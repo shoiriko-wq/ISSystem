@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>校内予約・座席表管理システム</title>
+  <style>
+    :root {
+      --primary-color: #2c3e50;
+      --accent-classroom: #3498db;
+      --accent-gym: #e67e22;
+      --accent-seating: #2ecc71;
+      --bg-color: #f8f9fa;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: var(--bg-color);
+      color: #333;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    header {
+      background-color: var(--primary-color);
+      color: white;
+      text-align: center;
+      padding: 2rem 1rem;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 1.8rem;
+    }
+
+    header p {
+      margin: 0.5rem 0 0 0;
+      opacity: 0.8;
+      font-size: 0.95rem;
+    }
+
+    main {
+      max-width: 1000px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+      flex: 1;
+    }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .card {
+      background: white;
+      border-radius: 8px;
+      padding: 1.5rem;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+      border-top: 5px solid #ccc;
+      transition: transform 0.2s, box-shadow 0.2s;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 6px 12px rgba(0,0,0,0.1);
+    }
+
+    .card.classroom { border-top-color: var(--accent-classroom); }
+    .card.gym { border-top-color: var(--accent-gym); }
+    .card.seating { border-top-color: var(--accent-seating); }
+
+    .card h2 {
+      margin-top: 0;
+      font-size: 1.4rem;
+    }
+
+    .card p {
+      color: #666;
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+
+    .btn-group {
+      margin-top: 1.5rem;
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .btn {
+      flex: 1;
+      text-align: center;
+      padding: 0.6rem 0.8rem;
+      text-decoration: none;
+      border-radius: 4px;
+      font-weight: bold;
+      font-size: 0.9rem;
+    }
+
+    .btn-primary { background-color: var(--primary-color); color: white; }
+    .btn-outline { border: 1px solid var(--primary-color); color: var(--primary-color); }
+    .btn:hover { opacity: 0.9; }
+
+    .system-status {
+      margin-top: 3rem;
+      padding: 1rem;
+      background: white;
+      border-radius: 6px;
+      text-align: center;
+      font-size: 0.85rem;
+      color: #777;
+    }
+
+    .status-badge {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background-color: #ccc;
+      margin-right: 5px;
+    }
+    .status-badge.ok { background-color: #2ecc71; }
+
+    footer {
+      background-color: #e9ecef;
+      color: #6c757d;
+      text-align: center;
+      padding: 1.2rem 1rem;
+      font-size: 0.85rem;
+      margin-top: 3rem;
+      border-top: 1px solid #dee2e6;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>校内予約・座席表管理システム</h1>
+    <p>ログイン不要・誰でも予約および管理が可能です</p>
+  </header>
+
+  <main>
+    <div class="card-grid">
+      <!-- 教室予約 -->
+      <div class="card classroom">
+        <div>
+          <h2>教室予約</h2>
+          <p>特別教室や会議室等の空き状況確認・予約が行えます。カレンダー表示からの予約および印刷に対応しています。</p>
+        </div>
+        <div class="btn-group">
+          <a href="/classrooms/index.html" class="btn btn-primary">予約画面</a>
+          <a href="/classrooms/admin.html" class="btn btn-outline">管理</a>
+        </div>
+      </div>
+
+      <!-- 体育館予約 -->
+      <div class="card gym">
+        <div>
+          <h2>体育館予約</h2>
+          <p>放課後・休日の体育館使用の割り当て管理を行います。全面/半面の分割予約および部活（使用団体）ごとの印刷が可能です。</p>
+        </div>
+        <div class="btn-group">
+          <a href="/gym/index.html" class="btn btn-primary">予約画面</a>
+          <a href="/gym/admin.html" class="btn btn-outline">管理</a>
+        </div>
+      </div>
+
+      <!-- 座席表作成 -->
+      <div class="card seating">
+        <div>
+          <h2>座席表作成</h2>
+          <p>クラスごとの座席配置の編集や生徒情報の管理を行います。印刷表示の切替や自動配置に対応しています。</p>
+        </div>
+        <div class="btn-group">
+          <a href="/seating/index.html" class="btn btn-primary">座席表を表示</a>
+          <a href="/seating/admin.html" class="btn btn-outline">編集・管理</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- サーバー疎通状態の表示 -->
+    <div class="system-status">
+      <span id="status-badge" class="status-badge"></span>
+      <span id="status-text">サーバー接続確認中...</span>
+    </div>
+  </main>
+
+  <footer>
+    <p style="margin: 0;">&copy; ISSystem All rights reserved.</p>
+  </footer>
+
+  <script>
+    async function checkHealth() {
+      const badge = document.getElementById('status-badge');
+      const text = document.getElementById('status-text');
+      try {
+        const res = await fetch('/api/health');
+        const data = await res.json();
+        if (data.status === 'ok') {
+          badge.classList.add('ok');
+          text.textContent = 'システム正常稼働中 (' + data.message + ')';
+        } else {
+          text.textContent = 'システム異常';
+        }
+      } catch (err) {
+        text.textContent = 'サーバーに接続できません';
+      }
+    }
+    checkHealth();
+  </script>
+</body>
+</html>

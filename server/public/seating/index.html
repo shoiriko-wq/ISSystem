@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>座席表表示・印刷 - 授業（講座）管理</title>
+  <style>
+    :root {
+      --primary-color: #2c3e50;
+      --bg-color: #f8f9fa;
+      --card-bg: #ffffff;
+      --seat-border: #94a3b8;
+      --podium-bg: #34495e;
+      
+      /* 性別識別用トーン設定（白黒印刷でもコントラストが出るトーン差） */
+      --seat-bg-male: #ffffff;
+      --seat-bg-female: #e2e8f0;
+      --seat-bg-other: #f1f5f9;
+      
+      --seat-accent-male: #475569;
+      --seat-accent-female: #0f172a;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: var(--bg-color);
+      color: #333;
+      margin: 0;
+      padding: 0;
+    }
+
+    header {
+      background-color: var(--primary-color);
+      color: white;
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .no-print {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+    }
+
+    .controls-panel {
+      background: white;
+      padding: 1rem 2rem;
+      border-bottom: 1px solid #ddd;
+      display: flex;
+      gap: 1.2rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .toggle-group {
+      display: flex;
+      gap: 0.8rem;
+      align-items: center;
+      background: #f1f5f9;
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+    }
+
+    .btn {
+      padding: 0.5rem 1rem;
+      border: none;
+      border-radius: 4px;
+      font-weight: bold;
+      cursor: pointer;
+      background: #2980b9;
+      color: white;
+      text-decoration: none;
+    }
+
+    .btn-secondary { background: #7f8c8d; }
+    .btn-success { background: #27ae60; }
+
+    /* 座席エリア外枠 */
+    .seating-container {
+      max-width: 1150px;
+      margin: 1.5rem auto;
+      padding: 1.5rem;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+      transition: transform 0.3s ease;
+    }
+
+    /* 教師用視点（全体180度回転） */
+    .seating-container.teacher-view {
+      transform: rotate(180deg);
+    }
+    
+    /* 座席内コンテンツの文字を元の向きに打ち消し回転 */
+    .seating-container.teacher-view .seat-content {
+      transform: rotate(180deg);
+    }
+
+    /* 【修正２】教師用視点時でも「教卓」の文字は反転させず正位置を保持 */
+    .seating-container.teacher-view .podium {
+      transform: rotate(180deg);
+    }
+
+    /* 教卓デザイン */
+    .podium-wrapper {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 1.5rem;
+    }
+
+    .podium {
+      width: 320px;
+      height: 46px;
+      background-color: var(--podium-bg);
+      color: white;
+      border: 3px solid #1a252f;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 1.05rem;
+      letter-spacing: 2px;
+      box-shadow: 0 3px 6px rgba(0,0,0,0.12);
+      transition: transform 0.3s ease;
+    }
+
+    /* 各列（Column）並列表示 */
+    .columns-board {
+      display: flex;
+      justify-content: center;
+      gap: 0.8rem;
+      align-items: flex-start;
+    }
+
+    .column-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+
+    /* 【修正１】座席ブロックの縦幅を完全固定（96px）にして列の歪みを防止 */
+    .seat {
+      width: 130px;
+      height: 96px; /* 固定高さを指定 */
+      border: 1px solid var(--seat-border);
+      border-radius: 6px;
+      padding: 0.35rem 0.45rem;
+      box-sizing: border-box; /* パディング込のサイズ固定 */
+      background-color: var(--card-bg);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .seat-content {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .seat.gender-male {
+      background-color: var(--seat-bg-male);
+      border-left: 3px solid var(--seat-accent-male);
+    }
+
+    .seat.gender-female {
+      background-color: var(--seat-bg-female);
+      border-left: 4px solid var(--seat-accent-female);
+    }
+
+    .seat.gender-other {
+      background-color: var(--seat-bg-other);
+      border-left: 3px dashed #64748b;
+    }
+
+    .seat.empty-seat {
+      background-color: #ffffff;
+      border: 1px dashed #cbd5e1;
+    }
+
+    .seat.empty-seat .seat-content {
+      justify-content: center;
+      align-items: center;
+    }
+
+    .seat-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+      font-size: 0.68rem;
+      color: #475569;
+      font-weight: 600;
+      border-bottom: 1px dotted rgba(0,0,0,0.12);
+      padding-bottom: 0.1rem;
+      line-height: 1;
+    }
+
+    .seat-kana {
+      font-size: 0.6rem;
+      color: #64748b;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.1;
+      margin-top: 0.1rem;
+    }
+
+    .seat-name {
+      font-size: 0.92rem;
+      font-weight: 700;
+      text-align: center;
+      line-height: 1.2;
+      color: #0f172a;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .seat-subinfo {
+      display: flex;
+      flex-direction: column;
+      gap: 0.1rem;
+      width: 100%;
+    }
+
+    .badge {
+      font-size: 0.58rem;
+      padding: 0.08rem 0.2rem;
+      border-radius: 3px;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      background: rgba(255, 255, 255, 0.85);
+      border: 1px solid rgba(0, 0, 0, 0.12);
+      color: #334155;
+      line-height: 1.1;
+    }
+
+    .view-indicator {
+      text-align: center;
+      font-weight: bold;
+      margin-bottom: 1rem;
+      color: #d97706;
+    }
+
+    /* 印刷スタイル */
+    @media print {
+      .no-print, header, .controls-panel {
+        display: none !important;
+      }
+
+      body { background: white; }
+
+      .seating-container {
+        box-shadow: none;
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        max-width: 100%;
+      }
+
+      .podium {
+        border-color: #000;
+        color: #000;
+        background: #f0f0f0;
+      }
+
+      .seat {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+        border-color: #000 !important;
+      }
+
+      .seat.gender-female {
+        background-color: #e2e8f0 !important;
+        border-left: 5px solid #000 !important;
+      }
+
+      .seat.gender-male {
+        background-color: #ffffff !important;
+        border-left: 2px solid #666 !important;
+      }
+
+      .badge {
+        border-color: #666 !important;
+        background: #fff !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="no-print">
+    <h1>座席表</h1>
+    <div>
+      <a href="/seating/admin.html" class="btn btn-secondary">授業・全生徒マスタ設定へ</a>
+      <a href="/" class="btn btn-secondary">トップへ</a>
+    </div>
+  </header>
+
+  <div class="controls-panel no-print">
+    <!-- 【修正３】対象のドロップダウンを「授業（講座）」に変更 -->
+    <div>
+      <label for="select-course"><b>対象授業（講座）:</b> </label>
+      <select id="select-course" onchange="onCourseChange()"></select>
+    </div>
+
+    <div>
+      <label for="view-mode"><b>視点:</b> </label>
+      <select id="view-mode" onchange="toggleViewMode()">
+        <option value="student">生徒用（黒板が上）</option>
+        <option value="teacher">教師用（教壇から見た配置）</option>
+      </select>
+    </div>
+
+    <!-- 個別の表示切替コントロール -->
+    <div class="toggle-group">
+      <span><b>表示項目:</b></span>
+      <label><input type="checkbox" id="show-kana" checked onchange="renderBoard()"> ふりがな</label>
+      <label><input type="checkbox" id="show-club" checked onchange="renderBoard()"> 部活</label>
+      <label><input type="checkbox" id="show-subject" checked onchange="renderBoard()"> 選択科目</label>
+    </div>
+
+    <button class="btn" onclick="shuffleSeats()">ランダム席替え</button>
+    <button class="btn btn-success" onclick="window.print()">印刷する</button>
+  </div>
+
+  <main>
+    <div id="seating-container" class="seating-container">
+      <div id="view-indicator" class="view-indicator no-print">【生徒用視点】</div>
+
+      <!-- 角丸矩形の教卓 -->
+      <div class="podium-wrapper">
+        <div class="podium">教 卓（黒板側）</div>
+      </div>
+
+      <!-- 座席配置エリア -->
+      <div id="columns-board" class="columns-board"></div>
+    </div>
+  </main>
+
+  <script>
+let currentCourseId = null;
+let currentStudents = [];
+let currentLayout = { pattern: '677776', alignment: 'back' };
+
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadCourseOptions();
+});
+
+// 授業ドロップダウンの初期化
+async function loadCourseOptions() {
+  const res = await fetch('/api/seating/courses');
+  if (!res.ok) return;
+  const courses = await res.json();
+  const select = document.getElementById('select-course');
+  select.innerHTML = '';
+
+  courses.forEach(c => {
+    select.innerHTML += `<option value="${c.id}">${escapeHtml(c.name)}</option>`;
+  });
+
+  if (courses.length > 0) {
+    onCourseChange();
+  }
+}
+
+// 授業変更時
+async function onCourseChange() {
+  const select = document.getElementById('select-course');
+  currentCourseId = select.value;
+  if (!currentCourseId) return;
+
+  // 1. レイアウト取得
+  const layoutRes = await fetch(`/api/seating/layout/${currentCourseId}`);
+  currentLayout = layoutRes.ok ? await layoutRes.json() : { pattern: '677776', alignment: 'back' };
+
+  // 2. 受講生徒一覧の取得
+  const studentsRes = await fetch(`/api/seating/course-students?course_id=${currentCourseId}`);
+  currentStudents = studentsRes.ok ? await studentsRes.json() : [];
+
+  renderBoard();
+}
+
+// 描画メイン処理
+function renderBoard() {
+  const board = document.getElementById('columns-board');
+  if (!board) return;
+  board.innerHTML = '';
+
+  const showKana = document.getElementById('show-kana').checked;
+  const showClub = document.getElementById('show-club').checked;
+  const showSubject = document.getElementById('show-subject').checked;
+
+  // パターン（例: "677776"）を数値配列化
+  const patternStr = currentLayout.pattern || '677776';
+  const columns = patternStr.split('').map(n => parseInt(n, 10) || 0);
+  const maxRows = Math.max(...columns, 1);
+
+  let studentIndex = 0;
+
+  columns.forEach((rowCapacity) => {
+    const colDiv = document.createElement('div');
+    colDiv.className = 'column-group';
+
+    const emptySeats = maxRows - rowCapacity;
+
+    for (let r = 0; r < maxRows; r++) {
+      // 空白マスの判定（後ろ詰めの場合は上の空きマス、前詰めの場合は下の空きマスをスキップ）
+      const isBlank = (currentLayout.alignment === 'back' && r < emptySeats) ||
+                      (currentLayout.alignment === 'front' && r >= rowCapacity);
+
+      if (isBlank) {
+        // 空白マス（デザインを崩さないための透明ダミー領域）
+        const spacer = document.createElement('div');
+        spacer.style.width = '130px';
+        spacer.style.height = '96px';
+        spacer.style.visibility = 'hidden';
+        colDiv.appendChild(spacer);
+      } else {
+        const student = currentStudents[studentIndex++];
+        const seat = document.createElement('div');
+
+        if (student) {
+          const genderClass = student.gender === '男' ? 'gender-male' : (student.gender === '女' ? 'gender-female' : 'gender-other');
+          seat.className = `seat ${genderClass}`;
+
+          let subInfoHtml = '';
+          if (showClub && student.club) {
+            subInfoHtml += `<span class="badge">${escapeHtml(student.club)}</span>`;
+          }
+          if (showSubject && student.subject_option) {
+            subInfoHtml += `<span class="badge">${escapeHtml(student.subject_option)}</span>`;
+          }
+
+          seat.innerHTML = `
+            <div class="seat-content">
+              <div class="seat-header">
+                <span>${escapeHtml(student.class_code || '')}</span>
+                <span>${student.student_number ? student.student_number + '番' : ''}</span>
+              </div>
+              ${showKana ? `<div class="seat-kana">${escapeHtml(student.kana || '')}</div>` : ''}
+              <div class="seat-name">${escapeHtml(student.name)}</div>
+              <div class="seat-subinfo">${subInfoHtml}</div>
+            </div>
+          `;
+        } else {
+          // 生徒が割り当てられていない空席
+          seat.className = 'seat empty-seat';
+          seat.innerHTML = `
+            <div class="seat-content">
+              <span style="color: #94a3b8; font-size: 0.8rem;">空席</span>
+            </div>
+          `;
+        }
+        colDiv.appendChild(seat);
+      }
+    }
+
+    board.appendChild(colDiv);
+  });
+}
+
+// 視点切り替え処理
+function toggleViewMode() {
+  const mode = document.getElementById('view-mode').value;
+  const container = document.getElementById('seating-container');
+  const indicator = document.getElementById('view-indicator');
+
+  if (mode === 'teacher') {
+    container.classList.add('teacher-view');
+    indicator.textContent = '【教師用視点（教壇から見た配置）】';
+  } else {
+    container.classList.remove('teacher-view');
+    indicator.textContent = '【生徒用視点】';
+  }
+}
+
+// シャッフル（ランダム席替え）
+function shuffleSeats() {
+  for (let i = currentStudents.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [currentStudents[i], currentStudents[j]] = [currentStudents[j], currentStudents[i]];
+  }
+  renderBoard();
+}
+
+function escapeHtml(str) {
+  return (str || '').replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag));
+}
+  </script>
+</body>
+</html>

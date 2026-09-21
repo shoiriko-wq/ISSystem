@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>管理画面 - 授業・全校生徒マスタ・座席設定</title>
+  <style>
+    :root {
+      --primary-color: #2c3e50;
+      --accent-seating: #2980b9;
+      --bg-color: #f8f9fa;
+      --danger-color: #e74c3c;
+      --success-color: #27ae60;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: var(--bg-color);
+      color: #333;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    header {
+      background-color: var(--primary-color);
+      color: white;
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    header h1 { margin: 0; font-size: 1.4rem; }
+
+    .nav-links a {
+      color: white;
+      text-decoration: none;
+      margin-left: 0.5rem;
+      font-size: 0.9rem;
+      padding: 0.4rem 0.8rem;
+      border-radius: 4px;
+      border: 1px solid rgba(255,255,255,0.3);
+      transition: background-color 0.2s;
+    }
+
+    .nav-links a:hover {
+      background-color: rgba(255,255,255,0.2);
+    }
+
+    main {
+      max-width: 1000px;
+      margin: 1.5rem auto;
+      padding: 0 1rem;
+      flex: 1;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    .card {
+      background: white;
+      border-radius: 8px;
+      padding: 1.5rem;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+      margin-bottom: 1.5rem;
+    }
+
+    .card h2 {
+      margin-top: 0;
+      font-size: 1.1rem;
+      border-bottom: 2px solid var(--accent-seating);
+      padding-bottom: 0.5rem;
+      color: var(--primary-color);
+    }
+
+    .form-row {
+      display: flex;
+      gap: 1rem;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+    }
+
+    .form-group label {
+      font-size: 0.85rem;
+      font-weight: bold;
+    }
+
+    input[type="text"], input[type="number"], select, textarea {
+      padding: 0.5rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 0.9rem;
+    }
+
+    textarea {
+      width: 100%;
+      height: 100px;
+      font-family: monospace;
+      box-sizing: border-box;
+      resize: vertical;
+    }
+
+    .btn {
+      padding: 0.52rem 1rem;
+      border: none;
+      border-radius: 4px;
+      font-weight: bold;
+      cursor: pointer;
+      background: var(--accent-seating);
+      color: white;
+      transition: opacity 0.2s;
+    }
+
+    .btn:hover { opacity: 0.9; }
+    .btn-success { background: var(--success-color); }
+    .btn-danger { background: var(--danger-color); padding: 0.2rem 0.5rem; font-size: 0.8rem; }
+
+    .tabs {
+      display: flex;
+      gap: 0.5rem;
+      border-bottom: 1px solid #ccc;
+      margin-bottom: 1rem;
+    }
+
+    .tab-btn {
+      padding: 0.5rem 1rem;
+      border: none;
+      background: none;
+      cursor: pointer;
+      font-weight: bold;
+      color: #666;
+      border-bottom: 3px solid transparent;
+    }
+
+    .tab-btn.active {
+      color: var(--accent-seating);
+      border-bottom-color: var(--accent-seating);
+    }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    .help-text {
+      font-size: 0.8rem;
+      color: #666;
+      margin-bottom: 0.5rem;
+    }
+
+    .student-selector {
+      max-height: 280px;
+      overflow-y: auto;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      padding: 10px;
+      background: #fafafa;
+    }
+
+    .student-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 0;
+      border-bottom: 1px solid #eee;
+    }
+
+    .student-item label {
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+    }
+
+    th, td {
+      border: 1px solid #eee;
+      padding: 0.5rem;
+      text-align: left;
+      font-size: 0.85rem;
+    }
+
+    th { background: #f2f4f5; }
+
+    footer {
+      background-color: #e9ecef;
+      color: #6c757d;
+      text-align: center;
+      padding: 1.2rem 1rem;
+      font-size: 0.85rem;
+      margin-top: auto;
+      border-top: 1px solid #dee2e6;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>座席管理 - 授業・生徒マスタ設定</h1>
+    <div class="nav-links">
+      <a href="/seating/index.html">座席表表示画面へ</a>
+      <a href="/">トップへ戻る</a>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- 1. 授業（講座）登録 -->
+    <div class="card">
+      <h2>1. 授業（講座）登録</h2>
+      <div class="form-row">
+        <div class="form-group" style="flex: 1;">
+          <label for="course-name">授業名（ユニークな名称）</label>
+          <input type="text" id="course-name" placeholder="例: 1年 情報Ⅰ, 2年 物理, 3年 選択美術">
+        </div>
+        <button class="btn" onclick="createCourse()">授業を追加</button>
+      </div>
+      <h3 style="font-size: 0.95rem; margin-top: 1rem;">登録済み授業一覧</h3>
+      <ul id="course-list" style="padding-left: 1.2rem; font-size: 0.9rem; color: #555;"></ul>
+    </div>
+
+    <!-- 2. 座席レイアウト設定 -->
+    <div class="card">
+      <h2>2. 座席レイアウト設定（選択中の授業）</h2>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="select-course-for-layout">対象授業</label>
+          <select id="select-course-for-layout" onchange="loadCourseLayout()"></select>
+        </div>
+        <div class="form-group">
+          <label for="layout-pattern">列配置パターン（窓側から）</label>
+          <input type="text" id="layout-pattern" placeholder="例: 677776" value="677776" style="width: 120px;">
+        </div>
+        <div class="form-group">
+          <label for="layout-alignment">前後詰め設定</label>
+          <select id="layout-alignment">
+            <option value="back" selected>後ろ詰め（標準）</option>
+            <option value="front">前詰め</option>
+          </select>
+        </div>
+        <button class="btn" onclick="saveCourseLayout()">レイアウト保存</button>
+      </div>
+      <p class="help-text">※「677776」と指定すると、窓側から1列目:6席、2列目:7席...6列目:6席（計40席）として自動配置されます。</p>
+    </div>
+
+    <!-- 3. 全校生徒マスタ登録 -->
+    <div class="card">
+      <h2>3. 全校生徒マスタ登録・管理</h2>
+
+      <div class="tabs">
+        <button class="tab-btn active" onclick="switchMasterTab('excel')">Excelから一括貼り付け</button>
+        <button class="tab-btn" onclick="switchMasterTab('single')">1件ずつ登録・更新</button>
+      </div>
+
+      <!-- Excel貼り付けエリア -->
+      <div id="tab-master-excel" class="tab-content active">
+        <p class="help-text">
+          Excel等の表から「4桁生徒ID」「学級」「出席番号」「氏名」「ふりがな」「性別」「部活」「選択科目」の列範囲をコピーしてそのまま貼り付けてください。<br>
+          （例: <code>1101 [TAB] 1-1 [TAB] 1 [TAB] 佐藤 蓮 [TAB] さとう れん [TAB] 男 [TAB] サッカー部 [TAB] 美術Ⅰ</code>）
+        </p>
+        <textarea id="excel-paste-master" placeholder="1101&#9;1-1&#9;1&#9;佐藤 蓮&#9;さとう れん&#9;男&#9;サッカー部&#9;美術Ⅰ&#10;1102&#9;1-1&#9;2&#9;鈴木 葵&#9;すずき あおい&#9;女&#9;吹奏楽部&#9;音楽Ⅰ"></textarea>
+        <div style="margin-top: 0.5rem;">
+          <button class="btn btn-success" onclick="bulkImportStudentsMaster()">一括取り込みを実行</button>
+        </div>
+      </div>
+
+      <!-- 個別登録エリア -->
+      <div id="tab-master-single" class="tab-content">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="st-id">生徒ID (4桁)</label>
+            <input type="text" id="st-id" placeholder="1101" style="width: 80px;">
+          </div>
+          <div class="form-group">
+            <label for="st-class">学級</label>
+            <input type="text" id="st-class" placeholder="1-1" style="width: 70px;">
+          </div>
+          <div class="form-group">
+            <label for="st-num">出席番号</label>
+            <input type="number" id="st-num" placeholder="1" style="width: 70px;">
+          </div>
+          <div class="form-group">
+            <label for="st-name">氏名</label>
+            <input type="text" id="st-name" placeholder="山田 太郎">
+          </div>
+          <div class="form-group">
+            <label for="st-kana">ふりがな</label>
+            <input type="text" id="st-kana" placeholder="やまだ たろう">
+          </div>
+          <div class="form-group">
+            <label for="st-club">部活</label>
+            <input type="text" id="st-club" placeholder="山岳部" style="width: 100px;">
+          </div>
+          <button class="btn" onclick="addStudentMaster()">保存</button>
+        </div>
+      </div>
+
+      <h3 style="font-size: 0.95rem; margin-top: 1.5rem;">登録済み全校生徒一覧 (<span id="master-count">0</span>名)</h3>
+      <div style="max-height: 250px; overflow-y: auto; border: 1px solid #eee;">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>学級</th>
+              <th>番号</th>
+              <th>氏名</th>
+              <th>ふりがな</th>
+              <th>部活</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="student-master-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 4. 授業受講名簿の設定 -->
+    <div class="card">
+      <h2>4. 授業受講名簿の設定（全校生徒から受講者を選択）</h2>
+      <div class="form-row">
+        <div class="form-group" style="flex: 1;">
+          <label for="select-course-for-enroll">対象授業</label>
+          <select id="select-course-for-enroll" onchange="loadEnrollment()"></select>
+        </div>
+      </div>
+
+      <div class="tabs">
+        <button class="tab-btn active" onclick="switchEnrollTab('select')">条件検索・一覧チェック</button>
+        <button class="tab-btn" onclick="switchEnrollTab('excel')">ExcelからIDリスト一括指定</button>
+      </div>
+
+      <!-- 条件絞り込み・手動チェック -->
+      <div id="tab-enroll-select" class="tab-content active">
+        <div class="form-row" style="margin-bottom: 0.5rem;">
+          <div class="form-group">
+            <label for="filter-class-or-id">4桁IDまたは学級で絞り込み</label>
+            <input type="text" id="filter-class-or-id" placeholder="例: 1-1 や 1101" oninput="filterChecklist()">
+          </div>
+          <button class="btn" style="background: #7f8c8d;" onclick="checkFilteredAll(true)">表示中をすべて選択</button>
+          <button class="btn" style="background: #7f8c8d;" onclick="checkFilteredAll(false)">表示中の選択を解除</button>
+        </div>
+
+        <div id="student-checklist" class="student-selector">
+          <!-- 生徒チェックボックス群 -->
+        </div>
+      </div>
+
+      <!-- ExcelからID一括一括指定 -->
+      <div id="tab-enroll-excel" class="tab-content">
+        <p class="help-text">
+          受講させたい生徒の「4桁生徒ID（例: 1101）」の列をExcel等からコピーして貼り付けてください。一致する生徒を自動的にチェック状態にします。
+        </p>
+        <textarea id="excel-paste-enroll-ids" placeholder="1101&#10;1102&#10;1103&#10;1104"></textarea>
+        <div style="margin-top: 0.5rem;">
+          <button class="btn" onclick="applyEnrollmentFromExcel()">IDリストから一括選択</button>
+        </div>
+      </div>
+
+      <div style="margin-top: 1.5rem;">
+        <button class="btn btn-success" onclick="saveEnrollment()" style="font-size: 1rem; padding: 0.7rem 1.5rem;">
+          選択した生徒をこの授業の受講名簿として保存
+        </button>
+      </div>
+    </div>
+
+  </main>
+
+  <footer>
+    <p style="margin: 0;">&copy; ISSystem All rights reserved.</p>
+  </footer>
+
+  <script>
+    let allStudents = [];
+    let currentCourses = [];
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      await refreshCourses();
+      await refreshStudentsMaster();
+    });
+
+    function switchMasterTab(tab) {
+      document.querySelectorAll('#tab-master-excel, #tab-master-single').forEach(el => el.classList.remove('active'));
+      const buttons = document.querySelectorAll('.card:nth-of-type(3) .tab-btn');
+      buttons.forEach(b => b.classList.remove('active'));
+
+      if (tab === 'excel') {
+        document.getElementById('tab-master-excel').classList.add('active');
+        buttons[0].classList.add('active');
+      } else {
+        document.getElementById('tab-master-single').classList.add('active');
+        buttons[1].classList.add('active');
+      }
+    }
+
+    function switchEnrollTab(tab) {
+      document.querySelectorAll('#tab-enroll-select, #tab-enroll-excel').forEach(el => el.classList.remove('active'));
+      const buttons = document.querySelectorAll('.card:nth-of-type(4) .tab-btn');
+      buttons.forEach(b => b.classList.remove('active'));
+
+      if (tab === 'select') {
+        document.getElementById('tab-enroll-select').classList.add('active');
+        buttons[0].classList.add('active');
+      } else {
+        document.getElementById('tab-enroll-excel').classList.add('active');
+        buttons[1].classList.add('active');
+      }
+    }
+
+    // --- 1. 授業管理 ---
+    async function refreshCourses() {
+      const res = await fetch('/api/seating/courses');
+      currentCourses = await res.json();
+      
+      const list = document.getElementById('course-list');
+      const selectEnroll = document.getElementById('select-course-for-enroll');
+      const selectLayout = document.getElementById('select-course-for-layout');
+
+      list.innerHTML = '';
+      selectEnroll.innerHTML = '';
+      selectLayout.innerHTML = '';
+
+      currentCourses.forEach(c => {
+        list.innerHTML += `<li>${escapeHtml(c.name)}</li>`;
+        selectEnroll.innerHTML += `<option value="${c.id}">${escapeHtml(c.name)}</option>`;
+        selectLayout.innerHTML += `<option value="${c.id}">${escapeHtml(c.name)}</option>`;
+      });
+
+      if (currentCourses.length > 0) {
+        await loadCourseLayout();
+        await loadEnrollment();
+      }
+    }
+
+    async function createCourse() {
+      const name = document.getElementById('course-name').value.trim();
+      if (!name) return alert('授業名を入力してください');
+
+      const res = await fetch('/api/seating/courses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+
+      if (res.ok) {
+        document.getElementById('course-name').value = '';
+        await refreshCourses();
+      }
+    }
+
+    // --- 2. 座席レイアウト設定 ---
+    async function loadCourseLayout() {
+      const courseId = document.getElementById('select-course-for-layout').value;
+      if (!courseId) return;
+
+      const res = await fetch(`/api/seating/layout/${courseId}`);
+      if (res.ok) {
+        const layout = await res.json();
+        document.getElementById('layout-pattern').value = layout.pattern || '677776';
+        document.getElementById('layout-alignment').value = layout.alignment || 'back';
+      }
+    }
+
+    async function saveCourseLayout() {
+      const courseId = document.getElementById('select-course-for-layout').value;
+      const pattern = document.getElementById('layout-pattern').value.trim();
+      const alignment = document.getElementById('layout-alignment').value;
+
+      if (!pattern) return alert('列配置パターンを入力してください（例: 677776）');
+
+      const res = await fetch(`/api/seating/layout/${courseId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pattern, alignment })
+      });
+
+      if (res.ok) alert('座席レイアウト設定を保存しました！');
+    }
+
+    // --- 3. 全校生徒マスタ管理 ---
+    async function refreshStudentsMaster() {
+      const res = await fetch('/api/seating/students');
+      allStudents = await res.json();
+      
+      document.getElementById('master-count').textContent = allStudents.length;
+      const tbody = document.getElementById('student-master-tbody');
+      tbody.innerHTML = '';
+
+      allStudents.sort((a,b) => String(a.id).localeCompare(String(b.id))).forEach(s => {
+        tbody.innerHTML += `
+          <tr>
+            <td>${s.id}</td>
+            <td>${s.class_code}</td>
+            <td>${s.student_number}</td>
+            <td>${escapeHtml(s.name)}</td>
+            <td>${escapeHtml(s.kana || '')}</td>
+            <td>${escapeHtml(s.club || '')}</td>
+            <td><button class="btn btn-danger" onclick="deleteStudentMaster('${s.id}')">削除</button></td>
+          </tr>
+        `;
+      });
+
+      filterChecklist();
+    }
+
+    async function addStudentMaster() {
+      const studentData = {
+        id: document.getElementById('st-id').value.trim(),
+        class_code: document.getElementById('st-class').value.trim(),
+        student_number: parseInt(document.getElementById('st-num').value),
+        name: document.getElementById('st-name').value.trim(),
+        kana: document.getElementById('st-kana').value.trim(),
+        club: document.getElementById('st-club').value.trim()
+      };
+
+      if (!studentData.id || !studentData.name) return alert('生徒IDと氏名は必須です');
+
+      await fetch('/api/seating/students', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(studentData)
+      });
+
+      await refreshStudentsMaster();
+      loadEnrollment();
+    }
+
+    async function bulkImportStudentsMaster() {
+      const rawText = document.getElementById('excel-paste-master').value.trim();
+      if (!rawText) return alert('テキストエリアにデータを貼り付けてください');
+
+      const lines = rawText.split(/\r?\n/);
+      const studentsList = [];
+
+      lines.forEach(line => {
+        if (!line.trim()) return;
+        const cols = line.split(/\t|,/).map(c => c.trim());
+        if (cols.length >= 4) {
+          studentsList.push({
+            id: cols[0],
+            class_code: cols[1],
+            student_number: parseInt(cols[2]),
+            name: cols[3],
+            kana: cols[4] || '',
+            gender: cols[5] || '未設定',
+            club: cols[6] || '',
+            subject_option: cols[7] || ''
+          });
+        }
+      });
+
+      if (studentsList.length === 0) return alert('有効なデータがパースできませんでした');
+
+      const res = await fetch('/api/seating/students/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ students: studentsList })
+      });
+
+      if (res.ok) {
+        const result = await res.json();
+        alert(`${result.count} 名の生徒マスタを取り込みました！`);
+        document.getElementById('excel-paste-master').value = '';
+        await refreshStudentsMaster();
+      }
+    }
+
+    async function deleteStudentMaster(id) {
+      if (!confirm(`生徒ID: ${id} を削除しますか？`)) return;
+      const res = await fetch(`/api/seating/students/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        await refreshStudentsMaster();
+        loadEnrollment();
+      }
+    }
+
+    // --- 4. 受講名簿設定（チェックリスト制御・4桁抽出） ---
+    function renderChecklist(selectedIds = null) {
+      const box = document.getElementById('student-checklist');
+      
+      // 現在のチェック状態を保持（selectedIdsが指定されていない場合）
+      let currentChecked = new Set();
+      if (selectedIds) {
+        currentChecked = new Set(selectedIds.map(String));
+      } else {
+        document.querySelectorAll('.st-checkbox:checked').forEach(cb => currentChecked.add(cb.value));
+      }
+
+      box.innerHTML = '';
+      const filterText = document.getElementById('filter-class-or-id').value.trim().toLowerCase();
+
+      allStudents.forEach(s => {
+        const matchClass = s.class_code && s.class_code.toLowerCase().includes(filterText);
+        const matchId = String(s.id).includes(filterText);
+        const matchName = s.name.toLowerCase().includes(filterText);
+
+        if (!filterText || matchClass || matchId || matchName) {
+          const isChecked = currentChecked.has(String(s.id)) ? 'checked' : '';
+          box.innerHTML += `
+            <div class="student-item">
+              <input type="checkbox" class="st-checkbox" value="${s.id}" id="chk_${s.id}" ${isChecked}>
+              <label for="chk_${s.id}">
+                <strong>[${s.id}]</strong> ${s.class_code} ${s.student_number}番 <strong>${escapeHtml(s.name)}</strong> (${s.club || '部活なし'})
+              </label>
+            </div>
+          `;
+        }
+      });
+    }
+
+    function filterChecklist() {
+      renderChecklist(null);
+    }
+
+    function checkFilteredAll(checkStatus) {
+      document.querySelectorAll('#student-checklist .st-checkbox').forEach(cb => {
+        cb.checked = checkStatus;
+      });
+    }
+
+    async function loadEnrollment() {
+      const courseId = document.getElementById('select-course-for-enroll').value;
+      if (!courseId) return;
+
+      const res = await fetch(`/api/seating/course-students?course_id=${courseId}`);
+      if (res.ok) {
+        const enrolled = await res.json();
+        const enrolledIds = enrolled.map(s => String(s.id));
+        renderChecklist(enrolledIds);
+      }
+    }
+
+    function applyEnrollmentFromExcel() {
+      const text = document.getElementById('excel-paste-enroll-ids').value.trim();
+      if (!text) return alert('4桁IDのリストを貼り付けてください');
+
+      const ids = text.split(/\r?\n/).map(s => s.trim()).filter(s => s);
+      const idSet = new Set(ids);
+
+      let matchCount = 0;
+      document.querySelectorAll('.st-checkbox').forEach(cb => {
+        if (idSet.has(cb.value)) {
+          cb.checked = true;
+          matchCount++;
+        }
+      });
+
+      alert(`${matchCount} 名の生徒を一致選択しました。`);
+      switchEnrollTab('select');
+    }
+
+    async function saveEnrollment() {
+      const courseId = document.getElementById('select-course-for-enroll').value;
+      if (!courseId) return alert('対象授業を選択してください');
+
+      const checkboxes = document.querySelectorAll('.st-checkbox:checked');
+      const studentIds = Array.from(checkboxes).map(cb => cb.value);
+
+      const res = await fetch('/api/seating/course-students', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ course_id: parseInt(courseId), student_ids: studentIds })
+      });
+
+      if (res.ok) alert('受講名簿を更新・保存しました！');
+    }
+
+    function escapeHtml(str) {
+      return (str || '').replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag));
+    }
+  </script>
+</body>
+</html>
