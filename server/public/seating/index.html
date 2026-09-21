@@ -3,22 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>座席表表示・印刷 - 授業（講座）管理</title>
+  <title>座席表表示・席替え</title>
   <style>
     :root {
       --primary-color: #2c3e50;
       --bg-color: #f8f9fa;
-      --card-bg: #ffffff;
-      --seat-border: #94a3b8;
+      --seat-bg: #eef2f7;
+      --seat-border: #cbd5e1;
       --podium-bg: #34495e;
-      
-      /* 性別識別用トーン設定（白黒印刷でもコントラストが出るトーン差） */
-      --seat-bg-male: #ffffff;
-      --seat-bg-female: #e2e8f0;
-      --seat-bg-other: #f1f5f9;
-      
-      --seat-accent-male: #475569;
-      --seat-accent-female: #0f172a;
+      --accent-color: #2980b9;
+      --success-color: #27ae60;
+      --danger-color: #e74c3c;
     }
 
     body {
@@ -38,11 +33,9 @@
       align-items: center;
     }
 
-    .no-print {
-      display: flex;
-      gap: 1rem;
-      align-items: center;
-    }
+    header h1 { margin: 0; font-size: 1.3rem; }
+
+    .no-print { display: flex; gap: 1rem; align-items: center; }
 
     .controls-panel {
       background: white;
@@ -54,244 +47,184 @@
       flex-wrap: wrap;
     }
 
-    .toggle-group {
-      display: flex;
-      gap: 0.8rem;
-      align-items: center;
-      background: #f1f5f9;
-      padding: 0.4rem 0.8rem;
-      border-radius: 6px;
-      font-size: 0.85rem;
-    }
-
     .btn {
       padding: 0.5rem 1rem;
       border: none;
       border-radius: 4px;
       font-weight: bold;
       cursor: pointer;
-      background: #2980b9;
+      background: var(--accent-color);
       color: white;
       text-decoration: none;
     }
 
     .btn-secondary { background: #7f8c8d; }
-    .btn-success { background: #27ae60; }
+    .btn-success { background: var(--success-color); }
+    .btn-danger { background: var(--danger-color); }
+    .btn-purple { background: #8e44ad; }
 
-    /* 座席エリア外枠 */
     .seating-container {
-      max-width: 1150px;
+      max-width: 1100px;
       margin: 1.5rem auto;
       padding: 1.5rem;
       background: white;
       border-radius: 8px;
       box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-      transition: transform 0.3s ease;
     }
 
-    /* 教師用視点（全体180度回転） */
-    .seating-container.teacher-view {
-      transform: rotate(180deg);
-    }
-    
-    /* 座席内コンテンツの文字を元の向きに打ち消し回転 */
-    .seating-container.teacher-view .seat-content {
-      transform: rotate(180deg);
-    }
+    /* CSSの回転処理（rotate）は完全に除去 */
 
-    /* 【修正２】教師用視点時でも「教卓」の文字は反転させず正位置を保持 */
-    .seating-container.teacher-view .podium {
-      transform: rotate(180deg);
-    }
-
-    /* 教卓デザイン */
-    .podium-wrapper {
-      display: flex;
-      justify-content: center;
-      margin-bottom: 1.5rem;
-    }
+    .podium-wrapper { display: flex; justify-content: center; margin: 1rem 0; }
 
     .podium {
       width: 320px;
-      height: 46px;
+      height: 40px;
       background-color: var(--podium-bg);
       color: white;
       border: 3px solid #1a252f;
-      border-radius: 10px;
+      border-radius: 12px;
       display: flex;
       align-items: center;
       justify-content: center;
       font-weight: bold;
       font-size: 1.05rem;
       letter-spacing: 2px;
-      box-shadow: 0 3px 6px rgba(0,0,0,0.12);
-      transition: transform 0.3s ease;
     }
 
-    /* 各列（Column）並列表示 */
-    .columns-board {
-      display: flex;
-      justify-content: center;
-      gap: 0.8rem;
-      align-items: flex-start;
-    }
+    .columns-board { display: flex; justify-content: center; gap: 1rem; align-items: flex-start; }
+    .column-group { display: flex; flex-direction: column; gap: 0.8rem; }
 
-    .column-group {
+    /* 座席カード全体の固定枠 */
+    .seat {
+      width: 125px;
+      height: 95px; /* 高さを固定 */
+      background-color: var(--seat-bg);
+      border: 2px solid var(--seat-border);
+      border-radius: 8px;
       display: flex;
       flex-direction: column;
-      gap: 0.6rem;
-    }
-
-    /* 【修正１】座席ブロックの縦幅を完全固定（96px）にして列の歪みを防止 */
-    .seat {
-      width: 130px;
-      height: 96px; /* 固定高さを指定 */
-      border: 1px solid var(--seat-border);
-      border-radius: 6px;
-      padding: 0.35rem 0.45rem;
-      box-sizing: border-box; /* パディング込のサイズ固定 */
-      background-color: var(--card-bg);
-      position: relative;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.35rem 0.4rem;
+      box-sizing: border-box;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.03);
+      user-select: none;
+      transition: all 0.2s;
       overflow: hidden;
     }
 
+    .seat.empty-space {
+      visibility: hidden;
+    }
+
+    body.mode-shuffle-building .seat:not(.empty-space) { cursor: pointer; }
+    body.mode-shuffle-building .seat:not(.empty-space):hover { border-color: #2196f3; }
+    body.mode-shuffle-building .seat.selected { background: #e3f2fd; border: 2px solid #2196f3; color: #1976d2; }
+    body.mode-shuffle-building .seat.locked { background: #ffebee; border: 2px solid #e53935; color: #c62828; cursor: not-allowed; }
+
     .seat-content {
+      width: 100%;
       height: 100%;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
     }
 
-    .seat.gender-male {
-      background-color: var(--seat-bg-male);
-      border-left: 3px solid var(--seat-accent-male);
-    }
-
-    .seat.gender-female {
-      background-color: var(--seat-bg-female);
-      border-left: 4px solid var(--seat-accent-female);
-    }
-
-    .seat.gender-other {
-      background-color: var(--seat-bg-other);
-      border-left: 3px dashed #64748b;
-    }
-
-    .seat.empty-seat {
-      background-color: #ffffff;
-      border: 1px dashed #cbd5e1;
-    }
-
-    .seat.empty-seat .seat-content {
-      justify-content: center;
-      align-items: center;
-    }
-
-    .seat-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      width: 100%;
-      font-size: 0.68rem;
-      color: #475569;
-      font-weight: 600;
-      border-bottom: 1px dotted rgba(0,0,0,0.12);
-      padding-bottom: 0.1rem;
-      line-height: 1;
-    }
-
-    .seat-kana {
-      font-size: 0.6rem;
-      color: #64748b;
-      text-align: center;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      line-height: 1.1;
-      margin-top: 0.1rem;
-    }
-
+    .seat-header { display: flex; justify-content: space-between; width: 100%; font-size: 0.68rem; color: #666; line-height: 1; }
+    .seat-kana { font-size: 0.65rem; color: #7f8c8d; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1; }
+    
+    /* 生徒氏名（位置をピシッと水平固定揃え） */
     .seat-name {
-      font-size: 0.92rem;
-      font-weight: 700;
+      font-size: 0.88rem;
+      font-weight: bold;
       text-align: center;
-      line-height: 1.2;
-      color: #0f172a;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      line-height: 1.1;
+      color: #1e293b;
+      min-height: 2.2em; /* 高さを固定して全カードで水平位置を一致させる */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      word-break: break-all;
     }
 
+    /* 付加情報（部活・選択科目）の見切れ防止設定 */
     .seat-subinfo {
+      font-size: 0.65rem;
+      color: #444;
       display: flex;
       flex-direction: column;
-      gap: 0.1rem;
+      gap: 2px;
+      align-items: center;
+      justify-content: flex-end;
       width: 100%;
     }
 
     .badge {
-      font-size: 0.58rem;
-      padding: 0.08rem 0.2rem;
+      background: #e2e8f0;
+      padding: 0.05rem 0.25rem;
       border-radius: 3px;
-      text-align: center;
+      max-width: 110px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      background: rgba(255, 255, 255, 0.85);
-      border: 1px solid rgba(0, 0, 0, 0.12);
-      color: #334155;
       line-height: 1.1;
-    }
-
-    .view-indicator {
+      font-size: 0.65rem;
       text-align: center;
-      font-weight: bold;
-      margin-bottom: 1rem;
-      color: #d97706;
     }
 
-    /* 印刷スタイル */
+    .shuffle-panel {
+      display: none;
+      background: #eef6fc;
+      border: 2px solid #2196f3;
+      border-radius: 8px;
+      padding: 1rem 1.5rem;
+      margin: 1rem auto;
+      max-width: 1100px;
+    }
+    .shuffle-panel.active { display: block; }
+
+    .student-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      max-height: 120px;
+      overflow-y: auto;
+      background: white;
+      padding: 0.5rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      margin: 0.5rem 0;
+    }
+
+    .student-chip {
+      padding: 0.2rem 0.6rem;
+      border-radius: 12px;
+      background: #f1f3f5;
+      font-size: 0.8rem;
+      cursor: pointer;
+      border: 1px solid #ced4da;
+    }
+    .student-chip.selected { background: #2196f3; color: white; border-color: #1976d2; }
+    .student-chip.disabled { opacity: 0.4; cursor: not-allowed; background: #e9ecef; }
+
+    .condition-tag {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #ffffff;
+      border-left: 4px solid #2196f3;
+      padding: 0.4rem 0.8rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
     @media print {
-      .no-print, header, .controls-panel {
-        display: none !important;
-      }
-
+      .no-print, header, .controls-panel, .shuffle-panel { display: none !important; }
       body { background: white; }
-
-      .seating-container {
-        box-shadow: none;
-        margin: 0;
-        padding: 0;
-        width: 100%;
-        max-width: 100%;
-      }
-
-      .podium {
-        border-color: #000;
-        color: #000;
-        background: #f0f0f0;
-      }
-
-      .seat {
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
-        border-color: #000 !important;
-      }
-
-      .seat.gender-female {
-        background-color: #e2e8f0 !important;
-        border-left: 5px solid #000 !important;
-      }
-
-      .seat.gender-male {
-        background-color: #ffffff !important;
-        border-left: 2px solid #666 !important;
-      }
-
-      .badge {
-        border-color: #666 !important;
-        background: #fff !important;
-      }
+      .seating-container { box-shadow: none; margin: 0; padding: 0; width: 100%; max-width: 100%; }
+      .podium { border-color: #000; color: #000; background: #f0f0f0; }
+      .seat { border-color: #000; background: #fff; }
     }
   </style>
 </head>
@@ -300,201 +233,461 @@
   <header class="no-print">
     <h1>座席表</h1>
     <div>
-      <a href="/seating/admin.html" class="btn btn-secondary">授業・全生徒マスタ設定へ</a>
+      <a href="/seating/admin.html" class="btn btn-secondary">クラス・生徒設定へ</a>
       <a href="/" class="btn btn-secondary">トップへ</a>
     </div>
   </header>
 
   <div class="controls-panel no-print">
-    <!-- 【修正３】対象のドロップダウンを「授業（講座）」に変更 -->
     <div>
-      <label for="select-course"><b>対象授業（講座）:</b> </label>
-      <select id="select-course" onchange="onCourseChange()"></select>
+      <label for="select-class"><b>対象クラス:</b> </label>
+      <select id="select-class" onchange="onClassChange()"></select>
     </div>
 
     <div>
       <label for="view-mode"><b>視点:</b> </label>
-      <select id="view-mode" onchange="toggleViewMode()">
+      <select id="view-mode" onchange="renderBoard()">
         <option value="student">生徒用（黒板が上）</option>
         <option value="teacher">教師用（教壇から見た配置）</option>
       </select>
     </div>
 
-    <!-- 個別の表示切替コントロール -->
-    <div class="toggle-group">
-      <span><b>表示項目:</b></span>
+    <div>
       <label><input type="checkbox" id="show-kana" checked onchange="renderBoard()"> ふりがな</label>
-      <label><input type="checkbox" id="show-club" checked onchange="renderBoard()"> 部活</label>
-      <label><input type="checkbox" id="show-subject" checked onchange="renderBoard()"> 選択科目</label>
+      <label style="margin-left: 0.5rem;"><input type="checkbox" id="show-club" checked onchange="renderBoard()"> 部活動</label>
+      <label style="margin-left: 0.5rem;"><input type="checkbox" id="show-subject" checked onchange="renderBoard()"> 選択科目</label>
     </div>
 
-    <button class="btn" onclick="shuffleSeats()">ランダム席替え</button>
+    <button class="btn btn-purple" onclick="toggleShufflePanel()">🎲 席替えモード設定</button>
     <button class="btn btn-success" onclick="window.print()">印刷する</button>
+  </div>
+
+  <div id="shuffle-panel" class="shuffle-panel no-print">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <h3 style="margin: 0; font-size: 1.05rem; color: #1976d2;">🎲 条件付き席替えモード</h3>
+      <button class="btn btn-secondary" style="padding: 0.2rem 0.6rem; font-size:0.8rem;" onclick="toggleShufflePanel()">パネルを閉じる</button>
+    </div>
+
+    <p style="font-size: 0.85rem; color: #444; margin: 0.5rem 0;">
+      <b>設定手順:</b> ①座席をクリックして選択 → ②該当する生徒を選択 → ③「条件を追加」を押す。
+    </p>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start;">
+      <div>
+        <label style="font-size: 0.85rem; font-weight: bold;">該当する生徒の選択:</label>
+        <div id="student-chips-container" class="student-chips"></div>
+        <div style="font-size: 0.8rem; color: #666;">
+          選択中: 座席 <b id="sel-seat-count" style="color:#2196f3;">0</b> 席 / 生徒 <b id="sel-student-count" style="color:#2196f3;">0</b> 名
+        </div>
+        <div style="margin-top: 0.5rem; display: flex; gap: 0.5rem;">
+          <button id="add-condition-btn" class="btn btn-success" style="font-size: 0.85rem; padding: 0.3rem 0.8rem;" onclick="addConditionRule()">条件を追加</button>
+          <button class="btn btn-secondary" style="font-size: 0.85rem; padding: 0.3rem 0.8rem;" onclick="clearTempSelection()">クリア</button>
+        </div>
+      </div>
+
+      <div>
+        <label style="font-size: 0.85rem; font-weight: bold;">設定済みの条件一覧:</label>
+        <div id="conditions-list" style="display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.4rem; max-height: 150px; overflow-y: auto;">
+          <span style="font-size: 0.8rem; color: #888;">(条件なしで実行すると完全ランダムになります)</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top: 1rem; border-top: 1px dashed #bbb; padding-top: 0.8rem; text-align: right;">
+      <button class="btn btn-purple" style="font-size: 1rem; padding: 0.6rem 1.5rem;" onclick="executeShuffle()">
+        🎲 この条件で席替えを実行する
+      </button>
+    </div>
   </div>
 
   <main>
     <div id="seating-container" class="seating-container">
-      <div id="view-indicator" class="view-indicator no-print">【生徒用視点】</div>
+      <div id="view-indicator" class="view-indicator no-print" style="text-align:center; font-weight:bold; margin-bottom:0.5rem; color:#e67e22;">【生徒用視点】</div>
 
-      <!-- 角丸矩形の教卓 -->
-      <div class="podium-wrapper">
+      <!-- 教卓（黒板）エリア：JSで位置を動的に入れ替える -->
+      <div id="podium-area-top" class="podium-wrapper">
         <div class="podium">教 卓（黒板側）</div>
       </div>
 
-      <!-- 座席配置エリア -->
       <div id="columns-board" class="columns-board"></div>
+
+      <div id="podium-area-bottom" class="podium-wrapper" style="display:none;">
+        <div class="podium">教 卓（黒板側）</div>
+      </div>
     </div>
   </main>
 
   <script>
-let currentCourseId = null;
-let currentStudents = [];
-let currentLayout = { pattern: '677776', alignment: 'back' };
+    let currentClassId = null;
+    let currentLayout = null;
+    let students = [];
+    let assignments = [];
 
-document.addEventListener('DOMContentLoaded', async () => {
-  await loadCourseOptions();
-});
+    let isShuffleMode = false;
+    let tempSelectedSeats = new Set();
+    let tempSelectedStudents = new Set();
+    let conditionRules = [];
+    let lockedSeats = new Set();
+    let lockedStudentIds = new Set();
+    let editingRuleId = null;
 
-// 授業ドロップダウンの初期化
-async function loadCourseOptions() {
-  const res = await fetch('/api/seating/courses');
-  if (!res.ok) return;
-  const courses = await res.json();
-  const select = document.getElementById('select-course');
-  select.innerHTML = '';
+    document.addEventListener('DOMContentLoaded', async () => {
+      await loadClasses();
+    });
 
-  courses.forEach(c => {
-    select.innerHTML += `<option value="${c.id}">${escapeHtml(c.name)}</option>`;
-  });
+    async function loadClasses() {
+      const res = await fetch('/api/seating/classes');
+      const classes = await res.json();
+      const select = document.getElementById('select-class');
+      select.innerHTML = '';
+      
+      classes.forEach(c => {
+        select.innerHTML += `<option value="${c.id}">${c.name}</option>`;
+      });
 
-  if (courses.length > 0) {
-    onCourseChange();
-  }
-}
-
-// 授業変更時
-async function onCourseChange() {
-  const select = document.getElementById('select-course');
-  currentCourseId = select.value;
-  if (!currentCourseId) return;
-
-  // 1. レイアウト取得
-  const layoutRes = await fetch(`/api/seating/layout/${currentCourseId}`);
-  currentLayout = layoutRes.ok ? await layoutRes.json() : { pattern: '677776', alignment: 'back' };
-
-  // 2. 受講生徒一覧の取得
-  const studentsRes = await fetch(`/api/seating/course-students?course_id=${currentCourseId}`);
-  currentStudents = studentsRes.ok ? await studentsRes.json() : [];
-
-  renderBoard();
-}
-
-// 描画メイン処理
-function renderBoard() {
-  const board = document.getElementById('columns-board');
-  if (!board) return;
-  board.innerHTML = '';
-
-  const showKana = document.getElementById('show-kana').checked;
-  const showClub = document.getElementById('show-club').checked;
-  const showSubject = document.getElementById('show-subject').checked;
-
-  // パターン（例: "677776"）を数値配列化
-  const patternStr = currentLayout.pattern || '677776';
-  const columns = patternStr.split('').map(n => parseInt(n, 10) || 0);
-  const maxRows = Math.max(...columns, 1);
-
-  let studentIndex = 0;
-
-  columns.forEach((rowCapacity) => {
-    const colDiv = document.createElement('div');
-    colDiv.className = 'column-group';
-
-    const emptySeats = maxRows - rowCapacity;
-
-    for (let r = 0; r < maxRows; r++) {
-      // 空白マスの判定（後ろ詰めの場合は上の空きマス、前詰めの場合は下の空きマスをスキップ）
-      const isBlank = (currentLayout.alignment === 'back' && r < emptySeats) ||
-                      (currentLayout.alignment === 'front' && r >= rowCapacity);
-
-      if (isBlank) {
-        // 空白マス（デザインを崩さないための透明ダミー領域）
-        const spacer = document.createElement('div');
-        spacer.style.width = '130px';
-        spacer.style.height = '96px';
-        spacer.style.visibility = 'hidden';
-        colDiv.appendChild(spacer);
-      } else {
-        const student = currentStudents[studentIndex++];
-        const seat = document.createElement('div');
-
-        if (student) {
-          const genderClass = student.gender === '男' ? 'gender-male' : (student.gender === '女' ? 'gender-female' : 'gender-other');
-          seat.className = `seat ${genderClass}`;
-
-          let subInfoHtml = '';
-          if (showClub && student.club) {
-            subInfoHtml += `<span class="badge">${escapeHtml(student.club)}</span>`;
-          }
-          if (showSubject && student.subject_option) {
-            subInfoHtml += `<span class="badge">${escapeHtml(student.subject_option)}</span>`;
-          }
-
-          seat.innerHTML = `
-            <div class="seat-content">
-              <div class="seat-header">
-                <span>${escapeHtml(student.class_code || '')}</span>
-                <span>${student.student_number ? student.student_number + '番' : ''}</span>
-              </div>
-              ${showKana ? `<div class="seat-kana">${escapeHtml(student.kana || '')}</div>` : ''}
-              <div class="seat-name">${escapeHtml(student.name)}</div>
-              <div class="seat-subinfo">${subInfoHtml}</div>
-            </div>
-          `;
-        } else {
-          // 生徒が割り当てられていない空席
-          seat.className = 'seat empty-seat';
-          seat.innerHTML = `
-            <div class="seat-content">
-              <span style="color: #94a3b8; font-size: 0.8rem;">空席</span>
-            </div>
-          `;
-        }
-        colDiv.appendChild(seat);
+      if (classes.length > 0) {
+        currentClassId = classes[0].id;
+        await loadAllData();
       }
     }
 
-    board.appendChild(colDiv);
-  });
-}
+    async function onClassChange() {
+      currentClassId = document.getElementById('select-class').value;
+      conditionRules = [];
+      lockedSeats.clear();
+      lockedStudentIds.clear();
+      clearTempSelection();
+      await loadAllData();
+    }
 
-// 視点切り替え処理
-function toggleViewMode() {
-  const mode = document.getElementById('view-mode').value;
-  const container = document.getElementById('seating-container');
-  const indicator = document.getElementById('view-indicator');
+    async function loadAllData() {
+      if (!currentClassId) return;
 
-  if (mode === 'teacher') {
-    container.classList.add('teacher-view');
-    indicator.textContent = '【教師用視点（教壇から見た配置）】';
-  } else {
-    container.classList.remove('teacher-view');
-    indicator.textContent = '【生徒用視点】';
-  }
-}
+      const [layoutRes, studentRes, assignRes] = await Promise.all([
+        fetch(`/api/seating/layout/${currentClassId}`),
+        fetch(`/api/seating/students?class_id=${currentClassId}`),
+        fetch(`/api/seating/assignments/${currentClassId}`)
+      ]);
 
-// シャッフル（ランダム席替え）
-function shuffleSeats() {
-  for (let i = currentStudents.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [currentStudents[i], currentStudents[j]] = [currentStudents[j], currentStudents[i]];
-  }
-  renderBoard();
-}
+      currentLayout = await layoutRes.json();
+      students = await studentRes.json();
+      assignments = await assignRes.json();
 
-function escapeHtml(str) {
-  return (str || '').replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag));
-}
+      renderBoard();
+      renderStudentChips();
+    }
+
+    function renderBoard() {
+      const board = document.getElementById('columns-board');
+      board.innerHTML = '';
+
+      const viewMode = document.getElementById('view-mode').value;
+      const indicator = document.getElementById('view-indicator');
+      const podiumTop = document.getElementById('podium-area-top');
+      const podiumBottom = document.getElementById('podium-area-bottom');
+
+      // 視点ごとの表示切り替え（文字を回転させず、配置インデックスと教卓位置を変更）
+      if (viewMode === 'teacher') {
+        indicator.textContent = '【教師用視点（教壇側から見た配置）】';
+        podiumTop.style.display = 'none';
+        podiumBottom.style.display = 'flex';
+      } else {
+        indicator.textContent = '【生徒用視点】';
+        podiumTop.style.display = 'flex';
+        podiumBottom.style.display = 'none';
+      }
+
+      const showKana = document.getElementById('show-kana').checked;
+      const showClub = document.getElementById('show-club').checked;
+      const showSubject = document.getElementById('show-subject').checked;
+
+      const rawColCounts = currentLayout.column_counts || [6, 7, 7, 7, 7, 6];
+      const alignment = currentLayout.alignment || 'back';
+      const maxRows = Math.max(...rawColCounts, 7);
+      const totalCols = rawColCounts.length;
+
+      // 1. 列順の制御（教師視点なら廊下側・窓側の左右を反転）
+      const colIndices = [];
+      for (let c = 0; c < totalCols; c++) {
+        colIndices.push(viewMode === 'teacher' ? (totalCols - 1 - c) : c);
+      }
+
+      // 2. 行順の制御（教師視点なら最後列が上、最前列が下）
+      const rowIndices = [];
+      if (viewMode === 'teacher') {
+        for (let r = maxRows; r >= 1; r--) rowIndices.push(r);
+      } else {
+        for (let r = 1; r <= maxRows; r++) rowIndices.push(r);
+      }
+
+      // 描画ループ
+      colIndices.forEach((colIdx) => {
+        const seatCount = rawColCounts[colIdx];
+        const colDiv = document.createElement('div');
+        colDiv.className = 'column-group';
+
+        rowIndices.forEach((r) => {
+          let isSeat = false;
+          if (alignment === 'back') {
+            if (r > (maxRows - seatCount)) isSeat = true;
+          } else {
+            if (r <= seatCount) isSeat = true;
+          }
+
+          const seatDiv = document.createElement('div');
+
+          if (!isSeat) {
+            seatDiv.className = 'seat empty-space';
+          } else {
+            const seatId = `r${r}_c${colIdx + 1}`;
+            seatDiv.className = 'seat';
+            seatDiv.dataset.seatId = seatId;
+
+            const assign = assignments.find(a => a.seat_id === seatId);
+            const student = assign ? students.find(s => String(s.id) === String(assign.student_id)) : null;
+
+            if (isShuffleMode) {
+              if (lockedSeats.has(seatId)) {
+                seatDiv.classList.add('locked');
+              } else if (tempSelectedSeats.has(seatId)) {
+                seatDiv.classList.add('selected');
+              }
+              seatDiv.onclick = () => onSeatClick(seatId);
+            }
+
+            if (student && !isShuffleMode) {
+              const kanaHtml = (showKana && student.kana) ? `<div class="seat-kana">${escapeHtml(student.kana)}</div>` : '';
+              
+              let subinfoParts = [];
+              if (showClub && student.club) {
+                subinfoParts.push(`<span class="badge">${escapeHtml(student.club)}</span>`);
+              }
+              if (showSubject && student.subject_option) {
+                subinfoParts.push(`<span class="badge" style="color:#2563eb; background:#dbeafe;">${escapeHtml(student.subject_option)}</span>`);
+              }
+              const subinfoHtml = subinfoParts.length > 0 ? `<div class="seat-subinfo">${subinfoParts.join('')}</div>` : '<div></div>';
+
+              seatDiv.innerHTML = `
+                <div class="seat-content">
+                  <div class="seat-header"><span>ID:${student.id}</span><span>${escapeHtml(student.gender || '')}</span></div>
+                  ${kanaHtml}
+                  <div class="seat-name">${escapeHtml(student.name)}</div>
+                  ${subinfoHtml}
+                </div>
+              `;
+            } else {
+              seatDiv.innerHTML = `
+                <div class="seat-content" style="text-align:center; justify-content:center;">
+                  <div style="font-size:0.75rem; color:#888;">位置: ${colIdx + 1}-${r}</div>
+                  <div class="seat-name" style="color: #a0aec0; font-size: 0.85rem; margin-top:0.3rem;">
+                    ${isShuffleMode ? (lockedSeats.has(seatId) ? '【条件指定済】' : '（選択可）') : '（空席）'}
+                  </div>
+                </div>
+              `;
+            }
+          }
+          colDiv.appendChild(seatDiv);
+        });
+        board.appendChild(colDiv);
+      });
+    }
+
+    function toggleShufflePanel() {
+      isShuffleMode = !isShuffleMode;
+      const panel = document.getElementById('shuffle-panel');
+      if (isShuffleMode) {
+        document.body.classList.add('mode-shuffle-building');
+        panel.classList.add('active');
+      } else {
+        document.body.classList.remove('mode-shuffle-building');
+        panel.classList.remove('active');
+      }
+      renderBoard();
+    }
+
+    function onSeatClick(seatId) {
+      if (lockedSeats.has(seatId)) return;
+      if (tempSelectedSeats.has(seatId)) {
+        tempSelectedSeats.delete(seatId);
+      } else {
+        tempSelectedSeats.add(seatId);
+      }
+      document.getElementById('sel-seat-count').textContent = tempSelectedSeats.size;
+      renderBoard();
+    }
+
+    function renderStudentChips() {
+      const container = document.getElementById('student-chips-container');
+      container.innerHTML = '';
+
+      students.forEach(s => {
+        const isLocked = lockedStudentIds.has(s.id);
+        const isSelected = tempSelectedStudents.has(s.id);
+
+        const chip = document.createElement('div');
+        chip.className = `student-chip ${isLocked ? 'disabled' : ''} ${isSelected ? 'selected' : ''}`;
+        chip.textContent = `${s.id}.${s.name}`;
+
+        if (!isLocked) {
+          chip.onclick = () => {
+            if (tempSelectedStudents.has(s.id)) {
+              tempSelectedStudents.delete(s.id);
+            } else {
+              tempSelectedStudents.add(s.id);
+            }
+            document.getElementById('sel-student-count').textContent = tempSelectedStudents.size;
+            renderStudentChips();
+          };
+        }
+        container.appendChild(chip);
+      });
+    }
+
+    function clearTempSelection() {
+      tempSelectedSeats.clear();
+      tempSelectedStudents.clear();
+      editingRuleId = null;
+      document.getElementById('add-condition-btn').textContent = '条件を追加';
+      document.getElementById('sel-seat-count').textContent = '0';
+      document.getElementById('sel-student-count').textContent = '0';
+      renderBoard();
+      renderStudentChips();
+    }
+
+    function addConditionRule() {
+      if (tempSelectedSeats.size === 0) return alert('座席を選択してください');
+      if (tempSelectedStudents.size === 0) return alert('該当する生徒を選択してください');
+      if (tempSelectedStudents.size > tempSelectedSeats.size) {
+        return alert(`選択した生徒数が座席数を超えています`);
+      }
+
+      if (editingRuleId !== null) {
+        const rule = conditionRules.find(r => r.id === editingRuleId);
+        if (rule) {
+          rule.seats = Array.from(tempSelectedSeats);
+          rule.student_ids = Array.from(tempSelectedStudents);
+          rule.seats.forEach(s => lockedSeats.add(s));
+          rule.student_ids.forEach(sid => lockedStudentIds.add(sid));
+        }
+      } else {
+        const rule = {
+          id: Date.now(),
+          seats: Array.from(tempSelectedSeats),
+          student_ids: Array.from(tempSelectedStudents)
+        };
+        conditionRules.push(rule);
+        rule.seats.forEach(s => lockedSeats.add(s));
+        rule.student_ids.forEach(sid => lockedStudentIds.add(sid));
+      }
+
+      clearTempSelection();
+      renderConditionsList();
+    }
+
+    function renderConditionsList() {
+      const container = document.getElementById('conditions-list');
+      if (conditionRules.length === 0) {
+        container.innerHTML = '<span style="font-size: 0.8rem; color: #888;">(条件なしで実行すると完全ランダムになります)</span>';
+        return;
+      }
+
+      container.innerHTML = conditionRules.map((rule, idx) => {
+        const names = rule.student_ids.map(sid => {
+          const st = students.find(s => String(s.id) === String(sid));
+          return st ? st.name : sid;
+        }).join(', ');
+
+        return `
+          <div class="condition-tag">
+            <span><b>条件${idx + 1}:</b> ${rule.seats.length}席 ➔ ${escapeHtml(names)}</span>
+            <div style="display:flex; gap:0.3rem;">
+              <button class="btn" style="padding:0.15rem 0.4rem; font-size:0.75rem;" onclick="editCondition(${rule.id})">編集</button>
+              <button class="btn btn-danger" style="padding:0.15rem 0.4rem; font-size:0.75rem;" onclick="removeCondition(${rule.id})">削除</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function editCondition(ruleId) {
+      const rule = conditionRules.find(r => r.id === ruleId);
+      if (!rule) return;
+
+      rule.seats.forEach(s => lockedSeats.delete(s));
+      rule.student_ids.forEach(sid => lockedStudentIds.delete(sid));
+
+      tempSelectedSeats = new Set(rule.seats);
+      tempSelectedStudents = new Set(rule.student_ids);
+      editingRuleId = ruleId;
+
+      document.getElementById('add-condition-btn').textContent = '条件を更新';
+      document.getElementById('sel-seat-count').textContent = tempSelectedSeats.size;
+      document.getElementById('sel-student-count').textContent = tempSelectedStudents.size;
+
+      renderBoard();
+      renderStudentChips();
+    }
+
+    function removeCondition(ruleId) {
+      const rule = conditionRules.find(r => r.id === ruleId);
+      if (!rule) return;
+
+      rule.seats.forEach(s => lockedSeats.delete(s));
+      rule.student_ids.forEach(sid => lockedStudentIds.delete(sid));
+      conditionRules = conditionRules.filter(r => r.id !== ruleId);
+
+      if (editingRuleId === ruleId) clearTempSelection();
+
+      renderBoard();
+      renderStudentChips();
+      renderConditionsList();
+    }
+
+    async function executeShuffle() {
+      if (!confirm('この条件で席替えを実行しますか？')) return;
+
+      const allSeatIds = [];
+      const colCounts = currentLayout.column_counts || [6,7,7,7,7,6];
+      const alignment = currentLayout.alignment || 'back';
+      const maxRows = Math.max(...colCounts, 7);
+
+      colCounts.forEach((seatCount, colIdx) => {
+        for (let r = 1; r <= maxRows; r++) {
+          let isSeat = false;
+          if (alignment === 'back') {
+            if (r > (maxRows - seatCount)) isSeat = true;
+          } else {
+            if (r <= seatCount) isSeat = true;
+          }
+          if (isSeat) allSeatIds.push(`r${r}_c${colIdx + 1}`);
+        }
+      });
+
+      try {
+        const res = await fetch('/api/seating/shuffle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            class_id: currentClassId,
+            conditions: conditionRules,
+            all_seat_ids: allSeatIds
+          })
+        });
+
+        const data = await res.json();
+        if (!res.ok) return alert(data.error || '席替えに失敗しました');
+
+        alert('席替えが完了しました！');
+        toggleShufflePanel();
+        await loadAllData();
+      } catch (err) {
+        alert('通信エラーが発生しました');
+      }
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag));
+    }
   </script>
 </body>
 </html>
