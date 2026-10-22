@@ -1,0 +1,116 @@
+/* ==========================================================================
+   ISSystem Theme Variables & Color Palette Definition
+   ========================================================================== */
+
+/* 1. Base Variables & Default Theme (Navy) */
+:root,
+.theme-navy {
+  --bg-main: #0b0f19;
+  --bg-header: rgba(15, 23, 42, 0.85);
+  --bg-sidebar: #0f172a;
+  --bg-card: rgba(30, 41, 59, 0.7);
+  --bg-card-hover: rgba(30, 41, 59, 0.9);
+  --bg-surface: #1e293b;
+  --bg-input: #0f172a;
+
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --text-inverse: #0f172a;
+
+  --border-color: rgba(51, 65, 85, 0.8);
+  --border-focus: #6366f1;
+
+  --accent-primary: #6366f1;
+  --accent-hover: #4f46e5;
+  --accent-light: rgba(99, 102, 241, 0.15);
+
+  --badge-bg: rgba(99, 102, 241, 0.2);
+  --badge-text: #a5b4fc;
+
+  --shadow-color: rgba(0, 0, 0, 0.35);
+  --glass-blur: blur(12px);
+}
+
+/* 2. High Contrast Theme (視覚境界・コントラスト強調) */
+.theme-high-contrast {
+  --bg-main: #000000;
+  --bg-header: #0a0a0a;
+  --bg-sidebar: #050505;
+  --bg-card: #121212;
+  --bg-card-hover: #1a1a1a;
+  --bg-surface: #1a1a1a;
+  --bg-input: #000000;
+
+  --text-main: #ffffff;
+  --text-muted: #f1f5f9;
+  --text-inverse: #000000;
+
+  --border-color: #fbbf24;
+  --border-focus: #f59e0b;
+
+  --accent-primary: #fbbf24;
+  --accent-hover: #f59e0b;
+  --accent-light: rgba(251, 191, 36, 0.25);
+
+  --badge-bg: #fbbf24;
+  --badge-text: #000000;
+
+  --shadow-color: rgba(251, 191, 36, 0.2);
+  --glass-blur: none;
+}
+
+/* 3. Warm Wood Theme (落ち着いた暖色木目調) */
+.theme-warm {
+  --bg-main: #1c1917;
+  --bg-header: rgba(44, 26, 18, 0.9);
+  --bg-sidebar: #291d18;
+  --bg-card: rgba(44, 26, 18, 0.75);
+  --bg-card-hover: rgba(56, 33, 23, 0.9);
+  --bg-surface: #382117;
+  --bg-input: #1c1917;
+
+  --text-main: #fef3c7;
+  --text-muted: #d97706;
+  --text-inverse: #1c1917;
+
+  --border-color: rgba(146, 64, 14, 0.6);
+  --border-focus: #f59e0b;
+
+  --accent-primary: #d97706;
+  --accent-hover: #b45309;
+  --accent-light: rgba(217, 119, 6, 0.2);
+
+  --badge-bg: rgba(217, 119, 6, 0.25);
+  --badge-text: #fde68a;
+
+  --shadow-color: rgba(0, 0, 0, 0.5);
+  --glass-blur: blur(8px);
+}
+
+/* 4. Deep Dark Mode (夜間作業向け) */
+.theme-dark {
+  --bg-main: #030712;
+  --bg-header: rgba(17, 24, 39, 0.9);
+  --bg-sidebar: #111827;
+  --bg-card: rgba(17, 24, 39, 0.8);
+  --bg-card-hover: rgba(31, 41, 55, 0.9);
+  --bg-surface: #1f2937;
+  --bg-input: #030712;
+
+  --text-main: #f9fafb;
+  --text-muted: #6b7280;
+  --text-inverse: #030712;
+
+  --border-color: #374151;
+  --border-focus: #3b82f6;
+
+  --accent-primary: #3b82f6;
+  --accent-hover: #2563eb;
+  --accent-light: rgba(59, 130, 246, 0.15);
+
+  --badge-bg: rgba(59, 130, 246, 0.2);
+  --badge-text: #93c5fd;
+
+  --shadow-color: rgba(0, 0, 0, 0.6);
+  --glass-blur: blur(10px);
+}

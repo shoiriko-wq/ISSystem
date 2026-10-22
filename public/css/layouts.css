@@ -1,0 +1,145 @@
+/* ==========================================================================
+   ISSystem Layout Grids, View Sections & Structural Positioning
+   ========================================================================== */
+
+/* 1. Main View Containers & Tab Switching */
+.tab-view {
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.tab-view.hidden {
+  display: none !important;
+}
+
+.tab-view.active {
+  display: block;
+  animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* 2. Responsive Dashboard Grid */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 1.25rem;
+}
+
+@media (min-width: 1024px) {
+  .dashboard-grid {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+  
+  .dash-col-main {
+    grid-column: span 8 / span 8;
+  }
+  
+  .dash-col-side {
+    grid-column: span 4 / span 4;
+  }
+}
+
+/* 3. Grid Presets for Multi-Column Layouts */
+.grid-2col {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+@media (min-width: 768px) {
+  .grid-2col {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.grid-3col {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+@media (min-width: 640px) {
+  .grid-3col {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .grid-3col {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* 4. Chat View Split Layout */
+.chat-layout {
+  display: flex;
+  height: calc(100vh - 6rem);
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  overflow: hidden;
+  background-color: var(--bg-card);
+}
+
+.chat-sidebar-channels {
+  width: 16rem;
+  border-right: 1px solid var(--border-color);
+  background-color: var(--bg-sidebar);
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-main-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-main);
+}
+
+/* 5. Matrix & Engine Layouts (Seating & Exam Matrix) */
+.seating-matrix-container {
+  overflow-x: auto;
+  padding: 1rem;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+}
+
+.timeline-scroll-container {
+  overflow-x: auto;
+  white-space: nowrap;
+  padding-bottom: 0.5rem;
+}
+
+/* 6. Header & Sidebar Specific Structural Adjustments */
+@media (max-width: 767px) {
+  .app-sidebar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100% !important;
+    height: 3.5rem;
+    z-index: 40;
+    flex-direction: row !important;
+    border-right: none !important;
+    border-top: 1px solid var(--border-color);
+    padding: 0.25rem 0.5rem !important;
+  }
+
+  .app-sidebar nav {
+    display: flex;
+    justify-content: space-around;
+    width: 100%;
+  }
+
+  .app-sidebar nav .nav-item {
+    font-size: 0.65rem;
+    flex-direction: column;
+    padding: 0.25rem;
+    gap: 0.1rem;
+  }
+
+  #main-content {
+    padding-bottom: 4rem;
+  }
+}

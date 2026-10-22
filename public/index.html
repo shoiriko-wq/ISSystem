@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="ja" class="theme-navy">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>職員室内リアルタイム情報共有システム - ISSystem</title>
+  
+  <!-- Tailwind CSS & Lucide Icons CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Socket.io CDN -->
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+
+  <!-- メインエントリーポイント -->
+  <script type="module" src="js/main.js"></script>
+
+  <!-- 分割CSSファイルの読み込み -->
+  <link rel="stylesheet" href="css/variables.css">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/animations.css">
+  <link rel="stylesheet" href="css/layouts.css">
+</head>
+<body class="bg-main text-main font-sans antialiased min-h-screen flex flex-col">
+
+  <!-- ==================== 1. ログイン画面 ==================== -->
+  <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/90 backdrop-blur-md">
+    <div class="card p-8 w-full max-w-md border-2 border-slate-700 shadow-2xl rounded-2xl">
+      <div class="text-center mb-6">
+        <div class="inline-flex p-3 rounded-2xl bg-indigo-600/20 text-indigo-400 mb-3 border border-indigo-500/30">
+          <i data-lucide="school" class="w-10 h-10"></i>
+        </div>
+        <h1 class="text-2xl font-bold tracking-tight text-white">職員室情報共有システム</h1>
+        <p class="text-xs text-slate-400 mt-1">校務の円滑化とリアルタイム連携プラットフォーム</p>
+      </div>
+
+      <!-- タブ切り替え -->
+      <div class="flex border-b border-slate-700 mb-4 text-xs font-bold text-center">
+        <button type="button" id="tab-login-btn" class="flex-1 pb-2 text-indigo-400 border-b-2 border-indigo-500 transition-colors">ログイン</button>
+        <button type="button" id="tab-register-btn" class="flex-1 pb-2 text-slate-400 border-b-2 border-transparent hover:text-slate-200 transition-colors">招待コードで新規登録</button>
+      </div>
+
+      <!-- ログインフォーム -->
+      <form id="login-form" onsubmit="event.preventDefault(); handleLoginClick();" class="space-y-4">
+        <div id="login-error" class="hidden p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-semibold"></div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">教員ID (スタッフコード)</label>
+          <input type="text" id="login-userid" class="input-field" placeholder="例: t-tanaka" required>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">パスワード</label>
+          <input type="password" id="login-password" class="input-field" placeholder="••••••••" required>
+        </div>
+        <button type="submit" class="btn-primary w-full py-2.5 mt-2 font-bold flex items-center justify-center gap-2">
+          <i data-lucide="log-in" class="w-4 h-4"></i> ログイン
+        </button>
+      </form>
+
+      <!-- 招待コード登録フォーム (初期非表示) -->
+      <form id="register-form" class="space-y-3 hidden">
+        <div id="register-error" class="hidden p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-semibold"></div>
+        <div>
+          <label class="block text-[11px] font-semibold text-slate-300 mb-1">招待コード (他教員から発行されたコード)</label>
+          <input type="text" id="reg-invitation-code" class="input-field w-full p-2 text-xs rounded bg-slate-800 border border-slate-700 text-white" placeholder="例: INV-12345" required>
+        </div>
+        <div>
+          <label class="block text-[11px] font-semibold text-slate-300 mb-1">教職員番号 (新規ID)</label>
+          <input type="text" id="reg-staffcode" class="input-field w-full p-2 text-xs rounded bg-slate-800 border border-slate-700 text-white" placeholder="例: t-saito" required>
+        </div>
+        <div>
+          <label class="block text-[11px] font-semibold text-slate-300 mb-1">氏名 (必須)</label>
+          <input type="text" id="reg-name" class="input-field w-full p-2 text-xs rounded bg-slate-800 border border-slate-700 text-white" placeholder="例: 斎藤 先生" required>
+        </div>
+        <div>
+          <label class="block text-[11px] font-semibold text-slate-300 mb-1">パスワード</label>
+          <input type="password" id="reg-password" class="input-field w-full p-2 text-xs rounded bg-slate-800 border border-slate-700 text-white" placeholder="••••••••" required>
+        </div>
+        <div>
+          <label class="block text-[11px] font-semibold text-slate-300 mb-1">所属部局</label>
+          <select id="reg-department" class="input-field w-full p-2 text-xs rounded bg-slate-800 border border-slate-700 text-white">
+            <option value="１学年">１学年</option>
+            <option value="２学年">２学年</option>
+            <option value="３学年">３学年</option>
+            <option value="教務部">教務部</option>
+            <option value="特色推進部">特色推進部</option>
+            <option value="生徒指導部">生徒指導部</option>
+            <option value="キャリアガイダンス部">キャリアガイダンス部</option>
+          </select>
+        </div>
+        <button type="submit" class="btn-primary w-full py-2.5 mt-2 font-bold flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500">
+          <i data-lucide="user-plus" class="w-4 h-4"></i> 新規アカウント登録
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================== 2. アプリメイン画面 ==================== -->
+  <div id="app-container" class="hidden flex-1 flex flex-col min-h-screen">
+    
+    <!-- グローバル接続ステータスバナー -->
+    <div id="connection-status-banner" class="hidden bg-rose-600 text-white px-4 py-2 text-xs font-bold text-center z-50 sticky top-0 flex items-center justify-center gap-2 shadow-lg transition-all">
+      <i data-lucide="wifi-off" class="w-4 h-4 animate-pulse"></i>
+      <span>サーバーとの接続が切断されました。再接続を試みています...</span>
+    </div>
+
+    <!-- Header -->
+    <header class="app-header h-16 border-b border-slate-800 flex items-center justify-between px-4 sticky top-0 z-30 shadow-md bg-slate-900">
+      <div class="flex items-center gap-4">
+        <div class="flex items-center gap-2">
+          <i data-lucide="school" class="w-7 h-7 text-indigo-400"></i>
+          <span class="font-extrabold text-lg tracking-wide bg-gradient-to-r from-indigo-400 via-purple-300 to-pink-400 bg-clip-text text-transparent">ISSystem</span>
+        </div>
+        
+        <!-- 横断検索 -->
+        <div class="relative hidden md:block w-64">
+          <i data-lucide="search" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+          <input type="text" id="global-search" class="input-field pl-9 py-1 text-xs rounded-full" placeholder="校内リソースを横断検索...">
+        </div>
+      </div>
+
+      <!-- ヘッダー右側ツールバー -->
+      <div class="flex items-center gap-3 text-xs">
+        <!-- お天気 & 時計ウィジェット -->
+        <div class="hidden lg:flex items-center gap-3 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700/50">
+          <span id="weather-widget" class="text-slate-300 flex items-center gap-1"><i data-lucide="cloud" class="w-4 h-4 text-slate-400"></i> 天気不明 --℃</span>
+          <span class="text-slate-600">|</span>
+          <span id="clock-widget" class="font-mono font-bold text-indigo-300">00:00:00</span>
+        </div>
+
+
+        <!-- 未読通知ベル -->
+        <div class="relative">
+          <button id="notification-btn" class="icon-btn relative p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300" title="リアルタイム通知・更新履歴">
+            <i data-lucide="bell" class="w-4 h-4"></i>
+            <span id="notification-badge" class="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full text-[9px] font-bold flex items-center justify-center hidden">0</span>
+          </button>
+
+          <!-- 通知履歴ドロップダウン -->
+          <div id="notification-dropdown-menu" class="hidden absolute right-0 mt-2 w-80 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-2 z-50 text-xs">
+            <div class="flex items-center justify-between px-4 pb-2 mb-2 border-b border-slate-800">
+              <span class="font-bold text-white flex items-center gap-1.5">
+                <i data-lucide="bell" class="w-3.5 h-3.5 text-indigo-400"></i> リアルタイム通知・更新履歴
+              </span>
+              <button id="notification-clear-all" class="text-[10px] text-slate-400 hover:text-white transition-colors">すべて既読</button>
+            </div>
+            <div id="notification-list" class="max-h-72 overflow-y-auto divide-y divide-slate-800/60">
+              <div class="px-4 py-6 text-center text-slate-500 text-[11px]">新着の通知はありません</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ユーザー情報 & ドロップダウンメニュー -->
+        <div class="relative pl-2 border-l border-slate-700">
+          <button id="user-menu-btn" class="flex items-center gap-2 hover:opacity-80 transition-opacity focus:outline-none px-2 py-1 rounded-lg bg-slate-800/60 border border-slate-700/60">
+            <div id="header-user-avatar" class="w-6 h-6 rounded-full bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-indigo-300 font-bold overflow-hidden text-xs">
+              <i data-lucide="user" class="w-3.5 h-3.5"></i>
+            </div>
+            <span id="current-user-badge" class="font-semibold text-slate-200">教員</span>
+            <i data-lucide="chevron-down" class="w-3 h-3 text-slate-400"></i>
+          </button>
+
+          <!-- ドロップダウンポップアップメニュー -->
+          <div id="user-dropdown-menu" class="hidden absolute right-0 mt-2 w-48 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1 z-50 text-xs">
+            <button id="menu-profile-btn" class="w-full text-left px-4 py-2.5 flex items-center gap-2 text-slate-200 hover:bg-slate-800 transition-colors">
+              <i data-lucide="user-pen" class="w-4 h-4 text-indigo-400"></i> プロフィール編集
+            </button>
+            <button id="menu-users-manage-btn" class="w-full text-left px-4 py-2.5 flex items-center gap-2 text-slate-200 hover:bg-slate-800 transition-colors">
+              <i data-lucide="users" class="w-4 h-4 text-emerald-400"></i> 職員一覧・ユーザー管理
+            </button>
+            <div class="border-t border-slate-800 my-1"></div>
+            <button id="logout-btn" class="w-full text-left px-4 py-2.5 flex items-center gap-2 text-red-400 hover:bg-slate-800 transition-colors">
+              <i data-lucide="log-out" class="w-4 h-4"></i> ログアウト (退出)
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- App Body (Sidebar + Main View) -->
+    <div class="flex-1 flex overflow-hidden">
+      <!-- Sidebar Navigation -->
+      <aside class="app-sidebar w-56 border-r border-slate-800 flex flex-col justify-between p-3 select-none shrink-0 bg-slate-900/50">
+        <nav class="space-y-1">
+          <!-- ダッシュボード -->
+          <a href="#" data-tab="dashboard" class="nav-item active flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-all">
+            <div class="flex items-center gap-2.5">
+              <i data-lucide="layout-dashboard" class="w-4 h-4 text-indigo-400"></i>
+              <span>ダッシュボード</span>
+            </div>
+          </a>
+
+          <!-- 職員連絡・掲示板 -->
+          <a href="#" data-tab="bulletin" class="nav-item flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-all">
+            <div class="flex items-center gap-2.5">
+              <i data-lucide="megaphone" class="w-4 h-4 text-amber-400"></i>
+              <span>職員連絡・掲示板</span>
+            </div>
+            <span id="bulletin-unread-count" class="hidden px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">0</span>
+          </a>
+
+          <!-- 校内チャット -->
+          <a href="#" data-tab="chat" class="nav-item flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-all">
+            <div class="flex items-center gap-2.5">
+              <i data-lucide="message-square" class="w-4 h-4 text-emerald-400"></i>
+              <span>校内チャット</span>
+            </div>
+            <span id="chat-unread-count" class="hidden px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">0</span>
+          </a>
+
+          <!-- 施設・物品予約 -->
+          <a href="#" data-tab="facility" class="nav-item flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-all">
+            <div class="flex items-center gap-2.5">
+              <i data-lucide="calendar" class="w-4 h-4 text-cyan-400"></i>
+              <span>施設・物品予約</span>
+            </div>
+          </a>
+
+          <!-- 行事・週案予定 -->
+          <a href="#" data-tab="schedule" class="nav-item flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-all">
+            <div class="flex items-center gap-2.5">
+              <i data-lucide="clock" class="w-4 h-4 text-purple-400"></i>
+              <span>行事・週案予定</span>
+            </div>
+          </a>
+
+          <!-- 回覧・決裁承認 -->
+          <a href="#" data-tab="approval" class="nav-item flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-all">
+            <div class="flex items-center gap-2.5">
+              <i data-lucide="check-square" class="w-4 h-4 text-rose-400"></i>
+              <span>回覧・決裁承認</span>
+            </div>
+          </a>
+
+          <!-- ★ 座席表・在席管理（新規追加） -->
+          <a href="#" data-tab="seating" class="nav-item flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-all">
+            <div class="flex items-center gap-2.5">
+              <i data-lucide="users" class="w-4 h-4 text-indigo-400"></i>
+              <span>座席表・在席管理</span>
+            </div>
+          </a>
+
+          <!-- 定期考査管理 (教務用) -->
+          <a href="#" id="nav-exam-item" data-tab="exam" class="nav-item hidden flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-all border border-amber-500/20 bg-amber-500/5">
+            <div class="flex items-center gap-2.5">
+              <i data-lucide="file-spreadsheet" class="w-4 h-4 text-amber-400"></i>
+              <span>定期考査管理</span>
+            </div>
+            <span class="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold">教務</span>
+          </a>
+        </nav>
+
+        <div class="text-[10px] text-slate-500 text-center font-mono py-2 border-t border-slate-800">
+          ISSystem v5.0
+        </div>
+      </aside>
+
+      <!-- Main Content Views Container -->
+      <main class="flex-1 overflow-y-auto p-4 md:p-6 bg-slate-950/20">
+        <!-- Dashboard View -->
+        <div id="view-dashboard" class="tab-view active space-y-4"></div>
+
+        <!-- ★ Seating View (新規追加) -->
+        <div id="view-seating" class="tab-view hidden space-y-4"></div>
+
+        <!-- Bulletin View -->
+        <div id="view-bulletin" class="tab-view hidden space-y-4"></div>
+
+        <!-- Chat View -->
+        <div id="view-chat" class="tab-view hidden space-y-4"></div>
+
+        <!-- Facility View -->
+        <div id="view-facility" class="tab-view hidden space-y-4"></div>
+
+        <!-- Schedule View -->
+        <div id="view-schedule" class="tab-view hidden space-y-4"></div>
+
+        <!-- Approval View -->
+        <div id="view-approval" class="tab-view hidden space-y-4"></div>
+
+        <!-- Exam View -->
+        <div id="view-exam" class="tab-view hidden space-y-4"></div>
+      </main>
+    </div>
+  </div>
+
+  <!-- ==================== 3. モーダル・ダイアログ領域 ==================== -->
+  <div id="modal-container">
+    <!-- 掲示板新規投稿モーダル -->
+    <div id="bulletin-modal" class="modal-overlay hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+      <div class="card p-6 w-full max-w-lg border border-slate-700 bg-slate-900 shadow-2xl rounded-2xl max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-800">
+          <h3 class="font-bold text-white text-base flex items-center gap-2">
+            <i data-lucide="plus-circle" class="w-5 h-5 text-indigo-400"></i> 新規連絡投稿
+          </h3>
+          <button class="modal-close text-slate-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+        </div>
+        <form id="bulletin-form" class="space-y-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">タイトル</label>
+            <input type="text" id="bulletin-title" class="input-field w-full p-2 text-xs rounded bg-slate-800 border border-slate-700 text-white" placeholder="例: 【教務部】採点票提出の件" required>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-300 mb-1">区分</label>
+              <select id="bulletin-category" class="input-field w-full p-2 text-xs rounded bg-slate-800 border border-slate-700 text-white">
+                <option value="GENERAL">全般</option>
+                <option value="INSTRUCTION">指示・依頼</option>
+                <option value="URGENT">緊急連絡</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-300 mb-1">対象日</label>
+              <input type="date" id="bulletin-target-date" class="input-field w-full p-2 text-xs rounded bg-slate-800 border border-slate-700 text-white" required>
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">内容</label>
+            <textarea id="bulletin-content" rows="4" class="input-field w-full p-2 text-xs rounded bg-slate-800 border border-slate-700 text-white" placeholder="連絡の詳細を入力してください..." required></textarea>
+          </div>
+          <div class="flex items-center gap-2">
+            <input type="checkbox" id="bulletin-pinned" class="rounded bg-slate-800 border-slate-700">
+            <label for="bulletin-pinned" class="text-xs text-slate-300">上部に固定表示する</label>
+          </div>
+          <div class="flex justify-end gap-2 pt-2">
+            <button type="button" class="modal-close btn-secondary px-4 py-2 text-xs rounded bg-slate-800 text-slate-300 hover:bg-slate-700">キャンセル</button>
+            <button type="submit" class="btn-primary px-4 py-2 text-xs rounded bg-indigo-600 text-white font-bold hover:bg-indigo-500">投稿する</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 掲示板詳細閲覧モーダル -->
+    <div id="bulletin-detail-modal" class="modal-overlay hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+      <div class="card p-6 w-full max-w-xl border border-slate-700 bg-slate-900 shadow-2xl rounded-2xl max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-800">
+          <h3 id="detail-bulletin-title" class="font-bold text-white text-base">連絡詳細</h3>
+          <button class="modal-close text-slate-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+        </div>
+        <div id="detail-bulletin-meta" class="flex items-center gap-4 text-xs text-slate-400 mb-4 pb-2 border-b border-slate-800/60"></div>
+        <div id="detail-bulletin-content" class="text-xs text-slate-200 leading-relaxed whitespace-pre-wrap min-h-[120px] mb-6"></div>
+        <div id="detail-bulletin-actions" class="flex justify-between items-center pt-3 border-t border-slate-800"></div>
+      </div>
+    </div>
+
+    <!-- ★ 天気詳細・防災情報モーダル (新規追加) -->
+    <div id="weather-detail-modal" class="modal-overlay hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+      <div class="card p-6 w-full max-w-2xl border border-slate-700 bg-slate-900 shadow-2xl rounded-2xl max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-800">
+          <h3 class="font-bold text-white text-base flex items-center gap-2">
+            <i data-lucide="shield-alert" class="w-5 h-5 text-amber-400"></i> 防災気象情報
+          </h3>
+          <div class="flex items-center gap-2">
+            <button class="modal-close text-slate-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+          </div>
+        </div>
+
+        <div class="space-y-4 text-xs text-slate-300">
+          <!-- 週間天気予報セクション -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <h4 class="font-bold text-white flex items-center gap-1.5 text-sm">
+                <i data-lucide="calendar" class="w-4 h-4 text-indigo-400"></i> 週間天気予報 (西宮市)
+              </h4>
+              <span id="weather-updated-at" class="text-[10px] text-slate-400 font-mono">更新: --</span>
+            </div>
+            <div id="weather-modal-forecasts" class="grid grid-cols-1 sm:grid-cols-7 gap-2">
+              <!-- 動的挿入 -->
+            </div>
+          </div>
+
+          <!-- 兵庫県の警報・注意報セクション -->
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <h4 class="font-bold text-amber-300 flex items-center gap-1.5 text-sm">
+                <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-400"></i> 兵庫県の警報・注意報
+              </h4>
+              <span id="warning-updated-at" class="text-[10px] text-slate-400 font-mono">更新: --</span>
+            </div>
+            <div class="bg-slate-800/80 p-3 rounded-xl border border-slate-700 space-y-2">
+              <p id="warning-content-text" class="text-[11px] text-slate-300">気象情報を読み込み中...</p>
+              <div class="flex items-center gap-3 pt-1 border-t border-slate-700/60">
+                <a href="https://www.jma.go.jp/bosai/forecast/#area_type=class15s&area_code=2820400" target="_blank" rel="noopener noreferrer" class="btn-secondary py-1 px-3 text-[11px] flex items-center gap-1 text-indigo-300 border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20">
+                  気象庁 西宮市の天気・警報 <i data-lucide="external-link" class="w-3 h-3"></i>
+                </a>
+                <a href="https://www.jma.go.jp/bosai/map.html#5/34.5/135.5/&elem=radar" target="_blank" rel="noopener noreferrer" class="btn-secondary py-1 px-3 text-[11px] flex items-center gap-1 text-emerald-300 border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20">
+                  高解像度 雨雲レーダー <i data-lucide="external-link" class="w-3 h-3"></i>
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <!-- その他の災害情報セクション -->
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <h4 class="font-bold text-rose-300 flex items-center gap-1.5 text-sm">
+                <i data-lucide="info" class="w-4 h-4 text-rose-400"></i> その他の災害情報
+              </h4>
+              <span id="disaster-updated-at" class="text-[10px] text-slate-400 font-mono">更新: --</span>
+            </div>
+            <div class="bg-slate-800/80 p-3 rounded-xl border border-slate-700">
+              <p id="disaster-content-text" class="text-[11px] text-slate-300">気象情報を読み込み中...</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex justify-end pt-4 mt-4">
+          <button type="button" class="modal-close btn-primary px-4 py-2 text-xs rounded bg-slate-800 text-slate-200 hover:bg-slate-700">閉じる</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- プロフィール編集モーダル -->
+    <div id="profile-modal" class="modal-overlay hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+      <div class="card p-6 w-full max-w-md border border-slate-700 bg-slate-900 shadow-2xl rounded-2xl max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-800">
+          <h3 class="font-bold text-white text-base flex items-center gap-2">
+            <i data-lucide="user-pen" class="w-5 h-5 text-indigo-400"></i> プロフィール編集
+          </h3>
+          <button class="modal-close text-slate-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+        </div>
+        <form id="profile-form" class="space-y-4">
+          <div class="flex flex-col items-center justify-center mb-3 space-y-2">
+            <!-- アバタープレビュー 兼 ドロップゾーン -->
+            <div id="profile-avatar-container" class="w-20 h-20 rounded-full bg-indigo-600/30 border-2 border-indigo-500/50 flex items-center justify-center text-indigo-300 font-bold overflow-hidden text-lg shadow-inner relative group cursor-pointer transition-all hover:border-indigo-400" title="画像をクリックまたはドロップして変更">
+              <img id="profile-avatar-img" class="w-full h-full object-cover hidden" alt="Avatar Preview">
+              <i data-lucide="user" id="profile-avatar-placeholder" class="w-10 h-10"></i>
+              <div class="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-[10px] text-white transition-opacity font-normal">
+                <i data-lucide="camera" class="w-4 h-4 mb-0.5"></i>変更
+              </div>
+            </div>
+
+            <!-- アクションボタン群 -->
+            <div class="flex items-center gap-3">
+              <label for="avatar-file-input" class="cursor-pointer text-xs font-semibold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition-colors">
+                <i data-lucide="upload" class="w-3.5 h-3.5"></i> 画像を選択
+              </label>
+              <input type="file" id="avatar-file-input" accept="image/*" class="hidden">
+              <button type="button" id="avatar-delete-btn" class="text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1 transition-colors">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> 画像を削除
+              </button>
+            </div>
+            <span class="text-[10px] text-slate-400">※ドラッグ＆ドロップでも設定可能</span>
+
+            <!-- 画像編集エディタツール -->
+            <div id="avatar-editor-tools" class="hidden flex flex-col gap-2.5 mt-2 w-full bg-slate-800/80 p-3 rounded-xl border border-slate-700">
+              <div class="flex items-center justify-between border-b border-slate-700/60 pb-1.5">
+                <span class="text-[11px] text-indigo-300 font-bold flex items-center gap-1">
+                  <i data-lucide="crop" class="w-3.5 h-3.5"></i> アイコン調整
+                </span>
+                <span class="text-[10px] text-slate-400">枠内ドラッグで移動・ホイールでズーム</span>
+              </div>
+              
+              <!-- キャンバス領域（直接ドラッグで移動） -->
+              <div class="flex flex-col items-center justify-center gap-1">
+                <div class="relative w-32 h-32 rounded-full overflow-hidden border-2 border-indigo-500 shadow-xl bg-slate-950 flex items-center justify-center">
+                  <canvas id="avatar-canvas" width="200" height="200" class="w-full h-full object-cover cursor-grab active:cursor-grabbing"></canvas>
+                  <div class="pointer-events-none absolute inset-0 rounded-full border border-white/20 shadow-inner"></div>
+                </div>
+              </div>
+
+              <!-- スライダー＆操作コントローラー -->
+              <div class="space-y-2 text-[11px] pt-1">
+                <!-- ズームスライダー -->
+                <div>
+                  <div class="flex justify-between text-slate-300 mb-0.5">
+                    <span class="flex items-center gap-1"><i data-lucide="zoom-in" class="w-3 h-3 text-indigo-400"></i> 拡大・縮小</span>
+                    <span id="scale-val" class="font-mono text-indigo-300">1.00x</span>
+                  </div>
+                  <input type="range" id="avatar-scale-slider" min="0.2" max="3.0" step="0.02" value="1.0" class="w-full accent-indigo-500 cursor-pointer">
+                </div>
+
+                <!-- 連続回転スライダー (無段階 0〜360°) -->
+                <div>
+                  <div class="flex justify-between text-slate-300 mb-0.5">
+                    <span class="flex items-center gap-1"><i data-lucide="rotate-cw" class="w-3 h-3 text-indigo-400"></i> 回転角度 (連続調整)</span>
+                    <span id="rotate-val" class="font-mono text-indigo-300">0°</span>
+                  </div>
+                  <input type="range" id="avatar-rotate-slider" min="0" max="360" step="1" value="0" class="w-full accent-indigo-500 cursor-pointer">
+                </div>
+
+                <!-- 補助ボタン（90度回転、リセット） -->
+                <div class="flex justify-end gap-2 pt-1 border-t border-slate-700/50">
+                  <button type="button" id="avatar-rotate-90-btn" class="px-2.5 py-1 text-[11px] rounded bg-slate-700/80 hover:bg-slate-600 text-slate-200 flex items-center gap-1 transition-colors">
+                    <i data-lucide="rotate-cw" class="w-3 h-3"></i> +90°回転
+                  </button>
+                  <button type="button" id="avatar-reset-btn" class="px-2.5 py-1 text-[11px] rounded bg-slate-700/80 hover:bg-slate-600 text-slate-200 flex items-center gap-1 transition-colors">
+                    <i data-lucide="refresh-cw" class="w-3 h-3"></i> リセット
+                  </button>
+                </div>
+              </div>
+            </div>
+            <input type="hidden" id="profile-avatar-url">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">氏名 (必須)</label>
+            <input type="text" id="profile-name" class="input-field w-full p-2 text-xs rounded bg-slate-800 border border-slate-700 text-white" required>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">メールアドレス</label>
+            <input type="email" id="profile-email" class="input-field w-full p-2 text-xs rounded bg-slate-800 border border-slate-700 text-white" placeholder="例: teacher@school.ed.jp">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">所属部局 / 担当</label>
+            <select id="profile-department" class="input-field w-full p-2 text-xs rounded bg-slate-800 border border-slate-700 text-white">
+              <option value="１学年">１学年</option>
+              <option value="２学年">２学年</option>
+              <option value="３学年">３学年</option>
+              <option value="教務部">教務部</option>
+              <option value="特色推進部">特色推進部</option>
+              <option value="生徒指導部">生徒指導部</option>
+              <option value="キャリアガイダンス部">キャリアガイダンス部</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">内線番号</label>
+            <input type="text" id="profile-extension" class="input-field w-full p-2 text-xs rounded bg-slate-800 border border-slate-700 text-white" placeholder="例: 101">
+          </div>
+          <div class="flex justify-end gap-2 pt-2">
+            <button type="button" class="modal-close btn-secondary px-4 py-2 text-xs rounded bg-slate-800 text-slate-300 hover:bg-slate-700">キャンセル</button>
+            <button type="submit" class="btn-primary px-4 py-2 text-xs rounded bg-indigo-600 text-white font-bold hover:bg-indigo-500">保存する</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 職員一覧・ユーザー管理モーダル -->
+    <div id="users-manage-modal" class="modal-overlay hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+      <div class="card p-6 w-full max-w-2xl border border-slate-700 bg-slate-900 shadow-2xl rounded-2xl max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-800">
+          <h3 class="font-bold text-white text-base flex items-center gap-2">
+            <i data-lucide="users" class="w-5 h-5 text-emerald-400"></i> 職員一覧・ユーザー管理
+          </h3>
+          <button class="modal-close text-slate-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+        </div>
+
+        <div class="space-y-6 text-xs text-slate-300">
+          <!-- 招待コード発行セクション -->
+          <div class="bg-slate-800/60 p-4 rounded-xl border border-slate-700">
+            <h4 class="font-bold text-white mb-2 flex items-center gap-1.5 text-sm">
+              <i data-lucide="key" class="w-4 h-4 text-amber-400"></i> 新規登録用 招待コード発行
+            </h4>
+            <p class="text-[11px] text-slate-400 mb-3">新規教員が自分でアカウント登録を行う際に必要な、有効期限付きの一時パス（招待コード）を発行します。</p>
+            <div class="flex items-center gap-3">
+              <button type="button" id="generate-invitation-btn" class="btn-primary py-1.5 px-3 text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white rounded flex items-center gap-1.5">
+                <i data-lucide="plus-circle" class="w-4 h-4"></i> 招待コードを発行
+              </button>
+              <div id="invitation-code-display" class="font-mono text-indigo-300 font-bold bg-slate-900 px-3 py-1.5 rounded border border-slate-700 hidden">--</div>
+            </div>
+          </div>
+
+          <!-- 新規教員追加フォーム -->
+          <div class="bg-slate-800/60 p-4 rounded-xl border border-slate-700">
+            <h4 class="font-bold text-white mb-3 flex items-center gap-1.5 text-sm">
+              <i data-lucide="user-plus" class="w-4 h-4 text-emerald-400"></i> 新規教職員の追加
+            </h4>
+            <form id="add-user-form" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-[11px] font-semibold text-slate-300 mb-1">教職員番号 (ID)</label>
+                <input type="text" id="new-user-staffcode" class="input-field w-full p-2 text-xs rounded bg-slate-800 border border-slate-700 text-white" placeholder="例: t-saito" required>
+              </div>
+              <div>
+                <label class="block text-[11px] font-semibold text-slate-300 mb-1">氏名</label>
+                <input type="text" id="new-user-name" class="input-field w-full p-2 text-xs rounded bg-slate-800 border border-slate-700 text-white" placeholder="例: 斎藤 先生" required>
+              </div>
+              <div>
+                <label class="block text-[11px] font-semibold text-slate-300 mb-1">初期パスワード</label>
+                <input type="password" id="new-user-password" class="input-field w-full p-2 text-xs rounded bg-slate-800 border border-slate-700 text-white" placeholder="••••••••" required>
+              </div>
+              <div>
+                <label class="block text-[11px] font-semibold text-slate-300 mb-1">所属部局</label>
+                <select id="new-user-dept" class="input-field w-full p-2 text-xs rounded bg-slate-800 border border-slate-700 text-white">
+                  <option value="１学年">１学年</option>
+                  <option value="２学年">２学年</option>
+                  <option value="３学年">３学年</option>
+                  <option value="教務部">教務部</option>
+                  <option value="特色推進部">特色推進部</option>
+                  <option value="生徒指導部">生徒指導部</option>
+                  <option value="キャリアガイダンス部">キャリアガイダンス部</option>
+                </select>
+              </div>
+              <div class="sm:col-span-2 flex justify-end pt-1">
+                <button type="submit" class="btn-primary py-2 px-4 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded">
+                  教職員を追加する
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <!-- 登録済み職員一覧 -->
+          <div>
+            <h4 class="font-bold text-white mb-2 flex items-center gap-1.5 text-sm">
+              <i data-lucide="list" class="w-4 h-4 text-indigo-400"></i> 登録済み教職員一覧
+            </h4>
+            <div class="overflow-x-auto border border-slate-700 rounded-xl">
+              <table class="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr class="bg-slate-800/80 border-b border-slate-700 text-slate-300">
+                    <th class="p-3">氏名 / ID</th>
+                    <th class="p-3">所属</th>
+                    <th class="p-3">内線</th>
+                    <th class="p-3 text-right">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="users-manage-tbody" class="divide-y divide-slate-800">
+                  <tr>
+                    <td colspan="4" class="text-center py-6 text-slate-500">読み込み中...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex justify-end pt-4 mt-4 border-t border-slate-800">
+          <button type="button" class="modal-close btn-primary px-4 py-2 text-xs rounded bg-slate-800 text-slate-200 hover:bg-slate-700">閉じる</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- トースト通知コンテナ -->
+  <div id="toast-container" class="fixed bottom-4 left-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+</body>
+</html>

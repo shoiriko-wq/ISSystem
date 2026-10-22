@@ -1,14 +1,18 @@
-# 依存ライブラリ
-server/node_modules/
+# 依存モジュール (Gitに含めない)
+node_modules/
 
-# 環境変数・機密情報（APIキーやDB接続情報など）
-server/.env
+# 環境設定・秘密鍵
+.env
+.env.local
+*.pem
+*.key
+
+# SQLite データベース実ファイル & WAL アーティファクト (Gitに含めない)
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
 
 # ログファイル
-
-# データベースファイル (SQLite等を利用する場合)
-data/
-
-# OS・エディタ生成ファイル
-
-# キャッシュ・ビルド成果物
+*.log
+logs/
