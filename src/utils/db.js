@@ -1,18 +1,10 @@
 /**
- * モデル共通の SQLite 接続 (database.sqlite)
+ * モデル共通の PostgreSQL 接続ヘルパー (pg パスプールの共有)
  */
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
-import { DB_PATH } from '../../config/database.js';
+import { pool, query } from '../../config/database.js';
 
-export async function openDb() {
-  const db = await open({
-    filename: DB_PATH,
-    driver: sqlite3.Database,
-  });
-  await db.exec('PRAGMA foreign_keys = ON;');
-  return db;
-}
+// レガシー互換: 旧コードの openDb() は非推奨 (pg のプール接続を使用すること)
+export { pool, query };
 
 export function todayJst() {
   return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });

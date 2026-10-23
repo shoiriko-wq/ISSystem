@@ -1,0 +1,7 @@
+{
+  "1240992": {
+    "expiry": 1823157600000,
+    "reason": "No patched version available yet for CVE-2026-93687. This is a development dependency for nodemon file watching, not exposed to the production server.",
+    "decision": "ignore"
+  }
+}

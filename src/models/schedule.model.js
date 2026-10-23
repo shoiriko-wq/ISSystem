@@ -1,23 +1,9 @@
 /**
  * ISSystem School Schedule & Event Data Access Model
- * 校内行事予定・本日のタイムライン・学年別スケジュール SQLite 完全対応モデル
+ * 校内行事予定・本日のタイムライン・学年別スケジュール PostgreSQL 完全対応モデル
  */
 
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const dbPath = path.resolve(__dirname, '../../database.sqlite');
-
-async function getDb() {
-  return await open({
-    filename: dbPath,
-    driver: sqlite3.Database
-  });
-}
+import { query } from '../../config/database.js';
 
 const mockSchedules = new Map();
 
@@ -63,30 +49,28 @@ export const scheduleModel = {
     }
 
     try {
-      const db = await getDb();
       let sql = `
         SELECT s.*, u.name as created_by_name
         FROM school_schedules s
         LEFT JOIN users u ON s.created_by_user_id = u.id
-        WHERE s.event_date >= ? AND s.event_date <= ?
+        WHERE s.event_date >= $1 AND s.event_date <= $2
       `;
       const params = [startDate, endDate];
 
       if (targetGrade) {
-        sql += ` AND (s.target_grade IS NULL OR s.target_grade = ?)`;
+        sql += ` AND (s.target_grade IS NULL OR s.target_grade = $3)`;
         params.push(parseInt(targetGrade, 10));
       }
 
       sql += ` ORDER BY s.event_date ASC, s.start_time ASC`;
 
-      const rows = await db.all(sql, params);
-      await db.close();
+      const res = await query(sql, params);
 
-      if (rows && rows.length > 0) {
-        return rows;
+      if (res.rows && res.rows.length > 0) {
+        return res.rows;
       }
     } catch (err) {
-      console.warn('[ScheduleModel SQLite Warning] findByDateRange fallback:', err.message);
+      console.warn('[ScheduleModel PG Warning] findByDateRange fallback:', err.message);
     }
 
     return Array.from(mockSchedules.values()).filter(s => {
@@ -114,12 +98,10 @@ export const scheduleModel = {
     if (mockSchedules.has(id)) return mockSchedules.get(id);
 
     try {
-      const db = await getDb();
-      const row = await db.get(`SELECT * FROM school_schedules WHERE id = ?`, [id]);
-      await db.close();
-      return row || null;
+      const res = await query(`SELECT * FROM school_schedules WHERE id = $1`, [id]);
+      return res.rows[0] || null;
     } catch (err) {
-      console.warn('[ScheduleModel SQLite Warning] findById fallback:', err.message);
+      console.warn('[ScheduleModel PG Warning] findById fallback:', err.message);
       return null;
     }
   },
@@ -151,10 +133,9 @@ export const scheduleModel = {
     mockSchedules.set(id, newSchedule);
 
     try {
-      const db = await getDb();
-      await db.run(
+      await query(
         `INSERT INTO school_schedules (id, title, description, event_date, start_time, end_time, category, target_grade, created_by_user_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [
           id, newSchedule.title, newSchedule.description, newSchedule.event_date,
           newSchedule.start_time, newSchedule.end_time, newSchedule.category,
@@ -162,9 +143,8 @@ export const scheduleModel = {
           newSchedule.created_at, newSchedule.updated_at
         ]
       );
-      await db.close();
     } catch (err) {
-      console.warn('[ScheduleModel SQLite Warning] create DB insert failed:', err.message);
+      console.warn('[ScheduleModel PG Warning] create DB insert failed:', err.message);
     }
 
     return newSchedule;
@@ -192,11 +172,10 @@ export const scheduleModel = {
     }
 
     try {
-      const db = await getDb();
-      await db.run(
+      await query(
         `UPDATE school_schedules
-         SET title = ?, description = ?, event_date = ?, start_time = ?, end_time = ?, category = ?, target_grade = ?, updated_at = ?
-         WHERE id = ?`,
+         SET title = $1, description = $2, event_date = $3, start_time = $4, end_time = $5, category = $6, target_grade = $7, updated_at = $8
+         WHERE id = $9`,
         [
           data.title || item.title, data.description || item.description,
           data.event_date || item.event_date, data.start_time || item.start_time,
@@ -205,9 +184,8 @@ export const scheduleModel = {
           nowStr, id
         ]
       );
-      await db.close();
     } catch (err) {
-      console.warn('[ScheduleModel SQLite Warning] update DB failed:', err.message);
+      console.warn('[ScheduleModel PG Warning] update DB failed:', err.message);
     }
 
     return item;
@@ -220,11 +198,9 @@ export const scheduleModel = {
   async delete(id) {
     mockSchedules.delete(id);
     try {
-      const db = await getDb();
-      await db.run(`DELETE FROM school_schedules WHERE id = ?`, [id]);
-      await db.close();
+      await query(`DELETE FROM school_schedules WHERE id = $1`, [id]);
     } catch (err) {
-      console.warn('[ScheduleModel SQLite Warning] delete DB failed:', err.message);
+      console.warn('[ScheduleModel PG Warning] delete DB failed:', err.message);
     }
   }
 };

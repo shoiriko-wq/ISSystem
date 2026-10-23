@@ -1,13 +1,10 @@
 /**
  * ISSystem Bulletin & Circular Data Access Model
- * SQLite database.sqlite (posts / post_acknowledgements) 完全準拠モデル
+ * PostgreSQL (posts / post_acknowledgements) 完全準拠モデル
  */
 
-import { openDb, nowIso, parseJson } from '../utils/db.js';
-
-async function getDb() {
-  return openDb();
-}
+import { query } from '../../config/database.js';
+import { nowIso, parseJson } from '../utils/db.js';
 
 function mapPost(row) {
   if (!row) return null;
@@ -25,8 +22,7 @@ export const bulletinModel = {
    */
   async findById(id) {
     try {
-      const db = await getDb();
-      const bulletin = await db.get(
+      const res = await query(
         `SELECT 
           p.id,
           p.title,
@@ -44,13 +40,12 @@ export const bulletinModel = {
           p.created_at
         FROM posts p 
         LEFT JOIN users u ON p.author_id = u.id 
-        WHERE p.id = ? AND p.is_deleted = 0`,
+        WHERE p.id = $1 AND p.is_deleted = 0`,
         [id]
       );
-      await db.close();
-      return mapPost(bulletin);
+      return mapPost(res.rows[0]);
     } catch (err) {
-      console.warn('[BulletinModel SQLite Warning] findById failed:', err.message);
+      console.warn('[BulletinModel PG Warning] findById failed:', err.message);
       return null;
     }
   },
@@ -61,8 +56,8 @@ export const bulletinModel = {
    */
   async findAll(filters = {}) {
     try {
-      const db = await getDb();
       const params = [];
+      const ph = () => `$${params.length + 1}`;
 
       let sql = `
         SELECT 
@@ -86,7 +81,7 @@ export const bulletinModel = {
 
       if (filters.currentUserId) {
         params.push(filters.currentUserId);
-        sql += ` LEFT JOIN post_acknowledgements pa ON p.id = pa.post_id AND pa.user_id = ?`;
+        sql += ` LEFT JOIN post_acknowledgements pa ON p.id = pa.post_id AND pa.user_id = ${ph()}`;
       } else {
         sql += ` LEFT JOIN post_acknowledgements pa ON p.id = pa.post_id`;
       }
@@ -95,17 +90,17 @@ export const bulletinModel = {
 
       if (filters.post_type || filters.type) {
         params.push(filters.post_type || filters.type);
-        sql += ` AND p.post_type = ?`;
+        sql += ` AND p.post_type = ${ph()}`;
       }
 
       if (filters.targetGrade && filters.targetGrade !== 'ALL') {
         params.push(`%"grade":"${filters.targetGrade}"%`);
-        sql += ` AND (p.target_scope LIKE ? OR p.target_scope LIKE '%"grade":"ALL"%')`;
+        sql += ` AND (p.target_scope LIKE ${ph()} OR p.target_scope LIKE '%"grade":"ALL"%')`;
       }
 
       if (filters.targetDepartment && filters.targetDepartment !== 'ALL') {
         params.push(`%"department":"${filters.targetDepartment}"%`);
-        sql += ` AND (p.target_scope LIKE ? OR p.target_scope LIKE '%"department":"ALL"%')`;
+        sql += ` AND (p.target_scope LIKE ${ph()} OR p.target_scope LIKE '%"department":"ALL"%')`;
       }
 
       if (filters.pinned === 'true' || filters.pinned === true) {
@@ -114,7 +109,7 @@ export const bulletinModel = {
 
       if (filters.searchKey) {
         params.push(`%${filters.searchKey.trim()}%`);
-        sql += ` AND (p.title LIKE ? OR p.content LIKE ?)`;
+        sql += ` AND (p.title LIKE ${ph()} OR p.content LIKE ${ph()})`;
         params.push(`%${filters.searchKey.trim()}%`);
       }
 
@@ -122,15 +117,14 @@ export const bulletinModel = {
 
       if (filters.limit) {
         params.push(parseInt(filters.limit, 10));
-        sql += ` LIMIT ?`;
+        sql += ` LIMIT ${ph()}`;
       }
 
-      const rows = await db.all(sql, params);
-      await db.close();
+      const res = await query(sql, params);
 
-      return (rows || []).map(mapPost);
+      return (res.rows || []).map(mapPost);
     } catch (err) {
-      console.warn('[BulletinModel SQLite Warning] findAll failed:', err.message);
+      console.warn('[BulletinModel PG Warning] findAll failed:', err.message);
       return [];
     }
   },
@@ -149,15 +143,13 @@ export const bulletinModel = {
     const attachments = postData.attachments || [];
 
     try {
-      const db = await getDb();
-      await db.run(
+      await query(
         `INSERT INTO posts (id, title, content, post_type, priority, author_id, target_scope, attachments, is_deleted, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, $9, $10)`,
         [id, postData.title, postData.content, postType, priority, authorId, JSON.stringify(targetScope), JSON.stringify(attachments), createdAt, createdAt]
       );
-      await db.close();
     } catch (err) {
-      console.warn('[BulletinModel SQLite Warning] create failed:', err.message);
+      console.warn('[BulletinModel PG Warning] create failed:', err.message);
     }
 
     return {
@@ -186,19 +178,17 @@ export const bulletinModel = {
     const acknowledgedAt = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
     try {
-      const db = await getDb();
-      await db.run(
+      await query(
         `INSERT INTO post_acknowledgements (id, post_id, user_id, status, comment, acknowledged_at)
-         VALUES (?, ?, ?, ?, ?, ?)
+         VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT(post_id, user_id) DO UPDATE SET
            status = excluded.status,
            comment = excluded.comment,
            acknowledged_at = excluded.acknowledged_at`,
         [id, postId, userId, status, comment, acknowledgedAt]
       );
-      await db.close();
     } catch (err) {
-      console.warn('[BulletinModel SQLite Warning] updateAcknowledgement failed:', err.message);
+      console.warn('[BulletinModel PG Warning] updateAcknowledgement failed:', err.message);
     }
 
     return { id, post_id: postId, user_id: userId, status, comment, acknowledged_at: acknowledgedAt };
@@ -210,18 +200,16 @@ export const bulletinModel = {
    */
   async getAcknowledgements(postId) {
     try {
-      const db = await getDb();
-      const rows = await db.all(
+      const res = await query(
         `SELECT pa.*, u.name as user_name, u.grade, u.department 
          FROM post_acknowledgements pa
          JOIN users u ON pa.user_id = u.id
-         WHERE pa.post_id = ?`,
+         WHERE pa.post_id = $1`,
         [postId]
       );
-      await db.close();
-      return rows || [];
+      return res.rows || [];
     } catch (err) {
-      console.warn('[BulletinModel SQLite Warning] getAcknowledgements failed:', err.message);
+      console.warn('[BulletinModel PG Warning] getAcknowledgements failed:', err.message);
       return [];
     }
   },
@@ -232,11 +220,9 @@ export const bulletinModel = {
    */
   async delete(id) {
     try {
-      const db = await getDb();
-      await db.run(`UPDATE posts SET is_deleted = 1, updated_at = ? WHERE id = ?`, [nowIso(), id]);
-      await db.close();
+      await query(`UPDATE posts SET is_deleted = 1, updated_at = $1 WHERE id = $2`, [nowIso(), id]);
     } catch (err) {
-      console.warn('[BulletinModel SQLite Warning] delete failed:', err.message);
+      console.warn('[BulletinModel PG Warning] delete failed:', err.message);
     }
   }
 };

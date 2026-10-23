@@ -3,7 +3,8 @@
  * 仕様: seating_status (user_id, desk_number, group_zone, current_status)
  */
 
-import { openDb, nowIso } from '../utils/db.js';
+import { query } from '../../config/database.js';
+import { nowIso } from '../utils/db.js';
 
 const mockStudents = new Map([
   ['1101', { student_code: '1101', grade: 1, class_num: 1, attendance_num: 1, name: '青木 翔' }],
@@ -24,15 +25,13 @@ function deskToCell(deskNumber, index) {
 export const seatingModel = {
   async listStatus() {
     try {
-      const db = await openDb();
-      const rows = await db.all(
+      const res = await query(
         `SELECT s.*, u.name, u.department, u.staff_code, u.role, u.grade
          FROM seating_status s
          LEFT JOIN users u ON s.user_id = u.id
          ORDER BY s.desk_number ASC`
       );
-      await db.close();
-      return rows || [];
+      return res.rows || [];
     } catch (err) {
       console.warn('[SeatingModel] listStatus failed:', err.message);
       return [];
@@ -92,28 +91,26 @@ export const seatingModel = {
   },
 
   async updateCells(_layoutId, cells = []) {
-    const db = await openDb();
     for (const cell of cells) {
       const userId = cell.teacher_id || cell.user_id || cell.teacherId;
       if (!userId) continue;
       const desk = cell.desk_number || cell.note || `${String.fromCharCode(64 + Number(cell.row || cell.row_idx || 1))}-${String(cell.col || cell.col_idx || 1).padStart(2, '0')}`;
       const status = cell.current_status || cell.status || 'PRESENT';
       const note = cell.status_note || cell.note || '';
-      const existing = await db.get(`SELECT id FROM seating_status WHERE user_id = ?`, [userId]);
-      if (existing) {
-        await db.run(
-          `UPDATE seating_status SET desk_number = ?, current_status = ?, status_note = ?, updated_at = ? WHERE user_id = ?`,
+      const existingRes = await query(`SELECT id FROM seating_status WHERE user_id = $1`, [userId]);
+      if (existingRes.rows[0]) {
+        await query(
+          `UPDATE seating_status SET desk_number = $1, current_status = $2, status_note = $3, updated_at = $4 WHERE user_id = $5`,
           [desk, status, note, nowIso(), userId]
         );
       } else {
-        await db.run(
+        await query(
           `INSERT INTO seating_status (id, user_id, desk_number, group_zone, current_status, status_note, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
           [`seat_${userId}`, userId, desk, cell.group_zone || 'staff', status, note, nowIso()]
         );
       }
     }
-    await db.close();
     return cells;
   },
 

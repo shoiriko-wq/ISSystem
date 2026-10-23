@@ -1,25 +1,27 @@
 /**
  * ISSystem User & Authentication Data Access Model
- * 教職員ユーザー情報(staff_code基盤) SQLite 実テーブル構造 完全準拠モデル
+ * 教職員ユーザー情報(staff_code基盤) PostgreSQL (pg) 準拠モデル
  */
 
-import { openDb, nowIso } from '../utils/db.js';
+import { query } from '../../config/database.js';
+import { nowIso } from '../utils/db.js';
 
-async function getDb() {
-  return openDb();
-}
-
-// 自動マイグレーション: avatar_url カラムの存在確認と追加
+// 自動マイグレーション: avatar_url カラムの存在確認と追加 (PostgreSQL)
 async function ensureAvatarColumn() {
   try {
-    const db = await getDb();
-    const tableInfo = await db.all("PRAGMA table_info(users);");
-    const hasAvatar = tableInfo.some(col => col.name === 'avatar_url');
-    if (!hasAvatar) {
-      await db.run("ALTER TABLE users ADD COLUMN avatar_url TEXT;");
-      console.log('[Database Migration] users テーブルに avatar_url カラムを追加しました。');
-    }
-    await db.close();
+    await query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'users' AND column_name = 'avatar_url'
+        ) THEN
+          ALTER TABLE users ADD COLUMN avatar_url TEXT;
+          RAISE NOTICE 'users テーブルに avatar_url カラムを追加しました。';
+        END IF;
+      END
+      $$;
+    `);
   } catch (err) {
     console.warn('[Database Migration Warning] ensureAvatarColumn failed:', err.message);
   }
@@ -38,15 +40,13 @@ export const userModel = {
     if (mockUsers.has(id)) return mockUsers.get(id);
 
     try {
-      const db = await getDb();
-      const user = await db.get(
-        `SELECT id, staff_code, email, name, role, grade, department, extension_number, password_hash FROM users WHERE id = ?`, 
+      const res = await query(
+        `SELECT id, staff_code, email, name, role, grade, department, extension_number, password_hash FROM users WHERE id = $1`,
         [id]
       );
-      await db.close();
-      return user || null;
+      return res.rows[0] || null;
     } catch (err) {
-      console.warn('[UserModel SQLite Warning] findById failed:', err.message);
+      console.warn('[UserModel PG Warning] findById failed:', err.message);
       return null;
     }
   },
@@ -64,16 +64,14 @@ export const userModel = {
     }
 
     try {
-      const db = await getDb();
-      // staff_code または id のいずれかで完全一致検索 (is_active 条件を除去)
-      const user = await db.get(
-        `SELECT id, staff_code, email, name, role, grade, department, extension_number, password_hash FROM users WHERE UPPER(staff_code) = UPPER(?) OR UPPER(id) = UPPER(?)`, 
+      const res = await query(
+        `SELECT id, staff_code, email, name, role, grade, department, extension_number, password_hash
+         FROM users WHERE UPPER(staff_code) = UPPER($1) OR UPPER(id) = UPPER($2)`,
         [staffCode, staffCode]
       );
-      await db.close();
-      return user || null;
+      return res.rows[0] || null;
     } catch (err) {
-      console.warn('[UserModel SQLite Warning] findByStaffCode failed:', err.message);
+      console.warn('[UserModel PG Warning] findByStaffCode failed:', err.message);
       return null;
     }
   },
@@ -89,15 +87,13 @@ export const userModel = {
     }
 
     try {
-      const db = await getDb();
-      const user = await db.get(
-        `SELECT id, staff_code, email, name, role, grade, department, extension_number, password_hash FROM users WHERE LOWER(email) = LOWER(?)`, 
+      const res = await query(
+        `SELECT id, staff_code, email, name, role, grade, department, extension_number, password_hash FROM users WHERE LOWER(email) = LOWER($1)`,
         [email]
       );
-      await db.close();
-      return user || null;
+      return res.rows[0] || null;
     } catch (err) {
-      console.warn('[UserModel SQLite Warning] findByEmail failed:', err.message);
+      console.warn('[UserModel PG Warning] findByEmail failed:', err.message);
       return null;
     }
   },
@@ -107,10 +103,8 @@ export const userModel = {
    */
   async listAll() {
     try {
-      const db = await getDb();
-      const users = await db.all(`SELECT id, staff_code, email, name, role, grade, department, extension_number, avatar_url FROM users ORDER BY name ASC`);
-      await db.close();
-      return users;
+      const res = await query(`SELECT id, staff_code, email, name, role, grade, department, extension_number, avatar_url FROM users ORDER BY name ASC`);
+      return res.rows;
     } catch (err) {
       return Array.from(mockUsers.values());
     }
@@ -138,18 +132,16 @@ export const userModel = {
     mockUsers.set(newUser.id, newUser);
 
     try {
-      const db = await getDb();
       const ts = nowIso();
       newUser.created_at = ts;
       newUser.updated_at = ts;
-      await db.run(
+      await query(
         `INSERT INTO users (id, staff_code, email, password_hash, name, role, department, extension_number, avatar_url, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [newUser.id, newUser.staff_code, newUser.email, newUser.password_hash, newUser.name, newUser.role, newUser.department, newUser.extension_number, newUser.avatar_url, ts, ts]
       );
-      await db.close();
     } catch (err) {
-      console.warn('[UserModel SQLite Warning] create user failed:', err.message);
+      console.warn('[UserModel PG Warning] create user failed:', err.message);
     }
 
     return newUser;
@@ -160,12 +152,9 @@ export const userModel = {
    */
   async updateProfile(userId, profile) {
     try {
-      const db = await getDb();
-      const user = await db.get(`SELECT * FROM users WHERE id = ?`, [userId]);
-      if (!user) {
-        await db.close();
-        return null;
-      }
+      const res = await query(`SELECT * FROM users WHERE id = $1`, [userId]);
+      const user = res.rows[0];
+      if (!user) return null;
 
       const name = profile.name !== undefined ? profile.name : user.name;
       const email = profile.email !== undefined ? profile.email : user.email;
@@ -173,14 +162,13 @@ export const userModel = {
       const extension_number = profile.extension_number !== undefined ? profile.extension_number : user.extension_number;
       const avatar_url = profile.avatar_url !== undefined ? profile.avatar_url : (user.avatar_url || null);
 
-      await db.run(
-        `UPDATE users SET name = ?, email = ?, department = ?, extension_number = ?, avatar_url = ?, updated_at = ? WHERE id = ?`,
+      await query(
+        `UPDATE users SET name = $1, email = $2, department = $3, extension_number = $4, avatar_url = $5, updated_at = $6 WHERE id = $7`,
         [name, email, department, extension_number, avatar_url, nowIso(), userId]
       );
-      await db.close();
       return { ...user, name, email, department, extension_number, avatar_url };
     } catch (err) {
-      console.warn('[UserModel SQLite Warning] updateProfile failed:', err.message);
+      console.warn('[UserModel PG Warning] updateProfile failed:', err.message);
       return null;
     }
   },
@@ -190,12 +178,10 @@ export const userModel = {
    */
   async delete(id) {
     try {
-      const db = await getDb();
-      await db.run(`DELETE FROM users WHERE id = ?`, [id]);
-      await db.close();
+      await query(`DELETE FROM users WHERE id = $1`, [id]);
       return true;
     } catch (err) {
-      console.warn('[UserModel SQLite Warning] delete user failed:', err.message);
+      console.warn('[UserModel PG Warning] delete user failed:', err.message);
       return false;
     }
   },
@@ -205,11 +191,9 @@ export const userModel = {
    */
   async updatePasswordHash(userId, newPasswordHash) {
     try {
-      const db = await getDb();
-      await db.run(`UPDATE users SET password_hash = ? WHERE id = ?`, [newPasswordHash, userId]);
-      await db.close();
+      await query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [newPasswordHash, userId]);
     } catch (err) {
-      console.warn('[UserModel SQLite Warning] updatePasswordHash failed:', err.message);
+      console.warn('[UserModel PG Warning] updatePasswordHash failed:', err.message);
     }
   },
 
@@ -220,28 +204,27 @@ export const userModel = {
     const normalized = status === 'IN' ? 'PRESENT' : status === 'OUT' ? 'LEAVE' : status;
     const ts = nowIso();
     try {
-      const db = await getDb();
-      const existing = await db.get(`SELECT * FROM seating_status WHERE user_id = ?`, [userId]);
-      if (existing) {
-        await db.run(
-          `UPDATE seating_status SET current_status = ?, status_note = ?, updated_at = ? WHERE user_id = ?`,
-          [normalized, statusNote || existing.status_note || '', ts, userId]
+      const res = await query(`SELECT * FROM seating_status WHERE user_id = $1`, [userId]);
+      if (res.rows[0]) {
+        await query(
+          `UPDATE seating_status SET current_status = $1, status_note = $2, updated_at = $3 WHERE user_id = $4`,
+          [normalized, statusNote || res.rows[0].status_note || '', ts, userId]
         );
       } else {
-        await db.run(
+        await query(
           `INSERT INTO seating_status (id, user_id, desk_number, group_zone, current_status, status_note, updated_at)
-           VALUES (?, ?, ?, 'staff', ?, ?, ?)`,
+           VALUES ($1, $2, $3, 'staff', $4, $5, $6)`,
           [`seat_${userId}`, userId, '-', normalized, statusNote || '', ts]
         );
       }
-      const user = await db.get(
-        `SELECT id, staff_code, email, name, role, grade, department, extension_number FROM users WHERE id = ?`,
+      const userRes = await query(
+        `SELECT id, staff_code, email, name, role, grade, department, extension_number FROM users WHERE id = $1`,
         [userId]
       );
-      await db.close();
-      return { ...user, status: normalized, current_status: normalized };
+      const user = userRes.rows[0];
+      return user ? { ...user, status: normalized, current_status: normalized } : { id: userId, status: normalized, current_status: normalized };
     } catch (err) {
-      console.warn('[UserModel SQLite Warning] updateStatus failed:', err.message);
+      console.warn('[UserModel PG Warning] updateStatus failed:', err.message);
       return { id: userId, status: normalized, current_status: normalized };
     }
   },
@@ -260,12 +243,10 @@ export const userModel = {
     };
 
     try {
-      const db = await getDb();
-      await db.run(
-        `INSERT INTO invitation_codes (id, code, created_by_user_id, is_used, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      await query(
+        `INSERT INTO invitation_codes (id, code, created_by_user_id, is_used, expires_at, created_at) VALUES ($1, $2, $3, $4, $5, $6)`,
         [invData.id, invData.code, invData.created_by_user_id, invData.is_used, invData.expires_at, invData.created_at]
       );
-      await db.close();
     } catch (err) {
       mockInvitationCodes.set(code, invData);
     }
@@ -274,10 +255,11 @@ export const userModel = {
 
   async findInvitationCode(code) {
     try {
-      const db = await getDb();
-      const inv = await db.get(`SELECT * FROM invitation_codes WHERE code = ? AND is_used = 0 AND expires_at > datetime('now')`, [code]);
-      await db.close();
-      return inv || mockInvitationCodes.get(code) || null;
+      const res = await query(
+        `SELECT * FROM invitation_codes WHERE code = $1 AND is_used = 0 AND expires_at > NOW()`,
+        [code]
+      );
+      return res.rows[0] || mockInvitationCodes.get(code) || null;
     } catch (err) {
       return mockInvitationCodes.get(code) || null;
     }
@@ -285,9 +267,7 @@ export const userModel = {
 
   async markInvitationCodeUsed(code, usedByUserId) {
     try {
-      const db = await getDb();
-      await db.run(`UPDATE invitation_codes SET is_used = 1, used_by_user_id = ? WHERE code = ?`, [usedByUserId, code]);
-      await db.close();
+      await query(`UPDATE invitation_codes SET is_used = 1, used_by_user_id = $1 WHERE code = $2`, [usedByUserId, code]);
     } catch (err) {
       if (mockInvitationCodes.has(code)) {
         const inv = mockInvitationCodes.get(code);

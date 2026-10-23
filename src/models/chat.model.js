@@ -1,23 +1,10 @@
 /**
  * ISSystem Chat & Messaging Data Access Model
- * チャットチャンネル・メンバー・メッセージ SQLite 実テーブル完全準拠モデル
+ * チャットチャンネル・メンバー・メッセージ PostgreSQL 完全対応モデル
  */
 
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const dbPath = path.resolve(__dirname, '../../database.sqlite');
-
-async function getDb() {
-  return await open({
-    filename: dbPath,
-    driver: sqlite3.Database
-  });
-}
+import { query } from '../../config/database.js';
+import { nowIso } from '../utils/db.js';
 
 // フォールバック用インメモリキャッシュ
 const mockChannels = new Map();
@@ -45,10 +32,8 @@ export const chatModel = {
     if (mockChannels.has(targetId)) return mockChannels.get(targetId);
 
     try {
-      const db = await getDb();
-      const channel = await db.get(`SELECT * FROM chat_channels WHERE id = ? OR id = ?`, [targetId, rawId]);
-      await db.close();
-      return channel || { id: rawId, name: '📢 全体チャット', type: 'PUBLIC' };
+      const res = await query(`SELECT * FROM chat_channels WHERE id = $1 OR id = $2`, [targetId, rawId]);
+      return res.rows[0] || { id: rawId, name: '📢 全体チャット', type: 'PUBLIC' };
     } catch (error) {
       return { id: rawId, name: '📢 全体チャット', type: 'PUBLIC' };
     }
@@ -60,20 +45,19 @@ export const chatModel = {
    */
   async listChannelsForUser(userId = 'kyomu01') {
     try {
-      const db = await getDb();
-      let channels = await db.all(
+      const res = await query(
         `SELECT DISTINCT c.*, cm.is_hidden, cm.joined_at
          FROM chat_channels c
-         LEFT JOIN chat_channel_members cm ON c.id = cm.channel_id AND cm.user_id = ?
-         WHERE c.type = 'PUBLIC' OR (cm.user_id = ? AND (cm.is_hidden IS NULL OR cm.is_hidden = 0))
+         LEFT JOIN chat_channel_members cm ON c.id = cm.channel_id AND cm.user_id = $1
+         WHERE c.type = 'PUBLIC' OR (cm.user_id = $2 AND (cm.is_hidden IS NULL OR cm.is_hidden = 0))
          ORDER BY c.created_at ASC`,
         [userId, userId]
       );
-      await db.close();
+      const channels = res.rows;
 
       if (channels && channels.length > 0) return channels;
     } catch (error) {
-      console.warn('[ChatModel SQLite Warning] listChannelsForUser fallback:', error.message);
+      console.warn('[ChatModel PG Warning] listChannelsForUser fallback:', error.message);
     }
 
     return [
@@ -90,7 +74,7 @@ export const chatModel = {
    */
   async createChannel(channelData) {
     const id = channelData.id || `chat_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const nowStr = nowIso();
     const newChannel = {
       id,
       name: channelData.name,
@@ -101,14 +85,12 @@ export const chatModel = {
     mockChannels.set(id, newChannel);
 
     try {
-      const db = await getDb();
-      await db.run(
-        `INSERT INTO chat_channels (id, name, type, created_at) VALUES (?, ?, ?, ?)`,
+      await query(
+        `INSERT INTO chat_channels (id, name, type, created_at) VALUES ($1, $2, $3, $4)`,
         [newChannel.id, newChannel.name, newChannel.type, nowStr]
       );
-      await db.close();
     } catch (error) {
-      console.warn('[ChatModel SQLite Warning] createChannel DB insert failed:', error.message);
+      console.warn('[ChatModel PG Warning] createChannel DB insert failed:', error.message);
     }
 
     if (channelData.memberIds && Array.isArray(channelData.memberIds)) {
@@ -121,13 +103,13 @@ export const chatModel = {
   },
 
   /**
-   * チャンネルへのメンバー追加・再表示処理 (SQLite 互換 INSERT OR REPLACE)
+   * チャンネルへのメンバー追加・再表示処理 (PostgreSQL 互換 ON CONFLICT)
    * @param {string} channelId
    * @param {string} userId
    */
   async addMember(channelId, userId) {
     const targetId = this.normalizeChannelId(channelId);
-    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const nowStr = nowIso();
     const key = `${targetId}_${userId}`;
     const member = {
       channel_id: targetId,
@@ -139,15 +121,14 @@ export const chatModel = {
     mockChannelMembers.set(key, member);
 
     try {
-      const db = await getDb();
-      await db.run(
-        `INSERT OR REPLACE INTO chat_channel_members (channel_id, user_id, is_hidden, joined_at)
-         VALUES (?, ?, 0, ?)`,
+      await query(
+        `INSERT INTO chat_channel_members (channel_id, user_id, is_hidden, joined_at)
+         VALUES ($1, $2, 0, $3)
+         ON CONFLICT (channel_id, user_id) DO UPDATE SET is_hidden = 0, joined_at = $3`,
         [targetId, userId, nowStr]
       );
-      await db.close();
     } catch (error) {
-      console.warn('[ChatModel SQLite Warning] addMember DB failed:', error.message);
+      console.warn('[ChatModel PG Warning] addMember DB failed:', error.message);
     }
 
     return member;
@@ -160,16 +141,14 @@ export const chatModel = {
   async getMembers(channelId) {
     const targetId = this.normalizeChannelId(channelId);
     try {
-      const db = await getDb();
-      const rows = await db.all(
+      const res = await query(
         `SELECT cm.*, u.name as user_name, u.role, u.department 
          FROM chat_channel_members cm
          JOIN users u ON cm.user_id = u.id
          WHERE cm.channel_id = ? OR cm.channel_id = ?`,
         [targetId, channelId]
       );
-      await db.close();
-      return rows || [];
+      return res.rows || [];
     } catch (error) {
       return [];
     }
@@ -184,23 +163,21 @@ export const chatModel = {
     const channelId = this.normalizeChannelId(messageData.channel_id || messageData.channelId);
     const senderId = messageData.sender_id || messageData.senderId || 'kyomu01';
     const messageText = messageData.message || messageData.message_text || messageData.messageText || messageData.content || '';
-    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const nowStr = nowIso();
 
     let senderName = messageData.sender_name || messageData.senderName;
     try {
-      const db = await getDb();
-      await db.run(
+      await query(
         `INSERT INTO chat_messages (id, channel_id, sender_id, message, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
+         VALUES ($1, $2, $3, $4, $5)`,
         [id, channelId, senderId, messageText, nowStr]
       );
       if (!senderName || senderName === '教員' || senderName === '教務 主任') {
-        const user = await db.get(`SELECT name FROM users WHERE id = ? OR staff_code = ?`, [senderId, senderId]);
-        if (user && user.name) senderName = user.name;
+        const userRes = await query(`SELECT name FROM users WHERE id = $1 OR staff_code = $2`, [senderId, senderId]);
+        if (userRes.rows[0] && userRes.rows[0].name) senderName = userRes.rows[0].name;
       }
-      await db.close();
     } catch (error) {
-      console.warn('[ChatModel SQLite Warning] sendMessage DB insert failed:', error.message);
+      console.warn('[ChatModel PG Warning] sendMessage DB insert failed:', error.message);
     }
 
     senderName = senderName || '教員';
@@ -234,20 +211,19 @@ export const chatModel = {
     const targetId = this.normalizeChannelId(channelId);
 
     try {
-      const db = await getDb();
-      const rows = await db.all(
+      const res = await query(
         `SELECT m.id, m.channel_id, m.sender_id, 
                 m.message,
                 m.created_at,
                 COALESCE(u.name, m.sender_id) as sender_name, u.role as sender_role
          FROM chat_messages m
          LEFT JOIN users u ON m.sender_id = u.id OR m.sender_id = u.staff_code
-         WHERE m.channel_id = ? OR m.channel_id = ?
+         WHERE m.channel_id = $1 OR m.channel_id = $2
          ORDER BY m.created_at ASC
-         LIMIT ?`,
+         LIMIT $3`,
         [targetId, rawId, limit]
       );
-      await db.close();
+      const rows = res.rows;
 
       if (rows && rows.length > 0) {
         // JS側でフロントエンド互換の全命名規則プロパティをセット
@@ -262,7 +238,7 @@ export const chatModel = {
         }));
       }
     } catch (error) {
-      console.warn('[ChatModel SQLite Warning] getMessages DB query failed:', error.message);
+      console.warn('[ChatModel PG Warning] getMessages DB query failed:', error.message);
     }
 
     return [];
@@ -289,12 +265,10 @@ export const chatModel = {
   async toggleHideChannel(channelId, userId, isHidden) {
     const targetId = this.normalizeChannelId(channelId);
     try {
-      const db = await getDb();
-      await db.run(
-        `UPDATE chat_channel_members SET is_hidden = ? WHERE channel_id = ? AND user_id = ?`,
+      await query(
+        `UPDATE chat_channel_members SET is_hidden = $1 WHERE channel_id = $2 AND user_id = $3`,
         [isHidden ? 1 : 0, targetId, userId]
       );
-      await db.close();
     } catch (error) {
       // 無視
     }
@@ -307,14 +281,12 @@ export const chatModel = {
     const targetId = this.normalizeChannelId(channelId);
     mockChannels.delete(targetId);
     try {
-      const db = await getDb();
-      await db.run(`DELETE FROM chat_messages WHERE channel_id = ?`, [targetId]);
-      await db.run(`DELETE FROM chat_channel_members WHERE channel_id = ?`, [targetId]);
-      await db.run(`DELETE FROM chat_channels WHERE id = ?`, [targetId]);
-      await db.close();
+      await query(`DELETE FROM chat_messages WHERE channel_id = $1`, [targetId]);
+      await query(`DELETE FROM chat_channel_members WHERE channel_id = $1`, [targetId]);
+      await query(`DELETE FROM chat_channels WHERE id = $1`, [targetId]);
       return true;
     } catch (error) {
-      console.warn('[ChatModel SQLite Warning] deleteChannel failed:', error.message);
+      console.warn('[ChatModel PG Warning] deleteChannel failed:', error.message);
       return false;
     }
   }

@@ -1,72 +1,66 @@
 /**
  * ISSystem Database Configuration & Initialization
- * 仕様書準拠: 単一 SQLite ファイル (database.sqlite) を全モデルで共有
+ * PostgreSQL 接続プール (pg) を全モデル・スクリプトで共有
  */
 
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
+import pg from 'pg';
+import 'dotenv/config';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const { Pool } = pg;
 
-export const DB_PATH = path.resolve(__dirname, '../database.sqlite');
-const SCHEMA_PATH = path.resolve(__dirname, '../db/schema.sql');
-
-let db = null;
-
-export async function getDb() {
-  if (!db) {
-    db = await open({
-      filename: DB_PATH,
-      driver: sqlite3.Database,
-    });
-    await db.exec('PRAGMA journal_mode = WAL;');
-    await db.exec('PRAGMA foreign_keys = ON;');
-  }
-  return db;
+// 環境変数からの接続設定 (.env 対応)
+const DB_PASSWORD = process.env.DB_PASSWORD;
+if (!DB_PASSWORD) {
+  throw new Error(
+    '[Database] DB_PASSWORD が設定されていません。' +
+    ' プロジェクトの .env ファイルに有効なパスワードを設定してください。' +
+    ' 例: DB_PASSWORD=your_password'
+  );
 }
+
+const PG_CONFIG = {
+  host: process.env.DB_HOST || 'localhost',
+  port: Number(process.env.DB_PORT || 5432),
+  database: process.env.DB_NAME || 'is_system',
+  user: process.env.DB_USER || 'postgres',
+  password: DB_PASSWORD,
+  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+};
+
+// 単一インスタンスの接続プールを全プロセス内で共有
+const pool = new Pool(PG_CONFIG);
 
 /**
  * モデル層から使用される共通 SQL クエリ実行ヘルパー
- * PostgreSQL 風の $1,$2 プレースホルダは SQLite の ? に変換する
+ * pg の Result (res.rows / res.rowCount) をそのまま返す
  */
 export async function query(sqlText, params = []) {
-  const database = await getDb();
-  const sqliteSql = String(sqlText).replace(/\$(\d+)/g, '?');
-  const trimmedSql = sqliteSql.trim().toUpperCase();
-
-  if (trimmedSql.startsWith('SELECT') || trimmedSql.startsWith('PRAGMA')) {
-    const rows = await database.all(sqliteSql, params);
-    return { rows };
-  }
-
-  const result = await database.run(sqliteSql, params);
-  return {
-    rows: [],
-    rowCount: result.changes || 0,
-    lastID: result.lastID,
-    changes: result.changes || 0,
-  };
+  const result = await pool.query(sqlText, params || []);
+  return result;
 }
 
+/**
+ * サーバー起動時の接続検証
+ */
 export async function initializeDatabase() {
-  const database = await getDb();
-
-  if (fs.existsSync(SCHEMA_PATH)) {
-    const sqlScript = fs.readFileSync(SCHEMA_PATH, 'utf-8');
-    await database.exec(sqlScript);
+  const client = await pool.connect();
+  try {
+    const res = await client.query('SELECT NOW() AS now');
+    console.log(`[Database] PostgreSQL 接続完了: ${PG_CONFIG.host}:${PG_CONFIG.port}/${PG_CONFIG.database} (server now=${res.rows[0].now})`);
+  } finally {
+    client.release();
   }
-
-  console.log('[Database] database.sqlite のスキーマ検証が完了しました。');
-  return database;
+  return pool;
 }
+
+export { pool };
 
 export default {
-  getDb,
+  pool,
   query,
   initializeDatabase,
-  DB_PATH,
+  PG_CONFIG,
 };

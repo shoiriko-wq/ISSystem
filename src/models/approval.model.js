@@ -1,205 +1,119 @@
 /**
- * ISSystem Workflow & Simple Approval Data Access Model
- * 簡易決裁・物品購入リクエスト SQLite (database.sqlite) 完全対応モデル
+ * 簡易決裁モデル (Approvals Model)
+ * PostgreSQL (pg) 準拠実装
  */
 
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { query } from '../../config/database.js';
+import { nowIso } from '../utils/db.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const dbPath = path.resolve(__dirname, '../../database.sqlite');
-
-async function getDb() {
-  return await open({
-    filename: dbPath,
-    driver: sqlite3.Database
-  });
-}
-
-// デモ・開発用インメモリキャッシュストア
-const mockApprovals = new Map();
-
-export const approvalModel = {
-  /**
-   * 決裁・申請データのID検索
-   * @param {string} id
-   */
+class ApprovalModel {
   async findById(id) {
-    if (!id) return null;
-    if (mockApprovals.has(id)) return mockApprovals.get(id);
-
     try {
-      const db = await getDb();
-      const item = await db.get(
+      const res = await query(
         `SELECT a.*, u.name as applicant_name, ap.name as approver_name
          FROM approvals a
          LEFT JOIN users u ON a.applicant_id = u.id
          LEFT JOIN users ap ON a.approver_id = ap.id
-         WHERE a.id = ?`,
+         WHERE a.id = $1`,
         [id]
       );
-      await db.close();
-      return item || null;
+      return res.rows[0] || null;
     } catch (err) {
-      console.warn('[ApprovalModel SQLite Warning] findById fallback:', err.message);
+      console.error('[ApprovalModel] findById failed:', err.message);
       return null;
     }
-  },
+  }
 
-  /**
-   * 申請データの一覧取得 (申請者・承認者・ステータス等でフィルタリング)
-   * @param {Object} filters - { applicantId, approverId, status, category }
-   */
   async findAll(filters = {}) {
     try {
-      const db = await getDb();
       const params = [];
       let sql = `
         SELECT a.*, u.name as applicant_name, ap.name as approver_name
         FROM approvals a
         LEFT JOIN users u ON a.applicant_id = u.id
         LEFT JOIN users ap ON a.approver_id = ap.id
-        WHERE 1=1
+        WHERE 1 = 1
       `;
 
-      if (filters.applicantId) {
-        sql += ` AND a.applicant_id = ?`;
-        params.push(filters.applicantId);
+      if (filters.applicant_id) {
+        params.push(filters.applicant_id);
+        sql += ` AND a.applicant_id = $${params.length}`;
       }
       if (filters.status) {
-        sql += ` AND a.status = ?`;
         params.push(filters.status);
+        sql += ` AND a.status = $${params.length}`;
       }
-      if (filters.category) {
-        sql += ` AND a.category = ?`;
-        params.push(filters.category);
-      }
+      sql += ` ORDER BY a.created_at DESC LIMIT 100`;
 
-      sql += ` ORDER BY a.created_at DESC`;
-
-      const rows = await db.all(sql, params);
-      await db.close();
-
-      if (rows && rows.length > 0) {
-        return rows;
-      }
-      return Array.from(mockApprovals.values());
+      const res = await query(sql, params);
+      return res.rows;
     } catch (err) {
-      console.warn('[ApprovalModel SQLite Warning] findAll fallback to mock:', err.message);
-      return Array.from(mockApprovals.values());
-    }
-  },
-
-  /**
-   * 新規決裁・物品購入申請の登録
-   * @param {Object} data
-   */
-  async create(data) {
-    const id = data.id || `app_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
-
-    const newApproval = {
-      id,
-      title: data.title || '無題の申請',
-      category: data.category || 'PURCHASE',
-      description: data.description || '',
-      amount: data.amount ? parseInt(data.amount, 10) : 0,
-      applicant_id: data.applicant_id || data.applicantId || 'kyomu01',
-      applicant_name: data.applicant_name || '教員',
-      approver_id: data.approver_id || null,
-      approver_name: null,
-      status: 'PENDING',
-      comment: null,
-      linked_chat_channel_id: data.linked_chat_channel_id || null,
-      created_at: nowStr,
-      updated_at: nowStr,
-      approved_at: null
-    };
-
-    mockApprovals.set(id, newApproval);
-
-    try {
-      const db = await getDb();
-      await db.run(
-        `INSERT INTO approvals (id, title, category, description, amount, applicant_id, approver_id, status, linked_chat_channel_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          id, newApproval.title, newApproval.category, newApproval.description,
-          newApproval.amount, newApproval.applicant_id, newApproval.approver_id,
-          newApproval.status, newApproval.linked_chat_channel_id,
-          newApproval.created_at, newApproval.updated_at
-        ]
-      );
-      await db.close();
-    } catch (err) {
-      console.warn('[ApprovalModel SQLite Warning] create DB insert failed, saved to mock:', err.message);
-    }
-
-    return newApproval;
-  },
-
-  /**
-   * 決裁ステータス（承認 / 却下）の更新
-   * @param {string} id
-   * @param {string} status - 'APPROVED' | 'REJECTED'
-   * @param {string} approverId
-   * @param {string} approverName
-   * @param {string|null} comment
-   */
-  async updateStatus(id, status, approverId, approverName, comment = null) {
-    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
-    const item = await this.findById(id);
-
-    if (item) {
-      item.status = status;
-      item.approver_id = approverId;
-      item.approver_name = approverName;
-      item.comment = comment;
-      item.approved_at = nowStr;
-      item.updated_at = nowStr;
-      mockApprovals.set(id, item);
-    }
-
-    try {
-      const db = await getDb();
-      await db.run(
-        `UPDATE approvals
-         SET status = ?, approver_id = ?, comment = ?, approved_at = ?, updated_at = ?
-         WHERE id = ?`,
-        [status, approverId, comment, nowStr, nowStr, id]
-      );
-      await db.close();
-    } catch (err) {
-      console.warn('[ApprovalModel SQLite Warning] updateStatus DB failed:', err.message);
-    }
-
-    return item || { id, status, approver_id: approverId, comment, approved_at: nowStr };
-  },
-
-  /**
-   * 専用チャットチャンネルIDの連携紐付け
-   * @param {string} id
-   * @param {string} channelId
-   */
-  async linkChatChannel(id, channelId) {
-    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
-    const item = await this.findById(id);
-    if (item) {
-      item.linked_chat_channel_id = channelId;
-      item.updated_at = nowStr;
-    }
-
-    try {
-      const db = await getDb();
-      await db.run(`UPDATE approvals SET linked_chat_channel_id = ?, updated_at = ? WHERE id = ?`, [channelId, nowStr, id]);
-      await db.close();
-    } catch (err) {
-      console.warn('[ApprovalModel SQLite Warning] linkChatChannel DB failed:', err.message);
+      console.error('[ApprovalModel] findAll failed:', err.message);
+      return [];
     }
   }
-};
 
-export default approvalModel;
+  async create(approval) {
+    const ts = nowIso();
+    const data = {
+      ...approval,
+      id: `app_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+      status: approval.status || 'PENDING',
+      created_at: approval.created_at || ts,
+      updated_at: ts,
+    };
+    try {
+      await query(
+        `INSERT INTO approvals (id, title, category, description, amount, applicant_id, approver_id, status, linked_chat_channel_id, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [
+          data.id,
+          data.title,
+          data.category || 'PURCHASE',
+          data.description || null,
+          data.amount || 0,
+          data.applicant_id || null,
+          data.approver_id || null,
+          data.status,
+          data.linked_chat_channel_id || null,
+          data.created_at,
+          data.updated_at,
+        ]
+      );
+      return data;
+    } catch (err) {
+      console.error('[ApprovalModel] create failed:', err.message);
+      throw err;
+    }
+  }
+
+  async updateStatus(id, { status, approver_id = null, comment = null }) {
+    const ts = nowIso();
+    try {
+      await query(
+        `UPDATE approvals SET status = $1, approver_id = $2, comment = $3, approved_at = $4, updated_at = $5 WHERE id = $6`,
+        [status, approver_id, comment, status === 'APPROVED' || status === 'REJECTED' ? ts : null, ts, id]
+      );
+      return this.findById(id);
+    } catch (err) {
+      console.error('[ApprovalModel] updateStatus failed:', err.message);
+      throw err;
+    }
+  }
+
+  async linkToChat(id, channelId) {
+    const nowStr = nowIso();
+    try {
+      await query(
+        `UPDATE approvals SET linked_chat_channel_id = $1, updated_at = $2 WHERE id = $3`,
+        [channelId, nowStr, id]
+      );
+      return this.findById(id);
+    } catch (err) {
+      console.error('[ApprovalModel] linkToChat failed:', err.message);
+      throw err;
+    }
+  }
+}
+
+export default new ApprovalModel();
