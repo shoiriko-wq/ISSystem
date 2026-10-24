@@ -3,25 +3,37 @@
  * 仕様書 v2.1.0 完全連動版
  */
 
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
+import bcrypt from 'bcrypt';
+import { pool } from '../config/database.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import crypto from 'crypto';
-import config from '../config/default.js';
+// crypto/config は bcrypt 化に伴い不要
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const dbPath = path.resolve(__dirname, '../database.sqlite');
+// PostgreSQL 準拠のため database.sqlite は使用しない
 
-function hashPassword(password) {
-  const secret = (config && config.auth && config.auth.jwtSecret) 
-    ? config.auth.jwtSecret 
-    : 'dev-secret-key-change-in-production';
-  return crypto.createHash('sha256').update(password + secret).digest('hex');
+async function hashPassword(password) {
+  // bcrypt ハッシュ (Salt rounds = 10) を使用
+
+  return bcrypt.hash(password, BCRYPT_ROUNDS);
 }
 
-const defaultPasswordHash = hashPassword('password123');
+const BCRYPT_ROUNDS = 10;
+/**
+ * PostgreSQL 準拠アップサートヘルパー
+ * SQLite の INSERT OR REPLACE 相当を $n プレースホルダ + ON CONFLICT (id) で実装
+ */
+async function upsert(client, table, columns, values) {
+  const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
+  const updates = columns.map((c) => `${c} = EXCLUDED.${c}`).join(', ');
+  const sql = `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders}) ON CONFLICT (id) DO UPDATE SET ${updates}`;
+  return client.query(sql, values);
+}
+
+
+const defaultPasswordHash = await hashPassword('password123');
 
 // 1. 教職員ユーザー
 const dummyUsers = [
@@ -80,8 +92,8 @@ const dummyResources = [
 
 // 8. 施設予約 (新スキーマ構造: facility_id, target_date, user_name 等に対応)
 const dummyReservations = [
-  { id: 'resv_1', facility_id: '1', resource_id: '1', user_id: 'kyomu01', user_name: '教務 主任', title: '教務部定例会議', target_date: '2026-10-15', start_time: '2026-10-15 16:30:00', end_time: '2026-10-15 17:30:00', is_cancelled: 0 },
-  { id: 'resv_2', facility_id: '4', resource_id: '4', user_id: 't-sato', user_name: '佐藤 先生', title: '進路説明会プレゼン', target_date: '2026-10-16', start_time: '2026-10-16 13:00:00', end_time: '2026-10-16 15:00:00', is_cancelled: 0 }
+  { id: 'resv_1', facility_id: '1', resource_id: '1', user_id: 'kyomu01', user_name: '教務 主任', title: '教務部定例会議', target_date: '2026-10-15', start_time: '2026-10-15 16:30:00', end_time: '2026-10-15 17:30:00', is_cancelled: false },
+  { id: 'resv_2', facility_id: '4', resource_id: '4', user_id: 't-sato', user_name: '佐藤 先生', title: '進路説明会プレゼン', target_date: '2026-10-16', start_time: '2026-10-16 13:00:00', end_time: '2026-10-16 15:00:00', is_cancelled: false }
 ];
 
 // 9. 校内スケジュール・年間行事 (新規追加)
@@ -94,86 +106,56 @@ const dummySchedules = [
 async function seedDatabase() {
   console.log('🌱 ダミーデータの一括投入を開始します...');
 
-  const db = await open({
-    filename: dbPath,
-    driver: sqlite3.Database
-  });
-
-  await db.run('PRAGMA foreign_keys = ON;');
-  await db.run('BEGIN TRANSACTION;');
+  const client = await pool.connect();
+  await client.query('BEGIN');
 
   try {
     for (const u of dummyUsers) {
-      await db.run(
-        `INSERT OR REPLACE INTO users (id, staff_code, name, email, password_hash, role, department, extension_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [u.id, u.staff_code, u.name, u.email, u.password_hash, u.role, u.department, u.extension_number]
-      );
+      await upsert(client, 'users', ['id', 'staff_code', 'name', 'email', 'password_hash', 'role', 'department', 'extension_number'], [u.id, u.staff_code, u.name, u.email, u.password_hash, u.role, u.department, u.extension_number]);
     }
 
     for (const p of dummyPosts) {
-      await db.run(
-        `INSERT OR REPLACE INTO posts (id, title, content, post_type, priority, author_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [p.id, p.title, p.content, p.post_type, p.priority, p.author_id, p.created_at]
-      );
+      await upsert(client, 'posts', ['id', 'title', 'content', 'post_type', 'priority', 'author_id', 'created_at'], [p.id, p.title, p.content, p.post_type, p.priority, p.author_id, p.created_at]);
     }
 
     for (const a of dummyAcknowledgements) {
-      await db.run(
-        `INSERT OR REPLACE INTO post_acknowledgements (id, post_id, user_id, status, comment, acknowledged_at) VALUES (?, ?, ?, ?, ?, ?)`,
-        [a.id, a.post_id, a.user_id, a.status, a.comment, a.acknowledged_at]
-      );
+      await upsert(client, 'post_acknowledgements', ['id', 'post_id', 'user_id', 'status', 'comment', 'acknowledged_at'], [a.id, a.post_id, a.user_id, a.status, a.comment, a.acknowledged_at]);
     }
 
     for (const c of dummyChannels) {
-      await db.run(
-        `INSERT OR REPLACE INTO chat_channels (id, name, type) VALUES (?, ?, ?)`,
-        [c.id, c.name, c.type]
-      );
+      await upsert(client, 'chat_channels', ['id', 'name', 'type'], [c.id, c.name, c.type]);
     }
 
     for (const m of dummyMessages) {
-      await db.run(
-        `INSERT OR REPLACE INTO chat_messages (id, channel_id, sender_id, message, created_at) VALUES (?, ?, ?, ?, ?)`,
-        [m.id, m.channel_id, m.sender_id, m.message, m.created_at]
-      );
+      await upsert(client, 'chat_messages', ['id', 'channel_id', 'sender_id', 'message', 'created_at'], [m.id, m.channel_id, m.sender_id, m.message, m.created_at]);
     }
 
     for (const s of dummySeating) {
-      await db.run(
-        `INSERT OR REPLACE INTO seating_status (id, user_id, desk_number, group_zone, current_status, status_note) VALUES (?, ?, ?, ?, ?, ?)`,
-        [s.id, s.user_id, s.desk_number, s.group_zone, s.current_status, s.status_note]
-      );
+      await upsert(client, 'seating_status', ['id', 'user_id', 'desk_number', 'group_zone', 'current_status', 'status_note'], [s.id, s.user_id, s.desk_number, s.group_zone, s.current_status, s.status_note]);
     }
 
     for (const r of dummyResources) {
-      await db.run(
-        `INSERT OR REPLACE INTO resources (id, name, category) VALUES (?, ?, ?)`,
-        [r.id, r.name, r.category]
-      );
+      await upsert(client, 'resources', ['id', 'name', 'category'], [r.id, r.name, r.category]);
     }
 
     for (const rv of dummyReservations) {
-      await db.run(
-        `INSERT OR REPLACE INTO reservations (id, facility_id, resource_id, user_id, user_name, title, target_date, start_time, end_time, is_cancelled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [rv.id, rv.facility_id, rv.resource_id, rv.user_id, rv.user_name, rv.title, rv.target_date, rv.start_time, rv.end_time, rv.is_cancelled]
-      );
+      await upsert(client, 'reservations', ['id', 'facility_id', 'resource_id', 'user_id', 'user_name', 'title', 'target_date', 'start_time', 'end_time', 'is_cancelled'], [rv.id, rv.facility_id, rv.resource_id, rv.user_id, rv.user_name, rv.title, rv.target_date, rv.start_time, rv.end_time, rv.is_cancelled]);
     }
 
     for (const sch of dummySchedules) {
-      await db.run(
-        `INSERT OR REPLACE INTO school_schedules (id, title, description, event_date, category, target_grade, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [sch.id, sch.title, sch.description, sch.event_date, sch.category, sch.target_grade, sch.created_by_user_id]
-      );
+      await upsert(client, 'school_schedules', ['id', 'title', 'description', 'event_date', 'category', 'target_grade', 'created_by_user_id'], [sch.id, sch.title, sch.description, sch.event_date, sch.category, sch.target_grade, sch.created_by_user_id]);
     }
 
-    await db.run('COMMIT;');
+    await client.query('COMMIT;');
     console.log('🎉 全テーブルへの最新ダミーデータ投入が完了しました！');
 
   } catch (err) {
-    await db.run('ROLLBACK;');
+    await client.query('ROLLBACK;');
     console.error('❌ シードデータ投入エラー:', err);
+    process.exitCode = 1;
   } finally {
-    await db.close();
+    client.release();
+    await pool.end();
   }
 }
 

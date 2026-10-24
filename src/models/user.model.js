@@ -12,6 +12,11 @@ async function ensureAvatarColumn() {
     await query(`
       DO $$
       BEGIN
+        IF to_regclass('public.users') IS NULL THEN
+          RAISE NOTICE 'users テーブル未作成のため avatar_url マイグレーションをスキップします (npm run db:init を実行)。';
+          RETURN;
+        END IF;
+
         IF NOT EXISTS (
           SELECT 1 FROM information_schema.columns
           WHERE table_name = 'users' AND column_name = 'avatar_url'
@@ -23,7 +28,12 @@ async function ensureAvatarColumn() {
       $$;
     `);
   } catch (err) {
-    console.warn('[Database Migration Warning] ensureAvatarColumn failed:', err.message);
+    // 42P01 = users テーブル未作成 (db:init 未実行)。警告ではなく案内として扱う
+    if (err && err.code === '42P01') {
+      console.log('[Database Migration] users テーブル未作成: npm run db:init を実行してください。');
+    } else {
+      console.warn('[Database Migration Warning] ensureAvatarColumn failed:', err.message);
+    }
   }
 }
 ensureAvatarColumn();
