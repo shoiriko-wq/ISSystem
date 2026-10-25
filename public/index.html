@@ -129,6 +129,11 @@
         </div>
 
 
+        <!-- テーマ設定ボタン -->
+        <button id="theme-menu-btn" class="icon-btn p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300" title="配色テーマ設定">
+          <i data-lucide="palette" class="w-4 h-4"></i>
+        </button>
+
         <!-- 未読通知ベル -->
         <div class="relative">
           <button id="notification-btn" class="icon-btn relative p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300" title="リアルタイム通知・更新履歴">
@@ -318,6 +323,14 @@
             <label class="block text-xs font-semibold text-slate-300 mb-1">内容</label>
             <textarea id="bulletin-content" rows="4" class="input-field w-full p-2 text-xs rounded bg-slate-800 border border-slate-700 text-white" placeholder="連絡の詳細を入力してください..." required></textarea>
           </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">添付ファイル <span class="text-slate-500 font-normal">(最大10件 / 1件10MB)</span></label>
+            <input type="file" id="bulletin-files" multiple
+                   accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv,.zip,.kgs,.kgme"
+                   class="w-full text-[11px] text-slate-300 border border-dashed border-slate-700 rounded-lg bg-slate-900/50 p-3 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-indigo-600/80 file:text-white file:text-[11px] hover:border-indigo-500/50">
+            <p class="mt-1 text-[10px] text-slate-500">対応形式: PDF・画像(png/jpg/gif/webp)・テキスト(txt/md/csv)・圧縮(zip)・KAGOSHIMA EDU(.kgs/.kgme)</p>
+            <ul id="bulletin-files-list" class="mt-2 space-y-1 text-[11px] text-slate-300"></ul>
+          </div>
           <div class="flex items-center gap-2">
             <input type="checkbox" id="bulletin-pinned" class="rounded bg-slate-800 border-slate-700">
             <label for="bulletin-pinned" class="text-xs text-slate-300">上部に固定表示する</label>
@@ -339,6 +352,7 @@
         </div>
         <div id="detail-bulletin-meta" class="flex items-center gap-4 text-xs text-slate-400 mb-4 pb-2 border-b border-slate-800/60"></div>
         <div id="detail-bulletin-content" class="text-xs text-slate-200 leading-relaxed whitespace-pre-wrap min-h-[120px] mb-6"></div>
+        <div id="detail-bulletin-attachments" class="mb-4"></div>
         <div id="detail-bulletin-actions" class="flex justify-between items-center pt-3 border-t border-slate-800"></div>
       </div>
     </div>
@@ -619,8 +633,134 @@
     </div>
   </div>
 
+  <!-- 配色テーマ設定モーダル -->
+  <div id="theme-modal" class="modal-overlay hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+    <div class="card p-6 w-full max-w-md border border-slate-700 bg-slate-900 shadow-2xl rounded-2xl">
+      <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-800">
+        <h3 class="font-bold text-white text-base flex items-center gap-2">
+          <i data-lucide="palette" class="w-5 h-5 text-indigo-400"></i> 配色テーマ設定
+        </h3>
+        <button class="modal-close text-slate-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <p class="text-xs text-slate-400 mb-4">お好みの配色テーマを選択してください。選択内容は自動保存されます。</p>
+      <div class="grid grid-cols-2 gap-3">
+        <button data-theme-set="navy" class="theme-select-btn flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-slate-700 hover:border-indigo-500 transition-colors">
+          <div class="flex gap-1">
+            <span class="w-6 h-6 rounded-full" style="background:#0f172a"></span>
+            <span class="w-6 h-6 rounded-full" style="background:#6366f1"></span>
+            <span class="w-6 h-6 rounded-full" style="background:#f8fafc"></span>
+          </div>
+          <span class="text-xs font-bold text-slate-200">標準ネイビー</span>
+        </button>
+        <button data-theme-set="high-contrast" class="theme-select-btn flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-slate-700 hover:border-amber-500 transition-colors">
+          <div class="flex gap-1">
+            <span class="w-6 h-6 rounded-full" style="background:#000000"></span>
+            <span class="w-6 h-6 rounded-full" style="background:#fbbf24"></span>
+            <span class="w-6 h-6 rounded-full" style="background:#ffffff"></span>
+          </div>
+          <span class="text-xs font-bold text-slate-200">ハイコントラスト</span>
+        </button>
+        <button data-theme-set="warm" class="theme-select-btn flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-slate-700 hover:border-amber-500 transition-colors">
+          <div class="flex gap-1">
+            <span class="w-6 h-6 rounded-full" style="background:#1c1917"></span>
+            <span class="w-6 h-6 rounded-full" style="background:#d97706"></span>
+            <span class="w-6 h-6 rounded-full" style="background:#fef3c7"></span>
+          </div>
+          <span class="text-xs font-bold text-slate-200">ウォームウッド</span>
+        </button>
+        <button data-theme-set="dark" class="theme-select-btn flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-slate-700 hover:border-blue-500 transition-colors">
+          <div class="flex gap-1">
+            <span class="w-6 h-6 rounded-full" style="background:#030712"></span>
+            <span class="w-6 h-6 rounded-full" style="background:#3b82f6"></span>
+            <span class="w-6 h-6 rounded-full" style="background:#f9fafb"></span>
+          </div>
+          <span class="text-xs font-bold text-slate-200">ダークモード</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 年休等・出張 登録・確認モーダル (ダッシュボード人数クリック用) -->
+  <div id="absence-modal" class="modal-overlay hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+    <div class="card p-6 w-full max-w-2xl border border-slate-700 bg-slate-900 shadow-2xl rounded-2xl max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-800">
+        <h3 class="font-bold text-white text-base flex items-center gap-2">
+          <i data-lucide="calendar-x-2" class="w-5 h-5 text-rose-400"></i> 年休等・出張 登録
+        </h3>
+        <button class="modal-close text-slate-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+
+      <!-- 対象日 & 更新 -->
+      <div class="flex flex-wrap items-end gap-3 mb-4">
+        <div>
+          <label class="block text-[10px] text-slate-400 mb-1">対象日</label>
+          <input type="date" id="absence-date" class="input-field py-1.5 text-xs w-36">
+        </div>
+        <button id="absence-btn-refresh" class="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1">
+          <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> 更新
+        </button>
+      </div>
+
+      <!-- 区分別人数サマリー -->
+      <div class="grid grid-cols-2 gap-3 mb-3">
+        <div class="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-center">
+          <span class="text-2xl font-black text-rose-400" id="absence-count-leave">0</span>
+          <span class="block text-[10px] text-slate-400">年休等（欠席）</span>
+        </div>
+        <div class="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-center">
+          <span class="text-2xl font-black text-amber-400" id="absence-count-trip">0</span>
+          <span class="block text-[10px] text-slate-400">出張</span>
+        </div>
+      </div>
+
+      <!-- 表示フィルタ -->
+      <div class="flex flex-wrap items-center gap-2 mb-2 text-[11px]">
+        <button class="absence-filter-btn py-1 px-2.5 rounded-lg border border-slate-700 text-slate-400 hover:text-white transition-colors" data-absence-filter="ALL">すべて</button>
+        <button class="absence-filter-btn py-1 px-2.5 rounded-lg border border-slate-700 text-slate-400 hover:text-white transition-colors" data-absence-filter="LEAVE">年休等</button>
+        <button class="absence-filter-btn py-1 px-2.5 rounded-lg border border-slate-700 text-slate-400 hover:text-white transition-colors" data-absence-filter="TRIP">出張</button>
+        <span class="text-slate-500 ml-auto font-mono text-[10px]" id="absence-filter-note">表示: すべて (0 件)</span>
+      </div>
+
+      <!-- 登録詳細一覧 -->
+      <div id="absence-list" class="space-y-2 mb-4"></div>
+
+      <!-- 手動記入フォーム -->
+      <form id="absence-form" class="p-3 rounded-xl border border-slate-800 bg-slate-950/40">
+        <div class="text-xs font-bold text-slate-200 mb-2 flex items-center gap-2">
+          <i data-lucide="pen-line" class="w-4 h-4 text-indigo-400"></i> 記入（新規登録）
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label class="block text-[10px] text-slate-400 mb-1">区分</label>
+            <select id="absence-type-select" class="input-field py-1.5 text-xs">
+              <option value="LEAVE">年休等</option>
+              <option value="TRIP">出張</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-[10px] text-slate-400 mb-1">対象教員</label>
+            <select id="absence-user-select" class="input-field py-1.5 text-xs"></select>
+          </div>
+          <div>
+            <label class="block text-[10px] text-slate-400 mb-1">理由・行き先（任意）</label>
+            <input type="text" id="absence-reason-input" class="input-field py-1.5 text-xs" placeholder="例: 年休（通院） / 県教委研修">
+          </div>
+        </div>
+        <p class="text-[10px] text-slate-400 mt-2 flex items-center gap-1.5" id="absence-permission-note"></p>
+        <div class="flex justify-end mt-3">
+          <button type="submit" id="absence-btn-save" class="btn-primary py-1.5 px-4 text-xs flex items-center gap-1.5">
+            <i data-lucide="save" class="w-3.5 h-3.5"></i> 登録する
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+
   <!-- トースト通知コンテナ -->
   <div id="toast-container" class="fixed bottom-4 left-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
 
 </body>
 </html>
+
+

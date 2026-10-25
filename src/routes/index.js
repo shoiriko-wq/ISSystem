@@ -25,6 +25,7 @@ import approvalController from '../controllers/approval.controller.js';
 import seatingController from '../controllers/seating.controller.js';
 import examController from '../controllers/exam.controller.js';
 import newsController from '../controllers/news.controller.js';
+import absenceController from '../controllers/absence.controller.js';
 import auditService from '../services/audit.service.js';
 
 const router = Router();
@@ -62,6 +63,12 @@ router.post('/auth/invite-code', authenticateToken, safe(authController?.generat
 // ==========================================
 // 2. 掲示板 & 回覧板 API (/api/bulletins)
 // ==========================================
+// 添付ファイル関連（multipart アップロード / ダウンロード / 削除）※ /: より先に登録
+router.post('/bulletins/upload', authenticateToken, safe(bulletinController?.createBulletinWithUpload));
+router.get('/bulletins/attachments/:attachmentId', authenticateToken, safe(bulletinController?.downloadBulletinAttachment));
+router.delete('/bulletins/attachments/:attachmentId', authenticateToken, safe(bulletinController?.deleteBulletinAttachment));
+router.post('/bulletins/:id/attachments', authenticateToken, safe(bulletinController?.addAttachmentsToBulletin));
+
 router.get('/bulletins', authenticateToken, safe(bulletinController?.getBulletins));
 router.get('/bulletins/:id', authenticateToken, safe(bulletinController?.getBulletinDetail));
 router.post('/bulletins', authenticateToken, safe(bulletinController?.createBulletin));
@@ -75,11 +82,14 @@ router.post('/bulletins/:id/remind', authenticateToken, safe(bulletinController?
 // ==========================================
 router.get('/chat/channels', authenticateToken, safe(chatController?.getChannels));
 router.post('/chat/channels', authenticateToken, safe(chatController?.createChannel));
-router.delete('/chat/channels/:channelId', authenticateToken, safe(chatController?.deleteChannel));
 router.get('/chat/channels/:channelId/members', authenticateToken, safe(chatController?.getChannelMembers));
 router.get('/chat/channels/:channelId/messages', authenticateToken, safe(chatController?.getMessages));
 router.post('/chat/channels/:channelId/messages', authenticateToken, safe(chatController?.sendMessage));
 router.put('/chat/channels/:channelId/read', authenticateToken, safe(chatController?.updateLastRead));
+// グループの「非表示 / 表示」切り替え（削除機能は廃止済み）
+router.put('/chat/channels/:channelId/hide', authenticateToken, safe(chatController?.toggleHideChannel));
+// コメント（メッセージ）の取り消し
+router.delete('/chat/messages/:messageId', authenticateToken, safe(chatController?.cancelMessage));
 router.post('/chat/renotify', authenticateToken, (req, res) => {
   return res.status(200).json({ success: true, message: '未読者へ再通知を送信しました。' });
 });
@@ -168,7 +178,16 @@ router.get('/news/health', safe(newsController?.checkHealth));
 router.post('/news/cache/clear', authenticateToken, requireKyomuRole, safe(newsController?.clearCache));
 
 // ==========================================
-// 10. システム監査ログ API (/api/audit)
+// 10. 年休等・出張 欠席登録 API (/api/absences)
+// 教務・管理職は全教員分を登録可、一般教員は本人分のみ登録可 (権限判定は Service 側)
+// ==========================================
+router.get('/absences', authenticateToken, safe(absenceController?.getSummary));
+router.get('/absences/teachers', authenticateToken, safe(absenceController?.getTeachers));
+router.post('/absences', authenticateToken, safe(absenceController?.recordAbsence));
+router.delete('/absences/:id', authenticateToken, safe(absenceController?.deleteAbsence));
+
+// ==========================================
+// 11. システム監査ログ API (/api/audit)
 // ==========================================
 router.get('/audit/logs', authenticateToken, requireKyomuRole, async (req, res, next) => {
   try {

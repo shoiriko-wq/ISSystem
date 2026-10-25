@@ -1,0 +1,24 @@
+        table_name        
+--------------------------
+ approvals
+ chat_channel_members
+ chat_channels
+ chat_messages
+ classes
+ editing_locks
+ exam_masters
+ exam_proctor_assignments
+ exam_slots
+ exam_teacher_exemptions
+ invitation_codes
+ post_acknowledgements
+ posts
+ reservations
+ resources
+ school_schedules
+ seating_status
+ subjects
+ system_audit_logs
+ users
+(20 rows)
+

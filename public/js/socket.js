@@ -11,6 +11,8 @@ import { loadSchedules } from './modules/schedule.module.js';
 import { loadMessages } from './modules/chat.module.js';
 import { loadSeatingData } from './modules/seating.module.js';
 import { fetchWeatherData } from './modules/dashboard.module.js';
+import { loadAbsenceSummary } from './modules/absence.module.js';
+
 
 let socket = null;
 let hasDisconnected = false;
@@ -107,6 +109,35 @@ export const socketClient = {
             window.selectChatChannel(chId);
           }
         });
+      }
+    });
+
+    // 1-b. 専用トースト通知イベント（チャット画面外・未joinチャンネルのメンバー宛て）
+    socket.on('chat:toast', (payload) => {
+      const chId = payload.channelId;
+      const channelName = payload.channelName || 'チャットグループ';
+      const sender = payload.senderName || '教員';
+      const preview = payload.preview || '';
+
+      const currentUserId = state.currentUser?.id || state.currentUser?._id || state.currentUser?.staff_code;
+      if (currentUserId && payload.senderId && String(currentUserId).trim() === String(payload.senderId).trim()) {
+        return; // 自分自身の送信分はトーストしない
+      }
+
+      const snippet = preview.length > 25 ? preview.substring(0, 25) + '...' : preview;
+      showToast(`💬 [${channelName}] ${sender} さん: ${snippet}`, 'info', () => {
+        switchTab('chat');
+        if (chId && typeof window.selectChatChannel === 'function') {
+          window.selectChatChannel(chId);
+        }
+      });
+    });
+
+    // 1-c. 参加チャンネルルームの自動同期通知
+    socket.on('chat:channels_synced', (payload) => {
+      const channels = payload.channels || [];
+      if (state.currentUser) {
+        state.currentUser.joinedChannels = channels.map((c) => c.id);
       }
     });
 
@@ -247,15 +278,27 @@ export const socketClient = {
 
     // 9. 天気情報の自動更新受信
     socket.on('weather:updated', (data) => {
-      showToast('🌤️ 天気情報を自動更新しました', 'info', () => {
-        switchTab('dashboard');
-        openModal('weather-detail-modal');
-      });
+      // ★ モーダルを強制的に開かない (cron 更新ごとにモーダルが開きちらつき・表示崩れの原因になっていた)
+      showToast('🌤️ 天気情報を自動更新しました', 'info');
 
       if (state.currentTab === 'dashboard' && typeof fetchWeatherData === 'function') {
         fetchWeatherData();
       }
     });
+
+    // 10. 年休等・出張登録の更新受信 (ダッシュボード人数の即時更新)
+    socket.on('absence:updated', (data) => {
+      const operator = data.operatorName || '教務';
+      const label = data.record_type_label || (data.record_type === 'TRIP' ? '出張' : '年休等');
+      const actionText = data.action === 'remove' ? '取消' : '登録';
+
+      showToast(`🗓️ ${operator} が ${data.userName || data.user_id} 教員の${label}を${actionText}しました`, 'info');
+
+      if (state.currentTab === 'dashboard' && typeof loadAbsenceSummary === 'function') {
+        loadAbsenceSummary(data.date);
+      }
+    });
+
   },
 
   joinChannel(channelId) {

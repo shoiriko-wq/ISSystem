@@ -121,7 +121,8 @@ const mockEducationNews = [
   },
 ];
 
-// デモ・デフォルト天気予報データ (気象庁API互換モック)
+// デモ・デフォルト天気予報データ (フロントエンド描画形式と完全に一致させる)
+// ※ dateLabel / isToday / lucide 系 icon 名を欠いたまま渡すとモーダルのレイアウトが崩れるため必須項目を揃える
 const mockWeatherData = {
   location: '西宮・阪神地域',
   areaCode: '280010',
@@ -129,19 +130,25 @@ const mockWeatherData = {
   forecasts: [
     {
       date: 'TODAY',
+      rawDate: new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }),
+      dateLabel: new Date().toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo', day: 'numeric', weekday: 'short' }).replace(/\s/g, ''),
+      isToday: true,
       weather: '晴れ のち くもり',
       tempMax: 24,
       tempMin: 16,
       pop: '10%',
-      icon: '01d',
+      icon: 'cloud-sun',
     },
     {
       date: 'TOMORROW',
+      rawDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }),
+      dateLabel: new Date(Date.now() + 24 * 60 * 60 * 1000).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo', day: 'numeric', weekday: 'short' }).replace(/\s/g, ''),
+      isToday: false,
       weather: 'くもり 時々 雨',
       tempMax: 21,
       tempMin: 15,
       pop: '60%',
-      icon: '10d',
+      icon: 'cloud-rain',
     },
   ],
 };

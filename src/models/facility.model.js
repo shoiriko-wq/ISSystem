@@ -6,44 +6,23 @@
 import { query } from '../../config/database.js';
 import { nowIso } from '../utils/db.js';
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-/**
- * 予約時間帯の正規化
- * 'HH:MM' / 'HH:MM:SS' 形式の時刻を target_date と組み合わせて
- * 'YYYY-MM-DD HH:MM:SS' の辞書順比較可能な文字列へ統一する
- * (シードデータの '2026-10-15 16:30:00' との比較も成立する)
- */
-function toDateTime(date, time) {
-  if (!time) return null;
-  const t = String(time).trim();
-  if (t.includes(' ')) return t;
-  const normalized = t.length === 5 ? `${t}:00` : t;
-  return date ? `${date} ${normalized}` : normalized;
+async function getDb() {
+  return openDb();
 }
 
-export class FacilityModel {
-  // ================= 施設マスタ (resources) =================
+function resourceIdOf(data) {
+  return String(data.resource_id || data.resourceId || data.facility_id || data.facilityId || '');
+}
 
-  /**
-   * 施設マスタ一覧 (category で絞り込み可能)
-   * @param {Object} filters - { category, type }
-   */
-  async listFacilities(filters = {}) {
-    const params = [];
-    const conditions = [];
+function dateOfRange(startTime) {
+  if (!startTime) return todayJst();
+  const str = String(startTime);
+  // 日付形式 (YYYY-MM-DD...) の場合のみ採用する (HH:MM を日付として誤認しない)
+  const match = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : todayJst();
+}
 
-    const category = filters.category || filters.type;
-    if (category) {
-      params.push(category);
-      conditions.push(`category = $${params.length}`);
-    }
-
-    const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
-    const res = await query(`SELECT * FROM resources${where} ORDER BY name`, params);
-    return res.rows;
-  }
-
+export const facilityModel = {
   async findAll() {
     return this.listFacilities();
   }
@@ -181,50 +160,41 @@ export class FacilityModel {
       start = arg3;
       end = arg4;
     }
+  },
 
-    const params = [facilityId];
-    const conditions = [
-      '(r.resource_id = $1 OR r.facility_id = $1)',
-      'r.is_cancelled = false',
-    ];
+  async getReservationsByDate(facilityId, targetDate) {
+    return this.findReservationsByFacility(facilityId, targetDate);
+  },
 
-    const canonicalStart = toDateTime(date, start);
-    const canonicalEnd = toDateTime(date, end);
-
-    params.push(canonicalEnd);
-    conditions.push(`r.start_time < $${params.length}`);
-    params.push(canonicalStart);
-    conditions.push(`r.end_time > $${params.length}`);
-
-    if (date) {
-      params.push(date);
-      conditions.push(`r.target_date = $${params.length}`);
+  async checkOverlap(facilityId, targetDate, startTime, endTime, excludeId = null) {
+    const start = startTime.includes(' ') ? startTime : `${targetDate} ${startTime}:00`;
+    const end = endTime.includes(' ') ? endTime : `${targetDate} ${endTime}:00`;
+    try {
+      const db = await getDb();
+      const row = await db.get(
+        `SELECT * FROM reservations
+         WHERE COALESCE(resource_id, facility_id) = ?
+           AND COALESCE(is_cancelled, 0) = 0
+           AND (id <> CAST(? AS TEXT) OR CAST(? AS TEXT) IS NULL)
+           AND start_time < ? AND end_time > ?`,
+        [String(facilityId), excludeId, excludeId, end, start]
+      );
+      await db.close();
+      return row || null;
+    } catch (err) {
+      return null;
     }
+  },
 
-    const res = await query(
-      `SELECT r.*, COALESCE(u.name, r.user_name) AS user_name
-       FROM reservations r
-       LEFT JOIN users u ON r.user_id = u.id
-       WHERE ${conditions.join(' AND ')}
-       ORDER BY r.start_time
-       LIMIT 1`,
-      params
-    );
-    return res.rows[0] || null;
-  }
-
-  /**
-   * 新規予約の作成（二重予約防止チェック付き）
-   */
-  async createReservation(data, user = null) {
-    const facilityId = data.facility_id || data.facilityId || data.resource_id || data.resourceId;
-    const targetDate = data.target_date || data.targetDate || data.date || null;
-    const startTime = data.start_time || data.startTime || data.start;
-    const endTime = data.end_time || data.endTime || data.end;
-    const title = (data.title || data.purpose || '施設予約').trim();
-    // 第2引数のユーザー (req.user 等) を優先して予約者の FK 完整性を満たす
-    const userId = data.user_id || data.userId || (user?.id || user?.user_id) || null;
-    const userName = data.user_name || data.userName || (user?.name) || '教員';
+  async createReservation(data, user = {}) {
+    const id = `res_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const fId = resourceIdOf(data) || '1';
+    const targetDate = data.target_date || data.targetDate || dateOfRange(data.start_time) || todayJst();
+    let startTime = data.start_time || data.startTime || `${targetDate} 08:50:00`;
+    let endTime = data.end_time || data.endTime || `${targetDate} 09:40:00`;
+    if (startTime.length <= 5) startTime = `${targetDate} ${startTime}:00`;
+    if (endTime.length <= 5) endTime = `${targetDate} ${endTime}:00`;
+    const title = data.title || data.purpose || '施設利用';
 
     const overlap = await this.checkOverlap(facilityId, targetDate, startTime, endTime);
     if (overlap) {

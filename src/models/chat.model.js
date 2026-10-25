@@ -3,8 +3,11 @@
  * チャットチャンネル・メンバー・メッセージ PostgreSQL 完全対応モデル
  */
 
-import { query } from '../../config/database.js';
-import { nowIso } from '../utils/db.js';
+import { openDb } from '../utils/db.js';
+
+async function getDb() {
+  return openDb();
+}
 
 // フォールバック用インメモリキャッシュ
 const mockChannels = new Map();
@@ -143,13 +146,15 @@ export const chatModel = {
     mockChannelMembers.set(key, member);
 
     try {
-      await query(
+      const db = await getDb();
+      await db.query(
         `INSERT INTO chat_channel_members (channel_id, user_id, is_hidden, joined_at)
          VALUES ($1, $2, 0, $3)
-         ON CONFLICT (channel_id, user_id) DO UPDATE SET is_hidden = 0, joined_at = $3`,
+         ON CONFLICT (channel_id, user_id) DO UPDATE SET is_hidden = 0, joined_at = EXCLUDED.joined_at`,
         [targetId, userId, nowStr]
       );
     } catch (error) {
+      console.warn('[ChatModel PG Warning] addMember DB failed:', error.message);
       console.warn('[ChatModel PG Warning] addMember DB failed:', error.message);
     }
 
@@ -268,6 +273,140 @@ export const chatModel = {
   },
 
   /**
+   * メッセージの削除（送信者による取り消し）
+   * @param {string} messageId
+   */
+  async deleteMessage(messageId) {
+    try {
+      const db = await getDb();
+      await db.run(`DELETE FROM chat_message_reads WHERE message_id = ?`, [messageId]);
+      await db.run(`DELETE FROM chat_messages WHERE id = ?`, [messageId]);
+      await db.close();
+      return true;
+    } catch (error) {
+      console.warn('[ChatModel] deleteMessage failed:', error.message);
+      return false;
+    }
+  },
+
+  /**
+   * チャンネル内の既読ログ取得（誰がどのメッセージを読んだか）
+   * @param {string} channelId
+   */
+  async getChannelReads(channelId) {
+    const targetId = this.normalizeChannelId(channelId);
+    try {
+      const db = await getDb();
+      const rows = await db.all(
+        `SELECT message_id, user_id, read_at FROM chat_message_reads WHERE channel_id = ?`,
+        [targetId]
+      );
+      await db.close();
+      return rows || [];
+    } catch (error) {
+      console.warn('[ChatModel] getChannelReads fallback:', error.message);
+      return [];
+    }
+  },
+
+  /**
+   * メッセージ既読の記録（チャンネル閲覧時、指定メッセージまでを既読扱いにする）
+   * @param {string} channelId
+   * @param {string} userId
+   * @param {string|null} uptoMessageId 既読位置となるメッセージID (省略時はチャンネル内全メッセージ)
+   */
+  async markChannelRead(channelId, userId, uptoMessageId = null) {
+    const targetId = this.normalizeChannelId(channelId);
+    if (!userId) return false;
+
+    try {
+      const db = await getDb();
+      let uptoDate = null;
+      if (uptoMessageId) {
+        const ref = await db.get(`SELECT created_at FROM chat_messages WHERE id = ?`, [uptoMessageId]);
+        uptoDate = ref ? ref.created_at : null;
+      }
+
+      // 自分の送信メッセージは既読扱いの対象外（未読者リストに自分を含めない）
+      const messages = await db.all(
+        `SELECT id, created_at FROM chat_messages
+         WHERE (channel_id = ? OR channel_id = ?) AND sender_id <> ?
+         ORDER BY created_at ASC`,
+        [targetId, channelId, userId]
+      );
+
+      const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
+      let recorded = 0;
+      for (const m of messages) {
+        if (uptoDate && m.created_at > uptoDate) continue;
+        await db.run(
+          `INSERT INTO chat_message_reads (channel_id, message_id, user_id, read_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT (channel_id, message_id, user_id) DO NOTHING`,
+          [targetId, m.id, userId, nowStr]
+        );
+        recorded += 1;
+      }
+      await db.close();
+      return recorded;
+    } catch (error) {
+      console.warn('[ChatModel] markChannelRead failed:', error.message);
+      return 0;
+    }
+  },
+
+  /**
+   * 特定ユーザーの未読メッセージ件数（未読バッジ用）
+   * @param {string} channelId
+   * @param {string} userId
+   */
+  async countUnreadForUser(channelId, userId) {
+    const targetId = this.normalizeChannelId(channelId);
+    if (!userId) return 0;
+    try {
+      const db = await getDb();
+      const row = await db.get(
+        `SELECT COUNT(m.id) AS cnt
+         FROM chat_messages m
+         WHERE (m.channel_id = ? OR m.channel_id = ?)
+           AND m.sender_id <> ?
+           AND NOT EXISTS (
+             SELECT 1 FROM chat_message_reads r
+             WHERE r.channel_id = ? AND r.message_id = m.id AND r.user_id = ?
+           )`,
+        [targetId, channelId, userId, targetId, userId]
+      );
+      await db.close();
+      return row ? parseInt(row.cnt, 10) : 0;
+    } catch (error) {
+      console.warn('[ChatModel] countUnreadForUser fallback:', error.message);
+      return 0;
+    }
+  },
+
+  /**
+   * メッセージ詳細取得（取り消し時の所有者検証用）
+   * @param {string} messageId
+   */
+  async findMessageById(messageId) {
+    try {
+      const db = await getDb();
+      const row = await db.get(
+        `SELECT m.*, COALESCE(u.name, m.sender_id) AS sender_name
+         FROM chat_messages m
+         LEFT JOIN users u ON m.sender_id = u.id OR m.sender_id = u.staff_code
+         WHERE m.id = ?`,
+        [messageId]
+      );
+      await db.close();
+      return row || null;
+    } catch (error) {
+      console.warn('[ChatModel] findMessageById fallback:', error.message);
+      return null;
+    }
+  },
+
+  /**
    * エイリアスメソッド群
    */
   async getUserChannels(userId) {
@@ -295,65 +434,7 @@ export const chatModel = {
     } catch (error) {
       // 無視
     }
-  },
-
-  /**
-   * チャンネル・グループの削除
-   */
-  async deleteChannel(channelId) {
-    const targetId = this.normalizeChannelId(channelId);
-    mockChannels.delete(targetId);
-    try {
-      await query(`DELETE FROM chat_messages WHERE channel_id = $1`, [targetId]);
-      await query(`DELETE FROM chat_channel_members WHERE channel_id = $1`, [targetId]);
-      await query(`DELETE FROM chat_channels WHERE id = $1`, [targetId]);
-      return true;
-    } catch (error) {
-      console.warn('[ChatModel PG Warning] deleteChannel failed:', error.message);
-      return false;
-    }
-  },
-
-  /**
-   * ユーザーが閲覧可能なチャンネル一覧（サービス側命名のエイリアス）
-   */
-  async getChannels(userId) {
-    return this.listChannelsForUser(userId);
-  },
-
-  /**
-   * チャンネルのアーカイブ（メンバーを非表示化しアーカイブ状態とする）
-   */
-  async archiveChannel(channelId, userId = null) {
-    const targetId = this.normalizeChannelId(channelId);
-    try {
-      await query(
-        `UPDATE chat_channel_members SET is_hidden = 1 WHERE channel_id = $1`,
-        [targetId]
-      );
-    } catch (error) {
-      console.warn('[ChatModel PG Warning] archiveChannel failed:', error.message);
-    }
-    return { id: targetId, archived: true };
-  },
-
-  /**
-   * メッセージ既読マークの更新 (chat_channel_members.last_read)
-   */
-  async markAsRead(userId, channelId, lastMessageId = null) {
-    const targetId = this.normalizeChannelId(channelId);
-    const nowStr = nowIso();
-    try {
-      await query(
-        `UPDATE chat_channel_members SET last_read = $1 WHERE channel_id = $2 AND user_id = $3`,
-        [nowStr, targetId, userId]
-      );
-    } catch (error) {
-      console.warn('[ChatModel PG Warning] markAsRead failed:', error.message);
-    }
-    return { userId, channelId: targetId, lastMessageId, last_read: nowStr };
-  },
-
+  }
 };
 
 // --- named import 用のエクスポート ---
@@ -369,10 +450,11 @@ export const {
   getMessages,
   getChannelMessages,
   toggleHideChannel,
-  deleteChannel,
-  getChannels,
-  archiveChannel,
-  markAsRead
+  deleteMessage,
+  findMessageById,
+  getChannelReads,
+  markChannelRead,
+  countUnreadForUser
 } = chatModel;
 
 export default chatModel;

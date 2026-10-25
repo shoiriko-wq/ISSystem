@@ -5,6 +5,7 @@
 
 import chatService from '../services/chat.service.js';
 import chatModel from '../models/chat.model.js';
+import { broadcastChatToast } from '../sockets/chat.socket.js';
 
 export const chatController = {
   /**
@@ -126,6 +127,9 @@ export const chatController = {
             channelName,
             message: sentMessage,
           });
+
+          // ★ チャット画面外にいるメンバーへもトースト通知を配信
+          await broadcastChatToast(io, { channelId, channelName, createdMessage: sentMessage, senderUser });
         }
       } catch (wsErr) {
         console.warn('[Socket Broadcast Warning]', wsErr.message);
@@ -284,20 +288,34 @@ export const chatController = {
   },
 
   /**
-   * チャットグループの削除
-   * DELETE /api/chat/channels/:channelId
+   * メッセージの取り消し（送信者本人のみ）
+   * DELETE /api/chat/messages/:messageId
    */
-  async deleteChannel(req, res, next) {
+  async cancelMessage(req, res, next) {
     try {
-      const { channelId } = req.params;
+      const { messageId } = req.params;
       const user = req.user || { id: 'kyomu01', name: '教務 主任' };
 
-      await chatService.deleteChannel(channelId, user);
+      const result = await chatService.cancelMessage(messageId, user);
 
+      // 全チャンネル参加者へ「取り消された」ことをリアルタイム通知
       try {
         const io = req.app ? req.app.get('io') : null;
         if (io) {
-          io.emit('chat:channel_deleted', { channelId });
+          io.to(`chat:channel:${result.channelId}`).emit('chat:message_deleted', {
+            channelId: result.channelId,
+            messageId,
+            deletedBy: user.id,
+            deletedByName: user.name,
+          });
+
+          // 各メンバーの未読バッジを再計算して同期
+          (result.affectedUnreads || []).forEach((entry) => {
+            io.to(`user:${entry.userId}`).emit('chat:unread_count_updated', {
+              channelId: result.channelId,
+              unreadCount: entry.unreadCount,
+            });
+          });
         }
       } catch (wsErr) {
         console.warn('[Socket Broadcast Warning]', wsErr.message);
@@ -305,36 +323,66 @@ export const chatController = {
 
       return res.status(200).json({
         success: true,
-        message: 'チャットグループを削除しました。',
-        channelId,
+        message: 'メッセージを取り消しました。',
+        data: { messageId, channelId: result.channelId },
+        messageId,
+        channelId: result.channelId,
       });
     } catch (error) {
-      return res.status(400).json({
+      console.error('[ChatController cancelMessage Error]', error.message);
+      return res.status(error.status || 400).json({
         success: false,
-        message: error.message || 'グループの削除に失敗しました。',
+        message: error.message || 'メッセージの取り消しに失敗しました。',
       });
     }
   },
 
   /**
-   * 最終既読日時の更新
+   * 最終既読日時の更新（閲覧位置ログ＝既読メッセージの記録）
    * PUT /api/chat/channels/:channelId/read
    */
   async updateLastRead(req, res, next) {
     try {
       const { channelId } = req.params;
       const userId = req.user ? req.user.id : 'kyomu01';
+      const lastReadMessageId = req.body ? (req.body.lastReadMessageId || req.body.last_read_message_id || null) : null;
+
+      let result = { success: true, unreadCount: 0 };
       if (chatService && typeof chatService.updateLastRead === 'function') {
-        await chatService.updateLastRead(channelId, userId);
+        result = await chatService.updateLastRead(channelId, userId, lastReadMessageId);
       }
+
+      // 自分の未読バッジを同期し、チャンネル参加者へ既読を通知する
+      try {
+        const io = req.app ? req.app.get('io') : null;
+        if (io) {
+          io.to(`user:${userId}`).emit('chat:unread_count_updated', {
+            channelId,
+            unreadCount: result.unreadCount || 0,
+          });
+          io.to(`chat:channel:${channelId}`).emit('chat:read_receipt', {
+            channelId,
+            userId,
+            userName: req.user ? req.user.name : '教員',
+            lastReadMessageId,
+          });
+        }
+      } catch (wsErr) {
+        console.warn('[Socket Broadcast Warning]', wsErr.message);
+      }
+
       return res.status(200).json({
         success: true,
         message: '既読状態を更新しました。',
+        data: result,
+        unreadCount: result.unreadCount || 0,
       });
     } catch (error) {
+      console.error('[ChatController updateLastRead Error]', error.message);
       return res.status(200).json({
         success: true,
         message: '既読更新スキップ',
+        unreadCount: 0,
       });
     }
   },
@@ -356,7 +404,7 @@ export const {
   getChannels,
   getMessages,
   getChannelMembers,
-  deleteChannel,
+  cancelMessage,
 } = chatController;
 
 export default chatController;

@@ -1,6 +1,6 @@
 /**
  * ISSystem Bulletin & Circular Data Access Model
- * PostgreSQL (posts / post_acknowledgements / post_comments) 完全準拠版
+ * PostgreSQL issystem DB (posts / post_acknowledgements) 準拠モデル
  */
 
 import { query } from '../../config/database.js';
@@ -8,47 +8,121 @@ import { nowIso, parseJson } from '../utils/db.js';
 
 function mapPost(row) {
   if (!row) return null;
-
-  const postType = row.post_type || row.postType || 'NOTICE';
-  const targetScope = parseJson(row.target_scope, { grade: 'ALL', department: 'ALL' });
-  const attachments = parseJson(row.attachments, []);
-  const authorName = row.author_name || row.authorName || '教務 主任';
-
+  const postedAt = row.postedAt || row.posted_at || row.createdAt;
+  const updatedAt = row.updatedAt || row.updated_at || postedAt;
   return {
     ...row,
-    postType,
-    post_type: postType,
-    priority: row.priority || 'NORMAL',
-    authorId: row.author_id || row.authorId,
-    author_id: row.author_id || row.authorId,
-    authorName,
-    author_name: authorName,
-    targetScope,
-    target_scope: targetScope,
-    attachments,
-    is_deleted: row.is_deleted === true,
-    createdAt: row.created_at,
-    created_at: row.created_at,
-    ackStatus: row.ack_status || row.ackStatus || 'UNREAD',
-    ack_status: row.ack_status || row.ackStatus || 'UNREAD',
+    postedAt,
+    posted_at: postedAt,
+    updatedAt,
+    updated_at: updatedAt,
+    targetScope: parseJson(row.target_scope, { grade: 'ALL', department: 'ALL' }),
+    attachments: parseJson(row.attachments, []),
   };
+}
+
+/**
+ * 投稿日時文字列を 'YYYY-MM-DD HH:MM:SS' へ正規化する
+ * 'YYYY-MM-DDTHH:MM' (datetime-local) にも対応し、不正日付 (例: 2月30日) は fallback を返す
+ * @param {string} value
+ * @param {string} fallback
+ */
+function normalizeDateTime(value, fallback = nowIso()) {
+  const raw = String(value || '').trim();
+  if (!raw) return fallback;
+
+  const normalized = raw.replace('T', ' ');
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ ](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (!match) return fallback;
+
+  const y = parseInt(match[1], 10);
+  const m = parseInt(match[2], 10);
+  const d = parseInt(match[3], 10);
+  const hh = match[4] || '00';
+  const mm = match[5] || '00';
+  const ss = match[6] || '00';
+
+  const dateObj = new Date(y, m - 1, d, Number(hh), Number(mm), Number(ss));
+  const isValid =
+    dateObj.getFullYear() === y &&
+    dateObj.getMonth() === m - 1 &&
+    dateObj.getDate() === d;
+
+  if (!isValid) return fallback;
+  return `${match[1]}-${match[2]}-${match[3]} ${hh}:${mm}:${ss}`;
 }
 
 export const bulletinModel = {
   /**
-   * 掲示・回覧板の一覧取得（閲覧者の既読/承認ステータス付与）
-   * @param {Object} filters - { post_type, type, targetGrade, targetDepartment, searchKey, pinned, limit, currentUserId }
+   * 掲示・回覧投稿の取得 (ID指定)
+   * @param {string} id
+   */
+  async findById(id) {
+    try {
+      const db = await getDb();
+      const bulletin = await db.get(
+        `SELECT 
+          p.id,
+          p.title,
+          p.content,
+          p.post_type as postType,
+          p.post_type,
+          p.priority,
+          p.author_id as authorId,
+          p.author_id,
+          p.target_scope,
+          p.attachments,
+          p.is_deleted,
+          u.name as authorName,
+          p.created_at as createdAt,
+          p.posted_at as postedAt,
+          p.posted_at,
+          p.updated_at as updatedAt,
+          p.updated_at
+        FROM posts p 
+        LEFT JOIN users u ON p.author_id = u.id 
+        WHERE p.id = ? AND p.is_deleted = 0`,
+        [id]
+      );
+      await db.close();
+      return mapPost(bulletin);
+    } catch (err) {
+      console.warn('[BulletinModel SQLite Warning] findById failed:', err.message);
+      return null;
+    }
+  },
+
+  /**
+   * 掲示板・回覧板の一覧取得（作成者名・承認ステータス結合）
+   * @param {Object} filters - { searchKey, currentUserId, limit, pinned, post_type }
    */
   async findAll(filters = {}) {
     const params = [];
     const ph = () => `$${params.length}`;
 
-    let sql = `
-      SELECT p.*, u.name AS author_name,
-             COALESCE(pa.status, 'UNREAD') AS ack_status
-      FROM posts p
-      LEFT JOIN users u ON p.author_id = u.id
-    `;
+      let sql = `
+        SELECT 
+          p.id,
+          p.title,
+          p.content,
+          p.post_type as postType,
+          p.post_type,
+          p.priority,
+          p.author_id as authorId,
+          p.author_id,
+          p.target_scope,
+          p.attachments,
+          u.name as authorName,
+          p.created_at as createdAt,
+          p.created_at,
+          p.posted_at as postedAt,
+          p.posted_at,
+          p.updated_at as updatedAt,
+          p.updated_at,
+          COALESCE(pa.status, 'UNREAD') as ackStatus
+        FROM posts p
+        LEFT JOIN users u ON p.author_id = u.id
+      `;
 
     if (filters.currentUserId) {
       params.push(filters.currentUserId);
@@ -85,7 +159,24 @@ export const bulletinModel = {
       params.push(`%${filters.searchKey.trim()}%`);
     }
 
-    sql += ` ORDER BY CASE WHEN p.priority = 'URGENT' THEN 1 ELSE 2 END, p.created_at DESC`;
+      // 投稿日 (日ごと表示) による絞り込み
+      const postedDay = filters.postedDay || filters.day || filters.posted_date;
+      if (postedDay) {
+        params.push(String(postedDay).substring(0, 10));
+        sql += ` AND to_char(COALESCE(p.posted_at, p.created_at), 'YYYY-MM-DD') = ?`;
+      }
+
+      // 期間 ( startDate 〜 endDate ) による絞り込み (週間表示モードなど)
+      if (filters.startDate) {
+        params.push(String(filters.startDate).substring(0, 10));
+        sql += ` AND to_char(COALESCE(p.posted_at, p.created_at), 'YYYY-MM-DD') >= ?`;
+      }
+      if (filters.endDate) {
+        params.push(String(filters.endDate).substring(0, 10));
+        sql += ` AND to_char(COALESCE(p.posted_at, p.created_at), 'YYYY-MM-DD') <= ?`;
+      }
+
+      sql += ` ORDER BY CASE WHEN p.priority = 'URGENT' THEN 1 ELSE 2 END, COALESCE(p.posted_at, p.created_at) DESC`;
 
     if (filters.limit) {
       params.push(parseInt(filters.limit, 10));
@@ -120,60 +211,46 @@ export const bulletinModel = {
     const authorId = postData.author_id || postData.authorId || 'kyomu01';
     const targetScope = postData.target_scope || postData.targetScope || { grade: 'ALL', department: 'ALL' };
     const attachments = postData.attachments || [];
-    const nowStr = nowIso();
+    const postedAt = normalizeDateTime(postData.postedAt || postData.posted_at || postData.postedAtInput, createdAt);
 
-    const res = await query(
-      `INSERT INTO posts (id, title, content, post_type, priority, author_id, target_scope, attachments, is_deleted, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, $9, $10)
-       RETURNING *`,
-      [
-        id,
-        postData.title,
-        postData.content,
-        postType,
-        priority,
-        authorId,
-        JSON.stringify(targetScope),
-        JSON.stringify(attachments),
-        nowStr,
-        nowStr,
-      ]
-    );
-    return mapPost(res.rows[0]);
-  },
+    try {
+      const db = await getDb();
+      await db.run(
+        `INSERT INTO posts (id, title, content, post_type, priority, author_id, target_scope, attachments, is_deleted, posted_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+        [id, postData.title, postData.content, postType, priority, authorId, JSON.stringify(targetScope), JSON.stringify(attachments), postedAt, createdAt, createdAt]
+      );
 
-  /**
-   * 投稿内容の更新（掲示・回覧板）
-   */
-  async update(postData) {
-    const id = postData.id || postData.bulletinId;
-    const nowStr = nowIso();
-    const scope = postData.target_scope || postData.targetScope;
-    const attachments = postData.attachments;
+      // 投稿作成時に添付ファイル (未紐付け) をこの投稿へ紐付ける
+      const attachmentIds = (attachments || [])
+        .map((a) => (typeof a === 'string' ? a : a && a.id))
+        .filter(Boolean);
+      if (attachmentIds.length > 0) {
+        const setSql = attachmentIds.map(() => '?').join(', ');
+        await db.run(
+          `UPDATE bulletin_attachments SET post_id = ? WHERE id IN (${setSql}) AND post_id IS NULL`,
+          [id, ...attachmentIds]
+        );
+      }
+      await db.close();
+    } catch (err) {
+      console.warn('[BulletinModel SQLite Warning] create failed:', err.message);
+    }
 
-    const res = await query(
-      `UPDATE posts
-       SET title = COALESCE($1, title),
-           content = COALESCE($2, content),
-           post_type = COALESCE($3, post_type),
-           priority = COALESCE($4, priority),
-           target_scope = COALESCE($5, target_scope),
-           attachments = COALESCE($6, attachments),
-           updated_at = $7
-       WHERE id = $8 AND is_deleted = false
-       RETURNING *`,
-      [
-        postData.title || null,
-        postData.content || null,
-        postData.post_type || postData.postType || null,
-        postData.priority || null,
-        scope ? JSON.stringify(scope) : null,
-        attachments ? JSON.stringify(attachments) : null,
-        nowStr,
-        id,
-      ]
-    );
-    return mapPost(res.rows[0]);
+    return {
+      id,
+      title: postData.title,
+      content: postData.content,
+      postType,
+      post_type: postType,
+      priority,
+      authorId,
+      createdAt,
+      postedAt,
+      posted_at: postedAt,
+      targetScope,
+      attachments
+    };
   },
 
   /**
@@ -181,101 +258,155 @@ export const bulletinModel = {
    */
   async updateAcknowledgement(postId, userId, status = 'APPROVED', comment = null) {
     const id = `ack_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const acknowledgedAt = nowIso();
+    const acknowledgedAt = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
-    const res = await query(
-      `INSERT INTO post_acknowledgements (id, post_id, user_id, status, comment, acknowledged_at)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (post_id, user_id)
-       DO UPDATE SET status = EXCLUDED.status, comment = EXCLUDED.comment, acknowledged_at = EXCLUDED.acknowledged_at
-       RETURNING *`,
-      [id, postId, userId, status, comment, acknowledgedAt]
-    );
+    try {
+      const db = await getDb();
+      await db.run(
+        `INSERT INTO post_acknowledgements (id, post_id, user_id, status, comment, acknowledged_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(post_id, user_id) DO UPDATE SET
+           status = excluded.status,
+           comment = excluded.comment,
+           acknowledged_at = excluded.acknowledged_at`,
+        [id, postId, userId, status, comment, acknowledgedAt]
+      );
+      await db.close();
+    } catch (err) {
+      console.warn('[BulletinModel SQLite Warning] updateAcknowledgement failed:', err.message);
+    }
 
-    return res.rows[0] || { id, post_id: postId, user_id: userId, status, comment, acknowledged_at: acknowledgedAt };
+    return { id, post_id: postId, user_id: userId, status, comment, acknowledged_at: acknowledgedAt };
   },
 
   /**
-   * 該当投稿の全承認・既読ログ取得
+   * 該当投稿の全承認ログ取得
+   * @param {string} postId
    */
   async getAcknowledgements(postId) {
-    const res = await query(
-      `SELECT pa.*, u.name AS user_name, u.grade, u.department
-       FROM post_acknowledgements pa
-       JOIN users u ON pa.user_id = u.id
-       WHERE pa.post_id = $1
-       ORDER BY pa.acknowledged_at DESC`,
-      [postId]
-    );
-    return res.rows;
+    try {
+      const db = await getDb();
+      const rows = await db.all(
+        `SELECT pa.*, u.name as user_name, u.grade, u.department 
+         FROM post_acknowledgements pa
+         JOIN users u ON pa.user_id = u.id
+         WHERE pa.post_id = ?`,
+        [postId]
+      );
+      await db.close();
+      return rows || [];
+    } catch (err) {
+      console.warn('[BulletinModel SQLite Warning] getAcknowledgements failed:', err.message);
+      return [];
+    }
   },
 
   /**
-   * 回覧板スレッドのコメント一覧
+   * 添付ファイルレコードの作成
+   * @param {Object} row - { id, post_id, original_name, stored_name, mime_type, extension, size_bytes, uploaded_by }
    */
-  async getComments(postId) {
-    const res = await query(
-      `SELECT pc.*, u.name AS author_name
-       FROM post_comments pc
-       LEFT JOIN users u ON pc.user_id = u.id
-       WHERE pc.post_id = $1
-       ORDER BY pc.created_at ASC`,
-      [postId]
-    );
-    return res.rows;
-  },
-
-  /**
-   * 回覧板スレッドへのコメント登録
-   */
-  async addComment(commentData) {
-    const id = commentData.id || `cmt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const postId = commentData.post_id || commentData.bulletin_id;
-    const userId = commentData.author_id || commentData.user_id || 'kyomu01';
-
-    const res = await query(
-      `INSERT INTO post_comments (id, post_id, user_id, user_name, comment_text, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING *`,
+  async createAttachment(row) {
+    const db = await getDb();
+    await db.run(
+      `INSERT INTO bulletin_attachments (id, post_id, original_name, stored_name, mime_type, extension, size_bytes, uploaded_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        id,
-        postId,
-        userId,
-        commentData.author_name || null,
-        commentData.comment_text,
-        commentData.created_at || nowIso(),
+        row.id,
+        row.post_id || null,
+        row.original_name,
+        row.stored_name,
+        row.mime_type || 'application/octet-stream',
+        row.extension || '',
+        Number(row.size_bytes || 0),
+        row.uploaded_by || null,
+        nowIso(),
       ]
     );
-    return res.rows[0];
+    await db.close();
+    return this.findAttachment(row.id);
   },
 
   /**
-   * 投稿の削除（ソフトデリート）
+   * 添付ファイルレコードの取得
+   * @param {string} id
+   */
+  async findAttachment(id) {
+    try {
+      const db = await getDb();
+      const row = await db.get(`SELECT * FROM bulletin_attachments WHERE id = ?`, [String(id)]);
+      await db.close();
+      return row || null;
+    } catch (err) {
+      console.warn('[BulletinModel] findAttachment failed:', err.message);
+      return null;
+    }
+  },
+
+  /**
+   * 投稿に紐づく添付ファイル一覧
+   * @param {string} postId
+   */
+  async listAttachments(postId) {
+    try {
+      const db = await getDb();
+      const rows = await db.all(
+        `SELECT * FROM bulletin_attachments WHERE post_id = ? ORDER BY created_at ASC`,
+        [String(postId)]
+      );
+      await db.close();
+      return rows || [];
+    } catch (err) {
+      console.warn('[BulletinModel] listAttachments failed:', err.message);
+      return [];
+    }
+  },
+
+  /**
+   * 複数投稿に紐づく添付ファイル一覧 (一括取得)
+   * @param {Array<string>} postIds
+   */
+  async listAttachmentsForPosts(postIds) {
+    const ids = (postIds || []).map((id) => String(id)).filter(Boolean);
+    if (ids.length === 0) return [];
+    try {
+      const db = await getDb();
+      const placeholders = ids.map(() => '?').join(', ');
+      const rows = await db.all(
+        `SELECT * FROM bulletin_attachments WHERE post_id IN (${placeholders}) ORDER BY created_at ASC`,
+        ids
+      );
+      await db.close();
+      return rows || [];
+    } catch (err) {
+      console.warn('[BulletinModel] listAttachmentsForPosts failed:', err.message);
+      return [];
+    }
+  },
+
+  /**
+   * 添付ファイルレコードの削除
+   * @param {string} id
+   */
+  async deleteAttachment(id) {
+    const db = await getDb();
+    await db.run(`DELETE FROM bulletin_attachments WHERE id = ?`, [String(id)]);
+    await db.close();
+    return true;
+  },
+
+  /**
+   * 投稿の削除
+   * @param {string} id
    */
   async delete(id) {
-    const res = await query(
-      `UPDATE posts SET is_deleted = true, updated_at = $1 WHERE id = $2 RETURNING *`,
-      [nowIso(), id]
-    );
-    return res.rows[0] || null;
-  },
-
-  // ===== 呼び出し側サービスとの命名互換エイリアス =====
-  async findPosts(filters = {}) {
-    return this.findAll(filters);
-  },
-
-  async listBulletins(filters = {}) {
-    return this.findAll(filters);
-  },
-
-  async createPost(postData) {
-    return this.create(postData);
-  },
-
-  async addAcknowledgement(postId, userId, status = 'APPROVED', comment = null) {
-    return this.updateAcknowledgement(postId, userId, status, comment);
-  },
+    try {
+      const db = await getDb();
+      await db.run(`UPDATE posts SET is_deleted = 1, updated_at = ? WHERE id = ?`, [nowIso(), id]);
+      await db.close();
+    } catch (err) {
+      console.warn('[BulletinModel SQLite Warning] delete failed:', err.message);
+    }
+  }
 };
 
 export default bulletinModel;

@@ -1,10 +1,16 @@
 /**
- * ISSystem Approval / Workflow Data Access Model
- * PostgreSQL (approvals) 完全対応版
+ * ISSystem Workflow & Simple Approval Data Access Model
+ * 簡易決裁・物品購入リクエスト PostgreSQL (issystem DB) 対応モデル
  */
 
-import { query } from '../../config/database.js';
-import { nowIso } from '../utils/db.js';
+import { openDb } from '../utils/db.js';
+
+async function getDb() {
+  return openDb();
+}
+
+// デモ・開発用インメモリキャッシュストア
+const mockApprovals = new Map();
 
 export class ApprovalModel {
   /**

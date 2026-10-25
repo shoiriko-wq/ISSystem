@@ -16,15 +16,17 @@ export const chatService = {
    */
   async getUserChannels(userId) {
     const channels = await chatModel.listChannelsForUser(userId);
-    
-    // 各チャンネルの最新メッセージまたは未読カウントなどの情報を付加
+
+    // 各チャンネルの最新メッセージ・未読件数・メンバー数を付加
     const enrichedChannels = await Promise.all(
       channels.map(async (ch) => {
         const messages = await chatModel.getMessages(ch.id, 1);
         const lastMessage = messages.length > 0 ? messages[0] : null;
+        const unread = await chatModel.countUnreadForUser(ch.id, userId);
         return {
           ...ch,
           lastMessage,
+          unread,
         };
       })
     );
@@ -52,9 +54,35 @@ export const chatService = {
     }
 
     const messages = await chatModel.getMessages(channelId, limit);
+
+    // 既読ログに基づき、各メッセージの「未読者」名簿を付与（未読0名のメッセージは全員既読）
+    const reads = await chatModel.getChannelReads(channelId);
+    const readSet = new Set(
+      reads.map((r) => `${r.message_id}::${r.user_id}`)
+    );
+
+    const decorated = messages.map((m) => {
+      const unreaders = members
+        .filter((mem) => {
+          const memId = mem.user_id;
+          if (!memId) return false;
+          if (String(memId) === String(m.sender_id)) return false; // 送信者は自身の未読対象外
+          return !readSet.has(`${m.id}::${memId}`);
+        })
+        .map((mem) => mem.user_name || mem.user_id);
+
+      return {
+        ...m,
+        unreaders,
+        readers: members
+          .filter((mem) => readSet.has(`${m.id}::${mem.user_id}`))
+          .map((mem) => mem.user_name || mem.user_id),
+      };
+    });
+
     return {
       channel,
-      messages,
+      messages: decorated,
     };
   },
 
@@ -244,29 +272,75 @@ export const chatService = {
   },
 
   /**
-   * チャンネル・グループの削除
+   * チャンネルの既読位置更新（閲覧した範囲を既読ログとして記録する）
    * @param {string} channelId
-   * @param {Object} user
+   * @param {string} userId
+   * @param {string|null} lastReadMessageId
    */
-  async deleteChannel(channelId, user) {
-    const channel = await chatModel.findChannelById(channelId);
-    if (!channel) {
-      throw new ApiError(404, '対象のチャットグループが見つかりません。');
+  async updateLastRead(channelId, userId, lastReadMessageId = null) {
+    const recorded = await chatModel.markChannelRead(channelId, userId, lastReadMessageId);
+    const remainingUnread = await chatModel.countUnreadForUser(channelId, userId);
+
+    try {
+      await auditModel.logAction({
+        userId: userId,
+        action: 'READ_CHAT_CHANNEL',
+        targetEntity: 'CHAT_CHANNEL',
+        targetId: channelId,
+        changesJson: JSON.stringify({ recorded, remainingUnread, lastReadMessageId }),
+      });
+    } catch (err) {}
+
+    return { success: true, channelId, userId, recorded, unreadCount: remainingUnread };
+  },
+
+  /**
+   * メッセージの取り消し（送信者本人のみ削除可能）
+   * @param {string} messageId
+   * @param {Object} user - { id, name }
+   */
+  async cancelMessage(messageId, user) {
+    const msg = await chatModel.findMessageById(messageId);
+    if (!msg) {
+      throw new ApiError(404, '取り消すメッセージが見つかりません。');
     }
-    if (channel.type === 'PUBLIC' || channelId === 'chat-all' || channelId === 'general') {
-      throw new ApiError(400, '全体連絡や公開チャンネルは削除できません。');
+
+    const requesterId = user?.id || user?.staff_code;
+    const senderId = msg.sender_id || msg.senderId;
+    const isStaffCodeMatch = user?.staff_code && String(user.staff_code) === String(senderId);
+
+    if (String(requesterId) !== String(senderId) && !isStaffCodeMatch) {
+      throw new ApiError(403, '自分が送信したメッセージのみ取り消すことができます。');
     }
 
-    await chatModel.deleteChannel(channelId);
+    const deleted = await chatModel.deleteMessage(messageId);
+    if (!deleted) {
+      throw new ApiError(400, 'メッセージの取り消しに失敗しました。');
+    }
 
-    await auditModel.logAction({
-      userId: user?.id || 'kyomu01',
-      action: 'DELETE_CHAT_CHANNEL',
-      targetEntity: 'CHAT_CHANNEL',
-      targetId: channelId,
-    });
+    try {
+      await auditModel.logAction({
+        userId: requesterId || 'kyomu01',
+        action: 'CANCEL_CHAT_MESSAGE',
+        targetEntity: 'CHAT_MESSAGE',
+        targetId: messageId,
+        changesJson: JSON.stringify({ channelId: msg.channel_id }),
+      });
+    } catch (err) {}
 
-    return { success: true, channelId };
+    // 既読・未読の整合性を保つため、削除後の未読件数を再計算して返す
+    const channelId = msg.channel_id;
+    const members = await chatModel.getMembers(channelId);
+    const affected = [];
+    for (const mem of members) {
+      if (!mem.user_id || String(mem.user_id) === String(senderId)) continue;
+      affected.push({
+        userId: mem.user_id,
+        unreadCount: await chatModel.countUnreadForUser(channelId, mem.user_id),
+      });
+    }
+
+    return { success: true, messageId, channelId, affectedUnreads: affected };
   },
 };
 

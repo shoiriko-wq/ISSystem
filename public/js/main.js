@@ -16,6 +16,8 @@ import { initChatModule, loadMessages } from './modules/chat.module.js';
 import { initFacilityModule, loadReservations } from './modules/facility.module.js';
 import { initScheduleModule, loadSchedules } from './modules/schedule.module.js';
 import { initApprovalModule, loadApprovals } from './modules/approval.module.js';
+import { initAbsenceModule, loadAbsenceSummary } from './modules/absence.module.js';
+
 
 /**
  * ログイン済みの場合にのみアクティブなタブの実データを取得する関数
@@ -688,6 +690,8 @@ document.addEventListener('DOMContentLoaded', () => {
   initFacilityModule();
   initScheduleModule();
   initApprovalModule();
+  initAbsenceModule();
+
 
   // 4. 初期画面の描画
   renderAuthScreen();

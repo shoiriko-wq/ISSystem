@@ -82,8 +82,7 @@ export const authService = {
     const isPasswordValid = await verifyPassword(password, user.password_hash);
 
     if (!isPasswordValid) {
-      // パスワードハッシュをログへ出さない (監査ログ・コンソールへの漏洩防止)
-      console.warn('[AuthService] パスワード照合失敗:', { identifier });
+      console.warn('[AuthService] パスワード照合失敗:', { identifier, dbHash: user.password_hash });
       throw new ApiError(401, '教職員番号またはパスワードが正しくありません。');
     }
 

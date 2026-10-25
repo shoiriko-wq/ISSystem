@@ -3,7 +3,11 @@
  * 校内行事予定・本日のタイムライン・学年別スケジュール PostgreSQL 完全対応モデル
  */
 
-import { query } from '../../config/database.js';
+import { openDb } from '../utils/db.js';
+
+async function getDb() {
+  return openDb();
+}
 
 const mockSchedules = new Map();
 

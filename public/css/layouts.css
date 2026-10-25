@@ -139,7 +139,9 @@
     gap: 0.1rem;
   }
 
-  #main-content {
-    padding-bottom: 4rem;
+  main#main-content,
+  #main-content,
+  main {
+    padding-bottom: 3.5rem;
   }
 }

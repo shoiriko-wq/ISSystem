@@ -1,9 +1,9 @@
 /**
  * ISSystem Chat Module
- * 職員チャット・カスタムグループ作成・グループ削除・メンバー一覧・改行/送信挙動最適化
+ * 職員チャット・カスタムグループ作成・グループ非表示・メンバー一覧・コメント取り消し・既読/未読表示・改行送信最適化
  */
 
-import { apiGet, apiPost, apiDelete } from '../api.js';
+import { apiGet, apiPost, apiPut, apiDelete } from '../api.js';
 import { formatDate, escapeHTML, refreshLucideIcons, showToast, openModal, closeModal } from '../ui-helpers.js';
 import { state, setUnreadCount } from '../state.js';
 import { socketClient } from '../socket.js';
@@ -17,12 +17,62 @@ let chatChannels = [
 
 let messagesCache = {};
 
+// グループ「非表示」状態（ユーザー個別設定・localStorage 永続化）※削除機能は廃止
+const HIDDEN_STORAGE_PREFIX = 'iss_chat_hidden_groups:';
+let hiddenChannels = new Map(); // channelId -> channel
+let showHiddenSection = false;
+
+function hiddenStorageKey() {
+  const uid = (state.currentUser && (state.currentUser.id || state.currentUser.staff_code)) || 'anonymous';
+  return `${HIDDEN_STORAGE_PREFIX}${uid}`;
+}
+
+function loadHiddenChannels() {
+  try {
+    const raw = localStorage.getItem(hiddenStorageKey());
+    hiddenChannels = raw ? new Map(JSON.parse(raw)) : new Map();
+  } catch (e) {
+    hiddenChannels = new Map();
+  }
+}
+
+function saveHiddenChannels() {
+  try {
+    localStorage.setItem(hiddenStorageKey(), JSON.stringify(Array.from(hiddenChannels.entries())));
+  } catch (e) {
+    console.warn('[Chat] 非表示グループの保存に失敗:', e.message);
+  }
+}
+
 /**
  * 未読総数の更新
  */
 function updateTotalUnread() {
-  const total = chatChannels.reduce((sum, c) => sum + (c.unread || 0), 0);
+  const total = chatChannels
+    .filter((c) => !hiddenChannels.has(c.id))
+    .reduce((sum, c) => sum + (c.unread || 0), 0);
   setUnreadCount('chat', total);
+}
+
+/**
+ * チャンネルの閲覧位置（既読ログ）をサーバーに記録する
+ * @param {string} channelId
+ * @param {string|null} lastReadMessageId
+ */
+async function markChannelRead(channelId, lastReadMessageId = null) {
+  try {
+    const res = await apiPut(`/chat/channels/${channelId}/read`, { lastReadMessageId });
+    const ch = chatChannels.find((c) => c.id === channelId);
+    if (ch) {
+      ch.unread = typeof res.unreadCount === 'number' ? res.unreadCount : 0;
+    }
+    updateTotalUnread();
+    renderChannels();
+    return res;
+  } catch (e) {
+    console.warn('[Chat] 既読状態の更新に失敗:', e.message);
+    return null;
+  }
 }
 
 /**
@@ -155,6 +205,7 @@ export async function initChatModule() {
     </div>
   `;
 
+  loadHiddenChannels();
   bindEvents();
   await loadChannels();
   setupSocketListeners();
@@ -280,19 +331,96 @@ function setupSocketListeners() {
     socketClient.socket.off('chat:message');
     socketClient.socket.on('chat:message', handleIncomingChatMessage);
 
-    // チャンネル削除時の処理
-    socketClient.socket.off('chat:channel_deleted');
-    socketClient.socket.on('chat:channel_deleted', (data) => {
-      const deletedId = data.channelId;
-      chatChannels = chatChannels.filter(c => c.id !== deletedId);
+    // グループ作成のリアルタイム反映（グループ列表への即時追加）
+    const handleChannelCreated = (data) => {
+      const ch = data.channel || data;
+      const newId = ch.id || ch.channelId;
+      if (!newId) return;
+
+      if (!chatChannels.some((c) => c.id === newId)) {
+        chatChannels.push({
+          id: newId,
+          name: ch.name || ch.channelName || '新規グループ',
+          icon: ch.type === 'PUBLIC' ? 'globe' : 'users',
+          unread: 0,
+          type: ch.type || 'GROUP',
+        });
+        renderChannels();
+        showToast(`新しいグループ「${ch.name || newId}」が作成されました`, 'info');
+      }
+    };
+
+    socketClient.socket.off('chat:channel_created');
+    socketClient.socket.on('chat:channel_created', handleChannelCreated);
+    socketClient.socket.off('channel_created');
+    socketClient.socket.on('channel_created', handleChannelCreated);
+
+    // サーバーからのチャンネルリスト同期（他ユーザーによるグループ作成の反映）
+    socketClient.socket.off('channels:synced');
+    socketClient.socket.on('channels:synced', (data) => {
+      const list = data.channels || [];
+      if (!Array.isArray(list) || list.length === 0) return;
+
+      list.forEach((serverCh) => {
+        const existing = chatChannels.find((c) => c.id === serverCh.id);
+        if (existing) {
+          existing.name = serverCh.name;
+          existing.icon = serverCh.type === 'PUBLIC' ? 'globe' : 'users';
+          existing.type = serverCh.type || existing.type;
+        } else {
+          chatChannels.push({
+            id: serverCh.id,
+            name: serverCh.name,
+            icon: serverCh.type === 'PUBLIC' ? 'globe' : 'users',
+            unread: serverCh.unread || 0,
+            type: serverCh.type || 'GROUP',
+          });
+        }
+      });
+
       renderChannels();
       updateTotalUnread();
+    });
 
-      if (currentChannelId === deletedId) {
-      currentChannelId = 'general';
+    // 未読件数のリアルタイム更新（コメント取り消し・既読更新時）
+    socketClient.socket.off('chat:unread_count_updated');
+    socketClient.socket.on('chat:unread_count_updated', (data) => {
+      const ch = chatChannels.find((c) => c.id === data.channelId);
+      if (ch) {
+        ch.unread = data.unreadCount || 0;
+        updateTotalUnread();
         renderChannels();
-        loadMessages(currentChannelId);
-        loadChannelMembers(currentChannelId);
+      }
+    });
+
+    // 既読回执（メンバーの既読完了表示）
+    socketClient.socket.off('chat:read_receipt');
+    socketClient.socket.on('chat:read_receipt', (data) => {
+      const list = messagesCache[data.channelId];
+      if (Array.isArray(list) && data.lastReadMessageId) {
+        const idx = list.findIndex((m) => String(m.id) === String(data.lastReadMessageId));
+        const upto = idx === -1 ? list.length : idx;
+        list.slice(0, upto).forEach((m) => {
+          if (Array.isArray(m.unreaders)) {
+            m.unreaders = m.unreaders.filter((n) => n !== data.userName);
+          }
+        });
+        if (String(data.channelId) === String(currentChannelId)) {
+          renderMessagesList();
+        }
+      }
+    });
+
+    // コメント取り消しのリアルタイム反映（グループ削除機能は廃止済み）
+    socketClient.socket.off('chat:message_deleted');
+    socketClient.socket.on('chat:message_deleted', (data) => {
+      const channelId = data.channelId;
+      const list = messagesCache[channelId];
+      if (Array.isArray(list)) {
+        messagesCache[channelId] = list.filter((m) => String(m.id) !== String(data.messageId));
+        if (String(channelId) === String(currentChannelId)) {
+          renderMessagesList();
+        }
       }
     });
 
@@ -319,36 +447,158 @@ function setupSocketListeners() {
 /**
  * チャンネルリスト描画
  */
+function channelRowHtml(ch, { hidden }) {
+  const isActive = ch.id === currentChannelId;
+  return `
+    <div class="flex items-center gap-1">
+      <button data-channel-id="${ch.id}" class="flex-1 min-w-0 text-left nav-item ${isActive ? 'active' : ''} ${hidden ? 'opacity-60' : ''}">
+        <span class="flex items-center gap-2 truncate">
+          <i data-lucide="${ch.icon || 'users'}"></i>
+          <span class="truncate">${escapeHTML(ch.name)}</span>
+        </span>
+        ${ch.unread > 0 ? `<span class="badge-count">${ch.unread}</span>` : ''}
+      </button>
+      ${hidden
+        ? `<button class="chat-unhide-btn text-emerald-400/80 hover:text-emerald-300 p-1.5 rounded hover:bg-slate-800" data-unhide-id="${ch.id}" title="このグループをリストに再表示する"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>`
+        : (ch.type !== 'PUBLIC'
+          ? `<button class="chat-hide-btn text-slate-500 hover:text-amber-300 p-1.5 rounded hover:bg-slate-800" data-hide-id="${ch.id}" title="グループを非表示にする（削除はされません）"><i data-lucide="eye-off" class="w-3.5 h-3.5"></i></button>`
+          : '')}
+    </div>
+  `;
+}
+
+/**
+ * チャンネル切り替え
+ * @param {string} channelId
+ */
+function selectChannel(channelId) {
+  if (!channelId || String(channelId) === String(currentChannelId)) return;
+  currentChannelId = channelId;
+
+  const target = chatChannels.find(c => c.id === channelId);
+  if (target) target.unread = 0;
+
+  updateTotalUnread();
+  renderChannels();
+  loadMessages(currentChannelId);
+  loadChannelMembers(currentChannelId);
+}
+
+/**
+ * 非表示ではない最初のチャンネルID
+ */
+function visibleFallbackId() {
+  const first = chatChannels.find(c => !hiddenChannels.has(c.id));
+  return first ? first.id : 'general';
+}
+
+/**
+ * グループを非表示にする（削除はしない）
+ * @param {string} channelId
+ */
+async function hideChannel(channelId) {
+  const ch = chatChannels.find(c => c.id === channelId);
+  const name = ch ? ch.name : channelId;
+
+  try {
+    await apiPut(`/chat/channels/${channelId}/hide`, { isHidden: true });
+  } catch (e) {
+    console.warn('[Chat] 非表示設定のサーバー保存に失敗:', e.message);
+  }
+
+  if (ch) hiddenChannels.set(channelId, ch);
+
+  if (String(currentChannelId) === String(channelId)) {
+    currentChannelId = visibleFallbackId();
+    loadMessages(currentChannelId);
+    loadChannelMembers(currentChannelId);
+  }
+
+  saveHiddenChannels();
+  updateTotalUnread();
+  renderChannels();
+  showToast(`グループ「${name}」を非表示にしました（データは残っています）`, 'info');
+}
+
+/**
+ * 非表示グループを再表示する
+ * @param {string} channelId
+ */
+async function unhideChannel(channelId) {
+  const ch = hiddenChannels.get(channelId);
+  const name = ch ? ch.name : channelId;
+
+  try {
+    await apiPut(`/chat/channels/${channelId}/hide`, { isHidden: false });
+  } catch (e) {
+    console.warn('[Chat] 表示設定のサーバー保存に失敗:', e.message);
+  }
+
+  if (ch && !chatChannels.some((c) => c.id === ch.id)) {
+    chatChannels.push(ch);
+  }
+  hiddenChannels.delete(channelId);
+
+  saveHiddenChannels();
+  updateTotalUnread();
+  renderChannels();
+  showToast(`グループ「${name}」をリストに再表示しました`, 'success');
+}
+
+/**
+ * チャンネルリスト描画
+ */
 function renderChannels() {
   const container = document.getElementById('chat-channels-list');
   if (!container) return;
 
-  container.innerHTML = chatChannels.map(ch => `
-    <button data-channel-id="${ch.id}" class="w-full text-left nav-item ${ch.id === currentChannelId ? 'active' : ''}">
-      <span class="flex items-center gap-2 truncate">
-        <i data-lucide="${ch.icon || 'users'}"></i>
-        <span class="truncate">${escapeHTML(ch.name)}</span>
-      </span>
-      ${ch.unread > 0 ? `<span class="badge-count">${ch.unread}</span>` : ''}
-    </button>
-  `).join('');
+  const visible = chatChannels.filter((c) => !hiddenChannels.has(c.id));
+  const hiddenList = Array.from(hiddenChannels.values());
+
+  let html = visible.map((ch) => channelRowHtml(ch, { hidden: false })).join('');
+
+  if (hiddenList.length > 0) {
+    html += `
+      <div class="mt-2 pt-2 border-t border-slate-800">
+        <button id="chat-toggle-hidden" class="w-full flex items-center justify-between px-2 py-1.5 text-[10px] text-slate-400 hover:text-slate-200 rounded">
+          <span class="flex items-center gap-1.5"><i data-lucide="eye-off" class="w-3.5 h-3.5"></i> 非表示グループ</span>
+          <span class="flex items-center gap-1">
+            <span class="badge-count">${hiddenList.length}</span>
+            <i data-lucide="${showHiddenSection ? 'chevron-up' : 'chevron-down'}" class="w-3.5 h-3.5"></i>
+          </span>
+        </button>
+        ${showHiddenSection ? hiddenList.map((ch) => channelRowHtml(ch, { hidden: true })).join('') : ''}
+      </div>
+    `;
+  }
+
+  container.innerHTML = html;
 
   container.querySelectorAll('[data-channel-id]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const id = btn.getAttribute('data-channel-id');
-      if (id && id !== currentChannelId) {
-        currentChannelId = id;
-        
-        const target = chatChannels.find(c => c.id === id);
-        if (target) target.unread = 0;
-        
-        updateTotalUnread();
-        renderChannels();
-        loadMessages(currentChannelId);
-        loadChannelMembers(currentChannelId);
-      }
+    btn.addEventListener('click', () => selectChannel(btn.getAttribute('data-channel-id')));
+  });
+
+  container.querySelectorAll('.chat-hide-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideChannel(btn.getAttribute('data-hide-id'));
     });
   });
+
+  container.querySelectorAll('.chat-unhide-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      unhideChannel(btn.getAttribute('data-unhide-id'));
+    });
+  });
+
+  const toggleBtn = document.getElementById('chat-toggle-hidden');
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', () => {
+      showHiddenSection = !showHiddenSection;
+      renderChannels();
+    });
+  }
 
   refreshLucideIcons();
 }
@@ -372,9 +622,8 @@ export async function loadMessages(channelId = currentChannelId) {
   if (titleEl && channelInfo) titleEl.textContent = channelInfo.name;
   if (iconEl && channelInfo) iconEl.setAttribute('data-lucide', channelInfo.icon || 'users');
 
-  // カスタムグループの場合は「グループ削除」ボタンをヘッダーアクションに動的表示
-  const defaultChannels = ['chat-all', 'general', 'chat-g1', 'chat-g2', 'chat-g3', 'chat-kyomu', 'chat_all', 'chat_g1', 'chat_g2', 'chat_g3', 'chat_kyomu'];
-  const isCustomGroup = channelInfo && channelInfo.type !== 'PUBLIC' && !defaultChannels.includes(channelId);
+  // カスタムグループの「非表示 / 再表示」トグル（グループ削除機能は廃止済み）
+  const isHidden = hiddenChannels.has(channelId);
 
   const headerActionsEl = document.getElementById('chat-header-actions');
   if (headerActionsEl) {
@@ -382,11 +631,14 @@ export async function loadMessages(channelId = currentChannelId) {
       <button id="chat-btn-members" class="btn-secondary py-1 px-2.5 text-[11px] flex items-center gap-1 text-slate-200 border-slate-700 bg-slate-800/80 hover:bg-slate-700">
         <i data-lucide="users" class="w-3.5 h-3.5 text-indigo-400"></i> メンバー (<span id="chat-member-count">0</span>名)
       </button>
-      ${isCustomGroup ? `
-        <button id="chat-btn-delete-group" class="btn-secondary py-1 px-2.5 text-[11px] flex items-center gap-1 text-rose-400 border-rose-500/30 hover:bg-rose-500/10">
-          <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> グループ削除
+      ${channelInfo && channelInfo.type !== 'PUBLIC' ? `
+        <button id="chat-btn-toggle-visibility" class="btn-secondary py-1 px-2.5 text-[11px] flex items-center gap-1 text-amber-300 border-amber-500/30 hover:bg-amber-500/10">
+          <i data-lucide="${isHidden ? 'eye' : 'eye-off'}" class="w-3.5 h-3.5"></i> ${isHidden ? 'リストに再表示' : 'リストから非表示'}
         </button>
       ` : ''}
+      <button id="chat-btn-mark-read" class="btn-secondary py-1 px-2.5 text-[11px] flex items-center gap-1 text-emerald-400 border-emerald-500/30">
+        <i data-lucide="check-check" class="w-3.5 h-3.5"></i> 既読にする
+      </button>
       <button id="chat-btn-renotify-all" class="btn-secondary py-1 px-2.5 text-[11px] flex items-center gap-1 text-amber-400 border-amber-500/30">
         <i data-lucide="bell-ring" class="w-3.5 h-3.5"></i> 未読者へ再通知
       </button>
@@ -397,7 +649,17 @@ export async function loadMessages(channelId = currentChannelId) {
       loadChannelMembers(currentChannelId);
     });
     document.getElementById('chat-btn-renotify-all')?.addEventListener('click', handleRenotifyAll);
-    document.getElementById('chat-btn-delete-group')?.addEventListener('click', handleDeleteGroup);
+    document.getElementById('chat-btn-mark-read')?.addEventListener('click', () => {
+      const msgs = messagesCache[channelId] || [];
+      markChannelRead(channelId, msgs.length > 0 ? msgs[0].id : null);
+    });
+    document.getElementById('chat-btn-toggle-visibility')?.addEventListener('click', () => {
+      if (isHidden) {
+        unhideChannel(channelId);
+      } else {
+        hideChannel(channelId);
+      }
+    });
   }
 
   try {
@@ -415,6 +677,12 @@ export async function loadMessages(channelId = currentChannelId) {
       unreaders: m.unreaders || []
     }));
 
+    // 表示した範囲を既読としてサーバーの閲覧ログに記録する
+    const lastReadId = messagesCache[channelId].length > 0 ? messagesCache[channelId][0].id : null;
+    if (lastReadId && !hiddenChannels.has(channelId)) {
+      markChannelRead(channelId, lastReadId);
+    }
+
   } catch (e) {
     if (!messagesCache[channelId]) {
       messagesCache[channelId] = getDummyMessages(channelId);
@@ -426,23 +694,20 @@ export async function loadMessages(channelId = currentChannelId) {
 }
 
 /**
- * チャットグループ削除処理
+ * コメント（メッセージ）取り消し処理 ※送信者本人のみ削除可能
+ * @param {string} messageId
  */
-async function handleDeleteGroup() {
-  const channelInfo = chatChannels.find(c => c.id === currentChannelId);
-  const groupName = channelInfo ? channelInfo.name : 'このグループ';
-  
-  if (confirm(`【グループ削除】\nチャットグループ「${groupName}」を削除しますか？\n（この操作は元に戻せません）`)) {
-    try {
-      await apiDelete(`/chat/channels/${currentChannelId}`);
-      showToast(`チャットグループ「${groupName}」を削除しました`, 'success');
-      currentChannelId = 'chat-all';
-      await loadChannels();
-      loadMessages(currentChannelId);
-      loadChannelMembers(currentChannelId);
-    } catch (e) {
-      showToast('グループの削除に失敗しました: ' + e.message, 'error');
-    }
+async function handleCancelMessage(messageId) {
+  if (!confirm('【コメント取り消し】\n送信したコメントを削除しますか？\n（この操作は元に戻せません）')) return;
+
+  try {
+    const res = await apiDelete(`/chat/messages/${messageId}`);
+    const list = messagesCache[currentChannelId] || [];
+    messagesCache[currentChannelId] = list.filter((m) => String(m.id) !== String(messageId));
+    renderMessagesList();
+    showToast(res.message || 'コメントを取り消しました', 'success');
+  } catch (e) {
+    showToast('コメントの取り消しに失敗しました: ' + e.message, 'error');
   }
 }
 
@@ -613,9 +878,11 @@ function renderMessagesList() {
   }
 
   const currentUserId = state.currentUser ? state.currentUser.id : 'me';
+  const currentStaffCode = state.currentUser ? state.currentUser.staff_code : null;
 
   container.innerHTML = msgs.map(m => {
-    const isMe = m.senderId === currentUserId;
+    const isMe = String(m.senderId) === String(currentUserId) ||
+      (currentStaffCode && String(m.senderId) === String(currentStaffCode));
     const unreadCount = (m.unreaders || []).length;
 
     return `
@@ -655,6 +922,11 @@ function renderMessagesList() {
           ` : `
             <span class="text-emerald-400/80 flex items-center gap-1"><i data-lucide="check-check" class="w-3 h-3"></i> 全員既読</span>
           `}
+          ${isMe ? `
+            <button class="chat-cancel-btn text-rose-400/80 hover:text-rose-300 flex items-center gap-1" data-msg-id="${m.id}" title="このコメントを取り消す（自分の発言のみ取り消し可能）">
+              <i data-lucide="undo-2" class="w-3 h-3"></i> 取り消す
+            </button>
+          ` : ''}
         </div>
       </div>
     `;
@@ -677,6 +949,12 @@ function renderMessagesList() {
     btn.addEventListener('click', () => {
       const msgId = btn.getAttribute('data-msg-id');
       showUnreadersModal(msgId);
+    });
+  });
+
+  container.querySelectorAll('.chat-cancel-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      handleCancelMessage(btn.getAttribute('data-msg-id'));
     });
   });
 

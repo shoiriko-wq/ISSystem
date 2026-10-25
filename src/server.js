@@ -6,7 +6,7 @@
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import app from './app.js';
-import { initializeDatabase } from '../config/database.js';
+import { initializeDatabase, closeDatabase } from '../config/database.js';
 import { initializeSockets } from './sockets/socket.index.js';
 import { initializeCronJobs } from './utils/cron.jobs.js';
 
@@ -58,8 +58,9 @@ async function startServer() {
     const gracefulShutdown = (signal) => {
       console.log(`\n[Server Shutdown] シグナル ${signal} を受信しました。サーバーを終了します...`);
 
-      server.close(() => {
+      server.close(async () => {
         console.log('[Server Shutdown] HTTP/WebSocket サーバーを停止しました。');
+        await closeDatabase();
         process.exit(0);
       });
 

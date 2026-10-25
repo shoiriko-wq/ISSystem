@@ -65,6 +65,8 @@ export function initializeSockets(io) {
     const userId = socket.user?.id;
     if (userId) {
       onlineUserIds.add(userId);
+      // 個人宛の通知 (chat:toast / 未読バッジ更新 など) を受けるためのパーソナルルームに参加
+      socket.join(`user:${userId}`);
       io.emit('user:presence', { userId, isOnline: true });
     }
     console.log(`[Socket.io] クライアント接続: User ID ${userId} (${socket.user.name || '教員'}) - Socket ID: ${socket.id}`);

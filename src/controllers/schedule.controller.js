@@ -14,6 +14,10 @@ export const scheduleController = {
     try {
       let { startDate, endDate, targetGrade, year, month, grade } = req.query;
 
+      // 別名キー (start / end) でも期間を受け付ける
+      startDate = startDate || req.query.start_date || req.query.start;
+      endDate = endDate || req.query.end_date || req.query.end;
+
       // 1. フロントエンドから year & month で送られてきた場合の自動補正
       if ((!startDate || !endDate) && (year || month)) {
         const y = year ? parseInt(year, 10) : 2026;

@@ -1,24 +1,67 @@
 /**
- * データベース初期化スクリプト (scripts/init-db.js)
- * db/schema.sql を読み込み、PostgreSQL (config/database.js 準拠) へ最新構造を適用します
+ * データベース初期化スクリプト (scripts/init-db.js) — PostgreSQL 版
+ * db/schema.sql を読み込み、常に最新構造へクリーンリビルドします
  */
 
+import { Client } from 'pg';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { pool, ensureSchema } from '../config/database.js';
+import config from '../config/default.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// パス定義 (接続設定は config/database.js の .env 準拠 / PostgreSQL)
+// パス定義 (PostgreSQL クラスタ内の issystem DB および db/schema.sql)
 const schemaPath = path.resolve(__dirname, '../db/schema.sql');
+const dbCfg = config.db;
+
+// SQL 識別子を安全にダブルクォートでエスケープする
+function quoteIdent(name) {
+  return `"${String(name).replace(/"/g, '""')}"`;
+}
+
+async function ensureDatabaseExists() {
+  const admin = new Client({
+    user: dbCfg.user,
+    password: dbCfg.password,
+    host: dbCfg.host,
+    port: dbCfg.port,
+    database: 'postgres',
+    application_name: 'issystem-init-db',
+  });
+
+  await admin.connect();
+  try {
+    const found = await admin.query('SELECT 1 AS ok FROM pg_database WHERE datname = $1', [dbCfg.name]);
+    if (found.rowCount === 0) {
+      // データベース名は識別子なので quoteIdent で埋め込む
+      await admin.query(`CREATE DATABASE ${quoteIdent(dbCfg.name)} TEMPLATE template0 ENCODING 'UTF8'`);
+      console.log(`🧱 PostgreSQL データベース "${dbCfg.name}" を新規作成しました。`);
+    } else {
+      console.log(`✅ 既存の PostgreSQL データベース "${dbCfg.name}" を利用します。`);
+    }
+
+    // タイムゾーン設定（日本標準時）
+    await admin.query(`ALTER DATABASE ${quoteIdent(dbCfg.name)} SET TIME ZONE 'Asia/Tokyo'`);
+  } finally {
+    await admin.end();
+  }
+}
 
 async function setupDatabase() {
   console.log('🔄 データベースの一括セットアップを開始します...');
-  const target = `${process.env.DB_HOST || 'localhost'}:${process.env.DB_PORT || 5432}/${process.env.DB_NAME || 'is_system'}`;
-  console.log(`📁 出力DB: ${target}`);
+  console.log(`📦 接続先: postgresql://${dbCfg.host}:${dbCfg.port}/${dbCfg.name}`);
   console.log(`📜 スキーマ: ${schemaPath}`);
+
+  const client = new Client({
+    user: dbCfg.user,
+    password: dbCfg.password,
+    host: dbCfg.host,
+    port: dbCfg.port,
+    database: dbCfg.name,
+    application_name: 'issystem-init-db',
+  });
 
   try {
     // 1. schema.sql の存在確認と読み込み
@@ -27,37 +70,26 @@ async function setupDatabase() {
     }
     const sqlScript = fs.readFileSync(schemaPath, 'utf-8');
 
-    // 2. 接続検証 (config/database.js の共有プールを使用)
-    const client = await pool.connect();
-    const connInfo = await client.query('SELECT current_database() AS db, version() AS v');
-    console.log(`🔗 接続先: ${connInfo.rows[0].db} (${connInfo.rows[0].v.split(' ')[1]})`);
-    client.release();
+    // 2. データベース自体が存在しなければ作成
+    await ensureDatabaseExists();
 
-    // 3. 最新スキーマのステートメント単位適用 (CREATE TABLE IF NOT EXISTS 準拠のため既存データは保持)
-    const applied = await ensureSchema();
-    if (!applied) {
-      throw new Error('スキーマの適用に失敗しました。db/schema.sql を確認してください。');
-    }
+    // 3. 対象データベースへ接続
+    await client.connect();
+    await client.query("SET TIME ZONE 'Asia/Tokyo'");
 
-    // 4. 適用結果の検証
-    const tablesRes = await pool.query(
-      `SELECT table_name FROM information_schema.tables
-       WHERE table_schema = 'public' ORDER BY table_name`
+    // 4. 最新スキーマの一括実行（外部キー制約は PostgreSQL では常に有効）
+    await client.query(sqlScript);
+
+    const tableCount = await client.query(
+      `SELECT count(*) AS cnt FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`
     );
-    const names = tablesRes.rows.map((r) => r.table_name);
-    console.log(`🧱 適用テーブル (${names.length}): ${names.join(', ')}`);
-
-    if (!names.includes('users')) {
-      throw new Error('users テーブルが存在しません。schema.sql を確認してください。');
-    }
-
-    console.log('🎉 データベースの初期化（PostgreSQL スキーマ適用）が正常に完了しました！');
+    console.log(`🎉 データベースの初期化＆データ投入が正常に完了しました！（public スキーマのテーブル数: ${tableCount.rows[0].cnt}）`);
 
   } catch (err) {
     console.error('❌ データベース初期化エラー:', err.message);
-    process.exitCode = 1;
+    process.exit(1);
   } finally {
-    await pool.end();
+    await client.end();
   }
 }
 

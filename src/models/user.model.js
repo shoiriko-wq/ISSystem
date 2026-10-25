@@ -9,24 +9,15 @@ import { nowIso } from '../utils/db.js';
 // 自動マイグレーション: avatar_url カラムの存在確認と追加 (PostgreSQL)
 async function ensureAvatarColumn() {
   try {
-    await query(`
-      DO $$
-      BEGIN
-        IF to_regclass('public.users') IS NULL THEN
-          RAISE NOTICE 'users テーブル未作成のため avatar_url マイグレーションをスキップします (npm run db:init を実行)。';
-          RETURN;
-        END IF;
-
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns
-          WHERE table_name = 'users' AND column_name = 'avatar_url'
-        ) THEN
-          ALTER TABLE users ADD COLUMN avatar_url TEXT;
-          RAISE NOTICE 'users テーブルに avatar_url カラムを追加しました。';
-        END IF;
-      END
-      $$;
-    `);
+    const db = await getDb();
+    const tableInfo = await db.query(
+      `SELECT column_name AS name FROM information_schema.columns WHERE table_name = 'users'`
+    );
+    const hasAvatar = tableInfo.rows.some((col) => col.name === 'avatar_url');
+    if (!hasAvatar) {
+      await db.query("ALTER TABLE users ADD COLUMN avatar_url TEXT");
+      console.log('[Database Migration] users テーブルに avatar_url カラムを追加しました。');
+    }
   } catch (err) {
     // 42P01 = users テーブル未作成 (db:init 未実行)。警告ではなく案内として扱う
     if (err && err.code === '42P01') {
@@ -222,26 +213,30 @@ export const userModel = {
     const normalized = status === 'IN' ? 'PRESENT' : status === 'OUT' ? 'LEAVE' : status;
     const ts = nowIso();
     try {
-      const res = await query(`SELECT * FROM seating_status WHERE user_id = $1`, [userId]);
-      if (res.rows[0]) {
-        await query(
+      const db = await getDb();
+      const existingRes = await db.query(`SELECT * FROM seating_status WHERE user_id = $1`, [userId]);
+      const existing = existingRes.rows[0];
+      if (existing) {
+        await db.query(
           `UPDATE seating_status SET current_status = $1, status_note = $2, updated_at = $3 WHERE user_id = $4`,
-          [normalized, statusNote || res.rows[0].status_note || '', ts, userId]
+          [normalized, statusNote || existing.status_note || '', ts, userId]
         );
       } else {
-        await query(
+        await db.query(
           `INSERT INTO seating_status (id, user_id, desk_number, group_zone, current_status, status_note, updated_at)
+           VALUES ($1, $2, $3, 'staff', $4, $5, $6)`,
            VALUES ($1, $2, $3, 'staff', $4, $5, $6)`,
           [`seat_${userId}`, userId, '-', normalized, statusNote || '', ts]
         );
       }
-      const userRes = await query(
+      const userRes = await db.query(
         `SELECT id, staff_code, email, name, role, grade, department, extension_number FROM users WHERE id = $1`,
         [userId]
       );
       const user = userRes.rows[0];
-      return user ? { ...user, status: normalized, current_status: normalized } : { id: userId, status: normalized, current_status: normalized };
+      return { ...user, status: normalized, current_status: normalized };
     } catch (err) {
+      console.warn('[UserModel PG Warning] updateStatus failed:', err.message);
       console.warn('[UserModel PG Warning] updateStatus failed:', err.message);
       return { id: userId, status: normalized, current_status: normalized };
     }
@@ -274,11 +269,10 @@ export const userModel = {
 
   async findInvitationCode(code) {
     try {
-      const res = await query(
-        `SELECT * FROM invitation_codes WHERE code = $1 AND is_used = 0 AND expires_at > NOW()`,
-        [code]
-      );
-      return res.rows[0] || mockInvitationCodes.get(code) || null;
+      const db = await getDb();
+      const inv = await db.get(`SELECT * FROM invitation_codes WHERE code = ? AND is_used = 0 AND expires_at > CURRENT_TIMESTAMP`, [code]);
+      await db.close();
+      return inv || mockInvitationCodes.get(code) || null;
     } catch (err) {
       return mockInvitationCodes.get(code) || null;
     }

@@ -75,6 +75,75 @@ export function initScheduleModule() {
         <div class="text-center py-10 text-xs text-slate-500">スケジュールデータを読み込み中...</div>
       </div>
     </div>
+
+    <!-- ★ 行事追加モーダル (schedule-modal) -->
+    <div id="schedule-modal" class="modal-overlay hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+      <div class="modal-card w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-5 max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-base font-bold text-white flex items-center gap-2">
+            <i data-lucide="calendar-plus" class="w-5 h-5 text-purple-400"></i> 校内行事の追加
+          </h3>
+          <button id="schedule-modal-close" class="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800">
+            <i data-lucide="x" class="w-4 h-4"></i>
+          </button>
+        </div>
+
+        <form id="schedule-form" class="space-y-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-300 mb-1">行事タイトル <span class="text-rose-400">*</span></label>
+            <input type="text" id="sched-title-input" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-purple-500" placeholder="例: 第3回 期末考査" required>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label class="block text-xs font-bold text-slate-300 mb-1">実施日 <span class="text-rose-400">*</span></label>
+              <input type="date" id="sched-date-input" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-purple-500" required>
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-300 mb-1">開始時刻</label>
+              <input type="time" id="sched-start-time" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-purple-500">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-300 mb-1">終了時刻</label>
+              <input type="time" id="sched-end-time" step="600" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-purple-500">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-bold text-slate-300 mb-1">カテゴリ <span class="text-rose-400">*</span></label>
+              <select id="sched-category-select" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-purple-500">
+                <option value="SCHOOL">全校行事</option>
+                <option value="GRADE">学年行事</option>
+                <option value="EXAM">定期考査・テスト</option>
+                <option value="OFFICIAL">出張・研修</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-300 mb-1">対象学年</label>
+              <select id="sched-grade-select" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-purple-500">
+                <option value="">全学年</option>
+                <option value="1">1年生</option>
+                <option value="2">2年生</option>
+                <option value="3">3年生</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-300 mb-1">内容・備考</label>
+            <textarea id="sched-desc-input" rows="3" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-purple-500" placeholder="内容、集合時間、持ち物等"></textarea>
+          </div>
+
+          <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+            <button type="button" id="sched-btn-cancel" class="btn-secondary py-2 px-4 text-xs">キャンセル</button>
+            <button type="submit" class="btn-primary py-2 px-4 text-xs font-bold flex items-center gap-1.5">
+              <i data-lucide="plus" class="w-4 h-4"></i> 登録する
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   `;
 
   bindEvents();
@@ -98,8 +167,23 @@ function bindEvents() {
   });
 
   document.getElementById('sched-btn-create')?.addEventListener('click', () => {
+    // モーダルを開く際、対象月の1日（または本日）を既定日として設定する
+    const dateInput = document.getElementById('sched-date-input');
+    if (dateInput && !dateInput.value) {
+      const y = currentMonth.getFullYear();
+      const m = String(currentMonth.getMonth() + 1).padStart(2, '0');
+      const today = new Date();
+      if (today.getFullYear() === y && today.getMonth() === currentMonth.getMonth()) {
+        dateInput.value = `${y}-${m}-${String(today.getDate()).padStart(2, '0')}`;
+      } else {
+        dateInput.value = `${y}-${m}-01`;
+      }
+    }
     openModal('schedule-modal');
   });
+
+  document.getElementById('schedule-modal-close')?.addEventListener('click', () => closeModal('schedule-modal'));
+  document.getElementById('sched-btn-cancel')?.addEventListener('click', () => closeModal('schedule-modal'));
 
   // フィルターボタン
   document.querySelectorAll('.sched-filter-btn').forEach(btn => {
@@ -153,12 +237,16 @@ export async function loadSchedules() {
     schedulesCache = rawList.map(s => ({
       id: s.id,
       title: s.title,
-      date: s.start_date ? s.start_date.split('T')[0] : (s.date || `${year}-${String(month).padStart(2, '0')}-15`),
-      category: s.event_type || s.category || 'SCHOOL',
-      targetGrade: s.target_grade || s.targetGrade || '全学年',
+      date: s.event_date || s.start_date?.split('T')[0] || s.date || s.startDate?.split(' ')[0] || '',
+      category: s.category || s.event_type || s.eventType || 'SCHOOL',
+      targetGrade: (s.target_grade === null || s.target_grade === undefined)
+        ? '全学年'
+        : `${s.target_grade}年生`,
+      startTime: s.start_time || s.startTime || '',
+      endTime: s.end_time || s.endTime || '',
       description: s.description || s.content || '',
-      authorName: s.author_name || s.authorName || '教務部'
-    }));
+      authorName: s.created_by_name || s.author_name || s.authorName || '教務部'
+    })).filter(s => s.date);
 
   } catch (e) {
     console.warn('[Schedule] API取得失敗のためダミー表示:', e.message);
@@ -233,36 +321,56 @@ async function handleCreateSchedule(e) {
 
   const title = document.getElementById('sched-title-input')?.value.trim();
   const date = document.getElementById('sched-date-input')?.value;
+  const startTime = document.getElementById('sched-start-time')?.value || null;
+  const endTime = document.getElementById('sched-end-time')?.value || null;
   const category = document.getElementById('sched-category-select')?.value;
   const targetGrade = document.getElementById('sched-grade-select')?.value;
   const description = document.getElementById('sched-desc-input')?.value.trim();
 
-  if (!title || !date || !category) {
-    showToast('必須項目を入力してください', 'warning');
+  if (!title || !date) {
+    showToast('行事タイトルと実施日は必須項目です', 'warning');
     return;
   }
 
-  const newSched = {
+  if (startTime && endTime && startTime >= endTime) {
+    showToast('終了時刻は開始時刻より後に設定してください', 'warning');
+    return;
+  }
+
+  // バックエンド (POST /api/schedules) が期待するキー名で送信する
+  const payload = {
     title,
-    startDate: `${date} 00:00:00`,
-    endDate: `${date} 23:59:59`,
-    eventType: category,
-    targetGrade: targetGrade || '全学年',
-    description
+    description: description || '',
+    event_date: date,
+    start_time: startTime,
+    end_time: endTime,
+    category: category || 'SCHOOL',
+    target_grade: targetGrade ? parseInt(targetGrade, 10) : null,
+    // フロントエンド互換の別名キーも併せて送る
+    date,
+    eventType: category || 'SCHOOL',
+    targetGrade: targetGrade || '全学年'
   };
 
   try {
-    await apiPost('/schedules', newSched);
+    await apiPost('/schedules', payload);
     showToast('校内行事を追加しました', 'success');
   } catch (err) {
     console.error('[Schedule] 作成エラー:', err);
-    showToast('校内行事を追加しました', 'info');
+    showToast(err.message || '校内行事の追加に失敗しました', 'error');
+    return;
   }
 
   closeModal('schedule-modal');
   document.getElementById('schedule-form')?.reset();
+
+  // 追加した行事の月へ表示を移動して再読み込み
+  const [y, m] = date.split('-');
+  currentMonth = new Date(parseInt(y, 10), parseInt(m, 10) - 1, 1);
+  updateMonthLabel();
   loadSchedules();
 }
+
 
 function getDummySchedules(year, month) {
   const mStr = String(month).padStart(2, '0');

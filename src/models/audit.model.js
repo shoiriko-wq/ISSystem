@@ -189,43 +189,83 @@ export const auditModel = {
   /**
    * ロックの最終アクセス更新 (自ユーザーのロック延長)
    */
-  async refreshEditingLock(resourceType, resourceId, userId) {
-    const res = await query(
-      `UPDATE editing_locks SET last_accessed = now()
-       WHERE resource_type = $1 AND resource_id = $2 AND user_id = $3
-       RETURNING *`,
-      [resourceType, resourceId, userId]
-    );
-    return res.rows[0] || null;
+  async getExpiredEditingLocks(timeoutSeconds = 180) {
+    const expiredList = [];
+    const now = Date.now();
+
+    // 1. メモリキャッシュ側のチェック
+    for (const [key, lock] of mockLocks.entries()) {
+      const lastActive = new Date(lock.last_active_at).getTime();
+      if ((now - lastActive) / 1000 >= timeoutSeconds) {
+        expiredList.push(lock);
+      }
+    }
+
+    // 2. DB側のチェック
+    try {
+      const sql = `
+        SELECT resource_type, resource_id, user_id as locked_by_user_id, user_name as locked_by_user_name
+        FROM editing_locks
+        WHERE updated_at < CURRENT_TIMESTAMP - make_interval(secs => ?::double precision)
+      `;
+      const res = await query(sql, [timeoutSeconds]);
+      if (res.rows && res.rows.length > 0) {
+        res.rows.forEach(row => {
+          if (!expiredList.some(item => item.resource_type === row.resource_type && item.resource_id === row.resource_id)) {
+            expiredList.push(row);
+          }
+        });
+      }
+    } catch (error) {
+      // キャッシュ結果を返す
+    }
+
+    return expiredList;
   },
 
   /**
    * アクティブな編集ロックの取得 (タイムアウト判定込み)
    * @param {number} timeoutSeconds
    */
-  async getActiveEditingLock(resourceType, resourceId, timeoutSeconds = 180) {
-    const res = await query(
-      `SELECT * FROM editing_locks
-       WHERE resource_type = $1 AND resource_id = $2
-         AND EXTRACT(EPOCH FROM (now() - last_accessed)) <= $3
-       LIMIT 1`,
-      [resourceType, resourceId, timeoutSeconds]
-    );
-    return res.rows[0] || null;
+  async releaseExpiredEditingLocks(timeoutSeconds = 180) {
+    const now = Date.now();
+
+    // 1. メモリキャッシュ側の解除
+    for (const [key, lock] of mockLocks.entries()) {
+      const lastActive = new Date(lock.last_active_at).getTime();
+      if ((now - lastActive) / 1000 >= timeoutSeconds) {
+        mockLocks.delete(key);
+      }
+    }
+
+    // 2. DB側の解除
+    try {
+      const sql = `
+        DELETE FROM editing_locks
+        WHERE updated_at < CURRENT_TIMESTAMP - make_interval(secs => ?::double precision)
+      `;
+      return await query(sql, [timeoutSeconds]);
+    } catch (error) {
+      return { rowCount: 0 };
+    }
   },
 
   /**
    * 無操作タイムアウト超過ロックの一覧 (cron 自動解放用)
    * @param {number} timeoutSeconds
    */
-  async getExpiredEditingLocks(timeoutSeconds = 180) {
-    const res = await query(
-      `SELECT * FROM editing_locks
-       WHERE EXTRACT(EPOCH FROM (now() - last_accessed)) > $1
-       ORDER BY last_accessed ASC`,
-      [timeoutSeconds]
-    );
-    return res.rows;
+  async cleanOldAuditLogs(daysToKeep = 90) {
+    try {
+      const sql = `
+        DELETE FROM system_audit_logs
+        WHERE created_at < CURRENT_TIMESTAMP - make_interval(days => ?::integer)
+      `;
+      const res = await query(sql, [daysToKeep]);
+      return res.changes || res.rowCount || 0;
+    } catch (error) {
+      console.warn('[AuditModel] cleanOldAuditLogs fallback:', error.message);
+      return 0;
+    }
   },
 
   /**

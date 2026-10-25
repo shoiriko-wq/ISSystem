@@ -7,7 +7,87 @@ import bulletinModel from '../models/bulletin.model.js';
 import userModel from '../models/user.model.js';
 import auditModel from '../models/audit.model.js';
 import chatModel from '../models/chat.model.js';
+import { mapAttachment, parseMultipart, extractFormParts, saveFileEntries, removeStoredFile, getAttachmentStream } from './upload.service.js';
 import { ApiError } from '../middlewares/error.middleware.js';
+
+/**
+ * targetScope JSON 文字列の安全パース
+ * @param {string} raw
+ */
+function safeParseScope(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : undefined;
+  } catch (e) {
+    return undefined;
+  }
+}
+
+/**
+ * 投稿一覧・詳細へ添付ファイルメタデータ（実体ファイル）を付与する
+ * @param {Array<Object>} items
+ * @param {import('../models/bulletin.model.js').bulletinModel} model
+ */
+async function attachAttachments(items, model = bulletinModel) {
+  const list = Array.isArray(items) ? items : [];
+  if (list.length === 0) return list;
+
+  const ids = list.map((i) => String(i.id)).filter(Boolean);
+  let rows = [];
+  try {
+    if (typeof model.listAttachmentsForPosts === 'function') {
+      rows = await model.listAttachmentsForPosts(ids);
+    }
+  } catch (e) {
+    console.warn('[BulletinService] 添付一覧取得失敗:', e.message);
+    rows = [];
+  }
+
+  const byPost = new Map();
+  rows.forEach((row) => {
+    const key = String(row.post_id);
+    if (!byPost.has(key)) byPost.set(key, []);
+    byPost.get(key).push(mapAttachment(row));
+  });
+
+  return list.map((item) => {
+    const dbAttachments = byPost.get(String(item.id)) || [];
+    const legacy = Array.isArray(item.attachments) ? item.attachments : [];
+    // JSON カラム内の旧添付レコード（オブジェクト/文字列 ID）を正規化し DB 実体と統合
+    const normalizedLegacy = legacy
+      .map((a) => {
+        if (typeof a === 'string') return { id: a, name: a, size: 0, downloadPath: null };
+        if (a && a.id) {
+          return {
+            id: a.id,
+            name: a.name || a.originalName || a.original_name || a.id,
+            size: Number(a.size || 0),
+            mime: a.mime || a.mime_type || '',
+            downloadPath: a.downloadPath || (a.id ? `/bulletins/attachments/${a.id}` : null),
+          };
+        }
+        return null;
+      })
+      .filter(Boolean);
+
+    const merged = [...dbAttachments];
+    normalizedLegacy.forEach((legacyItem) => {
+      if (!merged.some((m) => String(m.id) === String(legacyItem.id))) merged.push(legacyItem);
+    });
+
+    const postedAt = item.postedAt || item.posted_at || item.createdAt || item.created_at;
+    const postedDay = String(postedAt).substring(0, 10);
+
+    return {
+      ...item,
+      postedAt,
+      posted_at: postedAt,
+      postedDay,
+      posted_day: postedDay,
+      attachments: merged,
+    };
+  });
+}
 
 export const bulletinService = {
   /**
@@ -18,6 +98,7 @@ export const bulletinService = {
   async getBulletins(filters = {}, userId = 'kyomu01') {
     const rawFilter = {
       ...filters,
+      postedDay: filters.postedDay || filters.posted_date || filters.day,
       currentUserId: userId
     };
 
@@ -31,7 +112,7 @@ export const bulletinService = {
     if (!Array.isArray(list)) list = [];
 
     // フロントエンド描画に必要な両命名規則 (Camel / Snake) の同時展開
-    return list.map(item => {
+    const normalized = list.map(item => {
       const pType = item.postType || item.post_type || item.type || 'NOTICE';
       const pPriority = item.priority || (item.is_urgent ? 'URGENT' : 'NORMAL');
       const pAuthorName = item.authorName || item.author_name || item.author || '教務 主任';
@@ -57,6 +138,8 @@ export const bulletinService = {
         attachments: item.attachments || []
       };
     });
+
+    return await attachAttachments(normalized);
   },
 
   /**
@@ -122,8 +205,28 @@ export const bulletinService = {
     const pType = bulletin.postType || bulletin.post_type || 'NOTICE';
     const pAuthorName = bulletin.authorName || bulletin.author_name || '教務 主任';
 
+    // 添付ファイル実体メタデータ (テーブルから取得)
+    let attachmentMeta = [];
+    try {
+      if (typeof bulletinModel.listAttachments === 'function') {
+        const rows = await bulletinModel.listAttachments(id);
+        attachmentMeta = (rows || []).map((row) => mapAttachment(row));
+      }
+    } catch (attachErr) {
+      console.warn('[BulletinService] 添付取得失敗:', attachErr.message);
+      attachmentMeta = [];
+    }
+
+    const enriched = await attachAttachments([
+      {
+        ...bulletin,
+        attachments: attachmentMeta.length > 0 ? attachmentMeta : bulletin.attachments || [],
+      },
+    ]);
+    const base = enriched[0] || bulletin;
+
     return {
-      ...bulletin,
+      ...base,
       postType: pType,
       post_type: pType,
       authorName: pAuthorName,
@@ -162,6 +265,12 @@ export const bulletinService = {
       author_id: userId,
       authorName: userName,
       author_name: userName,
+      // 投稿日時（編集日時とは別）と添付ファイル ID 群
+      postedAt: postData.postedAt || postData.posted_at || postData.postedAtInput || null,
+      posted_at: postData.postedAt || postData.posted_at || postData.postedAtInput || null,
+      attachments: (postData.attachments || [])
+        .map((a) => (typeof a === 'string' ? a : a && a.id))
+        .filter(Boolean),
     };
 
     const createFn = bulletinModel.create || bulletinModel.createPost;
@@ -182,10 +291,30 @@ export const bulletinService = {
       console.warn('[Audit Log Warning]', auditErr.message);
     }
 
+    const createdAt = created.createdAt || created.created_at || new Date().toISOString();
+    const postedAt = created.postedAt || created.posted_at || normalizedPost.postedAt || createdAt;
+
+    let attachmentMeta = [];
+    try {
+      if (created.id && typeof bulletinModel.listAttachments === 'function') {
+        const rows = await bulletinModel.listAttachments(created.id);
+        attachmentMeta = (rows || []).map((row) => mapAttachment(row));
+      }
+    } catch (attachErr) {
+      console.warn('[BulletinService] 添付メタ取得失敗:', attachErr.message);
+      attachmentMeta = [];
+    }
+
     return {
       ...normalizedPost,
       ...created,
-      createdAt: created.createdAt || created.created_at || new Date().toISOString()
+      createdAt,
+      created_at: createdAt,
+      postedAt,
+      posted_at: postedAt,
+      postedDay: String(postedAt).substring(0, 10),
+      posted_day: String(postedAt).substring(0, 10),
+      attachments: attachmentMeta
     };
   },
 
@@ -333,6 +462,122 @@ export const bulletinService = {
     }
 
     return commentData;
+  },
+
+  /**
+   * multipart/form-data による掲示作成（ファイル添付付き）
+   * @param {import('express').Request} req
+   * @param {Object} authorUser
+   */
+  async createBulletinWithUpload(req, authorUser = {}) {
+    const form = await parseMultipart(req);
+    const { fields, files } = extractFormParts(form);
+
+    if (!files || files.length === 0) {
+      throw new ApiError(400, '添付ファイルを 1 件以上選択してください。');
+    }
+
+    const postData = {
+      title: fields.title || fields.subject || '',
+      content: fields.content || fields.body || '',
+      postType: fields.postType || fields.post_type || fields.type || fields.category,
+      priority: fields.priority,
+      postedAt: fields.postedAt || fields.posted_at || fields.postedAtInput,
+      targetScope: fields.targetScope ? safeParseScope(fields.targetScope) : undefined,
+      attachments: [],
+    };
+
+    // 本文・件名検証はファイル保存前に行う (失敗時はディスクに残さない)
+    if (!postData.title || !postData.content) {
+      throw new ApiError(400, '件名および本文は必須項目です。');
+    }
+
+    const created = await this.createBulletin(postData, authorUser);
+
+    // 添付をこの投稿へ紐付けて保存
+    const savedMeta = await saveFileEntries(files, authorUser, bulletinModel, created.id);
+
+    try {
+      if (auditModel && typeof auditModel.logAction === 'function') {
+        await auditModel.logAction({
+          userId: authorUser.id || 'kyomu01',
+          action: 'UPLOAD_BULLETIN_ATTACHMENT',
+          targetEntity: 'BULLETIN',
+          targetId: created.id,
+          changesJson: JSON.stringify({ files: savedMeta.map((m) => ({ id: m.id, name: m.name, size: m.size })) }),
+        });
+      }
+    } catch (auditErr) {
+      console.warn('[Audit Log Warning]', auditErr.message);
+    }
+
+    return { ...created, attachments: savedMeta };
+  },
+
+  /**
+   * 添付ファイル 1 件の取得（メタ + 実体ストリーム）
+   * @param {string} attachmentId
+   * @param {string} userId
+   */
+  async getAttachmentForDownload(attachmentId, userId = 'kyomu01') {
+    const row = await bulletinModel.findAttachment(attachmentId);
+    if (!row) {
+      throw new ApiError(404, '添付ファイルが見つかりません。');
+    }
+
+    if (row.post_id) {
+      const post = await bulletinModel.findById(row.post_id);
+      if (!post) {
+        throw new ApiError(404, '添付元の掲示が存在しないため、ダウンロードできません。');
+      }
+    }
+
+    return { meta: mapAttachment(row), row, stream: getAttachmentStream(row) };
+  },
+
+  /**
+   * 添付ファイルの削除（投稿者本人・教務・管理者のみ）
+   * @param {string} attachmentId
+   * @param {Object} user
+   */
+  async deleteAttachment(attachmentId, user = {}) {
+    const row = await bulletinModel.findAttachment(attachmentId);
+    if (!row) {
+      throw new ApiError(404, '添付ファイルが見つかりません。');
+    }
+
+    const role = String(user.role || '').toUpperCase();
+    const isPrivileged = role === 'KYOMU' || role === 'KYOUMU' || role === 'ADMIN';
+    const isUploader = row.uploaded_by && String(row.uploaded_by) === String(user.id);
+
+    let isPostAuthor = false;
+    if (row.post_id) {
+      const post = await bulletinModel.findById(row.post_id);
+      isPostAuthor = !!post && String(post.authorId || post.author_id) === String(user.id);
+    }
+
+    if (!isPrivileged && !isUploader && !isPostAuthor) {
+      throw new ApiError(403, '添付ファイルを削除できるのは投稿者本人・教務・管理者のみです。');
+    }
+
+    await bulletinModel.deleteAttachment(row.id);
+    await removeStoredFile(row.stored_name);
+
+    try {
+      if (auditModel && typeof auditModel.logAction === 'function') {
+        await auditModel.logAction({
+          userId: user.id || 'kyomu01',
+          action: 'DELETE_BULLETIN_ATTACHMENT',
+          targetEntity: 'BULLETIN',
+          targetId: row.post_id || row.id,
+          changesJson: JSON.stringify({ attachmentId: row.id, name: row.original_name }),
+        });
+      }
+    } catch (auditErr) {
+      console.warn('[Audit Log Warning]', auditErr.message);
+    }
+
+    return { id: row.id, name: row.original_name, deleted: true };
   },
 
   /**

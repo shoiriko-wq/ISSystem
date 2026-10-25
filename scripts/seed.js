@@ -1,49 +1,28 @@
 /**
- * ISSystem ダミーデータ一括挿入スクリプト (scripts/seed.js)
+ * ISSystem ダミーデータ一括挿入スクリプト (scripts/seed.js) — PostgreSQL 版
  * 仕様書 v2.1.0 完全連動版
  */
 
-import bcrypt from 'bcrypt';
-import { pool, ensureSchema } from '../config/database.js';
+import { Client } from 'pg';
 import path from 'path';
 import { fileURLToPath } from 'url';
-// crypto/config は bcrypt 化に伴い不要
-
+import bcrypt from 'bcrypt';
+import config from '../config/default.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-// PostgreSQL 準拠のため database.sqlite は使用しない
+const dbCfg = config.db;
 
-async function hashPassword(password) {
-  // bcrypt ハッシュ (Salt rounds = 10) を使用
-
-  return bcrypt.hash(password, BCRYPT_ROUNDS);
-}
-
-const BCRYPT_ROUNDS = 10;
-/**
- * PostgreSQL 準拠アップサートヘルパー
- * SQLite の INSERT OR REPLACE 相当を $n プレースホルダ + ON CONFLICT (id) で実装
- */
-async function upsert(client, table, columns, values) {
-  const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
-  const updates = columns.map((c) => `${c} = EXCLUDED.${c}`).join(', ');
-  const sql = `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders}) ON CONFLICT (id) DO UPDATE SET ${updates}`;
-  return client.query(sql, values);
-}
-
-
-const defaultPasswordHash = await hashPassword('password123');
+const BCRYPT_ROUNDS = parseInt(process.env.BCRYPT_SALT_ROUNDS || '10', 10);
+const SEED_PASSWORD = 'password123';
 
 // 1. 教職員ユーザー
 const dummyUsers = [
-  { id: 'kyomu01', staff_code: 'T2026001', name: '教務 主任', email: 'kyomu@school.ed.jp', password_hash: defaultPasswordHash, role: 'KYOMU', department: '教務部', extension_number: '101' },
-  { id: 't-tanaka', staff_code: 'T2026002', name: '田中 先生', email: 'tanaka@school.ed.jp', password_hash: defaultPasswordHash, role: 'TEACHER', department: '生徒指導部', extension_number: '102' },
-  { id: 't-sato', staff_code: 'T2026003', name: '佐藤 先生', email: 'sato@school.ed.jp', password_hash: defaultPasswordHash, role: 'TEACHER', department: 'キャリアガイダンス部', extension_number: '103' },
-  { id: 't-suzuki', staff_code: 'T2026004', name: '鈴木 先生', email: 'suzuki@school.ed.jp', password_hash: defaultPasswordHash, role: 'TEACHER', department: '特色推進部', extension_number: '104' },
-  { id: 't-takahashi', staff_code: 'T2026005', name: '高橋 先生', email: 'takahashi@school.ed.jp', password_hash: defaultPasswordHash, role: 'TEACHER', department: '１学年', extension_number: '105' },
-  // システム自動通知ユーザー (chat_messages.sender_id の FK 用 / ログイン不可)
-  { id: 'system', staff_code: 'SYS00001', name: 'システム', email: 'system@school.ed.jp', password_hash: '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', role: 'SYSTEM', department: 'システム' }
+  { id: 'kyomu01', staff_code: 'T2026001', name: '教務 主任', email: 'kyomu@school.ed.jp', role: 'KYOMU', grade: 'NONE', department: '教務部', extension_number: '101' },
+  { id: 't-tanaka', staff_code: 'T2026002', name: '田中 先生', email: 'tanaka@school.ed.jp', role: 'TEACHER', grade: '1', department: '生徒指導部', extension_number: '102' },
+  { id: 't-sato', staff_code: 'T2026003', name: '佐藤 先生', email: 'sato@school.ed.jp', role: 'TEACHER', grade: '2', department: 'キャリアガイダンス部', extension_number: '103' },
+  { id: 't-suzuki', staff_code: 'T2026004', name: '鈴木 先生', email: 'suzuki@school.ed.jp', role: 'TEACHER', grade: '3', department: '特色推進部', extension_number: '104' },
+  { id: 't-takahashi', staff_code: 'T2026005', name: '高橋 先生', email: 'takahashi@school.ed.jp', role: 'TEACHER', grade: '1', department: '１学年', extension_number: '105' }
 ];
 
 // 2. 掲示板投稿
@@ -62,22 +41,9 @@ const dummyAcknowledgements = [
 
 // 4. チャットチャンネル
 const dummyChannels = [
-  { id: 'general', name: '📢 職員全体', type: 'PUBLIC' },
-  { id: 'grade1', name: '🏫 1年学年部', type: 'GROUP' },
-  { id: 'kyomu', name: '📋 教務部連絡', type: 'GROUP' }
-];
-
-// 4b. チャンネル参加者 (chat_channel_members との突合用)
-const dummyChannelMembers = [
-  { channel_id: 'general', user_id: 'kyomu01' },
-  { channel_id: 'general', user_id: 't-tanaka' },
-  { channel_id: 'general', user_id: 't-sato' },
-  { channel_id: 'general', user_id: 't-suzuki' },
-  { channel_id: 'general', user_id: 't-takahashi' },
-  { channel_id: 'grade1', user_id: 't-tanaka' },
-  { channel_id: 'grade1', user_id: 't-takahashi' },
-  { channel_id: 'kyomu', user_id: 'kyomu01' },
-  { channel_id: 'kyomu', user_id: 't-sato' }
+  { id: 'general', name: '📢 職員全体', type: 'PUBLIC', members: ['kyomu01', 't-tanaka', 't-sato', 't-suzuki', 't-takahashi'] },
+  { id: 'grade1', name: '🏫 1年学年部', type: 'GROUP', members: ['t-tanaka', 't-takahashi'] },
+  { id: 'kyomu', name: '📋 教務部連絡', type: 'GROUP', members: ['kyomu01'] }
 ];
 
 // 5. チャットメッセージ
@@ -105,7 +71,7 @@ const dummyResources = [
   { id: '5', name: '校外研修用マイクロバス', category: 'EQUIPMENT' }
 ];
 
-// 8. 施設予約 (新スキーマ構造: facility_id, target_date, user_name 等に対応)
+// 8. 施設予約
 const dummyReservations = [
   { id: 'resv_1', facility_id: '1', resource_id: '1', user_id: 'kyomu01', user_name: '教務 主任', title: '教務部定例会議', target_date: '2026-10-15', start_time: '2026-10-15 16:30:00', end_time: '2026-10-15 17:30:00', is_cancelled: false },
   { id: 'resv_2', facility_id: '4', resource_id: '4', user_id: 't-sato', user_name: '佐藤 先生', title: '進路説明会プレゼン', target_date: '2026-10-16', start_time: '2026-10-16 13:00:00', end_time: '2026-10-16 15:00:00', is_cancelled: false }
@@ -118,68 +84,311 @@ const dummyApprovals = [
   { id: 'apr_3', title: '校外研修用マイクロバス借用申請', category: 'TRANSPORT', description: '10月22日の県外研修への送迎使用。', amount: 12000, applicant_id: 't-suzuki', approver_id: 'kyomu01', status: 'REJECTED', comment: '同日に県大会送迎と重複するため却下。', linked_chat_channel_id: null, approved_at: '2026-10-12 15:05:00', created_at: '2026-10-11 11:40:00' }
 ];
 
-// 9. 校内スケジュール・年間行事 (新規追加)
+// 9. 校内スケジュール・年間行事
 const dummySchedules = [
   { id: 'sch_101', title: '中間考査（第1日）', description: '全学年対象 9:00開始', event_date: '2026-10-15', category: 'EXAM', target_grade: null, created_by_user_id: 'kyomu01' },
   { id: 'sch_102', title: '職員定例会議', description: '第一会議室 15:30〜', event_date: '2026-10-15', category: 'MEETING', target_grade: null, created_by_user_id: 'kyomu01' },
   { id: 'sch_103', title: '避難訓練', description: 'グラウンド避難', event_date: '2026-10-20', category: 'SCHOOL', target_grade: null, created_by_user_id: 'kyomu01' }
 ];
 
+// 10. クラス・科目マスタ
+const dummyClasses = [
+  { id: '1-1', grade: 1, class_num: 1, name: '1年1組' },
+  { id: '1-2', grade: 1, class_num: 2, name: '1年2組' },
+  { id: '2-1', grade: 2, class_num: 1, name: '2年1組' },
+  { id: '2-2', grade: 2, class_num: 2, name: '2年2組' },
+  { id: '3-1', grade: 3, class_num: 1, name: '3年1組' },
+  { id: '3-2', grade: 3, class_num: 2, name: '3年2組' }
+];
+
+const dummySubjects = [
+  { id: 'ko01', name: '国語' },
+  { id: 'ko02', name: '数学' },
+  { id: 'ko03', name: '英語' },
+  { id: 'ko04', name: '理科' },
+  { id: 'ko05', name: '社会' }
+];
+
+// 11. 考査マスター
+const dummyExamMasters = [
+  { id: 'exam_2026_1', title: '2026年度 1学期中間考査', start_date: '2026-10-15', end_date: '2026-10-17', days_count: 3, daily_slots: 3, is_active: true }
+];
+
+// 12. 科目担当教員マッピング
+const subjectTeachers = { ko01: 'kyomu01', ko02: 't-sato', ko03: 't-tanaka', ko04: 't-suzuki', ko05: 't-takahashi' };
+
+// 13. 監督除外・配慮教員
+const dummyExamExemptions = [
+  { exam_master_id: 'exam_2026_1', teacher_id: 't-suzuki', reason: '毎週水曜に県教育委員会出張' },
+  { exam_master_id: 'exam_2026_1', teacher_id: 't-takahashi', reason: '通院治療による午後除外' }
+];
+
+// 15. 年休等・出張 欠席登録 (当日基準でデモデータを生成)
+const todayStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+const dummyAbsenceRecords = [
+  { id: 'abs_1', user_id: 't-takahashi', record_date: todayStr, record_type: 'LEAVE', reason: '年休（通院治療）', recorded_by: 'kyomu01', recorded_by_name: '教務 主任' },
+  { id: 'abs_2', user_id: 't-suzuki', record_date: todayStr, record_type: 'TRIP', reason: '県教育委員会 研修（午後）', recorded_by: 'kyomu01', recorded_by_name: '教務 主任' },
+  { id: 'abs_3', user_id: 't-sato', record_date: todayStr, record_type: 'TRIP', reason: '進路指導部 校外打ち合わせ', recorded_by: 'kyomu01', recorded_by_name: '教務 主任' }
+];
+
+// 14. 考査コマ（科目時間割）と監督割当を決定論的に生成 (3日 × 3コマ × 6クラス = 54コマ)
+const teacherPool = ['kyomu01', 't-tanaka', 't-sato', 't-suzuki', 't-takahashi'];
+const exemptedTeachers = new Set(dummyExamExemptions.map((e) => e.teacher_id));
+const dummyExamSlots = [];
+const dummyProctorAssignments = [];
+
+for (const master of dummyExamMasters) {
+  for (let day = 1; day <= master.days_count; day++) {
+    for (let slot = 1; slot <= master.daily_slots; slot++) {
+      dummyClasses.forEach((cls, classIndex) => {
+        const subject = dummySubjects[(day + slot + classIndex) % dummySubjects.length];
+        const subjectTeacher = subjectTeachers[subject.id];
+
+        dummyExamSlots.push({
+          exam_master_id: master.id,
+          day_number: day,
+          slot_number: slot,
+          class_id: cls.id,
+          subject_id: subject.id,
+          subject_teacher_id: subjectTeacher
+        });
+
+        // 自科目担当・除外教員を避けて監督教員を輪番割当
+        const eligible = teacherPool.filter((t) => t !== subjectTeacher && !exemptedTeachers.has(t));
+        const proctor = eligible[(day * 3 + slot + classIndex) % eligible.length];
+
+        dummyProctorAssignments.push({
+          exam_master_id: master.id,
+          day_number: day,
+          slot_number: slot,
+          class_id: cls.id,
+          proctor_teacher_id: proctor
+        });
+      });
+    }
+  }
+}
+
 async function seedDatabase() {
   console.log('🌱 ダミーデータの一括投入を開始します...');
 
-  // 自動スキーマ適用と競合しないよう、先にスキーマ適用を完了させる
-  await ensureSchema();
+  const passwordHash = await bcrypt.hash(SEED_PASSWORD, BCRYPT_ROUNDS);
 
-  const client = await pool.connect();
-  await client.query('BEGIN');
+  const client = new Client({
+    user: dbCfg.user,
+    password: dbCfg.password,
+    host: dbCfg.host,
+    port: dbCfg.port,
+    database: dbCfg.name,
+    application_name: 'issystem-seed',
+  });
+
+  await client.connect();
+  await client.query("SET TIME ZONE 'Asia/Tokyo'");
+
+  // INSERT OR REPLACE 相当：外部キー順序を考慮して関連テーブルを一括クリアする
+  const truncateSql = `
+    TRUNCATE TABLE
+      system_audit_logs,
+      editing_locks,
+      invitation_codes,
+      school_schedules,
+      reservations,
+      resources,
+      seating_status,
+      absence_records,
+      chat_messages,
+      chat_channel_members,
+      chat_channels,
+      post_acknowledgements,
+      posts,
+      exam_teacher_exemptions,
+      exam_proctor_assignments,
+      exam_slots,
+      exam_masters,
+      classes,
+      subjects,
+      users
+    RESTART IDENTITY CASCADE;
+  `;
+
+  await client.query('BEGIN TRANSACTION;');
 
   try {
+    await client.query(truncateSql);
+
     for (const u of dummyUsers) {
-      await upsert(client, 'users', ['id', 'staff_code', 'name', 'email', 'password_hash', 'role', 'department', 'extension_number'], [u.id, u.staff_code, u.name, u.email, u.password_hash, u.role, u.department, u.extension_number]);
-    }
-
-    for (const p of dummyPosts) {
-      await upsert(client, 'posts', ['id', 'title', 'content', 'post_type', 'priority', 'author_id', 'created_at'], [p.id, p.title, p.content, p.post_type, p.priority, p.author_id, p.created_at]);
-    }
-
-    for (const a of dummyAcknowledgements) {
-      await upsert(client, 'post_acknowledgements', ['id', 'post_id', 'user_id', 'status', 'comment', 'acknowledged_at'], [a.id, a.post_id, a.user_id, a.status, a.comment, a.acknowledged_at]);
-    }
-
-    for (const c of dummyChannels) {
-      await upsert(client, 'chat_channels', ['id', 'name', 'type'], [c.id, c.name, c.type]);
-    }
-
-    for (const m of dummyMessages) {
-      await upsert(client, 'chat_messages', ['id', 'channel_id', 'sender_id', 'message', 'created_at'], [m.id, m.channel_id, m.sender_id, m.message, m.created_at]);
-    }
-
-    for (const s of dummySeating) {
-      await upsert(client, 'seating_status', ['id', 'user_id', 'desk_number', 'group_zone', 'current_status', 'status_note'], [s.id, s.user_id, s.desk_number, s.group_zone, s.current_status, s.status_note]);
-    }
-
-    for (const r of dummyResources) {
-      await upsert(client, 'resources', ['id', 'name', 'category'], [r.id, r.name, r.category]);
-    }
-
-    for (const rv of dummyReservations) {
-      await upsert(client, 'reservations', ['id', 'facility_id', 'resource_id', 'user_id', 'user_name', 'title', 'target_date', 'start_time', 'end_time', 'is_cancelled'], [rv.id, rv.facility_id, rv.resource_id, rv.user_id, rv.user_name, rv.title, rv.target_date, rv.start_time, rv.end_time, rv.is_cancelled]);
-    }
-
-    for (const sch of dummySchedules) {
-      await upsert(client, 'school_schedules', ['id', 'title', 'description', 'event_date', 'category', 'target_grade', 'created_by_user_id'], [sch.id, sch.title, sch.description, sch.event_date, sch.category, sch.target_grade, sch.created_by_user_id]);
-    }
-
-    for (const cm of dummyChannelMembers) {
       await client.query(
-        `INSERT INTO chat_channel_members (channel_id, user_id, is_hidden, joined_at) VALUES ($1, $2, 0, CURRENT_TIMESTAMP) ON CONFLICT (channel_id, user_id) DO NOTHING`,
-        [cm.channel_id, cm.user_id]
+        `INSERT INTO users (id, staff_code, name, email, password_hash, role, grade, department, extension_number)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (id) DO UPDATE SET
+           staff_code = EXCLUDED.staff_code,
+           name = EXCLUDED.name,
+           email = EXCLUDED.email,
+           password_hash = EXCLUDED.password_hash,
+           role = EXCLUDED.role,
+           grade = EXCLUDED.grade,
+           department = EXCLUDED.department,
+           extension_number = EXCLUDED.extension_number`,
+        [u.id, u.staff_code, u.name, u.email, passwordHash, u.role, u.grade, u.department, u.extension_number]
       );
     }
 
-    for (const apr of dummyApprovals) {
-      await upsert(client, 'approvals', ['id', 'title', 'category', 'description', 'amount', 'applicant_id', 'approver_id', 'status', 'comment', 'linked_chat_channel_id', 'approved_at', 'created_at'], [apr.id, apr.title, apr.category, apr.description, apr.amount, apr.applicant_id, apr.approver_id, apr.status, apr.comment, apr.linked_chat_channel_id, apr.approved_at, apr.created_at]);
+    for (const p of dummyPosts) {
+      await client.query(
+        `INSERT INTO posts (id, title, content, post_type, priority, author_id, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $7)`,
+        [p.id, p.title, p.content, p.post_type, p.priority, p.author_id, p.created_at]
+      );
+    }
+
+    for (const a of dummyAcknowledgements) {
+      await client.query(
+        `INSERT INTO post_acknowledgements (id, post_id, user_id, status, comment, acknowledged_at)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (post_id, user_id) DO UPDATE SET
+           status = EXCLUDED.status,
+           comment = EXCLUDED.comment,
+           acknowledged_at = EXCLUDED.acknowledged_at`,
+        [a.id, a.post_id, a.user_id, a.status, a.comment, a.acknowledged_at]
+      );
+    }
+
+    for (const c of dummyChannels) {
+      await client.query(
+        `INSERT INTO chat_channels (id, name, type, members) VALUES ($1, $2, $3, $4)`,
+        [c.id, c.name, c.type, JSON.stringify(c.members)]
+      );
+      for (const m of c.members) {
+        await client.query(
+          `INSERT INTO chat_channel_members (channel_id, user_id, is_hidden)
+           VALUES ($1, $2, 0) ON CONFLICT (channel_id, user_id) DO NOTHING`,
+          [c.id, m]
+        );
+      }
+    }
+
+    for (const m of dummyMessages) {
+      await client.query(
+        `INSERT INTO chat_messages (id, channel_id, sender_id, message, created_at) VALUES ($1, $2, $3, $4, $5)`,
+        [m.id, m.channel_id, m.sender_id, m.message, m.created_at]
+      );
+    }
+
+    for (const s of dummySeating) {
+      await client.query(
+        `INSERT INTO seating_status (id, user_id, desk_number, group_zone, current_status, status_note)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (user_id) DO UPDATE SET
+           desk_number = EXCLUDED.desk_number,
+           group_zone = EXCLUDED.group_zone,
+           current_status = EXCLUDED.current_status,
+           status_note = EXCLUDED.status_note`,
+        [s.id, s.user_id, s.desk_number, s.group_zone, s.current_status, s.status_note]
+      );
+    }
+
+    for (const ab of dummyAbsenceRecords) {
+      await client.query(
+        `INSERT INTO absence_records (id, user_id, record_date, record_type, reason, recorded_by, recorded_by_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (user_id, record_date, record_type) DO UPDATE SET
+           reason = EXCLUDED.reason,
+           recorded_by = EXCLUDED.recorded_by,
+           recorded_by_name = EXCLUDED.recorded_by_name,
+           updated_at = CURRENT_TIMESTAMP`,
+        [ab.id, ab.user_id, ab.record_date, ab.record_type, ab.reason, ab.recorded_by, ab.recorded_by_name]
+      );
+    }
+
+    for (const r of dummyResources) {
+      await client.query(
+        `INSERT INTO resources (id, name, category) VALUES ($1, $2, $3)
+         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, category = EXCLUDED.category`,
+        [r.id, r.name, r.category]
+      );
+    }
+
+    for (const rv of dummyReservations) {
+      await client.query(
+        `INSERT INTO reservations (id, facility_id, resource_id, user_id, user_name, title, target_date, start_time, end_time, is_cancelled)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [rv.id, rv.facility_id, rv.resource_id, rv.user_id, rv.user_name, rv.title, rv.target_date, rv.start_time, rv.end_time, rv.is_cancelled]
+      );
+    }
+
+    for (const sch of dummySchedules) {
+      await client.query(
+        `INSERT INTO school_schedules (id, title, description, event_date, category, target_grade, created_by_user_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [sch.id, sch.title, sch.description, sch.event_date, sch.category, sch.target_grade, sch.created_by_user_id]
+      );
+    }
+
+    for (const c of dummyClasses) {
+      await client.query(
+        `INSERT INTO classes (id, grade, class_num, name) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (id) DO UPDATE SET
+           grade = EXCLUDED.grade,
+           class_num = EXCLUDED.class_num,
+           name = EXCLUDED.name`,
+        [c.id, c.grade, c.class_num, c.name]
+      );
+    }
+
+    for (const subj of dummySubjects) {
+      await client.query(
+        `INSERT INTO subjects (id, name) VALUES ($1, $2)
+         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name`,
+        [subj.id, subj.name]
+      );
+    }
+
+    for (const m of dummyExamMasters) {
+      await client.query(
+        `INSERT INTO exam_masters (id, title, start_date, end_date, days_count, daily_slots, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, true)
+         ON CONFLICT (id) DO UPDATE SET
+           title = EXCLUDED.title,
+           start_date = EXCLUDED.start_date,
+           end_date = EXCLUDED.end_date,
+           days_count = EXCLUDED.days_count,
+           daily_slots = EXCLUDED.daily_slots,
+           is_active = true,
+           updated_at = CURRENT_TIMESTAMP`,
+        [m.id, m.title, m.start_date, m.end_date, m.days_count, m.daily_slots]
+      );
+    }
+
+    for (const ex of dummyExamExemptions) {
+      await client.query(
+        `INSERT INTO exam_teacher_exemptions (exam_master_id, teacher_id, reason)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (exam_master_id, teacher_id) DO UPDATE SET reason = EXCLUDED.reason`,
+        [ex.exam_master_id, ex.teacher_id, ex.reason]
+      );
+    }
+
+    for (const sl of dummyExamSlots) {
+      await client.query(
+        `INSERT INTO exam_slots (exam_master_id, day_number, slot_number, class_id, subject_id, subject_teacher_id)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (exam_master_id, day_number, slot_number, class_id)
+         DO UPDATE SET
+           subject_id = EXCLUDED.subject_id,
+           subject_teacher_id = EXCLUDED.subject_teacher_id`,
+        [sl.exam_master_id, sl.day_number, sl.slot_number, sl.class_id, sl.subject_id, sl.subject_teacher_id]
+      );
+    }
+
+    for (const pa of dummyProctorAssignments) {
+      await client.query(
+        `INSERT INTO exam_proctor_assignments (exam_master_id, day_number, slot_number, class_id, proctor_teacher_id)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (exam_master_id, day_number, slot_number, class_id)
+         DO UPDATE SET proctor_teacher_id = EXCLUDED.proctor_teacher_id`,
+        [pa.exam_master_id, pa.day_number, pa.slot_number, pa.class_id, pa.proctor_teacher_id]
+      );
     }
 
     await client.query('COMMIT;');
@@ -187,11 +396,10 @@ async function seedDatabase() {
 
   } catch (err) {
     await client.query('ROLLBACK;');
-    console.error('❌ シードデータ投入エラー:', err);
-    process.exitCode = 1;
+    console.error('❌ シードデータ投入エラー:', err.message);
+    process.exit(1);
   } finally {
-    client.release();
-    await pool.end();
+    await client.end();
   }
 }
 

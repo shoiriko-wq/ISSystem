@@ -7,7 +7,14 @@ import { apiGet, apiPost, apiDelete } from '../api.js';
 import { formatDate, escapeHTML, refreshLucideIcons, openModal, closeModal, showToast } from '../ui-helpers.js';
 import { state } from '../state.js';
 
-let selectedDate = '2026-10-15';
+/**
+ * JST 基準の今日 (YYYY-MM-DD) を返す
+ */
+function todayJst() {
+  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+}
+
+let selectedDate = todayJst();
 
 // 施設マスター初期定義
 let facilities = [
@@ -18,17 +25,49 @@ let facilities = [
   { id: '5', name: '校外研修用マイクロバス', type: 'SPECIAL' }
 ];
 
-// タイムラインの列定義
-const PERIODS = [
-  { id: 1, label: '1限', time: '08:50 - 09:40', startMin: 530, endMin: 580 },
-  { id: 2, label: '2限', time: '09:50 - 10:40', startMin: 590, endMin: 640 },
-  { id: 3, label: '3限', time: '10:50 - 11:40', startMin: 650, endMin: 700 },
-  { id: 4, label: '4限', time: '11:50 - 12:40', startMin: 710, endMin: 760 },
-  { id: 8, label: '昼休み', time: '12:40 - 13:25', startMin: 760, endMin: 805, isLunch: true },
-  { id: 5, label: '5限', time: '13:25 - 14:15', startMin: 805, endMin: 855 },
-  { id: 6, label: '6限', time: '14:25 - 15:15', startMin: 865, endMin: 915 },
-  { id: 7, label: '7限/放課後', time: '15:25 - 17:00', startMin: 925, endMin: 1020 }
-];
+// ★ 時限（period）概念を廃止し、8:00〜18:00 の連続時間帯として扱う
+const TIME_START_MIN = 8 * 60;   // 08:00
+const TIME_END_MIN = 18 * 60;    // 18:00
+// ★ 10分刻みルールは撤廃。クリックした空き帯域は 1時間ブロックとして初期化する
+const SLOT_MIN = 60;
+const TIME_SPAN = TIME_END_MIN - TIME_START_MIN;
+
+/**
+ * 分を 'HH:MM' 表記へ変換する
+ * @param {number} totalMin
+ */
+function formatMinutesToTime(totalMin) {
+  const h = String(Math.floor(totalMin / 60)).padStart(2, '0');
+  const m = String(totalMin % 60).padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+/**
+ * 'HH:MM' 表記を分数へ変換する
+ * @param {string} hhmm
+ */
+function parseTimeToMinutes(hhmm) {
+  const match = String(hhmm || '').match(/(\d{1,2}):(\d{2})/);
+  if (!match) return -1;
+  return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+}
+
+/**
+ * タイムライン上の位置 (百分率) を算出する
+ * @param {number} minutes
+ */
+function timeToPercent(minutes) {
+  const clamped = Math.min(TIME_END_MIN, Math.max(TIME_START_MIN, minutes));
+  return ((clamped - TIME_START_MIN) / TIME_SPAN) * 100;
+}
+
+// 時間スケールヘッダーセル (1時間単位)
+const TIME_START_H = Math.floor(TIME_START_MIN / 60);
+const TIME_END_H = Math.floor(TIME_END_MIN / 60);
+const timeScaleCells = Array.from({ length: TIME_END_H - TIME_START_H }, (_, i) => {
+  const hour = TIME_START_H + i;
+  return `<div class="flex-1 border-l border-slate-800/60 px-1 py-2 text-left">${String(hour).padStart(2, '0')}:00</div>`;
+}).join('');
 
 let reservationsCache = [];
 
@@ -67,27 +106,25 @@ export function initFacilityModule() {
       </div>
     </div>
 
-    <!-- タイムラインマトリクス表示エリア -->
+    <!-- タイムラインマトリクス表示エリア (時間帯バンド表示) -->
     <div class="card p-4 overflow-hidden mt-4">
+      <div class="flex items-center justify-between mb-3 text-xs text-slate-400">
+        <span class="flex items-center gap-1.5"><i data-lucide="clock" class="w-3.5 h-3.5 text-emerald-400"></i> ${TIME_START_H}時〜${TIME_END_H}時の連続タイムライン (時限・10分刻み区切りなし)</span>
+        <span class="text-slate-500">バンドをクリック → 詳細 / キャンセル、空き帯域をクリック → 予約作成</span>
+      </div>
       <div class="timeline-scroll-container overflow-x-auto">
-        <table class="w-full text-left border-collapse text-xs min-w-[900px]">
-          <thead>
-            <tr class="border-b border-slate-800 bg-slate-900/80">
-              <th class="p-3 w-40 text-slate-300 font-bold">施設名称</th>
-              ${PERIODS.map(p => `
-                <th class="p-3 text-center border-l border-slate-800/80 ${p.isLunch ? 'bg-amber-950/20' : ''}">
-                  <div class="font-bold ${p.isLunch ? 'text-amber-300' : 'text-slate-200'}">${p.label}</div>
-                  <div class="text-[10px] text-slate-500 font-mono font-normal">${p.time}</div>
-                </th>
-              `).join('')}
-            </tr>
-          </thead>
-          <tbody id="facility-matrix-body" class="divide-y divide-slate-800/60">
-            <tr>
-              <td colspan="9" class="text-center py-12 text-slate-500">予約データを読み込み中...</td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="min-w-[880px]">
+          <!-- 時間スケールヘッダー -->
+          <div class="flex border-b border-slate-800 bg-slate-900/80 text-[10px] text-slate-500 font-mono">
+            <div class="w-40 shrink-0 p-2 font-bold text-slate-300 font-sans">施設名称</div>
+            <div class="flex-1 flex">
+              ${timeScaleCells}
+            </div>
+          </div>
+          <div id="facility-matrix-body" class="divide-y divide-slate-800/60">
+            <div class="py-12 text-center text-slate-500 text-xs">予約データを読み込み中...</div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -116,27 +153,26 @@ export function initFacilityModule() {
           </div>
 
           <div>
-            <label class="block text-xs font-bold text-slate-300 mb-1">利用時間帯 (10分刻み) <span class="text-rose-400">*</span></label>
+            <label class="block text-xs font-bold text-slate-300 mb-1">利用開始・終了時刻 <span class="text-rose-400">*</span></label>
+            <p class="text-[10px] text-slate-500 mb-2">時限・期間の区切りや10分刻みの制約はなく、8:00〜18:00 の任意の時刻 (分単位) で予約できます。</p>
             <div class="grid grid-cols-2 gap-3 mb-2">
               <div>
                 <span class="text-[10px] text-slate-400 block mb-0.5">開始時刻</span>
-                <input type="time" id="facility-start-time" step="600" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-emerald-500" value="08:50" required>
+                <input type="time" id="facility-start-time" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-emerald-500" value="08:50" required>
               </div>
               <div>
                 <span class="text-[10px] text-slate-400 block mb-0.5">終了時刻</span>
-                <input type="time" id="facility-end-time" step="600" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-emerald-500" value="09:40" required>
+                <input type="time" id="facility-end-time" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-emerald-500" value="09:40" required>
               </div>
             </div>
 
-            <div class="flex flex-wrap gap-1">
-              <button type="button" class="btn-preset text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2 py-1 rounded" data-start="08:50" data-end="09:40">1限</button>
-              <button type="button" class="btn-preset text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2 py-1 rounded" data-start="09:50" data-end="10:40">2限</button>
-              <button type="button" class="btn-preset text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2 py-1 rounded" data-start="10:50" data-end="11:40">3限</button>
-              <button type="button" class="btn-preset text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2 py-1 rounded" data-start="11:50" data-end="12:40">4限</button>
-              <button type="button" class="btn-preset text-[10px] bg-amber-950 hover:bg-amber-900 text-amber-300 border border-amber-700/60 px-2 py-1 rounded font-bold" data-start="12:40" data-end="13:20">昼休み</button>
-              <button type="button" class="btn-preset text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2 py-1 rounded" data-start="13:25" data-end="14:15">5限</button>
-              <button type="button" class="btn-preset text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2 py-1 rounded" data-start="14:25" data-end="15:15">6限</button>
-              <button type="button" class="btn-preset text-[10px] bg-indigo-950 hover:bg-indigo-900 text-indigo-300 border border-indigo-700/60 px-2 py-1 rounded font-bold" data-start="15:25" data-end="17:00">放課後</button>
+            <div class="flex flex-wrap gap-1 items-center">
+              <span class="text-[10px] text-slate-500 mr-1">時短:</span>
+              <button type="button" class="btn-duration text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2 py-1 rounded" data-minutes="30">30分</button>
+              <button type="button" class="btn-duration text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2 py-1 rounded" data-minutes="60">1時間</button>
+              <button type="button" class="btn-duration text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2 py-1 rounded" data-minutes="90">1時間30分</button>
+              <button type="button" class="btn-duration text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2 py-1 rounded" data-minutes="120">2時間</button>
+              <button type="button" class="btn-daylight text-[10px] bg-indigo-950 hover:bg-indigo-900 text-indigo-300 border border-indigo-700/60 px-2 py-1 rounded font-bold" data-start="08:00" data-end="18:00">終日 (8:00-18:00)</button>
             </div>
           </div>
 
@@ -172,7 +208,7 @@ function bindEvents() {
   document.getElementById('facility-next-day')?.addEventListener('click', () => changeDate(1));
 
   document.getElementById('facility-btn-today')?.addEventListener('click', () => {
-    selectedDate = '2026-10-15';
+    selectedDate = todayJst();
     if (picker) picker.value = selectedDate;
     loadReservations();
   });
@@ -183,7 +219,23 @@ function bindEvents() {
     openModal('facility-modal');
   });
 
-  document.querySelectorAll('.btn-preset').forEach(btn => {
+  // 終了時刻プリセット (開始時刻からの経過分数)
+  document.querySelectorAll('.btn-duration').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const minutes = parseInt(btn.getAttribute('data-minutes'), 10) || 60;
+      const startInput = document.getElementById('facility-start-time');
+      const endInput = document.getElementById('facility-end-time');
+      if (!startInput || !endInput) return;
+
+      const startMin = parseTimeToMinutes(startInput.value);
+      if (startMin < 0) return;
+      const endMin = Math.min(TIME_END_MIN, startMin + minutes);
+      endInput.value = formatMinutesToTime(endMin);
+    });
+  });
+
+  // 指定時間帯プリセット (終日など)
+  document.querySelectorAll('.btn-daylight').forEach(btn => {
     btn.addEventListener('click', () => {
       const start = btn.getAttribute('data-start');
       const end = btn.getAttribute('data-end');
@@ -194,6 +246,7 @@ function bindEvents() {
       if (endInput && end) endInput.value = end;
     });
   });
+
 
   const closeModalFn = () => closeModal('facility-modal');
   document.getElementById('facility-modal-close')?.addEventListener('click', closeModalFn);
@@ -206,9 +259,10 @@ function bindEvents() {
 }
 
 function changeDate(days) {
-  const d = new Date(selectedDate);
-  d.setDate(d.getDate() + days);
-  selectedDate = d.toISOString().split('T')[0];
+  // JST の日付キーとして加減算する (UTC ズレ防止)
+  const base = new Date(`${selectedDate}T12:00:00+09:00`);
+  base.setDate(base.getDate() + days);
+  selectedDate = base.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
   const picker = document.getElementById('facility-date-picker');
   if (picker) picker.value = selectedDate;
   loadReservations();
@@ -317,90 +371,86 @@ export async function loadReservations() {
   renderMatrix();
 }
 
-function formatMinutesToTime(totalMin) {
-  const h = String(Math.floor(totalMin / 60)).padStart(2, '0');
-  const m = String(totalMin % 60).padStart(2, '0');
-  return `${h}:${m}`;
-}
-
 /**
- * タイムラインマトリクスの描画
+ * タイムラインマトリクスの描画 (時限ではなく開始〜終了時刻のバンド表示)
  */
 function renderMatrix() {
   const tbody = document.getElementById('facility-matrix-body');
   if (!tbody) return;
 
+  // 1時間ごとのグリッド線 (8:00〜18:00)
+  const gridLines = Array.from({ length: TIME_END_H - TIME_START_H + 1 }, (_, i) => {
+    const pos = timeToPercent(TIME_START_MIN + i * 60);
+    return `<div class="absolute top-0 bottom-0 border-l border-slate-800/50 pointer-events-none" style="left:${pos}%"></div>`;
+  }).join('');
+
   tbody.innerHTML = facilities.map(fac => {
-    return `
-      <tr class="hover:bg-slate-900/30 transition-colors">
-        <td class="p-3 font-bold text-slate-200 bg-slate-900/40 border-r border-slate-800">
-          <div class="flex items-center gap-2">
-            <i data-lucide="${getFacilityIcon(fac.type)}" class="w-4 h-4 text-emerald-400"></i>
-            <span>${escapeHTML(fac.name)}</span>
+    const facRes = reservationsCache.filter(r => {
+      const isSameFacility = (
+        r.facilityId === fac.id ||
+        r.facilityName === fac.name ||
+        (r.facilityId && fac.id && (r.facilityId === fac.id || fac.id.includes(r.facilityId) || r.facilityId.includes(fac.id)))
+      );
+      return isSameFacility;
+    });
+
+    const bands = facRes.map(res => {
+      const s = res.startMin >= 0 ? res.startMin : TIME_START_MIN;
+      const e = res.endMin > s ? res.endMin : s + 30;
+      const left = timeToPercent(s);
+      const width = Math.max(2, timeToPercent(e) - left);
+      return `
+        <div class="reservation-chip absolute top-1 bottom-1 rounded-lg px-2 py-1 text-[11px] bg-emerald-950/80 border border-emerald-500/50 hover:border-emerald-400 transition-all cursor-pointer overflow-hidden"
+             style="left:${left}%; width:${width}%" data-res-id="${res.id}" title="${escapeHTML(res.purpose)} (${res.timeRangeStr})">
+          <div class="font-bold text-emerald-200 truncate leading-tight">${escapeHTML(res.purpose)}</div>
+          <div class="text-[10px] text-emerald-400 font-mono flex items-center gap-1 mt-0.5">
+            <span>${res.timeRangeStr || '予約中'}</span>
+            <span class="text-emerald-300/80 truncate">${escapeHTML(res.userName)}</span>
           </div>
-        </td>
-        ${PERIODS.map(p => {
-          const res = reservationsCache.find(r => {
-            // 施設マッチング
-            const isSameFacility = (
-              r.facilityId === fac.id || 
-              r.facilityName === fac.name || 
-              (r.facilityId && fac.id && (r.facilityId === fac.id || fac.id.includes(r.facilityId) || r.facilityId.includes(fac.id)))
-            );
-            
-            // 時間・コマの判定
-            let isTimeOverlap = false;
-            if (r.startMin > 0 && r.endMin > 0) {
-              isTimeOverlap = (r.startMin < p.endMin && r.endMin > p.startMin);
-            } else if (r.period > 0) {
-              isTimeOverlap = (r.period === p.id);
-            }
+        </div>
+      `;
+    }).join('');
 
-            return isSameFacility && isTimeOverlap;
-          });
-
-          return `
-            <td class="p-1.5 text-center border-l border-slate-800/80 h-16 align-middle ${p.isLunch ? 'bg-amber-950/10' : ''}">
-              ${res ? `
-                <div class="reservation-chip p-1.5 rounded-lg text-left text-[11px] bg-emerald-950/70 border border-emerald-500/50 hover:border-emerald-400 transition-all cursor-pointer flex flex-col justify-between h-full" data-res-id="${res.id}">
-                  <div class="font-bold text-emerald-200 truncate">${escapeHTML(res.purpose)}</div>
-                  <div class="text-[10px] text-emerald-400 font-mono flex items-center justify-between mt-0.5">
-                    <span>${res.timeRangeStr || '予約中'}</span>
-                    <span class="text-emerald-300/80 truncate ml-1">${escapeHTML(res.userName)}</span>
-                  </div>
-                </div>
-              ` : `
-                <button class="w-full h-full rounded border border-dashed border-slate-800/60 hover:border-slate-700 hover:bg-slate-800/40 text-[10px] text-slate-600 hover:text-slate-400 transition-all flex items-center justify-center gap-1 btn-quick-reserve" data-facility-id="${fac.id}" data-start="${formatMinutesToTime(p.startMin)}" data-end="${formatMinutesToTime(p.endMin)}">
-                  <i data-lucide="plus" class="w-3 h-3"></i> 空き
-                </button>
-              `}
-            </td>
-          `;
-        }).join('')}
-      </tr>
+    return `
+      <div class="flex hover:bg-slate-900/30 transition-colors" data-facility-row="${fac.id}">
+        <div class="w-40 shrink-0 p-3 font-bold text-slate-200 bg-slate-900/40 border-r border-slate-800 flex items-center gap-2">
+          <i data-lucide="${getFacilityIcon(fac.type)}" class="w-4 h-4 text-emerald-400"></i>
+          <span class="truncate">${escapeHTML(fac.name)}</span>
+        </div>
+        <div class="flex-1 relative h-16 btn-quick-reserve-area cursor-crosshair" data-facility-id="${fac.id}">
+          ${gridLines}
+          ${bands}
+        </div>
+      </div>
     `;
   }).join('');
 
+  // バンドクリック → 予約詳細・キャンセル
   tbody.querySelectorAll('[data-res-id]').forEach(chip => {
-    chip.addEventListener('click', () => {
+    chip.addEventListener('click', (e) => {
+      e.stopPropagation();
       openReservationDetail(chip.getAttribute('data-res-id'));
     });
   });
 
-  tbody.querySelectorAll('.btn-quick-reserve').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const fId = btn.getAttribute('data-facility-id');
-      const start = btn.getAttribute('data-start');
-      const end = btn.getAttribute('data-end');
-      
+  // 空き時間帯クリック → クリック位置の時刻から予約作成モーダルを開く
+  tbody.querySelectorAll('.btn-quick-reserve-area').forEach(area => {
+    area.addEventListener('click', (e) => {
+      const rect = area.getBoundingClientRect();
+      const ratio = (e.clientX - rect.left) / rect.width;
+      const rawMin = TIME_START_MIN + Math.round(ratio * TIME_SPAN);
+      const snapped = Math.round(rawMin / SLOT_MIN) * SLOT_MIN;
+      const startClamped = Math.min(TIME_END_MIN - SLOT_MIN, Math.max(TIME_START_MIN, snapped));
+      const endClamped = Math.min(TIME_END_MIN, startClamped + SLOT_MIN);
+
       const selectFac = document.getElementById('facility-select');
       const startInput = document.getElementById('facility-start-time');
       const endInput = document.getElementById('facility-end-time');
       const dateInput = document.getElementById('facility-date-input');
 
-      if (selectFac) selectFac.value = fId;
-      if (startInput) startInput.value = start;
-      if (endInput) endInput.value = end;
+      if (selectFac) selectFac.value = area.getAttribute('data-facility-id');
+      if (startInput) startInput.value = formatMinutesToTime(startClamped);
+      if (endInput) endInput.value = formatMinutesToTime(endClamped);
       if (dateInput) dateInput.value = selectedDate;
 
       openModal('facility-modal');
@@ -409,6 +459,7 @@ function renderMatrix() {
 
   refreshLucideIcons();
 }
+
 
 function openReservationDetail(resId) {
   const res = reservationsCache.find(r => String(r.id) === String(resId));

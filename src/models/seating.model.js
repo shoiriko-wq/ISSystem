@@ -97,15 +97,16 @@ export const seatingModel = {
       const desk = cell.desk_number || cell.note || `${String.fromCharCode(64 + Number(cell.row || cell.row_idx || 1))}-${String(cell.col || cell.col_idx || 1).padStart(2, '0')}`;
       const status = cell.current_status || cell.status || 'PRESENT';
       const note = cell.status_note || cell.note || '';
-      const existingRes = await query(`SELECT id FROM seating_status WHERE user_id = $1`, [userId]);
+      const existingRes = await db.query(`SELECT id FROM seating_status WHERE user_id = $1`, [userId]);
       if (existingRes.rows[0]) {
-        await query(
+        await db.query(
           `UPDATE seating_status SET desk_number = $1, current_status = $2, status_note = $3, updated_at = $4 WHERE user_id = $5`,
           [desk, status, note, nowIso(), userId]
         );
       } else {
-        await query(
+        await db.query(
           `INSERT INTO seating_status (id, user_id, desk_number, group_zone, current_status, status_note, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
            VALUES ($1, $2, $3, $4, $5, $6, $7)`,
           [`seat_${userId}`, userId, desk, cell.group_zone || 'staff', status, note, nowIso()]
         );

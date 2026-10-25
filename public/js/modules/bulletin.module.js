@@ -3,13 +3,17 @@
  * 掲示板一覧・詳細閲覧モーダル・修正依頼・API連携完全版
  */
 
-import { apiGet, apiPost, apiPut } from '../api.js';
+import { apiGet, apiPost, apiPut, apiPostForm, apiDelete } from '../api.js';
 import { formatDate, escapeHTML, refreshLucideIcons, openModal, closeModal, showToast } from '../ui-helpers.js';
 import { state } from '../state.js';
+import { API_BASE_URL } from '../config.js';
 
 let bulletinsCache = [];
 let currentCategory = 'ALL';
 let currentSearch = '';
+// ★ 投稿日による日ごと表示モード ('ALL' | 'TODAY' | 'YESTERDAY' | 'WEEK' | 'SPECIFIC')
+let currentDayMode = 'ALL';
+let currentDayDate = '';
 
 /**
  * 未読数の安全な更新ヘルパー
@@ -42,6 +46,20 @@ export function initBulletinModule() {
           <i data-lucide="plus-circle" class="w-4 h-4"></i> 新規連絡投稿
         </button>
       </div>
+    </div>
+
+    <!-- ★ 投稿日（日ごと表示）フィルター -->
+    <div class="flex flex-wrap items-center gap-2 text-xs mb-3 bg-slate-900/40 border border-slate-800 rounded-xl p-2.5">
+      <span class="text-slate-400 font-semibold flex items-center gap-1.5"><i data-lucide="calendar-days" class="w-3.5 h-3.5 text-indigo-400"></i> 投稿日表示</span>
+      <button data-day="ALL" class="bulletin-day-btn px-2.5 py-1 rounded-lg border border-slate-700 bg-slate-800 text-slate-200 font-semibold">すべて</button>
+      <button data-day="TODAY" class="bulletin-day-btn px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200">本日</button>
+      <button data-day="YESTERDAY" class="bulletin-day-btn px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200">昨日</button>
+      <button data-day="WEEK" class="bulletin-day-btn px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200">直近7日</button>
+      <label class="flex items-center gap-1.5 ml-auto text-slate-400">
+        特定の日付:
+        <input type="date" id="bulletin-day-date" class="py-1 px-2 rounded-lg border border-slate-700 bg-slate-900 text-slate-200 text-xs">
+      </label>
+      <button id="bulletin-day-clear" class="btn-secondary px-2.5 py-1 rounded-lg text-[11px] text-slate-300 border-slate-700">リセット</button>
     </div>
 
     <!-- 検索 & フィルタバー -->
@@ -115,14 +133,100 @@ function bindEvents() {
     currentSearch = e.target.value.toLowerCase().trim();
     renderBulletinList();
   });
+
+  // ★ 添付ファイル選択プレビュー
+  const fileInput = document.getElementById('bulletin-files');
+  if (fileInput) {
+    fileInput.addEventListener('change', () => {
+      renderSelectedFiles(Array.from(fileInput.files || []));
+    });
+  }
+
+  // ★ 投稿日（日ごと）フィルター
+  document.querySelectorAll('.bulletin-day-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.bulletin-day-btn').forEach(b => {
+        b.classList.remove('bg-slate-800', 'text-slate-200', 'border-slate-700', 'font-semibold');
+        b.classList.add('bg-slate-900', 'text-slate-400', 'border-slate-800');
+      });
+      btn.classList.add('bg-slate-800', 'text-slate-200', 'border-slate-700', 'font-semibold');
+      btn.classList.remove('bg-slate-900', 'text-slate-400', 'border-slate-800');
+
+      currentDayMode = btn.getAttribute('data-day') || 'ALL';
+      currentDayDate = '';
+      const dateInput = document.getElementById('bulletin-day-date');
+      if (dateInput) dateInput.value = '';
+      loadBulletins();
+    });
+  });
+
+  document.getElementById('bulletin-day-date')?.addEventListener('change', (e) => {
+    currentDayMode = e.target.value ? 'SPECIFIC' : 'ALL';
+    currentDayDate = e.target.value;
+    loadBulletins();
+  });
+
+  document.getElementById('bulletin-day-clear')?.addEventListener('click', () => {
+    currentDayMode = 'ALL';
+    currentDayDate = '';
+    const dateInput = document.getElementById('bulletin-day-date');
+    if (dateInput) dateInput.value = '';
+    loadBulletins();
+  });
+}
+
+/**
+ * 日付文字列を JST キー (YYYY-MM-DD) に正規化
+ * @param {string} iso
+ */
+function toJstDay(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return new Date(d.getTime() + 9 * 3600000).toISOString().split('T')[0];
+}
+
+/**
+ * JST 基準の今日キーから offset 日分のキー
+ * @param {number} offset
+ */
+function dayKey(offset = 0) {
+  const d = new Date(Date.now() + 9 * 3600000);
+  d.setUTCDate(d.getUTCDate() + offset);
+  return d.toISOString().split('T')[0];
+}
+
+/**
+ * 投稿日が現在の「日ごと」表示モードに一致するか
+ * @param {Object} b
+ */
+function matchesDay(b) {
+  const posted = toJstDay(b.postedAt || b.posted_at || b.createdAt || b.created_at);
+  if (currentDayMode === 'ALL') return true;
+  if (!posted) return false;
+  if (currentDayMode === 'TODAY') return posted === dayKey(0);
+  if (currentDayMode === 'YESTERDAY') return posted === dayKey(-1);
+  if (currentDayMode === 'WEEK') return posted >= dayKey(-7) && posted <= dayKey(0);
+  if (currentDayMode === 'SPECIFIC') return posted === currentDayDate;
+  return true;
 }
 
 /**
  * 掲示データの取得
  */
 export async function loadBulletins() {
+  // 日ごと表示モードに応じたサーバー側フィルタパラメータ
+  const params = {};
+  if (currentDayMode === 'TODAY') params.postedDay = dayKey(0);
+  if (currentDayMode === 'YESTERDAY') params.postedDay = dayKey(-1);
+  if (currentDayMode === 'SPECIFIC' && currentDayDate) params.postedDay = currentDayDate;
+  if (currentDayMode === 'WEEK') {
+    params.startDate = dayKey(-7);
+    params.endDate = dayKey(0);
+  }
+
   try {
-    const res = await apiGet('/bulletins');
+    const res = await apiGet('/bulletins', params);
     bulletinsCache = res.bulletins || (Array.isArray(res) ? res : []);
   } catch (err) {
     console.warn('[Bulletin] API取得失敗のためダミー表示:', err.message);
@@ -157,18 +261,22 @@ function renderBulletinList() {
       b.content.toLowerCase().includes(currentSearch) ||
       (b.authorName && b.authorName.toLowerCase().includes(currentSearch));
 
-    return matchCat && matchQuery;
+    return matchCat && matchQuery && matchesDay(b);
   });
 
-  // 優先度(URGENT)および日時降順ソート
+  // 優先度(URGENT)および投稿日時降順ソート
   filtered.sort((a, b) => {
     const pA = a.priority === 'URGENT' ? 1 : 0;
     const pB = b.priority === 'URGENT' ? 1 : 0;
-    return pB - pA || new Date(b.createdAt || b.created_at) - new Date(a.createdAt || a.created_at);
+    const dateA = new Date(a.postedAt || a.posted_at || a.createdAt || a.created_at);
+    const dateB = new Date(b.postedAt || b.posted_at || b.createdAt || b.created_at);
+    return pB - pA || dateB - dateA;
   });
 
   if (filtered.length === 0) {
-    container.innerHTML = `<div class="text-center py-12 text-xs text-slate-500 bg-slate-900/30 rounded-xl border border-slate-800">該当する掲示連絡はありません。</div>`;
+    container.innerHTML = `<div class="text-center py-12 text-xs text-slate-500 bg-slate-900/30 rounded-xl border border-slate-800">
+      ${currentDayMode === 'ALL' ? '該当する掲示連絡はありません。' : '選択した投稿日に掲示連絡はありません。'}
+    </div>`;
     return;
   }
 
@@ -176,6 +284,8 @@ function renderBulletinList() {
     const isUrgent = b.priority === 'URGENT';
     const isCircular = b.postType === 'CIRCULAR' || b.post_type === 'CIRCULAR';
     const isRead = b.isRead || b.ackStatus === 'READ' || b.ackStatus === 'APPROVED';
+    const attachments = b.attachments || [];
+    const postedLabel = formatDate(b.postedAt || b.posted_at || b.createdAt || b.created_at);
 
     return `
       <div class="card p-4 hover:border-indigo-500/50 transition-all cursor-pointer ${isUrgent ? 'border-l-4 border-l-amber-400 bg-slate-900/80' : ''}" data-bulletin-id="${b.id}">
@@ -184,6 +294,7 @@ function renderBulletinList() {
             ${isUrgent ? '<span class="badge badge-warning flex items-center gap-1"><i data-lucide="alert-triangle" class="w-3 h-3"></i> 至急</span>' : ''}
             <span class="badge ${isCircular ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' : 'badge'}">${isCircular ? '回覧・要承認' : '一般掲示'}</span>
             ${!isRead ? '<span class="badge bg-red-500/20 text-red-400 border-red-500/30">未読</span>' : ''}
+            ${attachments.length > 0 ? `<span class="badge bg-indigo-500/20 text-indigo-300 border-indigo-500/30 flex items-center gap-1"><i data-lucide="paperclip" class="w-3 h-3"></i> 添付 ${attachments.length}</span>` : ''}
           </div>
           <div class="text-[11px] text-slate-400 font-mono">
             投稿者: <strong class="text-slate-200">${escapeHTML(b.authorName || b.author_name || '教員')}</strong>
@@ -191,7 +302,7 @@ function renderBulletinList() {
         </div>
         <h3 class="font-bold text-sm text-slate-100 mb-1 flex items-center justify-between">
           <span>${escapeHTML(b.title)}</span>
-          <span class="text-[10px] text-slate-500 font-mono font-normal">${formatDate(b.createdAt || b.created_at)}</span>
+          <span class="text-[10px] text-slate-500 font-mono font-normal">投稿日: ${postedLabel}</span>
         </h3>
         <p class="text-xs text-slate-300 line-clamp-2 leading-relaxed whitespace-pre-wrap">${escapeHTML(b.content)}</p>
       </div>
@@ -233,16 +344,44 @@ async function openBulletinDetail(id) {
   const metaEl = document.getElementById('detail-bulletin-meta');
   const contentEl = document.getElementById('detail-bulletin-content');
   const actionsEl = document.getElementById('detail-bulletin-actions');
+  const attachEl = document.getElementById('detail-bulletin-attachments');
 
   if (titleEl) titleEl.textContent = item.title;
   if (metaEl) {
     metaEl.innerHTML = `
       <span>種別: <strong class="text-indigo-300">${item.postType === 'CIRCULAR' ? '回覧板' : '一般掲示'}</strong></span>
       <span>投稿者: ${escapeHTML(item.authorName || item.author_name || '教員')}</span>
-      <span>日時: ${formatDate(item.createdAt || item.created_at)}</span>
+      <span>投稿日: <strong class="text-slate-200">${formatDate(item.postedAt || item.posted_at || item.createdAt || item.created_at)}</strong></span>
     `;
   }
   if (contentEl) contentEl.textContent = item.content;
+
+  // ★ 添付ファイル一覧
+  if (attachEl) {
+    const atts = item.attachments || [];
+    if (atts.length === 0) {
+      attachEl.innerHTML = '';
+    } else {
+      attachEl.innerHTML = `
+        <p class="text-[11px] font-semibold text-slate-300 mb-1.5 flex items-center gap-1">
+          <i data-lucide="paperclip" class="w-3.5 h-3.5 text-indigo-400"></i> 添付ファイル (${atts.length})
+        </p>
+        <ul class="space-y-1.5">
+          ${atts.map(a => `
+            <li class="flex items-center gap-2 text-[11px] bg-slate-900/60 border border-slate-800 rounded-lg px-2.5 py-1.5">
+              <span class="truncate text-slate-200">${escapeHTML(a.name)}</span>
+              <span class="text-slate-500 shrink-0">${formatBytes(a.size)}</span>
+              ${a.kgs ? '<span class="badge bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">KAGOSHIMA EDU</span>' : ''}
+              <a href="${API_BASE_URL}/bulletins/attachments/${a.id}" target="_blank" rel="noopener"
+                 class="ml-auto text-indigo-300 hover:text-indigo-200 shrink-0 flex items-center gap-1">
+                <i data-lucide="download" class="w-3.5 h-3.5"></i> ダウンロード
+              </a>
+            </li>
+          `).join('')}
+        </ul>
+      `;
+    }
+  }
 
   if (actionsEl) {
     const isCircular = item.postType === 'CIRCULAR' || item.post_type === 'CIRCULAR';
@@ -298,6 +437,7 @@ async function handleCreateBulletin(e) {
   const category = document.getElementById('bulletin-category')?.value;
   const content = document.getElementById('bulletin-content')?.value.trim();
   const isPinned = document.getElementById('bulletin-pinned')?.checked || false;
+  const targetDate = document.getElementById('bulletin-target-date')?.value || '';
 
   if (!title || !content) {
     showToast('タイトルと本文は必須です', 'warning');
@@ -307,17 +447,52 @@ async function handleCreateBulletin(e) {
   const postType = (category === 'INSTRUCTION' || category === 'CIRCULAR') ? 'CIRCULAR' : 'NOTICE';
   const priority = (category === 'URGENT' || isPinned) ? 'URGENT' : 'NORMAL';
 
-  const newPost = {
-    title,
-    content,
-    postType,
-    priority,
-    targetScope: { grade: 'ALL', department: 'ALL' },
-    attachments: []
-  };
+  // 投稿日時（JST 現在時刻・日ごと表示の基準）
+  const postedAt = new Date(Date.now() + 9 * 3600000).toISOString().replace('Z', '+09:00');
+
+  const fileInput = document.getElementById('bulletin-files');
+  const files = fileInput ? Array.from(fileInput.files || []) : [];
+
+  if (files.length > 10) {
+    showToast('添付ファイルは1回につき10件までです', 'warning');
+    return;
+  }
+
+  const maxBytes = 10 * 1024 * 1024;
+  const oversize = files.find(f => f.size > maxBytes);
+  if (oversize) {
+    showToast(`「${oversize.name}」は10MBを超えています`, 'warning');
+    return;
+  }
+
+  const targetScope = { grade: 'ALL', department: 'ALL' };
 
   try {
-    await apiPost('/bulletins', newPost);
+    if (files.length > 0) {
+      const fd = new FormData();
+      fd.append('title', title);
+      fd.append('content', content);
+      fd.append('postType', postType);
+      fd.append('priority', priority);
+      fd.append('postedAt', postedAt);
+      fd.append('targetDate', targetDate);
+      fd.append('targetScope', JSON.stringify(targetScope));
+      files.forEach((f) => fd.append('files', f, f.name));
+      await apiPostForm('/bulletins/upload', fd);
+      showToast(`投稿しました（添付 ${files.length} 件）`, 'success');
+    } else {
+      await apiPost('/bulletins', {
+        title,
+        content,
+        postType,
+        priority,
+        postedAt,
+        targetDate,
+        targetScope,
+        attachments: []
+      });
+      showToast('投稿しました', 'success');
+    }
   } catch(err) {
     console.error('[Bulletin] 投稿エラー:', err);
     showToast(err.message || '投稿に失敗しました', 'error');
@@ -325,8 +500,50 @@ async function handleCreateBulletin(e) {
   }
 
   closeModal('bulletin-modal');
-  document.getElementById('bulletin-form')?.reset();
+  const form = document.getElementById('bulletin-form');
+  form?.reset();
+  if (fileInput) fileInput.value = '';
+  renderSelectedFiles([]);
   loadBulletins();
+}
+
+/**
+ * 選択ファイル一覧の表示（投稿モーダル内）
+ * @param {Array<File>} files
+ */
+function renderSelectedFiles(files = []) {
+  const listEl = document.getElementById('bulletin-files-list');
+  if (!listEl) return;
+
+  if (files.length === 0) {
+    listEl.innerHTML = '';
+    return;
+  }
+
+  listEl.innerHTML = files.map(f => `
+    <li class="flex items-center gap-2 text-[11px] text-slate-300">
+      <i data-lucide="paperclip" class="w-3 h-3 text-indigo-400 shrink-0"></i>
+      <span class="truncate">${escapeHTML(f.name)}</span>
+      <span class="text-slate-500 shrink-0">${formatBytes(f.size)}</span>
+    </li>
+  `).join('');
+  refreshLucideIcons();
+}
+
+/**
+ * バイト数表示の整形
+ * @param {number} bytes
+ */
+function formatBytes(bytes = 0) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let v = bytes;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${v < 10 && i > 0 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
 }
 
 function getDummyBulletins() {

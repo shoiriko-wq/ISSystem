@@ -4,6 +4,7 @@
  */
 
 import facilityModel from '../models/facility.model.js';
+import { facilityService } from '../services/facility.service.js';
 
 export const facilityController = {
   /**
@@ -76,8 +77,8 @@ export const facilityController = {
   async createReservation(req, res) {
     try {
       const user = req.user || { id: 'kyomu01', name: '教務 主任' };
-      const reservation = await facilityModel.createReservation(req.body, user);
-      
+      const reservation = await facilityService.createReservation(req.body, user);
+
       const io = req.app ? req.app.get('io') : null;
       if (io) {
         io.emit('facility:reservation_changed', { action: 'create', reservation, userId: user.id || user._id, userName: user.name || '教員' });
@@ -90,8 +91,11 @@ export const facilityController = {
         data: reservation
       });
     } catch (err) {
-      // 二重予約は 409 Conflict、モデルが設定した statusCode を尊重する
-      return res.status(err.statusCode || 400).json({
+      const status = err.statusCode >= 400 && err.statusCode < 600 ? err.statusCode : 400;
+      if (status === 409) {
+        console.warn('[FacilityController] 予約時間帯の重複:', err.message);
+      }
+      return res.status(status).json({
         success: false,
         message: err.message || '重複予約があるため登録できません。'
       });

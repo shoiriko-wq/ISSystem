@@ -21,6 +21,11 @@ export async function apiFetch(endpoint, options = {}) {
     ...(options.headers || {})
   };
 
+  // FormData (multipart/form-data) の場合はブラウザが Content-Type + boundary を生成するため削除
+  if (options.body instanceof FormData) {
+    delete headers['Content-Type'];
+  }
+
   if (state.authToken) {
     headers['Authorization'] = `Bearer ${state.authToken}`;
   }
@@ -122,5 +127,17 @@ export async function apiPut(endpoint, body = {}) {
 export async function apiDelete(endpoint) {
   return apiFetch(endpoint, {
     method: 'DELETE'
+  });
+}
+
+/**
+ * multipart/form-data リクエスト送信（ファイル添付アップロード）
+ * @param {string} endpoint
+ * @param {FormData} formData
+ */
+export async function apiPostForm(endpoint, formData = new FormData()) {
+  return apiFetch(endpoint, {
+    method: 'POST',
+    body: formData
   });
 }

@@ -34,10 +34,14 @@ export function errorHandler(err, req, res, next) {
 
   // 深刻なエラー (500系) はシステム監査ログに自動出力
   if (statusCode >= 500) {
-    logger.error(`[Server Error] ${req.method} ${req.originalUrl}:`, {
-      message: err.message,
-      stack: err.stack,
+    logger.log({
       userId: req.user?.id || null,
+      action: 'SERVER_ERROR',
+      target: `${req.method} ${req.originalUrl}`,
+      details: {
+        message: err.message,
+        stack: err.stack,
+      },
     });
   }
 

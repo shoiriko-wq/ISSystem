@@ -19,23 +19,32 @@ const config = {
     port: toInt(process.env.PORT, 3000),
   },
 
-  // データベース接続設定 (PostgreSQL のみ)
+  // 2. 認証・セキュリティ設定
+  auth: {
+    jwtSecret: process.env.JWT_SECRET || 'is_system_secret_key_2026_default_jwt',
+    jwtExpiresIn: process.env.JWT_EXPIRES_IN || '24h',
+    bcryptSaltRounds: parseInt(process.env.BCRYPT_SALT_ROUNDS || '10', 10),
+    invitationCodeExpiryHours: 24,
+  },
+
+  // 3. データベース接続設定 (PostgreSQL 18.6 / pg ライブラリ)
   db: {
-    type: 'postgres',
+    type: process.env.DB_TYPE || 'postgres', // 'postgres'
+    uri: process.env.DATABASE_URL || 'postgresql://postgres:password@localhost:5432/issystem',
     host: process.env.DB_HOST || 'localhost',
-    port: toInt(process.env.DB_PORT, 5432),
-    database: process.env.DB_NAME || 'issystem',
-    user: process.env.PG_USER || process.env.DB_USER || 'postgres',
-    password: process.env.PG_PASSWORD || process.env.DB_PASSWORD || 'postgres',
-    ssl: process.env.PG_SSL === 'require' || process.env.DB_SSL === 'true',
-    pool: {
-      max: toInt(process.env.DB_POOL_SIZE, 10),
-      min: toInt(process.env.DB_POOL_MIN, 2),
-      idleTimeoutMillis: toInt(process.env.DB_IDLE_TIMEOUT_MS, 30000),
-      connectionTimeoutMillis: toInt(process.env.DB_CONNECTION_TIMEOUT_MS, 5000),
-    },
-    schemaPath: process.env.DB_SCHEMA_PATH || 'db/schema.sql',
-    autoInitSchema: process.env.DB_AUTO_INIT !== 'false',
+    port: parseInt(process.env.DB_PORT || '5432', 10),
+    name: process.env.DB_NAME || 'issystem',
+    user: process.env.DB_USER || 'postgres',
+    password: process.env.DB_PASSWORD || 'password',
+    maxConnections: parseInt(process.env.DB_MAX_CONN || '20', 10),
+    timezone: process.env.DB_TIMEZONE || 'Asia/Tokyo',
+  },
+
+  // 4. リアルタイム通信 & 排他制御設定
+  realtime: {
+    lockTimeoutMs: parseInt(process.env.LOCK_TIMEOUT_MS || '180000', 10), // 3分間無操作で自動解放
+    pingIntervalMs: 25000,
+    pingTimeoutMs: 20000,
   },
 
   // JWT 認証設定 (auth.middleware.js / auth.service.js は config.auth.jwtSecret を参照する)
@@ -85,6 +94,14 @@ const config = {
     auditRetentionDays: toInt(process.env.AUDIT_RETENTION_DAYS, 90),
   },
 };
+
+// モデル層は config/database.js の共有 pg プール（PostgreSQL）を使用する
+if (config.db.type !== 'postgres') {
+  console.warn(
+    `[Config Warning] DB_TYPE='${config.db.type}' は PostgreSQL 以外の指定です。` +
+    '全モデルは config/database.js 経由で PostgreSQL に接続します。DB_TYPE=postgres を設定してください。'
+  );
+}
 
 export default config;
 export { config };
