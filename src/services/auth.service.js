@@ -75,12 +75,6 @@ export const authService = {
       user = await userModel.findByEmail(identifier);
     }
 
-    // デバッグログ出力 (ターミナルで確認可能)
-    console.log('--- [AUTH DEBUG] ---');
-    console.log('検索識別子:', identifier);
-    console.log('取得ユーザー:', user ? { id: user.id, staff_code: user.staff_code, hash: user.password_hash } : 'NOT FOUND (null)');
-    console.log('--------------------');
-
     if (!user) {
       throw new ApiError(401, '教職員番号またはパスワードが正しくありません。');
     }
@@ -88,7 +82,8 @@ export const authService = {
     const isPasswordValid = await verifyPassword(password, user.password_hash);
 
     if (!isPasswordValid) {
-      console.warn('[AuthService] パスワード照合失敗:', { inputHash, dbHash: user.password_hash });
+      // パスワードハッシュをログへ出さない (監査ログ・コンソールへの漏洩防止)
+      console.warn('[AuthService] パスワード照合失敗:', { identifier });
       throw new ApiError(401, '教職員番号またはパスワードが正しくありません。');
     }
 

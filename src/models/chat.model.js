@@ -10,6 +10,28 @@ import { nowIso } from '../utils/db.js';
 const mockChannels = new Map();
 const mockChannelMembers = new Map();
 
+/**
+ * sender_id の FOREIGN KEY 解決
+ * users テーブルに存在しない送信者 (SYSTEM 自動通知など) は 'system' ユーザーへ寄せ、
+ * chat_messages_sender_id_fkey 制約を満たす
+ */
+async function resolveSenderId(senderId) {
+  if (!senderId) return senderId;
+  try {
+    const res = await query(
+      `SELECT id FROM users WHERE id = $1 OR staff_code = $1 LIMIT 1`,
+      [senderId]
+    );
+    if (res.rows[0]) return res.rows[0].id;
+    const sys = await query(`SELECT id FROM users WHERE id = 'system' LIMIT 1`, []);
+    return sys.rows[0] ? sys.rows[0].id : senderId;
+  } catch (error) {
+    console.warn('[ChatModel PG Warning] resolveSenderId fallback:', error.message);
+    return senderId;
+  }
+}
+
+
 export const chatModel = {
   /**
    * チャンネルIDの正規化エイリアス変換
@@ -145,7 +167,7 @@ export const chatModel = {
         `SELECT cm.*, u.name as user_name, u.role, u.department 
          FROM chat_channel_members cm
          JOIN users u ON cm.user_id = u.id
-         WHERE cm.channel_id = ? OR cm.channel_id = ?`,
+         WHERE cm.channel_id = $1 OR cm.channel_id = $2`,
         [targetId, channelId]
       );
       return res.rows || [];
@@ -161,7 +183,8 @@ export const chatModel = {
   async sendMessage(messageData) {
     const id = messageData.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const channelId = this.normalizeChannelId(messageData.channel_id || messageData.channelId);
-    const senderId = messageData.sender_id || messageData.senderId || 'kyomu01';
+    const rawSenderId = messageData.sender_id || messageData.senderId || 'kyomu01';
+    const senderId = await resolveSenderId(rawSenderId);
     const messageText = messageData.message || messageData.message_text || messageData.messageText || messageData.content || '';
     const nowStr = nowIso();
 
@@ -289,7 +312,48 @@ export const chatModel = {
       console.warn('[ChatModel PG Warning] deleteChannel failed:', error.message);
       return false;
     }
-  }
+  },
+
+  /**
+   * ユーザーが閲覧可能なチャンネル一覧（サービス側命名のエイリアス）
+   */
+  async getChannels(userId) {
+    return this.listChannelsForUser(userId);
+  },
+
+  /**
+   * チャンネルのアーカイブ（メンバーを非表示化しアーカイブ状態とする）
+   */
+  async archiveChannel(channelId, userId = null) {
+    const targetId = this.normalizeChannelId(channelId);
+    try {
+      await query(
+        `UPDATE chat_channel_members SET is_hidden = 1 WHERE channel_id = $1`,
+        [targetId]
+      );
+    } catch (error) {
+      console.warn('[ChatModel PG Warning] archiveChannel failed:', error.message);
+    }
+    return { id: targetId, archived: true };
+  },
+
+  /**
+   * メッセージ既読マークの更新 (chat_channel_members.last_read)
+   */
+  async markAsRead(userId, channelId, lastMessageId = null) {
+    const targetId = this.normalizeChannelId(channelId);
+    const nowStr = nowIso();
+    try {
+      await query(
+        `UPDATE chat_channel_members SET last_read = $1 WHERE channel_id = $2 AND user_id = $3`,
+        [nowStr, targetId, userId]
+      );
+    } catch (error) {
+      console.warn('[ChatModel PG Warning] markAsRead failed:', error.message);
+    }
+    return { userId, channelId: targetId, lastMessageId, last_read: nowStr };
+  },
+
 };
 
 // --- named import 用のエクスポート ---
@@ -305,7 +369,10 @@ export const {
   getMessages,
   getChannelMessages,
   toggleHideChannel,
-  deleteChannel
+  deleteChannel,
+  getChannels,
+  archiveChannel,
+  markAsRead
 } = chatModel;
 
 export default chatModel;

@@ -37,7 +37,7 @@ export function initializeSockets(io) {
     }
 
     // ★ 2. 通常の JWT 検証
-    const jwtSecret = config.jwtSecret || process.env.JWT_SECRET || 'your-secret-key';
+    const jwtSecret = (config.auth && config.auth.jwtSecret) || process.env.JWT_SECRET || 'dev-secret-key-change-in-production';
 
     jwt.verify(token, jwtSecret, (err, decoded) => {
       if (err) {

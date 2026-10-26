@@ -90,7 +90,8 @@ export const facilityController = {
         data: reservation
       });
     } catch (err) {
-      return res.status(400).json({
+      // 二重予約は 409 Conflict、モデルが設定した statusCode を尊重する
+      return res.status(err.statusCode || 400).json({
         success: false,
         message: err.message || '重複予約があるため登録できません。'
       });

@@ -6,7 +6,7 @@
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { pool } from '../config/database.js';
+import { pool, ensureSchema } from '../config/database.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,8 +33,11 @@ async function setupDatabase() {
     console.log(`🔗 接続先: ${connInfo.rows[0].db} (${connInfo.rows[0].v.split(' ')[1]})`);
     client.release();
 
-    // 3. 最新スキーマの一括適用 (CREATE TABLE IF NOT EXISTS 準拠のため既存データは保持)
-    await pool.query(sqlScript);
+    // 3. 最新スキーマのステートメント単位適用 (CREATE TABLE IF NOT EXISTS 準拠のため既存データは保持)
+    const applied = await ensureSchema();
+    if (!applied) {
+      throw new Error('スキーマの適用に失敗しました。db/schema.sql を確認してください。');
+    }
 
     // 4. 適用結果の検証
     const tablesRes = await pool.query(

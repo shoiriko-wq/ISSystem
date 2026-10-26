@@ -4,7 +4,7 @@
  */
 
 import bcrypt from 'bcrypt';
-import { pool } from '../config/database.js';
+import { pool, ensureSchema } from '../config/database.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 // crypto/config は bcrypt 化に伴い不要
@@ -41,7 +41,9 @@ const dummyUsers = [
   { id: 't-tanaka', staff_code: 'T2026002', name: '田中 先生', email: 'tanaka@school.ed.jp', password_hash: defaultPasswordHash, role: 'TEACHER', department: '生徒指導部', extension_number: '102' },
   { id: 't-sato', staff_code: 'T2026003', name: '佐藤 先生', email: 'sato@school.ed.jp', password_hash: defaultPasswordHash, role: 'TEACHER', department: 'キャリアガイダンス部', extension_number: '103' },
   { id: 't-suzuki', staff_code: 'T2026004', name: '鈴木 先生', email: 'suzuki@school.ed.jp', password_hash: defaultPasswordHash, role: 'TEACHER', department: '特色推進部', extension_number: '104' },
-  { id: 't-takahashi', staff_code: 'T2026005', name: '高橋 先生', email: 'takahashi@school.ed.jp', password_hash: defaultPasswordHash, role: 'TEACHER', department: '１学年', extension_number: '105' }
+  { id: 't-takahashi', staff_code: 'T2026005', name: '高橋 先生', email: 'takahashi@school.ed.jp', password_hash: defaultPasswordHash, role: 'TEACHER', department: '１学年', extension_number: '105' },
+  // システム自動通知ユーザー (chat_messages.sender_id の FK 用 / ログイン不可)
+  { id: 'system', staff_code: 'SYS00001', name: 'システム', email: 'system@school.ed.jp', password_hash: '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', role: 'SYSTEM', department: 'システム' }
 ];
 
 // 2. 掲示板投稿
@@ -63,6 +65,19 @@ const dummyChannels = [
   { id: 'general', name: '📢 職員全体', type: 'PUBLIC' },
   { id: 'grade1', name: '🏫 1年学年部', type: 'GROUP' },
   { id: 'kyomu', name: '📋 教務部連絡', type: 'GROUP' }
+];
+
+// 4b. チャンネル参加者 (chat_channel_members との突合用)
+const dummyChannelMembers = [
+  { channel_id: 'general', user_id: 'kyomu01' },
+  { channel_id: 'general', user_id: 't-tanaka' },
+  { channel_id: 'general', user_id: 't-sato' },
+  { channel_id: 'general', user_id: 't-suzuki' },
+  { channel_id: 'general', user_id: 't-takahashi' },
+  { channel_id: 'grade1', user_id: 't-tanaka' },
+  { channel_id: 'grade1', user_id: 't-takahashi' },
+  { channel_id: 'kyomu', user_id: 'kyomu01' },
+  { channel_id: 'kyomu', user_id: 't-sato' }
 ];
 
 // 5. チャットメッセージ
@@ -96,6 +111,13 @@ const dummyReservations = [
   { id: 'resv_2', facility_id: '4', resource_id: '4', user_id: 't-sato', user_name: '佐藤 先生', title: '進路説明会プレゼン', target_date: '2026-10-16', start_time: '2026-10-16 13:00:00', end_time: '2026-10-16 15:00:00', is_cancelled: false }
 ];
 
+// 8b. 決裁・申請ワークフロー
+const dummyApprovals = [
+  { id: 'apr_1', title: '職員室用 大型プリンター導入 (10月)', category: 'PURCHASE', description: '印刷コスト削減のためA3対応機を導入。2社相見積。', amount: 248000, applicant_id: 't-sato', approver_id: 'kyomu01', status: 'PENDING', comment: null, linked_chat_channel_id: 'kyomu', approved_at: null, created_at: '2026-10-15 10:00:00' },
+  { id: 'apr_2', title: '1年学年集会 体育館使用申請', category: 'FACILITY', description: '10月20日 6限に体育館を使用。', amount: 0, applicant_id: 't-tanaka', approver_id: 'kyomu01', status: 'APPROVED', comment: '承認。使用予定表に登録済み。', linked_chat_channel_id: null, approved_at: '2026-10-14 16:20:00', created_at: '2026-10-13 09:30:00' },
+  { id: 'apr_3', title: '校外研修用マイクロバス借用申請', category: 'TRANSPORT', description: '10月22日の県外研修への送迎使用。', amount: 12000, applicant_id: 't-suzuki', approver_id: 'kyomu01', status: 'REJECTED', comment: '同日に県大会送迎と重複するため却下。', linked_chat_channel_id: null, approved_at: '2026-10-12 15:05:00', created_at: '2026-10-11 11:40:00' }
+];
+
 // 9. 校内スケジュール・年間行事 (新規追加)
 const dummySchedules = [
   { id: 'sch_101', title: '中間考査（第1日）', description: '全学年対象 9:00開始', event_date: '2026-10-15', category: 'EXAM', target_grade: null, created_by_user_id: 'kyomu01' },
@@ -105,6 +127,9 @@ const dummySchedules = [
 
 async function seedDatabase() {
   console.log('🌱 ダミーデータの一括投入を開始します...');
+
+  // 自動スキーマ適用と競合しないよう、先にスキーマ適用を完了させる
+  await ensureSchema();
 
   const client = await pool.connect();
   await client.query('BEGIN');
@@ -144,6 +169,17 @@ async function seedDatabase() {
 
     for (const sch of dummySchedules) {
       await upsert(client, 'school_schedules', ['id', 'title', 'description', 'event_date', 'category', 'target_grade', 'created_by_user_id'], [sch.id, sch.title, sch.description, sch.event_date, sch.category, sch.target_grade, sch.created_by_user_id]);
+    }
+
+    for (const cm of dummyChannelMembers) {
+      await client.query(
+        `INSERT INTO chat_channel_members (channel_id, user_id, is_hidden, joined_at) VALUES ($1, $2, 0, CURRENT_TIMESTAMP) ON CONFLICT (channel_id, user_id) DO NOTHING`,
+        [cm.channel_id, cm.user_id]
+      );
+    }
+
+    for (const apr of dummyApprovals) {
+      await upsert(client, 'approvals', ['id', 'title', 'category', 'description', 'amount', 'applicant_id', 'approver_id', 'status', 'comment', 'linked_chat_channel_id', 'approved_at', 'created_at'], [apr.id, apr.title, apr.category, apr.description, apr.amount, apr.applicant_id, apr.approver_id, apr.status, apr.comment, apr.linked_chat_channel_id, apr.approved_at, apr.created_at]);
     }
 
     await client.query('COMMIT;');

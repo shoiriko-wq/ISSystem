@@ -124,15 +124,23 @@ export const userModel = {
    * 新規教職員ユーザーの登録
    */
   async create(userData) {
-    if (!userData.name) {
-      throw new Error('氏名は必須です。');
+    // 教職員番号とパスワードハッシュを必須とする (name は初回未設定の空文字を許容)
+    if (!userData.staff_code) {
+      const staffErr = new Error('教職員番号 (staff_code) は必須です。');
+      staffErr.statusCode = 400;
+      throw staffErr;
+    }
+    if (!userData.password_hash) {
+      const passErr = new Error('パスワードハッシュは必須です。');
+      passErr.statusCode = 400;
+      throw passErr;
     }
     const newUser = {
       id: userData.id || `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       staff_code: userData.staff_code,
       email: userData.email || null,
       password_hash: userData.password_hash,
-      name: userData.name,
+      name: userData.name || '',
       role: userData.role || 'TEACHER',
       department: userData.department || null,
       extension_number: userData.extension_number || null,
@@ -258,6 +266,7 @@ export const userModel = {
         [invData.id, invData.code, invData.created_by_user_id, invData.is_used, invData.expires_at, invData.created_at]
       );
     } catch (err) {
+      console.warn('[UserModel PG Warning] createInvitationCode insert failed:', err.message);
       mockInvitationCodes.set(code, invData);
     }
     return invData;

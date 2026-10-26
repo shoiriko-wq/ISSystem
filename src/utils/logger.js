@@ -62,6 +62,22 @@ export const logger = {
       userAgent,
     });
   },
+
+  /**
+   * コンソールレベル出力 (error.middleware.js やサービス層からの呼出に対応)
+   * 監査ログ書き込みを伴わない軽い開発用ロガー
+   */
+  info(message, meta = null) {
+    console.log(message, meta !== null ? JSON.stringify(meta) : '');
+  },
+
+  warn(message, meta = null) {
+    console.warn(message, meta !== null ? JSON.stringify(meta) : '');
+  },
+
+  error(message, meta = null) {
+    console.error(message, meta !== null ? JSON.stringify(meta) : '');
+  },
 };
 
 export default logger;

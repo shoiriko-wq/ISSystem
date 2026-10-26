@@ -1,253 +1,258 @@
 /**
- * ISSystem Editing Lock & System Audit Log Data Access Model
- * リソース排他編集ロック・システム操作/エラー監査ログデータ操作 (SQLite対応 & Cron連携拡張版)
+ * ISSystem Audit Log & Editing Lock Data Access Model
+ * 操作監査ログ (90日保持) と編集排他ロック (3分無操作タイムアウト) の PostgreSQL データ操作
  */
 
 import { query } from '../../config/database.js';
 
-// デモ・開発用インメモリキャッシュストア
-const mockLocks = new Map(); // key: `${resourceType}_${resourceId}`
-const mockAuditLogs = [];
-
 export const auditModel = {
   /**
-   * 特定リソースの現在の排他編集ロック状態を取得
-   * @param {string} resourceType - 'seating', 'exam', 'schedule' 等
-   * @param {string} resourceId
+   * 監査ログの記録
+   * @param {Object} params - { userId, userName, action, resourceType, resourceId, oldValue, newValue, ipAddress, userAgent }
    */
-  async getEditingLock(resourceType, resourceId) {
-    const key = `${resourceType}_${resourceId}`;
-    if (mockLocks.has(key)) {
-      return mockLocks.get(key);
-    }
+  async logAction(params = {}) {
+    const sql = `
+      INSERT INTO audit_logs (
+        user_id, user_name, action, resource_type, resource_id,
+        old_value, new_value, ip_address, user_agent
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      RETURNING *
+    `;
+    // 呼び出し側サービスの命名揺れ (targetEntity / targetId / changesJson 等) を吸収してカラムへマップ
+    const userId = params.userId ?? params.user_id ?? null;
+    const userName = params.userName ?? params.user_name ?? null;
+    const resourceType = params.resourceType ?? params.resource_type ?? params.targetEntity ?? params.target_entity ?? null;
+    const rawResourceId = params.resourceId ?? params.resource_id ?? params.targetId ?? params.target_id ?? null;
+    const resourceId = rawResourceId === null || rawResourceId === undefined ? null : String(rawResourceId);
+    const oldValue = params.oldValue ?? params.old_value ?? null;
+    const newValue = params.newValue ?? params.new_value ?? params.changesJson ?? params.changes_json ?? null;
 
-    try {
-      const sql = `
-        SELECT resource_type, resource_id, user_id as locked_by_user_id, user_name as locked_by_user_name, created_at as locked_at, updated_at as last_active_at
-        FROM editing_locks
-        WHERE resource_type = ? AND resource_id = ?
-      `;
-      const res = await query(sql, [resourceType, String(resourceId)]);
-      return res.rows[0] || null;
-    } catch (error) {
-      return null;
-    }
+    const toText = (v) => (v === null || v === undefined ? null : typeof v === 'string' ? v : JSON.stringify(v));
+
+    const result = await query(sql, [
+      userId,
+      userName,
+      params.action,
+      resourceType,
+      resourceId,
+      toText(oldValue),
+      toText(newValue),
+      params.ipAddress || params.ip_address || null,
+      params.userAgent || params.user_agent || null,
+    ]);
+    return result.rows[0];
   },
 
   /**
-   * リソースの排他編集ロックを取得またはハートビート更新
+   * 編集操作の監査ログ記録
+   */
+  async logEdit({ userId, userName, action, resourceType, resourceId, oldValue, newValue, ipAddress, userAgent }) {
+    return await this.logAction({
+      userId,
+      userName,
+      action,
+      resourceType,
+      resourceId,
+      oldValue,
+      newValue,
+      ipAddress,
+      userAgent,
+    });
+  },
+
+  /**
+   * 監査ログの検索・ページング取得
+   * @param {Object} filters - { userId, action, resourceType, target, startDate, endDate, page, limit }
+   */
+  async getAuditLogs(filters = {}) {
+    const limit = filters.limit || 50;
+    const page = filters.page && filters.page > 0 ? filters.page : 1;
+    const offset = (page - 1) * limit;
+
+    const conditions = [];
+    const values = [];
+
+    if (filters.userId) {
+      values.push(filters.userId);
+      conditions.push(`user_id = $${values.length}`);
+    }
+
+    if (filters.action) {
+      values.push(filters.action);
+      conditions.push(`action = $${values.length}`);
+    }
+
+    if (filters.resourceType) {
+      values.push(filters.resourceType);
+      conditions.push(`resource_type = $${values.length}`);
+    }
+
+    if (filters.target) {
+      const pattern = `%${filters.target}%`;
+      values.push(pattern);
+      const ph = `$${values.length}`;
+      conditions.push(`(resource_type ILIKE ${ph} OR resource_id ILIKE ${ph})`);
+    }
+
+    if (filters.startDate) {
+      values.push(filters.startDate);
+      conditions.push(`created_at >= $${values.length}::timestamp`);
+    }
+
+    if (filters.endDate) {
+      values.push(filters.endDate);
+      conditions.push(`created_at <= $${values.length}::timestamp`);
+    }
+
+    const whereSql = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const countValues = values.slice();
+
+    const countRes = await query(
+      `SELECT COUNT(*) AS total FROM audit_logs ${whereSql}`,
+      countValues
+    );
+
+    const pageValues = values.slice();
+    pageValues.push(limit);
+    const limitPh = `$${pageValues.length}`;
+    pageValues.push(offset);
+    const offsetPh = `$${pageValues.length}`;
+
+    const rowsRes = await query(
+      `SELECT * FROM audit_logs ${whereSql} ORDER BY created_at DESC LIMIT ${limitPh} OFFSET ${offsetPh}`,
+      pageValues
+    );
+
+    return {
+      logs: rowsRes.rows,
+      total: parseInt(countRes.rows[0].total, 10),
+      page,
+      limit,
+    };
+  },
+
+  /**
+   * 編集排他ロックの取得 (1リソース = 1ロック / UNIQUE制約)
    * @param {string} resourceType
    * @param {string} resourceId
    * @param {string} userId
    * @param {string} userName
+   * @param {number} timeoutSeconds - 無操作タイムアウト閾値 (既定 180秒)
    */
-  async upsertEditingLock(resourceType, resourceId, userId, userName = '教員') {
-    const key = `${resourceType}_${resourceId}`;
-    const now = new Date();
+  async acquireEditingLock(resourceType, resourceId, userId, userName, timeoutSeconds = 180) {
+    // 有効期限内のロックを確認 (タイムアウト超過ロックは自動除去して再取得)
+    const existingRes = await query(
+      `SELECT * FROM editing_locks
+       WHERE resource_type = $1 AND resource_id = $2
+         AND EXTRACT(EPOCH FROM (now() - last_accessed)) <= $3
+       LIMIT 1`,
+      [resourceType, resourceId, timeoutSeconds]
+    );
 
-    const lockData = {
-      resource_type: resourceType,
-      resource_id: resourceId,
-      locked_by_user_id: userId,
-      locked_by_user_name: userName,
-      locked_at: mockLocks.has(key) ? mockLocks.get(key).locked_at : now,
-      last_active_at: now,
-    };
-
-    mockLocks.set(key, lockData);
-
-    try {
-      const sql = `
-        INSERT INTO editing_locks (resource_type, resource_id, user_id, user_name, updated_at)
-        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT (resource_type, resource_id)
-        DO UPDATE SET 
-          user_id = EXCLUDED.user_id,
-          user_name = EXCLUDED.user_name,
-          updated_at = CURRENT_TIMESTAMP
-      `;
-      await query(sql, [resourceType, String(resourceId), userId, userName]);
-    } catch (error) {
-      console.warn('[AuditModel] DB lock upsert fallback:', error.message);
+    const existing = existingRes.rows[0];
+    if (existing) {
+      if (existing.user_id === userId) {
+        return await this.refreshEditingLock(resourceType, resourceId, userId);
+      }
+      const holder = existing.user_name || existing.user_id;
+      throw new Error(`現在、${holder} が編集中です。同時に編集することはできません。`);
     }
 
-    return lockData;
+    // 無操作タイムアウト超過の放置ロックを掃除してから取得
+    await query(
+      `DELETE FROM editing_locks
+       WHERE resource_type = $1 AND resource_id = $2
+         AND EXTRACT(EPOCH FROM (now() - last_accessed)) > $3`,
+      [resourceType, resourceId, timeoutSeconds]
+    );
+
+    const inserted = await query(
+      `INSERT INTO editing_locks (resource_type, resource_id, user_id, user_name, acquired_at, last_accessed)
+       VALUES ($1, $2, $3, $4, now(), now())
+       RETURNING *`,
+      [resourceType, resourceId, userId, userName || null]
+    );
+    return inserted.rows[0];
   },
 
   /**
-   * リソースの排他編集ロックを解放
-   * @param {string} resourceType
-   * @param {string} resourceId
+   * 編集排他ロックの解放
    */
   async releaseEditingLock(resourceType, resourceId) {
-    const key = `${resourceType}_${resourceId}`;
-    mockLocks.delete(key);
-
-    try {
-      const sql = `DELETE FROM editing_locks WHERE resource_type = ? AND resource_id = ?`;
-      await query(sql, [resourceType, String(resourceId)]);
-    } catch (error) {
-      // ログ無視
-    }
+    const res = await query(
+      `DELETE FROM editing_locks WHERE resource_type = $1 AND resource_id = $2`,
+      [resourceType, resourceId]
+    );
+    return res.rowCount > 0;
   },
 
   /**
-   * 【Cron用】期限切れ（指定秒数無操作）の編集ロック一覧を取得
-   * @param {number} timeoutSeconds (デフォルト 180秒)
+   * ロックの最終アクセス更新 (自ユーザーのロック延長)
    */
-  async getExpiredEditingLocks(timeoutSeconds = 180) {
-    const expiredList = [];
-    const now = Date.now();
-
-    // 1. メモリキャッシュ側のチェック
-    for (const [key, lock] of mockLocks.entries()) {
-      const lastActive = new Date(lock.last_active_at).getTime();
-      if ((now - lastActive) / 1000 >= timeoutSeconds) {
-        expiredList.push(lock);
-      }
-    }
-
-    // 2. DB側のチェック
-    try {
-      const sql = `
-        SELECT resource_type, resource_id, user_id as locked_by_user_id, user_name as locked_by_user_name
-        FROM editing_locks
-        WHERE (strftime('%s', 'now') - strftime('%s', updated_at)) >= ?
-      `;
-      const res = await query(sql, [timeoutSeconds]);
-      if (res.rows && res.rows.length > 0) {
-        res.rows.forEach(row => {
-          if (!expiredList.some(item => item.resource_type === row.resource_type && item.resource_id === row.resource_id)) {
-            expiredList.push(row);
-          }
-        });
-      }
-    } catch (error) {
-      // キャッシュ結果を返す
-    }
-
-    return expiredList;
+  async refreshEditingLock(resourceType, resourceId, userId) {
+    const res = await query(
+      `UPDATE editing_locks SET last_accessed = now()
+       WHERE resource_type = $1 AND resource_id = $2 AND user_id = $3
+       RETURNING *`,
+      [resourceType, resourceId, userId]
+    );
+    return res.rows[0] || null;
   },
 
   /**
-   * 【Cron用】期限切れの編集ロックを一括解放
+   * アクティブな編集ロックの取得 (タイムアウト判定込み)
    * @param {number} timeoutSeconds
    */
-  async releaseExpiredEditingLocks(timeoutSeconds = 180) {
-    const now = Date.now();
-
-    // 1. メモリキャッシュ側の解除
-    for (const [key, lock] of mockLocks.entries()) {
-      const lastActive = new Date(lock.last_active_at).getTime();
-      if ((now - lastActive) / 1000 >= timeoutSeconds) {
-        mockLocks.delete(key);
-      }
-    }
-
-    // 2. DB側の解除
-    try {
-      const sql = `
-        DELETE FROM editing_locks
-        WHERE (strftime('%s', 'now') - strftime('%s', updated_at)) >= ?
-      `;
-      return await query(sql, [timeoutSeconds]);
-    } catch (error) {
-      return { rowCount: 0 };
-    }
+  async getActiveEditingLock(resourceType, resourceId, timeoutSeconds = 180) {
+    const res = await query(
+      `SELECT * FROM editing_locks
+       WHERE resource_type = $1 AND resource_id = $2
+         AND EXTRACT(EPOCH FROM (now() - last_accessed)) <= $3
+       LIMIT 1`,
+      [resourceType, resourceId, timeoutSeconds]
+    );
+    return res.rows[0] || null;
   },
 
   /**
-   * 【Cron用】古くなった監査ログのクリーンアップ（指定日数保持）
-   * @param {number} daysToKeep (デフォルト 90日)
+   * 無操作タイムアウト超過ロックの一覧 (cron 自動解放用)
+   * @param {number} timeoutSeconds
    */
-  async cleanOldAuditLogs(daysToKeep = 90) {
-    try {
-      const sql = `
-        DELETE FROM system_audit_logs
-        WHERE created_at < date('now', '-' || ? || ' days')
-      `;
-      const res = await query(sql, [daysToKeep]);
-      return res.changes || res.rowCount || 0;
-    } catch (error) {
-      console.warn('[AuditModel] cleanOldAuditLogs fallback:', error.message);
-      return 0;
-    }
+  async getExpiredEditingLocks(timeoutSeconds = 180) {
+    const res = await query(
+      `SELECT * FROM editing_locks
+       WHERE EXTRACT(EPOCH FROM (now() - last_accessed)) > $1
+       ORDER BY last_accessed ASC`,
+      [timeoutSeconds]
+    );
+    return res.rows;
   },
 
   /**
-   * システム操作・例外エラー監査ログの記録
+   * 保持期間を超過した監査ログのクリーンアップ
+   * @param {number} days - 保持日数 (既定 90日)
    */
-  async logAction(logData) {
-    const logEntry = {
-      id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      user_id: logData.userId || null,
-      action: logData.action,
-      target_entity: logData.targetEntity || logData.target || null,
-      target_id: logData.targetId || null,
-      changes_json: logData.changesJson || (logData.details ? JSON.stringify(logData.details) : null),
-      ip_address: logData.ipAddress || null,
-      timestamp: new Date(),
-    };
-
-    mockAuditLogs.push(logEntry);
-
-    try {
-      const sql = `
-        INSERT INTO system_audit_logs (user_id, action, target, details, ip_address)
-        VALUES (?, ?, ?, ?, ?)
-      `;
-      await query(sql, [
-        logEntry.user_id,
-        logEntry.action,
-        logEntry.target_entity,
-        logEntry.changes_json,
-        logEntry.ip_address,
-      ]);
-    } catch (error) {
-      console.warn('[AuditModel] DB logAction fallback:', error.message);
-    }
-
-    return logEntry;
-  },
-
-  /**
-   * 監査ログの検索・一覧取得
-   */
-  async getAuditLogs(filters = {}) {
-    const limit = filters.limit || 100;
-    if (mockAuditLogs.length > 0) {
-      let list = [...mockAuditLogs];
-      if (filters.userId) list = list.filter((l) => l.user_id === filters.userId);
-      if (filters.action) list = list.filter((l) => l.action === filters.action);
-      return { logs: list.reverse().slice(0, limit), pagination: { total: list.length } };
-    }
-
-    try {
-      const sql = `
-        SELECT l.*, u.name as user_name
-        FROM system_audit_logs l
-        LEFT JOIN users u ON l.user_id = u.id
-        ORDER BY l.created_at DESC
-        LIMIT ?
-      `;
-      const res = await query(sql, [limit]);
-      return { logs: res.rows || [], pagination: { total: res.rows.length } };
-    } catch (error) {
-      return { logs: [], pagination: { total: 0 } };
-    }
+  async cleanOldAuditLogs(days = 90) {
+    const res = await query(
+      `DELETE FROM audit_logs WHERE created_at < now() - make_interval(days => $1::int)`,
+      [days]
+    );
+    return res.rowCount;
   },
 };
 
-// --- named import (個別インポート) 用の展開エクスポート ---
-export const {
-  getEditingLock,
-  upsertEditingLock,
-  releaseEditingLock,
-  getExpiredEditingLocks,
-  releaseExpiredEditingLocks,
-  cleanOldAuditLogs,
-  logAction,
-  getAuditLogs,
-} = auditModel;
+export const log = (...args) => auditModel.logAction(...args);
+export const createAuditLog = (...args) => auditModel.logAction(...args);
+export const logAction = (...args) => auditModel.logAction(...args);
+export const logEdit = (...args) => auditModel.logEdit(...args);
+export const getAuditLogs = (...args) => auditModel.getAuditLogs(...args);
+export const getRecentLogs = (...args) => auditModel.getAuditLogs(...args);
+export const acquireEditingLock = (...args) => auditModel.acquireEditingLock(...args);
+export const releaseEditingLock = (...args) => auditModel.releaseEditingLock(...args);
+export const refreshEditingLock = (...args) => auditModel.refreshEditingLock(...args);
+export const getActiveEditingLock = (...args) => auditModel.getActiveEditingLock(...args);
+export const getExpiredEditingLocks = (...args) => auditModel.getExpiredEditingLocks(...args);
+export const cleanOldAuditLogs = (...args) => auditModel.cleanOldAuditLogs(...args);
 
 export default auditModel;
+

@@ -9,7 +9,10 @@
     "dev": "nodemon src/server.js",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand",
     "db:init": "node scripts/init-db.js",
-    "db:seed": "node scripts/seed.js"
+    "db:seed": "node scripts/seed.js",
+    "db:create": "node scripts/create-db.js",
+    "api:check": "node scripts/api-smoke-test.js",
+    "db:tables": "node scripts/list-tables.js"
   },
   "keywords": [
     "issystem",

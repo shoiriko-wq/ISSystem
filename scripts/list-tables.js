@@ -1,3 +1,7 @@
+/**
+ * コード内で参照されているテーブル名を一覧化する開発支援スクリプト
+ * 使用: npm run db:tables
+ */
 import fs from 'fs';
 import path from 'path';
 

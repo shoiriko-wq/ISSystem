@@ -1,66 +1,138 @@
 /**
- * ISSystem Database Configuration & Initialization
- * PostgreSQL 接続プール (pg) を全モデル・スクリプトで共有
+ * ISSystem Database Connection (PostgreSQL / node-pg)
+ * config/default.js の設定を唯一の接続定義とする単一構成 (SQLite 依存は完全撤廃)
  */
 
-import pg from 'pg';
-import 'dotenv/config';
+import { Pool } from 'pg';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import config from './default.js';
 
-const { Pool } = pg;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-// 環境変数からの接続設定 (.env 対応)
-const DB_PASSWORD = process.env.DB_PASSWORD;
-if (!DB_PASSWORD) {
-  throw new Error(
-    '[Database] DB_PASSWORD が設定されていません。' +
-    ' プロジェクトの .env ファイルに有効なパスワードを設定してください。' +
-    ' 例: DB_PASSWORD=your_password'
-  );
-}
+const dbConfig = config.db;
 
-const PG_CONFIG = {
-  host: process.env.DB_HOST || 'localhost',
-  port: Number(process.env.DB_PORT || 5432),
-  database: process.env.DB_NAME || 'is_system',
-  user: process.env.DB_USER || 'postgres',
-  password: DB_PASSWORD,
-  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
-};
+const pool = new Pool({
+  host: dbConfig.host,
+  port: dbConfig.port,
+  user: dbConfig.user,
+  password: dbConfig.password,
+  database: dbConfig.database,
+  max: dbConfig.pool.max,
+  min: dbConfig.pool.min,
+  idleTimeoutMillis: dbConfig.pool.idleTimeoutMillis,
+  connectionTimeoutMillis: dbConfig.pool.connectionTimeoutMillis,
+  ssl: dbConfig.ssl ? { rejectUnauthorized: false } : undefined,
+});
 
-// 単一インスタンスの接続プールを全プロセス内で共有
-const pool = new Pool(PG_CONFIG);
+pool.on('error', (err) => {
+  console.error('❌ 共有プール内の未処理クライアントエラー:', err.message);
+});
 
 /**
- * モデル層から使用される共通 SQL クエリ実行ヘルパー
- * pg の Result (res.rows / res.rowCount) をそのまま返す
+ * クエリヘルパー (PostgreSQL $1, $2.. プレースホルダ)
  */
-export async function query(sqlText, params = []) {
-  const result = await pool.query(sqlText, params || []);
-  return result;
-}
+const query = (text, params) => pool.query(text, params);
 
 /**
- * サーバー起動時の接続検証
+ * 排他処理用のクライアント取得 (トランザクション)
  */
-export async function initializeDatabase() {
-  const client = await pool.connect();
+const getClient = () => pool.connect();
+
+/**
+ * トランザクションヘルパー
+ * @param {(client: import('pg').Client) => Promise<any>} handler
+ */
+async function withTransaction(handler) {
+  const client = await getClient();
   try {
-    const res = await client.query('SELECT NOW() AS now');
-    console.log(`[Database] PostgreSQL 接続完了: ${PG_CONFIG.host}:${PG_CONFIG.port}/${PG_CONFIG.database} (server now=${res.rows[0].now})`);
+    await client.query('BEGIN');
+    const result = await handler(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
   } finally {
     client.release();
   }
-  return pool;
 }
 
-export { pool };
+// --- 冪等スキーマ自動適用 (db/schema.sql) ---
+let schemaApplied = false;
+let schemaPromise = null;
 
-export default {
-  pool,
-  query,
-  initializeDatabase,
-  PG_CONFIG,
-};
+/**
+ * ';' 区切りでステートメント単位に分割 (コメントのみのチャンクは除去)
+ * ※ 複数ステートメントを 1 クエリで送ると Postgres 内部カタログ (pg_type) が競合するため単位実行する
+ */
+function splitStatements(sqlScript) {
+  return sqlScript
+    .split(';')
+    .map((chunk) => chunk.split('\n').filter((line) => !line.trim().startsWith('--')).join('\n').trim())
+    .filter((chunk) => chunk.length > 0);
+}
+
+async function ensureSchema() {
+  if (schemaApplied) return true;
+  // 同時実行 (import 時自動適用 + 明示的 initialize/seed) は 1 回の適用に共有する
+  if (schemaPromise) return schemaPromise;
+
+  schemaPromise = (async () => {
+    const schemaPath = path.resolve(__dirname, '..', dbConfig.schemaPath);
+    if (!fs.existsSync(schemaPath)) {
+      console.warn(`⚠️ schema.sql が見つかりません: ${schemaPath}`);
+      return false;
+    }
+
+    const statements = splitStatements(fs.readFileSync(schemaPath, 'utf-8'));
+    const failures = [];
+
+    for (const stmt of statements) {
+      try {
+        await pool.query(stmt);
+      } catch (err) {
+        failures.push(`${stmt.substring(0, 48)}... => ${err.message}`);
+      }
+    }
+
+    if (failures.length > 0) {
+      console.warn(`⚠️ スキーマ適用に ${failures.length} 件の問題:`);
+      failures.forEach((f) => console.warn(`  - ${f}`));
+      return false;
+    }
+
+    schemaApplied = true;
+    console.log(`🧱 PostgreSQL スキーマを適用しました (${statements.length} ステートメント / ${schemaPath})`);
+    return true;
+  })().finally(() => {
+    schemaPromise = null;
+  });
+
+  return schemaPromise;
+}
+
+if (dbConfig.autoInitSchema) {
+  ensureSchema().then((applied) => {
+    if (!applied) {
+      console.log('[Database] データベースに接続できません。npm run db:init を実行してください。');
+    }
+  });
+}
+
+/**
+ * サーバー起動時のデータベース初期化 (スキーマ適用 + 接続確認)
+ */
+async function initializeDatabase() {
+  const applied = await ensureSchema();
+  const client = await pool.connect();
+  const info = await client.query('SELECT current_database() AS db, version() AS v');
+  client.release();
+  console.log(`🔗 データベース接続確認: ${info.rows[0].db} (${info.rows[0].v.split(' ')[1]})`);
+  return applied;
+}
+
+export { pool, query, getClient, withTransaction, ensureSchema, initializeDatabase };
+export default pool;

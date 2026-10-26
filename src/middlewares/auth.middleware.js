@@ -34,7 +34,7 @@ export function authenticateToken(req, res, next) {
 
     return res.status(403).json({
       error: 'Forbidden',
-      message: '無効なアクセストークonです。'
+      message: '無効なアクセストークンです。'
     });
   }
 }
