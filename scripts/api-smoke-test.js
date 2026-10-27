@@ -118,8 +118,8 @@ const sweep = [
   '/schedules/today',
   '/seating/layouts',
   '/seating/master',
-  '/exams',
-  '/exam/status',
+  '/exam',
+  '/exam/masters',
   '/news/dashboard-widget',
   '/audit/logs',
 ];

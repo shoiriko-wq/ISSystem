@@ -338,6 +338,47 @@ export const chatController = {
   },
 
   /**
+   * チャンネルの削除
+   * DELETE /api/chat/channels/:channelId
+   */
+  async deleteChannel(req, res, next) {
+    try {
+      const { channelId } = req.params;
+      const user = req.user || { id: 'kyomu01', name: '教務 主任' };
+
+      const result = await chatService.deleteChannel(channelId, user);
+
+      // チャンネル参加者へ削除をリアルタイム通知
+      try {
+        const io = req.app ? req.app.get('io') : null;
+        if (io) {
+          io.to(`chat:channel:${result.channelId}`).emit('chat:channel_deleted', {
+            channelId: result.channelId,
+            deletedBy: user.id,
+            deletedByName: user.name,
+          });
+        }
+      } catch (wsErr) {
+        console.warn('[Socket Broadcast Warning]', wsErr.message);
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'チャンネルを削除しました。',
+        data: result.channel,
+        channelId: result.channelId,
+      });
+    } catch (error) {
+      const statusCode = error?.statusCode || 400;
+      console.error('[ChatController deleteChannel Error]', error.message);
+      return res.status(statusCode).json({
+        success: false,
+        message: error.message || 'チャンネル削除に失敗しました。',
+      });
+    }
+  },
+
+  /**
    * 最終既読日時の更新（閲覧位置ログ＝既読メッセージの記録）
    * PUT /api/chat/channels/:channelId/read
    */
@@ -399,6 +440,7 @@ export const {
   sendMessage,
   createChannel,
   addMember,
+  deleteChannel,
   toggleHideChannel,
   updateLastRead,
   getChannels,

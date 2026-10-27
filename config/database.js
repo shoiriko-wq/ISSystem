@@ -13,17 +13,20 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const dbConfig = config.db;
+const poolConfig = dbConfig.pool || {};
 
 const pool = new Pool({
   host: dbConfig.host,
   port: dbConfig.port,
   user: dbConfig.user,
   password: dbConfig.password,
-  database: dbConfig.database,
-  max: dbConfig.pool.max,
-  min: dbConfig.pool.min,
-  idleTimeoutMillis: dbConfig.pool.idleTimeoutMillis,
-  connectionTimeoutMillis: dbConfig.pool.connectionTimeoutMillis,
+  // config.db.name 相当 (DB_NAME) を pg の接続先として使用する
+  database: dbConfig.database || dbConfig.name,
+  max: poolConfig.max ?? dbConfig.maxConnections ?? 20,
+  min: poolConfig.min ?? 0,
+  idleTimeoutMillis: poolConfig.idleTimeoutMillis ?? 30000,
+  connectionTimeoutMillis: poolConfig.connectionTimeoutMillis ?? 10000,
+  application_name: 'issystem',
   ssl: dbConfig.ssl ? { rejectUnauthorized: false } : undefined,
 });
 
@@ -32,14 +35,113 @@ pool.on('error', (err) => {
 });
 
 /**
- * クエリヘルパー (PostgreSQL $1, $2.. プレースホルダ)
+ * SQLite スタイルの ? プレースホルダを PostgreSQL の $n に変換する
+ * ※ 文字列リテラル内の ? は変換しない。既に $n 形式の SQL はそのまま通過させる
+ * @param {string} sql
  */
-const query = (text, params) => pool.query(text, params);
+function normalizePlaceholders(sql) {
+  const str = String(sql);
+  let out = '';
+  let paramIndex = 0;
+  let inSingle = false;
+  let inDouble = false;
+
+  for (let i = 0; i < str.length; i += 1) {
+    const ch = str[i];
+
+    if (inSingle) {
+      out += ch;
+      if (ch === "'") inSingle = false;
+      continue;
+    }
+    if (inDouble) {
+      out += ch;
+      if (ch === '"') inDouble = false;
+      continue;
+    }
+    if (ch === "'") {
+      inSingle = true;
+      out += ch;
+      continue;
+    }
+    if (ch === '"') {
+      inDouble = true;
+      out += ch;
+      continue;
+    }
+    if (ch === '$') {
+      // 既存の $n を追跡し、次採番は $max+1 から行う (? と $n の混在は採番崩れを防ぐ)
+      const match = str.slice(i).match(/^\$(\d+)/);
+      if (match) paramIndex = Math.max(paramIndex, parseInt(match[1], 10));
+      out += ch;
+      continue;
+    }
+    if (ch === '?') {
+      paramIndex += 1;
+      out += `$${paramIndex}`;
+      continue;
+    }
+
+    out += ch;
+  }
+
+  return out;
+}
+
+/**
+ * クエリヘルパー (PostgreSQL $1, $2.. プレースホルダ。 ? 表記も許容)
+ */
+const query = (text, params) => pool.query(normalizePlaceholders(text), params);
 
 /**
  * 排他処理用のクライアント取得 (トランザクション)
  */
 const getClient = () => pool.connect();
+
+/**
+ * モデル層用の SQLite 互換アダプタ (get / all / run / query / exec / close)
+ * 共有プール上で SQLite と同じ API を提供し、close() は no-op とする
+ * @param {import('pg').Pool | import('pg').Client} client
+ */
+function createDbAdapter(client = pool) {
+  const runQuery = (sql, params = []) => client.query(normalizePlaceholders(sql), params);
+
+  return {
+    async get(sql, params = []) {
+      const res = await runQuery(sql, params);
+      return res.rows[0] || null;
+    },
+
+    async all(sql, params = []) {
+      const res = await runQuery(sql, params);
+      return res.rows;
+    },
+
+    async run(sql, params = []) {
+      const res = await runQuery(sql, params);
+      return { changes: res.rowCount, rowCount: res.rowCount, rows: res.rows };
+    },
+
+    async query(sql, params = []) {
+      return runQuery(sql, params);
+    },
+
+    async exec(sql) {
+      await client.query(sql);
+    },
+
+    async transaction(handler) {
+      return withTransaction(handler);
+    },
+
+    // 共有プールを借用するのみ → 実.Close は行わない (no-op)
+    async close() {
+      return null;
+    },
+
+    pool,
+  };
+}
 
 /**
  * トランザクションヘルパー
@@ -123,6 +225,27 @@ if (dbConfig.autoInitSchema) {
 }
 
 /**
+ * モデル層用接続アダプタ (共有プールを借用)。close() は no-op
+ * ※ 冪等スキーマ (db/schema.sql) を初回アクセス時に適用する
+ */
+async function getDb() {
+  if (dbConfig.autoInitSchema && !schemaApplied) {
+    await ensureSchema();
+  }
+  return createDbAdapter(pool);
+}
+
+/**
+ * サーバー終了時のプールクローズ (複数回呼び出し-safe)
+ */
+let poolClosingPromise = null;
+
+async function closeDatabase() {
+  if (!poolClosingPromise) poolClosingPromise = pool.end();
+  await poolClosingPromise;
+}
+
+/**
  * サーバー起動時のデータベース初期化 (スキーマ適用 + 接続確認)
  */
 async function initializeDatabase() {
@@ -134,5 +257,16 @@ async function initializeDatabase() {
   return applied;
 }
 
-export { pool, query, getClient, withTransaction, ensureSchema, initializeDatabase };
+export {
+  pool,
+  query,
+  getClient,
+  withTransaction,
+  ensureSchema,
+  initializeDatabase,
+  getDb,
+  createDbAdapter,
+  closeDatabase,
+  normalizePlaceholders,
+};
 export default pool;

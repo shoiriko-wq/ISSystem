@@ -4,7 +4,12 @@
  */
 
 import { query } from '../../config/database.js';
-import { nowIso, parseJson } from '../utils/db.js';
+import { openDb, nowIso, parseJson } from '../utils/db.js';
+
+/** モデル層用 SQLite 互換アダプタ (共有プール借用 / close() は no-op) */
+async function getDb() {
+  return openDb();
+}
 
 function mapPost(row) {
   if (!row) return null;
@@ -131,7 +136,7 @@ export const bulletinModel = {
       sql += ` LEFT JOIN post_acknowledgements pa ON p.id = pa.post_id`;
     }
 
-    sql += ` WHERE p.is_deleted = false`;
+    sql += ` WHERE COALESCE(p.is_deleted, 0) = 0`;
 
     const postType = filters.post_type || filters.type;
     if (postType) {
@@ -195,7 +200,7 @@ export const bulletinModel = {
       `SELECT p.*, u.name AS author_name
        FROM posts p
        LEFT JOIN users u ON p.author_id = u.id
-       WHERE p.id = $1 AND p.is_deleted = false`,
+       WHERE p.id = $1 AND COALESCE(p.is_deleted, 0) = 0`,
       [id]
     );
     return mapPost(res.rows[0]);
@@ -211,6 +216,7 @@ export const bulletinModel = {
     const authorId = postData.author_id || postData.authorId || 'kyomu01';
     const targetScope = postData.target_scope || postData.targetScope || { grade: 'ALL', department: 'ALL' };
     const attachments = postData.attachments || [];
+    const createdAt = nowIso();
     const postedAt = normalizeDateTime(postData.postedAt || postData.posted_at || postData.postedAtInput, createdAt);
 
     try {

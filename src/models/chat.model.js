@@ -3,7 +3,8 @@
  * チャットチャンネル・メンバー・メッセージ PostgreSQL 完全対応モデル
  */
 
-import { openDb } from '../utils/db.js';
+import { query } from '../../config/database.js';
+import { openDb, nowIso } from '../utils/db.js';
 
 async function getDb() {
   return openDb();
@@ -403,6 +404,31 @@ export const chatModel = {
     } catch (error) {
       console.warn('[ChatModel] findMessageById fallback:', error.message);
       return null;
+    }
+  },
+
+  /**
+   * チャンネルの削除（参加者・メッセージ・既読ログは ON DELETE CASCADE で同時に削除）
+   * @param {string} channelId
+   * @returns {Promise<boolean>} 削除成功時 true
+   */
+  async deleteChannel(channelId) {
+    const targetId = this.normalizeChannelId(channelId);
+
+    // in-memory キャッシュも併せて除去（削除後のフェッチで幽霊チャンネルが返るのを防ぐ）
+    mockChannels.delete(targetId);
+    for (const key of Array.from(mockChannelMembers.keys())) {
+      if (key.startsWith(`${targetId}_`)) mockChannelMembers.delete(key);
+    }
+
+    try {
+      const db = await getDb();
+      const res = await db.run(`DELETE FROM chat_channels WHERE id = ?`, [targetId]);
+      await db.close();
+      return (res?.changes ?? 0) > 0;
+    } catch (error) {
+      console.warn('[ChatModel] deleteChannel failed:', error.message);
+      return false;
     }
   },
 

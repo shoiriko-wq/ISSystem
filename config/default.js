@@ -19,11 +19,11 @@ const config = {
     port: toInt(process.env.PORT, 3000),
   },
 
-  // 2. 認証・セキュリティ設定
+  // 2. 認証・セキュリティ設定 (auth.middleware.js / auth.service.js / socket.index.js が参照)
   auth: {
     jwtSecret: process.env.JWT_SECRET || 'is_system_secret_key_2026_default_jwt',
     jwtExpiresIn: process.env.JWT_EXPIRES_IN || '24h',
-    bcryptSaltRounds: parseInt(process.env.BCRYPT_SALT_ROUNDS || '10', 10),
+    bcryptSaltRounds: toInt(process.env.BCRYPT_SALT_ROUNDS, 10),
     invitationCodeExpiryHours: 24,
   },
 
@@ -34,10 +34,23 @@ const config = {
     host: process.env.DB_HOST || 'localhost',
     port: parseInt(process.env.DB_PORT || '5432', 10),
     name: process.env.DB_NAME || 'issystem',
+    // pg ライブラリ用の接続先データベース名 (name と同一。config/database.js が参照するキー)
+    database: process.env.DB_NAME || 'issystem',
     user: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD || 'password',
     maxConnections: parseInt(process.env.DB_MAX_CONN || '20', 10),
     timezone: process.env.DB_TIMEZONE || 'Asia/Tokyo',
+    // 共有プール設定 (config/database.js が参照するキー)
+    pool: {
+      max: toInt(process.env.DB_MAX_CONN, 20),
+      min: toInt(process.env.DB_MIN_CONN, 0),
+      idleTimeoutMillis: toInt(process.env.DB_IDLE_TIMEOUT_MS, 30000),
+      connectionTimeoutMillis: toInt(process.env.DB_CONNECT_TIMEOUT_MS, 10000),
+    },
+    // 冪等スキーマ自動適用 (db/schemaPath 起点はプロジェクトルート)
+    schemaPath: process.env.DB_SCHEMA_PATH || 'db/schema.sql',
+    autoInitSchema: process.env.DB_AUTO_SCHEMA !== 'false',
+    ssl: process.env.DB_SSL === 'true',
   },
 
   // 4. リアルタイム通信 & 排他制御設定
@@ -45,13 +58,6 @@ const config = {
     lockTimeoutMs: parseInt(process.env.LOCK_TIMEOUT_MS || '180000', 10), // 3分間無操作で自動解放
     pingIntervalMs: 25000,
     pingTimeoutMs: 20000,
-  },
-
-  // JWT 認証設定 (auth.middleware.js / auth.service.js は config.auth.jwtSecret を参照する)
-  auth: {
-    jwtSecret: process.env.JWT_SECRET || 'dev-secret-key-change-in-production',
-    jwtExpiresIn: process.env.JWT_EXPIRES_IN || '24h',
-    bcryptSaltRounds: toInt(process.env.BCRYPT_SALT_ROUNDS, 10),
   },
 
   jwt: {

@@ -4,7 +4,12 @@
  */
 
 import { query } from '../../config/database.js';
-import { nowIso } from '../utils/db.js';
+import { openDb, nowIso } from '../utils/db.js';
+
+/** モデル層用 SQLite 互換アダプタ (共有プール借用 / close() は no-op) */
+async function getDb() {
+  return openDb();
+}
 
 // 自動マイグレーション: avatar_url カラムの存在確認と追加 (PostgreSQL)
 async function ensureAvatarColumn() {
@@ -225,7 +230,6 @@ export const userModel = {
         await db.query(
           `INSERT INTO seating_status (id, user_id, desk_number, group_zone, current_status, status_note, updated_at)
            VALUES ($1, $2, $3, 'staff', $4, $5, $6)`,
-           VALUES ($1, $2, $3, 'staff', $4, $5, $6)`,
           [`seat_${userId}`, userId, '-', normalized, statusNote || '', ts]
         );
       }
@@ -236,7 +240,6 @@ export const userModel = {
       const user = userRes.rows[0];
       return { ...user, status: normalized, current_status: normalized };
     } catch (err) {
-      console.warn('[UserModel PG Warning] updateStatus failed:', err.message);
       console.warn('[UserModel PG Warning] updateStatus failed:', err.message);
       return { id: userId, status: normalized, current_status: normalized };
     }

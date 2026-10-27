@@ -4,8 +4,11 @@
  */
 
 import { query } from '../../config/database.js';
-import { nowIso } from '../utils/db.js';
+import { openDb, nowIso, todayJst } from '../utils/db.js';
 
+const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})/;
+
+/** モデル層用 SQLite 互換アダプタ (共有プール借用 / close() は no-op) */
 async function getDb() {
   return openDb();
 }
@@ -14,27 +17,65 @@ function resourceIdOf(data) {
   return String(data.resource_id || data.resourceId || data.facility_id || data.facilityId || '');
 }
 
+/** 'HH:MM' / 'HH:MM:SS' を 'HH:MM' に正規化 (不正なら null) */
+function normalizeTime(raw) {
+  if (!raw) return null;
+  const match = String(raw).trim().match(/(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (!match) return null;
+  const h = parseInt(match[1], 10);
+  const m = parseInt(match[2], 10);
+  if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+/** 'YYYY-MM-DD...' を 'YYYY-MM-DD' に正規化 (HH:MM を日付として誤認しない) */
+function normalizeDate(raw) {
+  if (!raw) return null;
+  const match = String(raw).trim().match(DATE_RE);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : null;
+}
+
 function dateOfRange(startTime) {
   if (!startTime) return todayJst();
-  const str = String(startTime);
-  // 日付形式 (YYYY-MM-DD...) の場合のみ採用する (HH:MM を日付として誤認しない)
-  const match = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  return match ? `${match[1]}-${match[2]}-${match[3]}` : todayJst();
+  return normalizeDate(startTime) || todayJst();
 }
+
+/** target_date と時刻表記から文字列比較可能な 'YYYY-MM-DD HH:MM:SS' を組み立てる */
+function toDateTime(targetDate, time) {
+  const str = String(time || '').trim();
+  if (!str) return null;
+  if (str.includes(' ')) return str; // 既に 'YYYY-MM-DD HH:MM:SS' 形式
+  const date = normalizeDate(targetDate) || todayJst();
+  const hhmm = normalizeTime(str);
+  return hhmm ? `${date} ${hhmm}:00` : `${date} ${str}:00`;
+}
+
+const isDateLike = (value) => typeof value === 'string' && DATE_RE.test(value.trim());
 
 export const facilityModel = {
   async findAll() {
-    return this.listFacilities();
-  }
+    try {
+      const res = await query(`SELECT id, name, category FROM resources ORDER BY category, name`);
+      return (res.rows || []).map((r) => ({ ...r, facility_id: r.id, facility_name: r.name }));
+    } catch (err) {
+      console.warn('[FacilityModel] findAll failed:', err.message);
+      return [];
+    }
+  },
+
+  async listFacilities(filters = {}) {
+    return this.findAll();
+  },
 
   async findFacilityById(id) {
-    const res = await query('SELECT * FROM resources WHERE id = $1', [id]);
-    return res.rows[0] || null;
-  }
+    const res = await query('SELECT id, name, category FROM resources WHERE id = $1', [String(id)]);
+    const row = res.rows[0];
+    return row ? { ...row, facility_id: row.id, facility_name: row.name } : null;
+  },
 
   async findResourceById(id) {
     return this.findFacilityById(id);
-  }
+  },
 
   // ================= 予約 (reservations) =================
 
@@ -46,42 +87,57 @@ export const facilityModel = {
     let facilityId = null;
     let date = null;
 
-    if (arg2) {
-      facilityId = arg1;
-      date = arg2;
-    } else if (typeof arg1 === 'string' && DATE_RE.test(arg1)) {
+    if (arg1 && arg2) {
+      // (date, facilityId) 順も吸収する
+      if (isDateLike(arg1) && !isDateLike(arg2)) {
+        date = arg1;
+        facilityId = arg2;
+      } else {
+        facilityId = arg1;
+        date = arg2;
+      }
+    } else if (arg1 && isDateLike(arg1)) {
       date = arg1;
     } else {
-      facilityId = arg1;
+      facilityId = arg1 || null;
     }
 
     const params = [];
-    const conditions = ['r.is_cancelled = false'];
+    const conditions = ['COALESCE(r.is_cancelled, 0) = 0'];
 
     if (facilityId) {
-      params.push(facilityId);
-      conditions.push(`(r.resource_id = $${params.length} OR r.facility_id = $${params.length})`);
+      params.push(String(facilityId));
+      conditions.push(`COALESCE(r.resource_id, r.facility_id) = $${params.length}`);
     }
 
     if (date) {
-      params.push(date);
-      conditions.push(`r.target_date = $${params.length}`);
+      params.push(normalizeDate(date) || date);
+      conditions.push(`(r.target_date = $${params.length} OR substring(r.start_time, 1, 10) = $${params.length})`);
     }
 
-    const res = await query(
-      `SELECT r.*, COALESCE(u.name, r.user_name) AS user_name
-       FROM reservations r
-       LEFT JOIN users u ON r.user_id = u.id
-       WHERE ${conditions.join(' AND ')}
-       ORDER BY r.target_date, r.start_time`,
-      params
-    );
-    return res.rows;
-  }
+    try {
+      const res = await query(
+        `SELECT r.*, COALESCE(u.name, r.user_name) AS user_name,
+                COALESCE(res.name, r.facility_id) AS facility_name,
+                COALESCE(r.resource_id, r.facility_id) AS facility_id
+         FROM reservations r
+         LEFT JOIN users u ON r.user_id = u.id
+         LEFT JOIN resources res ON res.id = COALESCE(r.resource_id, r.facility_id)
+         WHERE ${conditions.join(' AND ')}
+         ORDER BY r.target_date, r.start_time`,
+        params
+      );
+      return res.rows.map((r) => ({ ...r, purpose: r.title }));
+    } catch (err) {
+      console.warn('[FacilityModel] getReservationsByDate failed:', err.message);
+      return [];
+    }
+  },
 
-  async findReservationsByFacility(facilityId) {
-    return this.getReservationsByDate(facilityId);
-  }
+  async findReservationsByFacility(facilityId, targetDate) {
+    if (!facilityId) return this.getReservationsByDate(targetDate);
+    return this.getReservationsByDate(facilityId, targetDate);
+  },
 
   /**
    * 期間指定の予約一覧 (target_date の範囲)
@@ -95,17 +151,18 @@ export const facilityModel = {
     if (!start || !end) return this.getReservationsByDate(facilityId);
 
     const res = await query(
-      `SELECT r.*, COALESCE(u.name, r.user_name) AS user_name
+      `SELECT r.*, COALESCE(u.name, r.user_name) AS user_name,
+              COALESCE(r.resource_id, r.facility_id) AS facility_id
        FROM reservations r
        LEFT JOIN users u ON r.user_id = u.id
-       WHERE (r.resource_id = $1 OR r.facility_id = $1)
+       WHERE COALESCE(r.resource_id, r.facility_id) = $1
          AND r.target_date >= $2 AND r.target_date <= $3
-         AND r.is_cancelled = false
+         AND COALESCE(r.is_cancelled, 0) = 0
        ORDER BY r.target_date, r.start_time`,
-      [facilityId, start, end]
+      [String(facilityId), start, end]
     );
-    return res.rows;
-  }
+    return res.rows.map((r) => ({ ...r, purpose: r.title }));
+  },
 
   /**
    * 指定日の施設別利用状況（施設ごとの予約有無を含む一覧）
@@ -130,7 +187,7 @@ export const facilityModel = {
         available: list.length === 0,
       };
     });
-  }
+  },
 
   /**
    * 指定日に利用可能な施設一覧
@@ -143,76 +200,92 @@ export const facilityModel = {
     const reservations = await this.getReservationsByDate(null, date);
     const busy = new Set(reservations.map((r) => r.resource_id || r.facility_id));
     return facilities.filter((f) => !busy.has(f.id));
-  }
+  },
 
   /**
    * 二重予約検出 (既存.start_time < 新規.end_time AND 既存.end_time > 新規.start_time)
-   * 呼び出し形式吸収: checkOverlap(facilityId, date, start, end) / checkOverlap(facilityId, start, end)
+   * 時刻は 'HH:MM' / 'YYYY-MM-DD HH:MM:SS' を許容する
+   * @param {string} facilityId
+   * @param {string} targetDate - 'YYYY-MM-DD'
+   * @param {string} startTime
+   * @param {string} endTime
+   * @param {string} [excludeId] - 除外する自己予約ID
    */
-  async checkOverlap(arg1, arg2, arg3, arg4) {
-    const facilityId = arg1;
-    let date = null;
-    let start = arg2;
-    let end = arg3;
-
-    if (arg4) {
-      date = arg2;
-      start = arg3;
-      end = arg4;
-    }
-  },
-
-  async getReservationsByDate(facilityId, targetDate) {
-    return this.findReservationsByFacility(facilityId, targetDate);
-  },
-
   async checkOverlap(facilityId, targetDate, startTime, endTime, excludeId = null) {
-    const start = startTime.includes(' ') ? startTime : `${targetDate} ${startTime}:00`;
-    const end = endTime.includes(' ') ? endTime : `${targetDate} ${endTime}:00`;
+    const date = normalizeDate(targetDate) || todayJst();
+    const start = toDateTime(date, startTime);
+    const end = toDateTime(date, endTime);
+
     try {
-      const db = await getDb();
-      const row = await db.get(
-        `SELECT * FROM reservations
-         WHERE COALESCE(resource_id, facility_id) = ?
-           AND COALESCE(is_cancelled, 0) = 0
-           AND (id <> CAST(? AS TEXT) OR CAST(? AS TEXT) IS NULL)
-           AND start_time < ? AND end_time > ?`,
-        [String(facilityId), excludeId, excludeId, end, start]
+      const res = await query(
+        `SELECT r.*, COALESCE(u.name, r.user_name) AS user_name
+         FROM reservations r
+         LEFT JOIN users u ON r.user_id = u.id
+         WHERE COALESCE(r.resource_id, r.facility_id) = $1
+           AND COALESCE(r.is_cancelled, 0) = 0
+           AND ($2::text IS NULL OR r.id <> $2::text)
+           AND r.start_time < $3 AND r.end_time > $4
+         ORDER BY r.start_time ASC
+         LIMIT 1`,
+        [String(facilityId), excludeId ? String(excludeId) : null, end, start]
       );
-      await db.close();
-      return row || null;
+      return res.rows[0] || null;
     } catch (err) {
+      console.warn('[FacilityModel] checkOverlap failed:', err.message);
       return null;
     }
   },
 
   async createReservation(data, user = {}) {
-    const id = `res_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const fId = resourceIdOf(data) || '1';
-    const targetDate = data.target_date || data.targetDate || dateOfRange(data.start_time) || todayJst();
-    let startTime = data.start_time || data.startTime || `${targetDate} 08:50:00`;
-    let endTime = data.end_time || data.endTime || `${targetDate} 09:40:00`;
-    if (startTime.length <= 5) startTime = `${targetDate} ${startTime}:00`;
-    if (endTime.length <= 5) endTime = `${targetDate} ${endTime}:00`;
+    const targetDate =
+      normalizeDate(data.target_date || data.targetDate) || dateOfRange(data.start_time) || todayJst();
+    const startTime = toDateTime(targetDate, data.start_time || data.startTime || '08:50');
+    const endTime = toDateTime(targetDate, data.end_time || data.endTime || '09:40');
     const title = data.title || data.purpose || '施設利用';
+    const userId = data.user_id || user.id || null;
+    const userName = data.user_name || user.name || '教員';
+    const id = data.id || `res_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-    const overlap = await this.checkOverlap(facilityId, targetDate, startTime, endTime);
+    const overlap = await this.checkOverlap(fId, targetDate, startTime, endTime);
     if (overlap) {
-      const err = new Error('既存の予約と時間帯が重複しています。');
+      const err = new Error(`指定された時間帯は既存の予約「${overlap.title}」と時間帯が重複しています。`);
       err.statusCode = 409;
       throw err;
     }
 
-    const id = data.id || `res_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-
-    const res = await query(
-      `INSERT INTO reservations (id, resource_id, facility_id, user_id, user_name, title, target_date, start_time, end_time, is_cancelled, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false, $10)
-       RETURNING *`,
-      [id, facilityId, facilityId, userId, userName, title, targetDate, toDateTime(targetDate, startTime), toDateTime(targetDate, endTime), nowIso()]
-    );
-    return res.rows[0];
-  }
+    try {
+      const res = await query(
+        `INSERT INTO reservations (id, resource_id, facility_id, user_id, user_name, title, target_date, start_time, end_time, is_cancelled, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 0, $10)
+         RETURNING *`,
+        [id, fId, fId, userId, userName, title, targetDate, startTime, endTime, nowIso()]
+      );
+      const created = res.rows[0];
+      if (created) return { ...created, purpose: created.title };
+      return {
+        id,
+        resource_id: fId,
+        facility_id: fId,
+        user_id: userId,
+        user_name: userName,
+        title,
+        target_date: targetDate,
+        start_time: startTime,
+        end_time: endTime,
+        is_cancelled: 0,
+        created_at: nowIso(),
+      };
+    } catch (err) {
+      // 一意制約衝突は 409 として扱う (二重登録防止)
+      if (err && (err.code === '23505' || /duplicate key/i.test(String(err.message)))) {
+        const conflict = new Error('指定された時間帯は既存の予約と時間帯が重複しています。');
+        conflict.statusCode = 409;
+        throw conflict;
+      }
+      throw err;
+    }
+  },
 
   async findReservationById(id) {
     const res = await query(
@@ -223,18 +296,19 @@ export const facilityModel = {
       [id]
     );
     return res.rows[0] || null;
-  }
+  },
 
   /**
    * 予約の取消（ソフトキャンセル）
    */
   async cancelReservation(id, userId = null) {
     const res = await query(
-      `UPDATE reservations SET is_cancelled = true WHERE id = $1 RETURNING *`,
-      [id]
+      `UPDATE reservations SET is_cancelled = 1 WHERE id = $1 RETURNING *`,
+      [String(id)]
     );
-    return res.rows[0] || null;
-  }
+    const row = res.rows[0] || null;
+    return row ? { ...row, purpose: row.title } : null;
+  },
 
   // ================= 編集排他ロック (editing_locks) =================
 
@@ -268,7 +342,7 @@ export const facilityModel = {
       [resource_type, resource_id, user_id, user_name, nowStr, nowStr]
     );
     return res.rows[0];
-  }
+  },
 
   /**
    * ロックのハートビート更新（操作があれば last_accessed を延ばす）
@@ -281,7 +355,7 @@ export const facilityModel = {
       [nowIso(), resource_type, resource_id, user_id]
     );
     return res.rows[0] || null;
-  }
+  },
 
   /**
    * ロックの解放（保持者のみ解放可能）
@@ -302,7 +376,7 @@ export const facilityModel = {
       [resource_type, resource_id]
     );
     return true;
-  }
+  },
 
   // ================= フィールドセル値 (facility_cells) =================
 
@@ -322,7 +396,7 @@ export const facilityModel = {
     }
 
     return entries.map(([cellKey, value]) => ({ cellKey, value }));
-  }
+  },
 
   async getCells(cellKey) {
     const res = await query(
@@ -332,9 +406,6 @@ export const facilityModel = {
     return res.rows;
   }
 }
-
-// FacilityModel はクラス宣言時に export 済み
-const facilityModel = new FacilityModel();
 
 export const listAvailable = (...args) => facilityModel.listAvailable(...args);
 export const listFacilities = (...args) => facilityModel.listFacilities(...args);

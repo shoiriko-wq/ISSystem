@@ -20,8 +20,6 @@ CREATE TABLE IF NOT EXISTS users (
   avatar_url TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 CREATE INDEX IF NOT EXISTS idx_users_department ON users(department);
@@ -93,7 +91,6 @@ CREATE TABLE IF NOT EXISTS post_acknowledgements (
   status TEXT NOT NULL DEFAULT 'UNREAD',
   comment TEXT,
   acknowledged_at TIMESTAMP,
-  acknowledged_at TIMESTAMP,
   FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   UNIQUE (post_id, user_id)
@@ -116,7 +113,6 @@ CREATE TABLE IF NOT EXISTS chat_channel_members (
   channel_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
   is_hidden INTEGER DEFAULT 0,
-  joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (channel_id, user_id),
   FOREIGN KEY (channel_id) REFERENCES chat_channels(id) ON DELETE CASCADE,
@@ -158,7 +154,6 @@ CREATE TABLE IF NOT EXISTS seating_status (
   group_zone TEXT NOT NULL DEFAULT 'staff',
   current_status TEXT NOT NULL DEFAULT 'PRESENT',
   status_note TEXT DEFAULT '',
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -203,8 +198,6 @@ CREATE TABLE IF NOT EXISTS school_schedules (
   category TEXT NOT NULL DEFAULT 'EVENT',
   target_grade INTEGER,
   created_by_user_id TEXT,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -264,10 +257,25 @@ CREATE TABLE IF NOT EXISTS editing_locks (
   resource_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
   user_name TEXT NOT NULL,
+  acquired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  last_accessed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (resource_type, resource_id)
 );
+-- 既存データベース向けマイグレーション (取得・ハートビート時刻カラム)
+ALTER TABLE editing_locks ADD COLUMN IF NOT EXISTS acquired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE editing_locks ADD COLUMN IF NOT EXISTS last_accessed TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+-- 12b. フィールドセル値 (facility_cells) ※ facility.model.js の updateCells/getCells が使用
+CREATE TABLE IF NOT EXISTS facility_cells (
+  cell_id TEXT NOT NULL,
+  cell_key TEXT NOT NULL,
+  value TEXT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (cell_id, cell_key)
+);
+CREATE INDEX IF NOT EXISTS idx_facility_cells_key ON facility_cells(cell_key);
 
 -- 13. 監査ログ (system_audit_logs)
 CREATE TABLE IF NOT EXISTS system_audit_logs (

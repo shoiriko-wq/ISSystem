@@ -261,6 +261,46 @@ export const chatService = {
   },
 
   /**
+   * チャンネルの削除（公開チャンネルは削除不可、参加者・管理者のみ）
+   * @param {string} channelId
+   * @param {Object} user - { id, name, role, is_kyomu }
+   */
+  async deleteChannel(channelId, user) {
+    const targetId = chatModel.normalizeChannelId(channelId);
+    const channel = await chatModel.findChannelById(targetId);
+    const channelType = (channel && channel.type) || 'PRIVATE';
+
+    if (targetId === 'general' || channelType === 'PUBLIC') {
+      throw new ApiError(400, '公開チャンネルは削除できません。');
+    }
+
+    const members = await chatModel.getMembers(targetId);
+    const isMember = members.some((m) => (m.user_id || m.id) === user.id);
+    const privileged = user.role === 'ADMIN' || user.is_kyomu === true || user.is_kyomu === 1;
+
+    if (!isMember && !privileged) {
+      throw new ApiError(403, 'このチャンネルを削除する権限がありません。');
+    }
+
+    const deleted = await chatModel.deleteChannel(targetId);
+    if (!deleted) {
+      throw new ApiError(404, '削除対象のチャンネルが見つかりません。');
+    }
+
+    try {
+      await auditModel.logAction({
+        userId: user.id,
+        action: 'DELETE_CHAT_CHANNEL',
+        targetEntity: 'CHAT_CHANNEL',
+        targetId,
+        changesJson: JSON.stringify({ name: channel?.name }),
+      });
+    } catch (err) {}
+
+    return { channelId: targetId, channel: channel || { id: targetId } };
+  },
+
+  /**
    * チャンネルの非表示 / 表示切り替え
    * @param {string} channelId
    * @param {string} userId

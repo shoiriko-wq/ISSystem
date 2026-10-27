@@ -193,6 +193,7 @@ async function seedDatabase() {
       editing_locks,
       invitation_codes,
       school_schedules,
+      approvals,
       reservations,
       resources,
       seating_status,
@@ -313,7 +314,27 @@ async function seedDatabase() {
       await client.query(
         `INSERT INTO reservations (id, facility_id, resource_id, user_id, user_name, title, target_date, start_time, end_time, is_cancelled)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [rv.id, rv.facility_id, rv.resource_id, rv.user_id, rv.user_name, rv.title, rv.target_date, rv.start_time, rv.end_time, rv.is_cancelled]
+        [rv.id, rv.facility_id, rv.resource_id, rv.user_id, rv.user_name, rv.title, rv.target_date, rv.start_time, rv.end_time, rv.is_cancelled ? 1 : 0]
+      );
+    }
+
+    for (const ap of dummyApprovals) {
+      await client.query(
+        `INSERT INTO approvals (id, title, category, description, amount, applicant_id, approver_id, status, comment, linked_chat_channel_id, approved_at, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
+         ON CONFLICT (id) DO UPDATE SET
+           title = EXCLUDED.title,
+           category = EXCLUDED.category,
+           description = EXCLUDED.description,
+           amount = EXCLUDED.amount,
+           applicant_id = EXCLUDED.applicant_id,
+           approver_id = EXCLUDED.approver_id,
+           status = EXCLUDED.status,
+           comment = EXCLUDED.comment,
+           linked_chat_channel_id = EXCLUDED.linked_chat_channel_id,
+           approved_at = EXCLUDED.approved_at,
+           updated_at = EXCLUDED.updated_at`,
+        [ap.id, ap.title, ap.category, ap.description, ap.amount, ap.applicant_id, ap.approver_id, ap.status, ap.comment, ap.linked_chat_channel_id, ap.approved_at, ap.created_at]
       );
     }
 

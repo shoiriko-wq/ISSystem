@@ -154,7 +154,7 @@ export const facilityService = {
     if (overlappingReservation) {
       throw new ApiError(
         409,
-        `指定された時間帯 (${startHHMM}〜${endHHMM}) には既に予約「${overlappingReservation.title}」（予約者: ${overlappingReservation.user_name || '他教員'}）が入っています。`
+        `指定された時間帯 (${startHHMM}〜${endHHMM}) は既存予約「${overlappingReservation.title}」（予約者: ${overlappingReservation.user_name || '他教員'}）と時間帯が重複しています。`
       );
     }
 

@@ -86,8 +86,10 @@ router.get('/chat/channels/:channelId/members', authenticateToken, safe(chatCont
 router.get('/chat/channels/:channelId/messages', authenticateToken, safe(chatController?.getMessages));
 router.post('/chat/channels/:channelId/messages', authenticateToken, safe(chatController?.sendMessage));
 router.put('/chat/channels/:channelId/read', authenticateToken, safe(chatController?.updateLastRead));
-// グループの「非表示 / 表示」切り替え（削除機能は廃止済み）
+// グループの「非表示 / 表示」切り替え
 router.put('/chat/channels/:channelId/hide', authenticateToken, safe(chatController?.toggleHideChannel));
+// チャンネルの削除（公開チャンネルは 400、参加者・管理者のみ削除可）
+router.delete('/chat/channels/:channelId', authenticateToken, safe(chatController?.deleteChannel));
 // コメント（メッセージ）の取り消し
 router.delete('/chat/messages/:messageId', authenticateToken, safe(chatController?.cancelMessage));
 router.post('/chat/renotify', authenticateToken, (req, res) => {

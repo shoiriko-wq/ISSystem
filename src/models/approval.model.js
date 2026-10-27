@@ -3,7 +3,8 @@
  * 簡易決裁・物品購入リクエスト PostgreSQL (issystem DB) 対応モデル
  */
 
-import { openDb } from '../utils/db.js';
+import { query } from '../../config/database.js';
+import { openDb, nowIso } from '../utils/db.js';
 
 async function getDb() {
   return openDb();
