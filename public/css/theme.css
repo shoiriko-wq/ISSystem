@@ -157,13 +157,10 @@
   100% { background-color: transparent; }
 }
 
-/* ---------- Theme picker swatches ---------- */
+/* ---------- Theme picker swatches ----------
+   The gradient is provided inline by theme.js (per-theme palette),
+   so no swatch color variables are needed here. */
 .theme-swatch {
   border: 2px solid var(--border-main);
-  background-image: linear-gradient(
-    135deg,
-    var(--swatch-a) 0%, var(--swatch-a) 45%,
-    var(--swatch-b) 45%, var(--swatch-b) 62%,
-    var(--swatch-c) 62%, var(--swatch-c) 100%);
 }
 

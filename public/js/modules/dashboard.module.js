@@ -10,7 +10,7 @@
 
 import { apiGet } from '../api.js';
 
-import { formatDate, escapeHTML, refreshLucideIcons, openModal } from '../ui-helpers.js';
+import { formatDate, escapeHTML, refreshLucideIcons, openModal, showToast } from '../ui-helpers.js';
 
 import { switchTab } from '../main.js';
 
@@ -518,7 +518,7 @@ export async function loadDashboardData() {
 
 
 
-  // 3. 在席数・タスク数の更新
+  // 3. 要対応タスク数（未処理承認・未読掲示）の更新
 
   // 年休等・出張サマリー (absence.module.js) を読み込み人数表示
 
@@ -530,11 +530,18 @@ export async function loadDashboardData() {
 
 
 
-  if (presenceIn) presenceIn.textContent = '28';
-
-  if (presenceOut) presenceOut.textContent = '6';
-
-  if (pendingApprovals) pendingApprovals.textContent = '2件';
+  // 未処理の承認申請 (PENDING) 件数を実データから取得
+  if (pendingApprovals) {
+    try {
+      const approvalRes = await apiGet('/approvals', { status: 'PENDING' });
+      const approvalList = approvalRes.approvals || (Array.isArray(approvalRes) ? approvalRes : []);
+      const pendingCount = approvalList.filter((a) => (a.status || 'PENDING') === 'PENDING').length;
+      pendingApprovals.textContent = `${pendingCount}件`;
+    } catch (e) {
+      console.warn('[Dashboard] 未処理承認数の取得に失敗:', e.message);
+      pendingApprovals.textContent = '--';
+    }
+  }
 
   if (unreadBulletins) unreadBulletins.textContent = `${state.unreadCounts?.bulletin || 0}件`;
 

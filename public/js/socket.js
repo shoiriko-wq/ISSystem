@@ -12,6 +12,7 @@ import { loadMessages } from './modules/chat.module.js';
 import { loadSeatingData } from './modules/seating.module.js';
 import { fetchWeatherData } from './modules/dashboard.module.js';
 import { loadAbsenceSummary } from './modules/absence.module.js';
+import { loadBulletins } from './modules/bulletin.module.js';
 
 
 let socket = null;

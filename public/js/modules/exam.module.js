@@ -125,29 +125,42 @@ export function initExamModule() {
 }
 
 /**
- * イベントリスナーの登録
+ * 内部タブ (割り当て表 / 矛盾診断) の切り替え
+ * @param {'matrix'|'conflicts'} tab
  */
-function bindEvents() {
-  // タブ切り替え
+function switchExamTab(tab) {
   const tabMatrix = document.getElementById('exam-tab-matrix');
   const tabConflicts = document.getElementById('exam-tab-conflicts');
   const viewMatrix = document.getElementById('exam-view-matrix');
   const viewConflicts = document.getElementById('exam-view-conflicts');
 
-  tabMatrix?.addEventListener('click', () => {
+  if (tab === 'matrix') {
     activeTab = 'matrix';
-    tabMatrix.className = 'exam-nav-tab px-4 py-2 rounded-lg font-bold transition-all border bg-surface text-accent-strong border-main';
-    tabConflicts.className = 'exam-nav-tab px-4 py-2 rounded-lg font-bold transition-all border bg-surface-strong text-muted border-divider hover-text-main';
+    if (tabMatrix) tabMatrix.className = 'exam-nav-tab px-4 py-2 rounded-lg font-bold transition-all border bg-surface text-accent-strong border-main';
+    if (tabConflicts) tabConflicts.className = 'exam-nav-tab px-4 py-2 rounded-lg font-bold transition-all border bg-surface-strong text-muted border-divider hover-text-main';
     viewMatrix?.classList.remove('hidden');
     viewConflicts?.classList.add('hidden');
-  });
-
-  tabConflicts?.addEventListener('click', () => {
+  } else {
     activeTab = 'conflicts';
-    tabConflicts.className = 'exam-nav-tab px-4 py-2 rounded-lg font-bold transition-all border bg-surface text-warning-strong border-main';
-    tabMatrix.className = 'exam-nav-tab px-4 py-2 rounded-lg font-bold transition-all border bg-surface-strong text-muted border-divider hover-text-main';
+    if (tabConflicts) tabConflicts.className = 'exam-nav-tab px-4 py-2 rounded-lg font-bold transition-all border bg-surface text-warning-strong border-main';
+    if (tabMatrix) tabMatrix.className = 'exam-nav-tab px-4 py-2 rounded-lg font-bold transition-all border bg-surface-strong text-muted border-divider hover-text-main';
     viewConflicts?.classList.remove('hidden');
     viewMatrix?.classList.add('hidden');
+  }
+  refreshLucideIcons();
+}
+
+/**
+ * イベントリスナーの登録
+ */
+function bindEvents() {
+  // タブ切り替え
+  document.getElementById('exam-tab-matrix')?.addEventListener('click', () => switchExamTab('matrix'));
+  document.getElementById('exam-tab-conflicts')?.addEventListener('click', () => switchExamTab('conflicts'));
+
+  // 矛盾リストの「割り当て表で確認」ボタン (イベント委譲)
+  document.getElementById('exam-conflicts-list')?.addEventListener('click', (e) => {
+    if (e.target.closest('[data-exam-show-matrix]')) switchExamTab('matrix');
   });
 
   // 最適化実行ボタン
@@ -353,7 +366,7 @@ function renderConflictsList() {
           <span class="font-bold text-main">${escapeHTML(c.message)}</span>
         </div>
       </div>
-      <button class="btn-secondary py-1 px-2 text-[10px] flex-shrink-0" onclick="switchTab('exam')">割り当て表で確認</button>
+      <button class="btn-secondary py-1 px-2 text-[10px] flex-shrink-0" data-exam-show-matrix>割り当て表で確認</button>
     </div>
   `).join('');
 

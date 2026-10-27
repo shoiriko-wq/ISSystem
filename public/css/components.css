@@ -328,3 +328,143 @@
   color: var(--accent-primary);
   border-bottom-color: var(--accent-primary);
 }
+
+/* 9. Bulletin zapping (day strip chips, mini calendar, day group heads, kbd hints) */
+.day-chip {
+  padding: 0.35rem 0.6rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-surface);
+  color: var(--text-soft);
+  font-size: 0.72rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.day-chip:hover {
+  border-color: var(--accent-border);
+  color: var(--text-main);
+}
+
+.day-chip.active {
+  background-color: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: var(--text-on-accent);
+}
+
+.day-chip-count {
+  min-width: 1.15rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background-color: var(--bg-surface-strong);
+  color: var(--text-main);
+  font-size: 0.62rem;
+  text-align: center;
+}
+
+.day-chip.active .day-chip-count {
+  background-color: rgba(255, 255, 255, 0.28);
+  color: #fff;
+}
+
+.mini-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.mini-cal-wd {
+  text-align: center;
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  padding: 0.15rem 0;
+}
+
+.mini-cal-day {
+  position: relative;
+  min-height: 1.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.4rem;
+  font-size: 0.72rem;
+  color: var(--text-soft);
+  border: 1px solid transparent;
+  background-color: transparent;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.mini-cal-day:hover:not(:disabled) {
+  background-color: var(--bg-card-hover);
+  border-color: var(--border-color);
+}
+
+.mini-cal-empty { cursor: default; }
+
+.mini-cal-day-future {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.mini-cal-today {
+  border-color: var(--accent-border);
+  color: var(--text-accent-strong);
+  font-weight: 700;
+}
+
+.mini-cal-selected {
+  background-color: var(--accent-primary);
+  color: var(--text-on-accent);
+  font-weight: 700;
+}
+
+.mini-cal-dot {
+  position: absolute;
+  bottom: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background-color: var(--accent-primary);
+}
+
+.mini-cal-selected .mini-cal-dot { background-color: #fff; }
+
+.bulletin-day-head { backdrop-filter: blur(2px); }
+
+.kbd-key {
+  display: inline-block;
+  padding: 0.05rem 0.35rem;
+  border-radius: 0.3rem;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-surface-strong);
+  color: var(--text-soft);
+  font-size: 0.66rem;
+  font-family: ui-monospace, monospace;
+}
+
+.mini-cal-has {
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.mini-cal-num {
+  display: block;
+}
+
+/* キーボードザッピング時のカードフォーカスリングと展開状態の背景 */
+#bulletin-list-container button:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+  border-radius: 0.55rem;
+}
+
+#bulletin-list-container [data-bulletin-toggle][aria-expanded="true"] {
+  background-color: var(--bg-surface-soft);
+}

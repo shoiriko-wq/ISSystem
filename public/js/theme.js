@@ -7,29 +7,35 @@ import { state, setThemeState } from './state.js';
 import { openModal, closeModal, showToast } from './ui-helpers.js';
 
 // 対応テーマ一覧（CSS クラスは variables.css の html.theme-* と一致させる）
-// mode: CSS のコントラスト/視認性調整レイヤー (readability.css) がライト/ダークで分岐するための判定に使用
+// mode   : CSS のコントラスト/視認性調整レイヤー (readability.css) がライト/ダークで分岐するための判定
+// chrome : "saturated" は二色テーマ（内容色＝白系、バー＝原色）。variables.css の data-chrome フックが白いバー用インクを適用
+// hidden : 旧設定（localStorage）との互換エイリアス。テーマ選択UIには表示しない
 export const SUPPORTED_THEMES = [
-  { id: 'light-standard', name: 'ライト（標準）', class: 'theme-light-standard', mode: 'light', palette: ['#eef2f7', '#4f46e5', '#1e293b'] },
-  { id: 'light-sky', name: 'スカイライト', class: 'theme-light-sky', mode: 'light', palette: ['#eaf3fa', '#0284c7', '#1b3547'] },
-  { id: 'light-forest', name: 'フォレストライト', class: 'theme-light-forest', mode: 'light', palette: ['#ecf4ec', '#15803d', '#1e3126'] },
-  { id: 'light-sakura', name: 'サクラライト', class: 'theme-light-sakura', mode: 'light', palette: ['#f9eaf1', '#db2777', '#3a2129'] },
-  { id: 'light-sepia', name: 'セピアライト', class: 'theme-light-sepia', mode: 'light', palette: ['#efe6d7', '#b45309', '#3b3126'] },
-  { id: 'light-candy', name: 'キャンディライト', class: 'theme-light-candy', mode: 'light', palette: ['#fbe9f1', '#e11d48', '#341f2c'] },
-  { id: 'light-mint', name: 'ミントライト', class: 'theme-light-mint', mode: 'light', palette: ['#e9f4f0', '#0d9488', '#16352f'] },
-  { id: 'light-paper', name: 'ペーパー（明・高コントラスト）', class: 'theme-light-paper', mode: 'light', palette: ['#ffffff', '#1d4ed8', '#0b0b0f'] },
+  // ---------- ライト（7） ----------
+  { id: 'light-standard', name: 'ライト標準', class: 'theme-light-standard', mode: 'light', palette: ['#f4f6fa', '#4f46e5', '#1e293b'] },
+  { id: 'light-paper', name: 'ペーパー（明・高コントラスト）', class: 'theme-light-paper', mode: 'light', palette: ['#f1f2f4', '#1d4ed8', '#0b0b0f'] },
+  { id: 'light-sepia', name: 'セピア', class: 'theme-light-sepia', mode: 'light', palette: ['#f7f2e9', '#b45309', '#3b3126'] },
+  { id: 'pop-azure', name: 'ポップ：アジュール', class: 'theme-pop-azure', mode: 'light', chrome: 'saturated', palette: ['#0284c7', '#ffffff', '#123a52'] },
+  { id: 'pop-forest', name: 'ポップ：エメラルド', class: 'theme-pop-forest', mode: 'light', chrome: 'saturated', palette: ['#15803d', '#ffffff', '#1e3126'] },
+  { id: 'pop-crimson', name: 'ポップ：クリムゾン', class: 'theme-pop-crimson', mode: 'light', chrome: 'saturated', palette: ['#b91c1c', '#ffffff', '#3b1621'] },
+  { id: 'pop-sunset', name: 'ポップ：サンセット', class: 'theme-pop-sunset', mode: 'light', chrome: 'saturated', palette: ['#1f2937', '#ea580c', '#ffffff'] },
+  // ---------- ダーク（4） ----------
   { id: 'dark-navy', name: 'ダークネイビー', class: 'theme-dark-navy', mode: 'dark', palette: ['#0f172a', '#6366f1', '#f8fafc'] },
   { id: 'dark-midnight', name: 'ミッドナイトブラック', class: 'theme-dark-midnight', mode: 'dark', palette: ['#0b1120', '#818cf8', '#e8eefc'] },
-  { id: 'dark-forest', name: 'フォレストダーク', class: 'theme-dark-forest', mode: 'dark', palette: ['#0e1a14', '#34d399', '#e8f5ec'] },
-  { id: 'dark-ocean', name: 'オーシャンダーク', class: 'theme-dark-ocean', mode: 'dark', palette: ['#0b1d2a', '#38bdf8', '#e6f2fa'] },
   { id: 'dark-plum', name: 'プラムダーク', class: 'theme-dark-plum', mode: 'dark', palette: ['#1a1226', '#c084fc', '#f2e9fb'] },
-  { id: 'dark-sunset', name: 'サンセットダーク', class: 'theme-dark-sunset', mode: 'dark', palette: ['#20131a', '#fb923c', '#fbe9ec'] },
-  { id: 'dark-charcoal', name: 'チャコールダーク', class: 'theme-dark-charcoal', mode: 'dark', palette: ['#17191c', '#e2e8f0', '#e5e7eb'] },
   { id: 'high-contrast-dark', name: 'ハイコントラスト（暗）', class: 'theme-high-contrast-dark', mode: 'dark', palette: ['#000000', '#fbbf24', '#ffffff'] },
-  // 後方互換: 旧設定に保存されたテーマ
-  { id: 'navy', name: '標準ネイビー（旧）', class: 'theme-navy', mode: 'dark', palette: ['#0f172a', '#6366f1', '#f8fafc'] },
-  { id: 'dark', name: 'ダークモード（旧）', class: 'theme-dark', mode: 'dark', palette: ['#111318', '#38bdf8', '#e9edf3'] },
-  { id: 'warm', name: 'ウォームウッド（旧）', class: 'theme-warm', mode: 'dark', palette: ['#1b1f26', '#a78bfa', '#e9edf3'] },
-  { id: 'high-contrast', name: 'ハイコントラスト（旧）', class: 'theme-high-contrast', palette: ['#000000', '#fbbf24', '#ffffff'], mode: 'dark' }
+  // ---------- 後方互換エイリアス（旧テーマ設定はそのまま新しいテーマへ対応） ----------
+  { id: 'light-sky', name: 'スカイライト（旧）', class: 'theme-pop-azure', mode: 'light', chrome: 'saturated', hidden: true, palette: [] },
+  { id: 'light-forest', name: 'フォレストライト（旧）', class: 'theme-pop-forest', mode: 'light', chrome: 'saturated', hidden: true, palette: [] },
+  { id: 'light-sakura', name: 'サクラライト（旧）', class: 'theme-pop-crimson', mode: 'light', chrome: 'saturated', hidden: true, palette: [] },
+  { id: 'light-candy', name: 'キャンディライト（旧）', class: 'theme-pop-crimson', mode: 'light', chrome: 'saturated', hidden: true, palette: [] },
+  { id: 'light-mint', name: 'ミントライト（旧）', class: 'theme-pop-forest', mode: 'light', chrome: 'saturated', hidden: true, palette: [] },
+  { id: 'dark-sunset', name: 'サンセットダーク（旧）', class: 'theme-dark-plum', mode: 'dark', hidden: true, palette: [] },
+  { id: 'dark-charcoal', name: 'チャコールダーク（旧）', class: 'theme-dark-midnight', mode: 'dark', hidden: true, palette: [] },
+  { id: 'navy', name: '標準ネイビー（旧）', class: 'theme-dark-navy', mode: 'dark', hidden: true, palette: [] },
+  { id: 'dark', name: 'ダークモード（旧）', class: 'theme-dark-midnight', mode: 'dark', hidden: true, palette: [] },
+  { id: 'warm', name: 'ウォームウッド（旧）', class: 'theme-light-sepia', mode: 'light', hidden: true, palette: [] },
+  { id: 'high-contrast', name: 'ハイコントラスト（旧）', class: 'theme-high-contrast-dark', mode: 'dark', hidden: true, palette: [] }
 ];
 
 // テーマクラスの一覧（applyTheme で全消去する）
@@ -46,12 +52,15 @@ export function applyTheme(themeId) {
   ALL_THEME_CLASSES.forEach(c => htmlEl.classList.remove(c));
 
   const selectedTheme = SUPPORTED_THEMES.find(t => t.id === themeId)
-    || SUPPORTED_THEMES.find(t => t.id === APP_CONFIG.defaultTheme)
+    || SUPPORTED_THEMES.find(t => t.id === APP_CONFIG.DEFAULT_THEME)
     || SUPPORTED_THEMES[0];
+
   htmlEl.classList.add(selectedTheme.class);
 
   // CSS の視認性・コントラスト調整レイヤーがライト/ダークで分岐するためのフック
   htmlEl.dataset.themeMode = selectedTheme.mode || 'light';
+  // 二色テーマ（ポップ）でバー用のインクを適用するためのフック
+  htmlEl.dataset.chrome = selectedTheme.chrome || 'light';
 
   // ステートおよびLocalStorageへの保存
   setThemeState(selectedTheme.id);
@@ -73,14 +82,24 @@ function updateThemeSelection(activeId) {
 }
 
 /**
- * テーマ選択グリッドを動的生成
+ * 旧テーマ設定（削除されたテーマID）を新テーマ体系のIDへ変換する
+ */
+function migrateLegacyTheme() {
+  const stored = SUPPORTED_THEMES.find(t => t.id === state.currentTheme);
+  if (!stored || !stored.hidden) return;
+  const canonical = SUPPORTED_THEMES.find(t => t.class === stored.class && !t.hidden);
+  if (canonical) setThemeState(canonical.id);
+}
+
+/**
+ * テーマ選択グリッドを動的生成（旧テーマのエイリアスは表示しない）
  */
 function renderThemeOptions() {
   const grid = document.getElementById('theme-modal-grid');
   if (!grid) return;
 
   grid.innerHTML = '';
-  SUPPORTED_THEMES.forEach(t => {
+  SUPPORTED_THEMES.filter(t => !t.hidden).forEach(t => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'theme-select-btn flex flex-col items-center gap-2 p-2 rounded-xl bg-card border border-main hover-surface transition-colors';
@@ -100,7 +119,8 @@ function renderThemeOptions() {
  * テーマ切り替えUIモーダルの初期化
  */
 export function initThemeManager() {
-  // 初期テーマの適用
+  // 旧テーマ設定は新体系のテーマIDへ変換してから適用する
+  migrateLegacyTheme();
   applyTheme(state.currentTheme);
 
   const grid = document.getElementById('theme-modal-grid');
@@ -130,3 +150,4 @@ export function initThemeManager() {
     });
   }
 }
+
