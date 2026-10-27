@@ -1,0 +1,169 @@
+/* ============================================================
+   ISSystem Semantic Utility Classes
+   Consumes tokens from variables.css. Load AFTER base.css.
+   ============================================================ */
+
+/* ---------- Background utilities ---------- */
+.bg-main { background-color: var(--bg-main); }
+.bg-header { background-color: var(--bg-header); }
+.bg-sidebar { background-color: var(--bg-sidebar); }
+.bg-card { background-color: var(--bg-card); }
+.bg-card-static { background-color: var(--bg-card-static); }
+.bg-surface { background-color: var(--bg-surface); }
+.bg-surface-strong { background-color: var(--bg-surface-strong); }
+.bg-surface-soft { background-color: var(--bg-surface-soft); }
+.bg-input { background-color: var(--bg-input); }
+.bg-elevated { background-color: var(--bg-elevated); }
+.bg-inset { background-color: var(--bg-inset); }
+.bg-overlay { background-color: var(--bg-overlay); }
+.bg-scrim { background-color: var(--bg-scrim); backdrop-filter: var(--glass-blur); }
+.bg-muted { background-color: var(--bg-muted); }
+.bg-accent { background-color: var(--accent-primary); color: var(--text-on-accent); }
+.bg-accent-soft { background-color: var(--accent-soft); }
+.bg-accent-inset { background-color: var(--accent-inset); }
+.bg-accent-alt { background-color: var(--accent-alt); color: var(--text-on-accent); }
+.bg-accent-alt-soft { background-color: var(--accent-soft-alt); }
+.bg-success { background-color: var(--success); color: var(--text-on-accent); }
+.bg-success-soft { background-color: var(--success-soft); }
+.bg-success-inset { background-color: var(--success-inset); }
+.bg-warning { background-color: var(--warning); color: var(--text-on-accent); }
+.bg-warning-soft { background-color: var(--warning-soft); }
+.bg-warning-inset { background-color: var(--warning-inset); }
+.bg-danger { background-color: var(--danger); color: var(--text-on-accent); }
+.bg-danger-soft { background-color: var(--danger-soft); }
+.bg-danger-inset { background-color: var(--danger-inset); }
+.bg-info { background-color: var(--info); color: var(--text-on-accent); }
+.bg-info-soft { background-color: var(--info-soft); }
+.bg-info-inset { background-color: var(--info-inset); }
+
+/* ---------- Text utilities ---------- */
+.text-main { color: var(--text-main); }
+.text-soft { color: var(--text-soft); }
+.text-muted { color: var(--text-muted); }
+.text-faint { color: var(--text-faint); }
+.text-inverse { color: var(--text-inverse); }
+.text-on-accent { color: var(--text-on-accent); }
+.text-accent { color: var(--text-accent); }
+.text-accent-strong { color: var(--text-accent-strong); }
+.text-accent-alt { color: var(--text-accent-alt); }
+.text-success { color: var(--text-success); }
+.text-success-strong { color: var(--text-success-strong); }
+.text-warning { color: var(--text-warning); }
+.text-warning-strong { color: var(--text-warning-strong); }
+.text-danger { color: var(--text-danger); }
+.text-danger-strong { color: var(--text-danger-strong); }
+.text-info { color: var(--text-info); }
+.text-info-strong { color: var(--text-info-strong); }
+
+/* ---------- Border utilities ---------- */
+.border-main { border-color: var(--border-main); }
+.border-strong { border-color: var(--border-strong); }
+.border-divider { border-color: var(--border-divider); }
+.border-muted { border-color: var(--border-muted); }
+.border-accent { border-color: var(--accent-border); }
+.border-accent-soft { border-color: var(--accent-border-soft); }
+.border-accent-alt { border-color: var(--accent-border-alt); }
+.border-success { border-color: var(--success-border); }
+.border-success-soft { border-color: var(--success-border-soft); }
+.border-warning { border-color: var(--warning-border); }
+.border-warning-soft { border-color: var(--warning-border-soft); }
+.border-danger { border-color: var(--danger-border); }
+.border-danger-soft { border-color: var(--danger-border-soft); }
+.border-info { border-color: var(--info-border); }
+.border-info-soft { border-color: var(--info-border-soft); }
+.border-l-warning { border-left-color: var(--warning-border-strong); }
+.border-l-danger { border-left-color: var(--danger-border-strong); }
+.border-l-success { border-left-color: var(--success-border-strong); }
+.border-b-accent { border-bottom-color: var(--accent-primary); }
+.border-t-accent { border-top-color: var(--accent-primary); }
+.border-b-warning { border-bottom-color: var(--warning); }
+
+/* ---------- Ring, divide, accent-color ---------- */
+.ring-accent { box-shadow: 0 0 0 1px var(--accent-ring); }
+.ring-warning { box-shadow: 0 0 0 1px var(--warning-ring); }
+.ring-danger { box-shadow: 0 0 0 1px var(--danger-ring); }
+.ring-success { box-shadow: 0 0 0 1px var(--success-ring); }
+.accent-theme { accent-color: var(--accent-primary); }
+.divide-divider > * + * { border-color: var(--border-divider); }
+
+
+/* ---------- Focus & hover utilities ---------- */
+.focus-border-accent:focus { border-color: var(--border-focus); }
+.focus-border-accent:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.focus-ring-accent:focus, .focus-ring-accent:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-ring); }
+
+.hover-surface:hover { background-color: var(--bg-surface); }
+.hover-surface-strong:hover { background-color: var(--bg-surface-strong); }
+.hover-surface-soft:hover { background-color: var(--bg-surface-soft); }
+.hover-primary:hover { background-color: var(--accent-hover); }
+.hover-accent-soft:hover { background-color: var(--accent-soft); }
+.hover-accent-inset:hover { background-color: var(--accent-inset); }
+.hover-success-soft:hover { background-color: var(--success-soft); }
+.hover-success-strong:hover { background-color: var(--success-strong); }
+.hover-warning-soft:hover { background-color: var(--warning-soft); }
+.hover-warning-strong:hover { background-color: var(--warning-strong); }
+.hover-danger-soft:hover { background-color: var(--danger-soft); }
+.hover-danger-strong:hover { background-color: var(--danger-strong); }
+.hover-text-main:hover { color: var(--text-main); }
+.hover-text-soft:hover { color: var(--text-soft); }
+.hover-text-accent:hover { color: var(--text-accent); }
+.hover-text-accent-strong:hover { color: var(--text-accent-strong); }
+.hover-text-success-strong:hover { color: var(--text-success-strong); }
+.hover-text-warning-strong:hover { color: var(--text-warning-strong); }
+.hover-text-danger-strong:hover { color: var(--text-danger-strong); }
+.hover-border-accent:hover { border-color: var(--accent-border); }
+.hover-border-accent-alt:hover { border-color: var(--accent-border-alt); }
+.hover-border-strong:hover { border-color: var(--border-strong); }
+.hover-border-success:hover { border-color: var(--success-border); }
+.hover-border-warning:hover { border-color: var(--warning-border); }
+.hover-border-danger:hover { border-color: var(--danger-border); }
+
+/* ---------- Shadow utilities ---------- */
+.shadow-glow-warning { box-shadow: 0 10px 15px -3px var(--glow-warning), 0 4px 6px -2px var(--shadow-color); }
+.shadow-glow-accent { box-shadow: 0 10px 15px -3px var(--glow-accent), 0 4px 6px -2px var(--shadow-color); }
+.shadow-glow-danger { box-shadow: 0 10px 15px -3px var(--glow-danger), 0 4px 6px -2px var(--shadow-color); }
+.shadow-glow-success { box-shadow: 0 10px 15px -3px var(--glow-success), 0 4px 6px -2px var(--shadow-color); }
+
+/* ---------- Gradient & special utilities ---------- */
+.gradient-accent-soft {
+  background-image: linear-gradient(to right,
+    var(--accent-soft),
+    color-mix(in srgb, var(--accent-primary) 25%, var(--bg-surface)));
+}
+.gradient-accent-inset {
+  background-image: linear-gradient(to right,
+    var(--accent-inset),
+    color-mix(in srgb, var(--accent-primary) 18%, var(--bg-inset)));
+}
+.logo-gradient {
+  background-image: linear-gradient(to bottom right, var(--accent-primary), var(--accent-alt));
+  color: var(--text-on-accent);
+}
+.modal-backdrop {
+  background-color: var(--bg-scrim);
+  backdrop-filter: var(--glass-blur);
+}
+.file-btn::-webkit-file-upload-button {
+  background-color: var(--bg-surface-strong);
+  color: var(--text-main);
+  border: 1px solid var(--border-main);
+  border-radius: 0.5rem;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.75rem;
+}
+.highlight-flash { animation: highlightFlash 1.2s ease-out; }
+@keyframes highlightFlash {
+  0% { background-color: var(--accent-soft); }
+  100% { background-color: transparent; }
+}
+
+/* ---------- Theme picker swatches ---------- */
+.theme-swatch {
+  border: 2px solid var(--border-main);
+  background-image: linear-gradient(
+    135deg,
+    var(--swatch-a) 0%, var(--swatch-a) 45%,
+    var(--swatch-b) 45%, var(--swatch-b) 62%,
+    var(--swatch-c) 62%, var(--swatch-c) 100%);
+}
+

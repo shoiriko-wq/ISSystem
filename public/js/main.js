@@ -257,14 +257,14 @@ function initEventsAndListeners() {
 
   if (tabLoginBtn && tabRegisterBtn && loginForm && registerForm) {
     tabLoginBtn.addEventListener('click', () => {
-      tabLoginBtn.className = 'flex-1 pb-2 text-indigo-400 border-b-2 border-indigo-500 transition-colors';
-      tabRegisterBtn.className = 'flex-1 pb-2 text-slate-400 border-b-2 border-transparent hover:text-slate-200 transition-colors';
+      tabLoginBtn.className = 'flex-1 pb-2 text-accent border-b-2 border-accent transition-colors';
+      tabRegisterBtn.className = 'flex-1 pb-2 text-muted border-b-2 border-transparent hover-text-main transition-colors';
       loginForm.classList.remove('hidden');
       registerForm.classList.add('hidden');
     });
     tabRegisterBtn.addEventListener('click', () => {
-      tabRegisterBtn.className = 'flex-1 pb-2 text-indigo-400 border-b-2 border-indigo-500 transition-colors';
-      tabLoginBtn.className = 'flex-1 pb-2 text-slate-400 border-b-2 border-transparent hover:text-slate-200 transition-colors';
+      tabRegisterBtn.className = 'flex-1 pb-2 text-accent border-b-2 border-accent transition-colors';
+      tabLoginBtn.className = 'flex-1 pb-2 text-muted border-b-2 border-transparent hover-text-main transition-colors';
       registerForm.classList.remove('hidden');
       loginForm.classList.add('hidden');
     });
@@ -390,16 +390,16 @@ function initEventsAndListeners() {
 
   avatarContainer?.addEventListener('dragover', (e) => {
     e.preventDefault();
-    avatarContainer.classList.add('ring-4', 'ring-indigo-400');
+    avatarContainer.classList.add('ring-4', 'ring-accent');
   });
 
   avatarContainer?.addEventListener('dragleave', () => {
-    avatarContainer.classList.remove('ring-4', 'ring-indigo-400');
+    avatarContainer.classList.remove('ring-4', 'ring-accent');
   });
 
   avatarContainer?.addEventListener('drop', (e) => {
     e.preventDefault();
-    avatarContainer.classList.remove('ring-4', 'ring-indigo-400');
+    avatarContainer.classList.remove('ring-4', 'ring-accent');
     const file = e.dataTransfer?.files?.[0];
     if (file) loadAvatarFile(file);
   });
@@ -622,29 +622,29 @@ function initEventsAndListeners() {
 async function loadUsersList() {
   const tbody = document.getElementById('users-manage-tbody');
   if (!tbody) return;
-  tbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-slate-500">読み込み中...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-muted">読み込み中...</td></tr>`;
   try {
     const data = await apiGet('/users');
     const users = data.users || [];
     if (users.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-slate-500">登録されている教職員はいません。</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-muted">登録されている教職員はいません。</td></tr>`;
       return;
     }
     tbody.innerHTML = users.map(u => `
-      <tr class="hover:bg-slate-800/40 transition-colors">
-        <td class="p-3 font-bold text-white flex items-center gap-2">
-          <div class="w-6 h-6 rounded-full bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-indigo-300 font-bold overflow-hidden text-xs shrink-0">
+      <tr class="hover-surface transition-colors">
+        <td class="p-3 font-bold text-main flex items-center gap-2">
+          <div class="w-6 h-6 rounded-full bg-accent-soft border border-accent flex items-center justify-center text-accent-strong font-bold overflow-hidden text-xs shrink-0">
             ${u.avatar_url ? `<img src="${u.avatar_url}" class="w-full h-full object-cover">` : `<i data-lucide="user" class="w-3.5 h-3.5"></i>`}
           </div>
           <div>
             <div>${escapeHTML(u.name || '(氏名未設定)')}</div>
-            <div class="text-[10px] text-slate-400 font-mono">${escapeHTML(u.staff_code)}</div>
+            <div class="text-[10px] text-muted font-mono">${escapeHTML(u.staff_code)}</div>
           </div>
         </td>
-        <td class="p-3 text-slate-300">${escapeHTML(u.department || '未設定')}</td>
-        <td class="p-3 text-slate-400 font-mono">${escapeHTML(u.extension_number || '-')}</td>
+        <td class="p-3 text-soft">${escapeHTML(u.department || '未設定')}</td>
+        <td class="p-3 text-muted font-mono">${escapeHTML(u.extension_number || '-')}</td>
         <td class="p-3 text-right">
-          <button class="btn-danger py-1 px-2 text-[11px] bg-red-500/20 text-red-300 border border-red-500/30 rounded hover:bg-red-500/30 delete-user-btn" data-user-id="${u.id}">
+          <button class="btn-danger py-1 px-2 text-[11px] bg-danger-soft text-danger-strong border border-danger-soft rounded hover-danger-soft delete-user-btn" data-user-id="${u.id}">
             削除
           </button>
         </td>
@@ -667,7 +667,7 @@ async function loadUsersList() {
       });
     });
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-red-400">教職員一覧の取得に失敗しました。</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-danger">教職員一覧の取得に失敗しました。</td></tr>`;
   }
 }
 

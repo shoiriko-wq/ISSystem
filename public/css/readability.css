@@ -1,0 +1,742 @@
+/* ==========================================================================
+   ISSystem Readability & Contrast Layer (視認性・コントラスト調整レイヤー)
+   Load AFTER base.css / theme.css / components.css / animations.css.
+
+   Purpose:
+   1. Raise the minimum text size (teachers with low vision) + comfortable line spacing
+   2. Enlarge small icons and make strokes thicker
+   3. Strengthen contrast: page background vs card/frame background, thicker borders
+   4. Emphasize hover / focus states (ring, glow, lift)
+   All overrides read the raw palette (--base-*) so no circular token references occur.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. Global typography scale
+   -------------------------------------------------------------------------- */
+html {
+  font-size: 17.5px;            /* rem scale +~10% => spacing, icons, paddings grow together */
+}
+
+body {
+  letter-spacing: 0.012em;
+  word-spacing: 0.06em;
+  line-height: 1.65;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+/* --------------------------------------------------------------------------
+   2. Font-size floor for Tailwind text utilities (min ~16px, +~40% for tiny text)
+      !important is required because the Tailwind CDN injects its utilities late.
+   -------------------------------------------------------------------------- */
+.text-\[8px\],
+.text-\[9px\],
+.text-\[10px\],
+.text-\[11px\],
+.text-xs {
+  font-size: 1rem !important;
+  line-height: 1.6 !important;
+  letter-spacing: 0.015em;
+}
+/* Compact pills, badges & chips keep a small size + single line so they fit
+   inside tight containers (sidebar counters, status chips, exam tags). */
+body .rounded-full,
+body .badge,
+body .badge-count,
+body [class*="text-[9px]"],
+body [class*="text-[10px]"] {
+  font-size: 0.82rem !important;
+  line-height: 1.3 !important;
+  white-space: nowrap;
+}
+
+
+
+.text-sm {
+  font-size: 1.12rem !important;
+  line-height: 1.55 !important;
+}
+
+.text-base {
+  font-size: 1.28rem !important;
+  line-height: 1.5 !important;
+}
+
+.text-lg {
+  font-size: 1.48rem !important;
+  line-height: 1.45 !important;
+}
+
+.text-xl {
+  font-size: 1.8rem !important;
+  line-height: 1.4 !important;
+}
+
+.text-2xl {
+  font-size: 2.15rem !important;
+  line-height: 1.35 !important;
+}
+
+.text-3xl {
+  font-size: 2.55rem !important;
+  line-height: 1.3 !important;
+}
+
+.text-4xl {
+  font-size: 3rem !important;
+  line-height: 1.25 !important;
+}
+
+/* Monospace meta info stays readable */
+.font-mono {
+  letter-spacing: 0.02em;
+}
+
+/* --------------------------------------------------------------------------
+   3. Icon scale (small icons get bigger, strokes get thicker)
+   -------------------------------------------------------------------------- */
+svg.lucide,
+svg[data-lucide] {
+  stroke-width: 2.4px;
+}
+
+.w-3.h-3,
+.w-3\.5\.h-3\.5,
+svg.w-3.h-3,
+svg.w-3\.5.h-3\.5 {
+  width: 1.25rem !important;
+  height: 1.25rem !important;
+}
+
+.w-4.h-4,
+svg.w-4.h-4 {
+  width: 1.5rem !important;
+  height: 1.5rem !important;
+}
+
+.w-5.h-5,
+svg.w-5.h-5 {
+  width: 1.75rem !important;
+  height: 1.75rem !important;
+}
+
+.w-6.h-6,
+svg.w-6.h-6 {
+  width: 2rem !important;
+  height: 2rem !important;
+}
+
+/* --------------------------------------------------------------------------
+   4. Controls: larger text + roomier hit areas
+   -------------------------------------------------------------------------- */
+input,
+select,
+textarea,
+button {
+  font-size: 1.02rem;
+}
+
+.input-field,
+.input-field.w-full,
+.input-field.p-2,
+input.input-field,
+select.input-field,
+textarea.input-field {
+  font-size: 1.05rem !important;
+  line-height: 1.5 !important;
+  padding: 0.7rem 0.9rem !important;
+  border-width: var(--border-width) !important;
+  border-color: var(--border-main) !important;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  width: 1.15rem;
+  height: 1.15rem;
+  accent-color: var(--accent-primary);
+  cursor: pointer;
+}
+
+label {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.btn-primary,
+.btn-secondary,
+.btn-danger {
+  font-size: 1.02rem !important;
+  letter-spacing: 0.02em;
+}
+
+.badge,
+.badge-count {
+  font-size: 0.9rem !important;
+  letter-spacing: 0.02em;
+  padding: 0.25rem 0.6rem !important;
+  border-width: var(--border-width) !important;
+}
+
+.badge-count {
+  min-width: 1.6rem;
+  height: 1.6rem;
+  font-size: 0.9rem !important;
+}
+
+.file-btn::-webkit-file-upload-button {
+  font-size: 0.95rem;
+  padding: 0.45rem 0.75rem;
+  border-width: 1.5px;
+}
+
+/* --------------------------------------------------------------------------
+   5. Tables & lists: thicker separators, taller rows
+   -------------------------------------------------------------------------- */
+table {
+  font-size: 1rem;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border-bottom: var(--border-width) solid var(--border-divider) !important;
+  vertical-align: middle;
+}
+
+th {
+  font-weight: 800;
+  color: var(--text-main);
+  background-color: var(--bg-inset);
+}
+
+tbody tr {
+  transition: background-color var(--duration-fast) var(--ease-spring),
+              box-shadow var(--duration-fast) var(--ease-spring);
+}
+
+tbody tr:hover {
+  background-color: var(--bg-card-hover) !important;
+  box-shadow: inset var(--border-width-thick) 0 0 var(--accent-primary);
+}
+
+/* --------------------------------------------------------------------------
+   8. Frames: thicker borders (not fixed to 1px) & stronger elevation
+   -------------------------------------------------------------------------- */
+.card,
+.card-static,
+.glass-card,
+.glass-panel,
+.modal-card,
+.chat-layout,
+.chat-sidebar-channels,
+.seating-matrix-container,
+.theme-select-btn,
+.toast,
+.app-sidebar,
+.bg-surface,
+.bg-surface-strong,
+.bg-surface-soft,
+.bg-card,
+.bg-card-static,
+.bg-inset,
+.bg-accent-soft,
+.bg-accent-inset,
+.bg-success-soft,
+.bg-warning-soft,
+.bg-danger-soft,
+.bg-info-soft {
+  border-width: var(--border-width) !important;
+  border-style: solid;
+}
+
+.card,
+.card-static,
+.glass-card,
+.modal-card,
+.seating-matrix-container,
+.chat-layout,
+.chat-sidebar-channels {
+  border-color: var(--border-main) !important;
+}
+
+/* Regions nested inside cards need a stronger line to stay readable */
+main .bg-surface,
+main .bg-surface-strong,
+main .bg-inset,
+main .bg-accent-soft,
+main .bg-accent-inset,
+main .bg-success-soft,
+main .bg-warning-soft,
+main .bg-danger-soft,
+main .bg-info-soft {
+  border-color: var(--border-strong) !important;
+}
+
+/* Section dividers get thicker lines as well */
+.border-b,
+.border-t,
+.border-l,
+.border-r,
+.border-y,
+.border-x,
+.border-b-2,
+.border-t-2 {
+  border-width: var(--border-width) !important;
+}
+
+.border {
+  border-width: var(--border-width) !important;
+  border-color: var(--border-main) !important;
+}
+
+/* --------------------------------------------------------------------------
+   9. Cursor feedback: hovering a frame must be obvious
+   -------------------------------------------------------------------------- */
+a,
+button,
+[role="button"],
+.nav-item,
+.theme-select-btn,
+.card,
+.card-static,
+.glass-card,
+.dropdown-panel,
+.chat-layout .chat-sidebar-channels button {
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-spring),
+              border-color var(--duration-fast) var(--ease-spring),
+              box-shadow var(--duration-fast) var(--ease-spring),
+              transform var(--duration-fast) var(--ease-spring),
+              color var(--duration-fast) var(--ease-spring);
+}
+
+a:hover,
+button:hover,
+[role="button"]:hover,
+.hover-emphasis:hover {
+  outline: var(--ring-width) solid var(--hover-ring);
+  outline-offset: 2px;
+}
+
+/* Non-interactive info frames react to the cursor as well */
+.card:hover,
+.card-static:hover,
+.glass-card:hover,
+.seating-matrix-container:hover,
+.bg-surface:hover,
+.bg-surface-strong:hover,
+.bg-inset:hover {
+  outline: var(--ring-width) solid var(--hover-ring);
+  outline-offset: 2px;
+  box-shadow: var(--card-glow);
+}
+
+/* Focus ring gets thicker and uses the accent color */
+:focus-visible {
+  outline: var(--ring-width) solid var(--border-focus);
+  outline-offset: 3px;
+}
+
+/* --------------------------------------------------------------------------
+   10. Frame & component emphasis (loaded last => wins over components.css)
+   -------------------------------------------------------------------------- */
+body,
+p,
+li,
+td,
+th {
+  font-weight: 500;
+}
+
+strong,
+b,
+.font-bold,
+.font-semibold {
+  font-weight: 800;
+}
+
+/* Cards: thicker accent border, tinted background, lift & glow on hover */
+.card:hover,
+.card-static:hover,
+.glass-card:hover {
+  border-color: var(--accent-primary) !important;
+  background-color: var(--bg-card-hover) !important;
+  transform: translateY(var(--hover-lift)) !important;
+  box-shadow: var(--card-glow), 0 0 0 4px var(--accent-ring) !important;
+}
+
+.seat-card:hover,
+.theme-select-btn:hover {
+  border-color: var(--accent-primary) !important;
+  background-color: var(--bg-card-hover) !important;
+  box-shadow: var(--card-glow), 0 0 0 4px var(--accent-ring) !important;
+}
+
+/* Sidebar rows: background, border, accent bar and a small slide */
+.nav-item:hover {
+  background-color: var(--bg-card-hover) !important;
+  border-color: var(--accent-border-soft) !important;
+  color: var(--text-main) !important;
+  transform: translateX(3px) !important;
+}
+
+.nav-item.active {
+  font-weight: 800;
+  box-shadow: 0 4px 14px var(--glow-accent) !important;
+}
+
+/* Buttons: lift + glow ring so the cursor target is unmistakable */
+.btn-primary:hover,
+.btn-secondary:hover,
+.btn-danger:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 18px var(--glow-accent), 0 0 0 4px var(--accent-ring) !important;
+}
+
+.btn-secondary:hover {
+  border-color: var(--border-strong) !important;
+  box-shadow: 0 6px 16px var(--shadow-color), 0 0 0 4px var(--border-divider) !important;
+}
+
+.btn-danger:hover {
+  box-shadow: 0 6px 18px var(--glow-danger), 0 0 0 4px var(--danger-ring) !important;
+}
+
+.icon-btn:hover {
+  transform: translateY(-2px) scale(1.1) !important;
+  background-color: var(--bg-surface-strong) !important;
+  border-color: var(--border-strong) !important;
+  color: var(--text-main) !important;
+}
+
+/* Inputs: visible focus ring and a stronger resting border */
+.input-field {
+  border-color: var(--border-strong) !important;
+}
+
+.input-field:focus {
+  border-color: var(--border-focus) !important;
+  box-shadow: 0 0 0 4px var(--accent-ring) !important;
+}
+
+/* Modal: white card on a darkened scrim, thick frame */
+.modal-card,
+.modal-overlay .card {
+  background-color: var(--bg-card) !important;
+  border-color: var(--border-strong) !important;
+  box-shadow: 0 24px 48px -12px var(--shadow-color), 0 0 0 2px var(--border-strong) !important;
+}
+
+.modal-header,
+.modal-overlay .card > div:first-child {
+  background-color: var(--bg-surface-strong) !important;
+  border-bottom: var(--border-width-thick) solid var(--border-strong) !important;
+}
+
+/* App chrome: header & sidebar are clearly separated from the content area */
+.app-header {
+  border-bottom: var(--border-width-thick) solid var(--border-strong) !important;
+}
+
+.app-sidebar {
+  background-color: var(--bg-surface-strong) !important;
+  border-right: var(--border-width-thick) solid var(--border-strong) !important;
+}
+
+.chat-layout {
+  border: var(--border-width-thick) solid var(--border-strong) !important;
+}
+
+.chat-sidebar-channels {
+  border-right: var(--border-width-thick) solid var(--border-strong) !important;
+  background-color: var(--bg-surface-strong) !important;
+}
+
+/* Toasts get a thick accent edge so notifications are easy to spot */
+.toast {
+  border-left: var(--border-width-thick) solid var(--accent-primary) !important;
+  box-shadow: 0 12px 28px -8px var(--shadow-color) !important;
+}
+
+/* Dropdown panels need a strong frame to separate them from the page */
+.dropdown-panel,
+#user-dropdown-menu,
+#notification-dropdown-menu,
+#theme-modal-grid .theme-select-btn {
+  background-color: var(--bg-card) !important;
+  border: var(--border-width) solid var(--border-strong) !important;
+  box-shadow: 0 18px 36px -10px var(--shadow-color) !important;
+}
+
+#user-dropdown-menu,
+#notification-dropdown-menu {
+  background-color: var(--bg-elevated) !important;
+}
+
+#user-dropdown-menu button,
+#notification-dropdown-menu button,
+#notification-dropdown-menu a,
+#user-dropdown-menu a {
+  transition: background-color var(--duration-fast) var(--ease-spring),
+              color var(--duration-fast) var(--ease-spring),
+              transform var(--duration-fast) var(--ease-spring);
+}
+
+#user-dropdown-menu button:hover,
+#notification-dropdown-menu button:hover {
+  background-color: var(--bg-card-hover) !important;
+  transform: translateX(2px);
+}
+
+
+/* Theme picker cards get a clear selection frame */
+.theme-select-btn {
+  box-shadow: var(--card-glow);
+}
+
+.theme-select-btn.border-accent,
+.theme-select-btn.ring-accent {
+  border-color: var(--accent-primary) !important;
+  box-shadow: var(--card-glow), 0 0 0 4px var(--accent-ring) !important;
+}
+
+
+
+/* --------------------------------------------------------------------------
+   6. Contrast layer - LIGHT themes
+      Page background is darkened so white cards/frames clearly pop out.
+   -------------------------------------------------------------------------- */
+html[data-theme-mode="light"] {
+  --bg-main: color-mix(in srgb, var(--base-bg-main) 96%, #cbd5e1);
+  --bg-header: color-mix(in srgb, var(--base-bg-header) 70%, #c3ccd8);
+  --bg-sidebar: color-mix(in srgb, var(--base-bg-header) 70%, #c3ccd8);
+  --bg-card: #ffffff;
+  --bg-card-static: #ffffff;
+  --bg-surface: color-mix(in srgb, var(--base-bg-surface) 78%, #c7d0dc);
+  --bg-surface-strong: color-mix(in srgb, var(--base-bg-surface-strong) 62%, #a9b4c2);
+  --bg-surface-soft: color-mix(in srgb, var(--base-bg-surface-soft) 88%, #d5dde7);
+  --bg-input: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-inset: color-mix(in srgb, var(--base-bg-inset) 58%, #c2ccda);
+  --bg-overlay: color-mix(in srgb, var(--base-bg-overlay) 78%, #cbd5e1);
+  --border-main: color-mix(in srgb, var(--base-border-main) 55%, #7c899a);
+  --border-strong: #64748b;
+  --border-divider: color-mix(in srgb, var(--base-border-divider) 45%, #8794a5);
+  --border-muted: color-mix(in srgb, var(--base-border-muted) 55%, #8794a5);
+  --text-soft: color-mix(in srgb, var(--base-text-soft) 50%, #0b1424);
+  --text-muted: color-mix(in srgb, var(--base-text-muted) 45%, #0b1424);
+  --text-faint: color-mix(in srgb, var(--base-text-faint) 45%, #263241);
+  --chrome-text: color-mix(in srgb, var(--base-text-main) 82%, #050c16);
+  --shadow-color: rgba(10, 18, 30, 0.16);
+  --bg-card-hover: color-mix(in srgb, var(--accent-primary) 14%, #ffffff);
+  --card-glow: 0 14px 28px -10px rgba(15, 23, 42, 0.22), 0 0 0 1.5px var(--border-strong);
+  --glass-bg: color-mix(in srgb, var(--base-glass-bg) 78%, #cbd5e1);
+  --hover-ring: color-mix(in srgb, var(--accent-primary) 60%, transparent);
+}
+
+/* --------------------------------------------------------------------------
+   7. Contrast layer - DARK themes
+      Page background is deepened, card/frames are lifted so the two layers
+      sit far apart in luminance.
+   -------------------------------------------------------------------------- */
+html[data-theme-mode="dark"] {
+  --bg-main: color-mix(in srgb, var(--base-bg-main) 68%, #000000);
+  --bg-header: color-mix(in srgb, var(--base-bg-header) 76%, #000000);
+  --bg-sidebar: color-mix(in srgb, var(--base-bg-sidebar) 76%, #000000);
+  --bg-card: color-mix(in srgb, var(--base-bg-surface) 96%, #ffffff);
+  --bg-card-static: var(--base-bg-surface);
+  --bg-surface: color-mix(in srgb, var(--base-bg-surface-strong) 88%, #ffffff);
+  --bg-surface-strong: color-mix(in srgb, var(--base-bg-surface) 92%, #ffffff);
+  --bg-surface-soft: color-mix(in srgb, var(--base-bg-surface) 58%, var(--base-bg-main));
+  --bg-input: color-mix(in srgb, var(--base-bg-surface) 55%, #000000);
+  --bg-elevated: color-mix(in srgb, var(--base-bg-surface) 95%, #ffffff);
+  --bg-inset: color-mix(in srgb, var(--base-bg-main) 78%, #000000);
+  --bg-overlay: color-mix(in srgb, var(--base-bg-overlay) 62%, #000000);
+  --border-main: color-mix(in srgb, var(--base-border-main) 60%, #ffffff);
+  --border-strong: color-mix(in srgb, var(--base-border-strong) 80%, #ffffff);
+  --border-divider: color-mix(in srgb, var(--base-border-divider) 55%, #ffffff);
+  --border-muted: color-mix(in srgb, var(--base-border-muted) 42%, #ffffff);
+  --text-soft: color-mix(in srgb, var(--base-text-soft) 80%, #ffffff);
+  --text-muted: color-mix(in srgb, var(--base-text-muted) 55%, #ffffff);
+  --text-faint: color-mix(in srgb, var(--base-text-faint) 62%, #ffffff);
+  --chrome-text: color-mix(in srgb, var(--base-text-main) 90%, #ffffff);
+  --shadow-color: rgba(0, 0, 0, 0.62);
+  --bg-card-hover: color-mix(in srgb, var(--accent-primary) 24%, var(--base-bg-surface));
+  --card-glow: 0 16px 32px -12px rgba(0, 0, 0, 0.9), 0 0 0 1.5px var(--border-strong);
+  --glass-bg: color-mix(in srgb, var(--base-glass-bg) 72%, #000000);
+  --hover-ring: color-mix(in srgb, var(--accent-primary) 70%, transparent);
+}
+
+
+/* --------------------------------------------------------------------------
+   8. Chrome text readability (light themes)
+   Header / sidebar / chat channel strip use the slate band, so the text placed
+   on them must be the dark "chrome" text tokens.
+   -------------------------------------------------------------------------- */
+html[data-theme-mode="light"] .app-header,
+html[data-theme-mode="light"] .app-header input::placeholder,
+html[data-theme-mode="light"] .app-sidebar,
+html[data-theme-mode="light"] .chat-sidebar-channels {
+  color: var(--chrome-text);
+}
+
+html[data-theme-mode="light"] .app-header .text-main,
+html[data-theme-mode="light"] .app-header .text-soft,
+html[data-theme-mode="light"] .app-header .text-muted,
+html[data-theme-mode="light"] .app-header .text-faint,
+html[data-theme-mode="light"] .app-sidebar .text-main,
+html[data-theme-mode="light"] .app-sidebar .text-soft,
+html[data-theme-mode="light"] .app-sidebar .text-muted,
+html[data-theme-mode="light"] .app-sidebar .text-faint,
+html[data-theme-mode="light"] .chat-sidebar-channels .text-soft,
+html[data-theme-mode="light"] .chat-sidebar-channels .text-muted,
+html[data-theme-mode="light"] .chat-sidebar-channels .text-main {
+  color: var(--chrome-text) !important;
+}
+
+/* Header / sidebar inner surfaces get lifted slightly so nested controls read clearly */
+html[data-theme-mode="light"] .app-header .bg-surface,
+html[data-theme-mode="light"] .app-sidebar .bg-surface,
+html[data-theme-mode="light"] .chat-sidebar-channels .bg-surface {
+  background-color: var(--bg-card) !important;
+}
+
+html[data-theme-mode="light"] .app-header .bg-surface,
+html[data-theme-mode="light"] .app-sidebar .bg-surface {
+  color: var(--text-main) !important;
+}
+
+/* Dropdown panels keep the card background + dark text (they are not on the chrome band) */
+html[data-theme-mode="light"] #user-dropdown-menu,
+html[data-theme-mode="light"] #notification-dropdown-menu {
+  background-color: var(--bg-elevated) !important;
+  color: var(--text-main) !important;
+}
+
+/* Decorative separators are removed from the chrome to cut visual noise */
+html[data-theme-mode="light"] .app-header .text-faint,
+html[data-theme-mode="light"] .app-header .border-l,
+.app-header .decorative-sep {
+  border-color: transparent !important;
+}
+
+/* --------------------------------------------------------------------------
+   9. Sidebar: labels & spacing tuned for the enlarged text
+   -------------------------------------------------------------------------- */
+.app-sidebar .nav-item {
+  padding: 0.6rem 0.75rem !important;
+  gap: 0.7rem;
+}
+
+.app-sidebar .nav-label {
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* Badge pills inside the sidebar stay compact (never wrap) */
+.app-sidebar .nav-badge {
+  font-size: 0.78rem !important;
+  padding: 0.12rem 0.42rem !important;
+  flex: 0 0 auto;
+}
+
+/* Modal footer primary buttons: consistent solid accent style across all modals */
+.modal-footer .btn-primary {
+  background-color: var(--accent-primary) !important;
+  color: var(--text-on-accent) !important;
+  border-color: var(--accent-hover) !important;
+}
+
+/* Modal body content keeps comfortable rhythm with the larger fonts */
+.modal-body {
+  line-height: 1.7;
+}
+
+
+
+/* --------------------------------------------------------------------------
+   12. Contrast guard for filled surfaces (accent / status colors)
+       The markup pairs bg-accent / bg-danger / bg-warning with text-main,
+       which leaves dark ink on saturated colors (ratio under 4.5).
+       Rules here are loaded last, so !important is used to pin the ink.
+   -------------------------------------------------------------------------- */
+
+/* Accent, success and info filled surfaces use the theme's inverse ink */
+.bg-accent,
+.bg-accent-alt,
+.bg-success,
+.bg-info,
+.btn-primary,
+.btn-success,
+.nav-item.active,
+.app-sidebar .nav-item.active .nav-label,
+.app-sidebar .nav-item.active i,
+.app-sidebar .nav-item.active svg,
+.modal-footer .btn-primary {
+  color: var(--text-on-accent) !important;
+  text-shadow: var(--on-accent-shadow) !important;
+}
+
+/* In light themes the fills are darkened to the "strong" tokens so the white ink
+   clears 4.5:1 (raw accent / danger / success colors are too light for white text) */
+html[data-theme-mode='light'] .bg-accent,
+html[data-theme-mode='light'] .btn-primary,
+html[data-theme-mode='light'] .nav-item.active,
+html[data-theme-mode='light'] .modal-footer .btn-primary {
+  background-color: var(--accent-strong) !important;
+  border-color: var(--accent-strong) !important;
+}
+
+html[data-theme-mode='light'] .bg-danger,
+html[data-theme-mode='light'] .btn-danger,
+html[data-theme-mode='light'] #notification-badge,
+html[data-theme-mode='light'] #connection-status-banner {
+  background-color: var(--danger-strong) !important;
+  border-color: var(--danger-strong) !important;
+}
+
+html[data-theme-mode='light'] .bg-success,
+html[data-theme-mode='light'] .btn-success {
+  background-color: var(--success-strong) !important;
+  border-color: var(--success-strong) !important;
+}
+
+/* Yellow filled surfaces: dark ink in every theme */
+.bg-warning,
+.btn-warning,
+#generate-invitation-btn {
+  color: var(--on-warning-ink) !important;
+  text-shadow: var(--on-status-shadow) !important;
+}
+
+/* Red filled surfaces (notification badge, connection banner): the theme's inverse ink
+   gives white ink in light themes and dark ink in dark themes (both above 4.5) */
+.bg-danger,
+.btn-danger,
+#notification-badge,
+#connection-status-banner {
+  color: var(--text-on-accent) !important;
+  text-shadow: var(--on-accent-shadow) !important;
+}
+
+/* Tiny badge numerals stay heavy so they survive the reduced size */
+#notification-badge,
+.nav-badge,
+.badge-count {
+  font-weight: 800 !important;
+}
+
+/* The header bell badge grows into a pill so two digit counts (10..99+) fit */
+#notification-badge {
+  width: auto;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.3rem;
+  line-height: 1.15rem;
+  justify-content: center;
+}
+

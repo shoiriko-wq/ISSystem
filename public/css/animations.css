@@ -54,10 +54,10 @@
 
 @keyframes pulseGlow {
   0%, 100% {
-    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4);
+    box-shadow: 0 0 0 0 var(--accent-ring);
   }
   50% {
-    box-shadow: 0 0 0 8px rgba(99, 102, 241, 0);
+    box-shadow: 0 0 0 8px transparent;
   }
 }
 
@@ -86,9 +86,9 @@
 .shimmer-loading {
   background: linear-gradient(
     90deg,
-    rgba(255, 255, 255, 0.03) 25%,
-    rgba(255, 255, 255, 0.08) 50%,
-    rgba(255, 255, 255, 0.03) 75%
+    var(--bg-surface-soft) 25%,
+    var(--bg-surface) 50%,
+    var(--bg-surface-soft) 75%
   );
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
@@ -116,3 +116,219 @@
 .interactive-scale:active {
   transform: scale(0.97);
 }
+
+/* ==========================================================================
+   5. Keyframes for entrance, realtime feedback & hover emphasis
+   ========================================================================== */
+@keyframes cardEnter {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes rowIn {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes badgePop {
+  0%   { transform: scale(0.4); }
+  62%  { transform: scale(1.22); }
+  100% { transform: scale(1); }
+}
+
+@keyframes livePulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-ring); opacity: 1; }
+  50%      { box-shadow: 0 0 0 7px transparent; opacity: 0.55; }
+}
+
+@keyframes barGrow {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+
+@keyframes overlayFade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes indicatorGrow {
+  from { transform: scaleY(0.15); opacity: 0; }
+  to   { transform: scaleY(1); opacity: 1; }
+}
+
+@keyframes spinSlow {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes attentionFlash {
+  0%, 100% { border-color: var(--border-main); box-shadow: 0 0 0 0 transparent; }
+  45%      { border-color: var(--accent-primary); box-shadow: 0 0 0 5px var(--accent-ring); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(26px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* ==========================================================================
+   6. Entrance choreography - staggered reveal of every view & list
+   ========================================================================== */
+:is(.tab-view.active, .dashboard-grid, .grid-2col, .grid-3col, .seating-grid-container,
+    #bulletin-list-container, #approval-list-container, #news-list-container,
+    #sched-list-container, #chat-messages-container, #chat-members-container, tbody) > * {
+  animation: cardEnter 0.42s var(--ease-spring) both;
+  animation-delay: calc(var(--stagger-index, 0) * 45ms);
+}
+
+:is(.tab-view.active, .dashboard-grid, .grid-2col, .grid-3col, .seating-grid-container,
+    #bulletin-list-container, #approval-list-container, #news-list-container,
+    #sched-list-container, #chat-messages-container, #chat-members-container, tbody) > :nth-child(1)  { --stagger-index: 0; }
+:is(.tab-view.active, .dashboard-grid, .grid-2col, .grid-3col, .seating-grid-container,
+    #bulletin-list-container, #approval-list-container, #news-list-container,
+    #sched-list-container, #chat-messages-container, #chat-members-container, tbody) > :nth-child(2)  { --stagger-index: 1; }
+:is(.tab-view.active, .dashboard-grid, .grid-2col, .grid-3col, .seating-grid-container,
+    #bulletin-list-container, #approval-list-container, #news-list-container,
+    #sched-list-container, #chat-messages-container, #chat-members-container, tbody) > :nth-child(3)  { --stagger-index: 2; }
+:is(.tab-view.active, .dashboard-grid, .grid-2col, .grid-3col, .seating-grid-container,
+    #bulletin-list-container, #approval-list-container, #news-list-container,
+    #sched-list-container, #chat-messages-container, #chat-members-container, tbody) > :nth-child(4)  { --stagger-index: 3; }
+:is(.tab-view.active, .dashboard-grid, .grid-2col, .grid-3col, .seating-grid-container,
+    #bulletin-list-container, #approval-list-container, #news-list-container,
+    #sched-list-container, #chat-messages-container, #chat-members-container, tbody) > :nth-child(5)  { --stagger-index: 4; }
+:is(.tab-view.active, .dashboard-grid, .grid-2col, .grid-3col, .seating-grid-container,
+    #bulletin-list-container, #approval-list-container, #news-list-container,
+    #sched-list-container, #chat-messages-container, #chat-members-container, tbody) > :nth-child(6)  { --stagger-index: 5; }
+:is(.tab-view.active, .dashboard-grid, .grid-2col, .grid-3col, .seating-grid-container,
+    #bulletin-list-container, #approval-list-container, #news-list-container,
+    #sched-list-container, #chat-messages-container, #chat-members-container, tbody) > :nth-child(7)  { --stagger-index: 6; }
+:is(.tab-view.active, .dashboard-grid, .grid-2col, .grid-3col, .seating-grid-container,
+    #bulletin-list-container, #approval-list-container, #news-list-container,
+    #sched-list-container, #chat-messages-container, #chat-members-container, tbody) > :nth-child(8)  { --stagger-index: 7; }
+:is(.tab-view.active, .dashboard-grid, .grid-2col, .grid-3col, .seating-grid-container,
+    #bulletin-list-container, #approval-list-container, #news-list-container,
+    #sched-list-container, #chat-messages-container, #chat-members-container, tbody) > :nth-child(n+9) { --stagger-index: 8; }
+
+/* List rows slide in from the left, cards pop upward */
+:is(#bulletin-list-container, #approval-list-container, #news-list-container,
+    #sched-list-container, #chat-messages-container, #chat-members-container,
+    tbody) > * {
+  animation-name: rowIn;
+  animation-duration: 0.34s;
+}
+
+/* Badges & counts pop when they appear (unread counts, status chips) */
+.badge,
+.badge-count {
+  animation: badgePop 0.36s var(--ease-spring) both;
+}
+
+.modal-overlay {
+  animation: overlayFade 0.22s ease both;
+}
+
+/* ==========================================================================
+   7. Hover / active emphasis (cursor feedback must be obvious)
+   ========================================================================== */
+.card,
+.card-static,
+.glass-card,
+.seat-card,
+.theme-select-btn {
+  transition: transform var(--duration-fast) var(--ease-spring),
+              box-shadow var(--duration-fast) var(--ease-spring),
+              border-color var(--duration-fast) var(--ease-spring),
+              background-color var(--duration-fast) var(--ease-spring);
+}
+
+.card:hover,
+.card-static:hover,
+.glass-card:hover {
+  transform: translateY(var(--hover-lift));
+}
+
+.seat-card:hover,
+.theme-select-btn:hover {
+  transform: translateY(-3px) scale(1.03);
+}
+
+.nav-item {
+  position: relative;
+}
+
+/* Left accent bar: grows on hover, full height when active */
+.nav-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 14%;
+  height: 72%;
+  width: var(--border-width-thick);
+  border-radius: 9999px;
+  background-color: var(--accent-primary);
+  transform: scaleY(0);
+  transform-origin: center;
+  transition: transform var(--duration-fast) var(--ease-spring),
+              background-color var(--duration-fast) var(--ease-spring);
+}
+
+.nav-item:hover::before {
+  transform: scaleY(0.65);
+}
+
+.nav-item.active::before {
+  background-color: var(--text-on-accent);
+  transform: scaleY(1);
+  animation: indicatorGrow var(--duration-base) var(--ease-spring);
+}
+
+.nav-item:hover {
+  transform: translateX(3px);
+}
+
+.btn-primary:active,
+.btn-secondary:active,
+.btn-danger:active,
+.icon-btn:active {
+  transform: translateY(0) scale(0.96);
+}
+
+/* Realtime helpers */
+.animate-live {
+  animation: livePulse 1.6s ease-in-out infinite;
+}
+
+.animate-bar {
+  transform-origin: left center;
+  animation: barGrow 0.7s var(--ease-spring) both;
+}
+
+.animate-spin-slow {
+  animation: spinSlow 9s linear infinite;
+}
+
+.animate-pop {
+  animation: badgePop 0.35s var(--ease-spring) both;
+}
+
+.animate-slide-right {
+  animation: slideInRight 0.35s var(--ease-spring) both;
+}
+
+.attention-flash {
+  animation: attentionFlash 1.6s ease-in-out 2;
+}
+
+/* ==========================================================================
+   8. Respect users who prefer reduced motion
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+

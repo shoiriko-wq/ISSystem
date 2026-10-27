@@ -110,7 +110,73 @@
   padding-bottom: 0.5rem;
 }
 
-/* 6. Header & Sidebar Specific Structural Adjustments */
+/* 6. Header & Sidebar Responsive Modes */
+
+/* --- 中幅 (768px〜1023px): アイコンのみ、ホバリング/フォーカスでせり出し --- */
+@media (min-width: 768px) and (max-width: 1023px) {
+  #app-body {
+    position: relative;
+    overflow: visible !important;
+  }
+
+  .app-sidebar {
+    position: absolute !important;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 3.6rem !important;
+    z-index: 30;
+    padding: 0.5rem 0.4rem !important;
+    box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+    transition: width 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+                box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* ホバリングでメニューがスライドしてせり出し、文字も表示 */
+  .app-sidebar:hover,
+  .app-sidebar:focus-within {
+    width: 12.5rem !important;
+    box-shadow: 10px 0 28px -8px var(--shadow-color);
+  }
+
+  .app-sidebar .nav-item {
+    padding: 0.55rem 0.5rem !important;
+    justify-content: flex-start !important;
+    white-space: nowrap;
+  }
+
+  .app-sidebar .nav-item > div {
+    gap: 0.7rem;
+  }
+
+  .app-sidebar .nav-label {
+    opacity: 0;
+    transition: opacity 0.12s ease;
+  }
+
+  .app-sidebar:hover .nav-label,
+  .app-sidebar:focus-within .nav-label {
+    opacity: 1;
+    transition-delay: 0.12s;
+  }
+
+  /* せり出し前はカウントバッジ・バージョン表記を隠す */
+  .app-sidebar .nav-badge,
+  .app-sidebar .sidebar-version {
+    display: none !important;
+  }
+
+  .app-sidebar:hover .nav-badge,
+  .app-sidebar:focus-within .nav-badge {
+    display: inline-flex !important;
+  }
+
+  main {
+    padding-left: 4.2rem !important;
+  }
+}
+
+/* --- 狭幅 (≤767px): 画面下のバーはアイコンのみ（ホバリングでも文字は出さない） --- */
 @media (max-width: 767px) {
   .app-sidebar {
     position: fixed;
@@ -118,30 +184,56 @@
     left: 0;
     right: 0;
     width: 100% !important;
-    height: 3.5rem;
+    height: 3.9rem;
     z-index: 40;
     flex-direction: row !important;
+    align-items: center;
+    justify-content: center;
     border-right: none !important;
-    border-top: 1px solid var(--border-color);
-    padding: 0.25rem 0.5rem !important;
+    border-top: var(--border-width-thick) solid var(--border-strong);
+    padding: 0.3rem 0.4rem !important;
   }
 
   .app-sidebar nav {
     display: flex;
     justify-content: space-around;
+    align-items: center;
     width: 100%;
+    gap: 0.15rem;
   }
 
-  .app-sidebar nav .nav-item {
-    font-size: 0.65rem;
+  .app-sidebar .nav-item {
     flex-direction: column;
-    padding: 0.25rem;
-    gap: 0.1rem;
+    justify-content: center !important;
+    padding: 0.35rem 0.35rem !important;
+    gap: 0.15rem;
+    white-space: nowrap;
   }
 
-  main#main-content,
-  #main-content,
+  /* 文字は隠す。ホバリングでも表示しない */
+  .app-sidebar .nav-label,
+  .app-sidebar .sidebar-version,
+  .app-sidebar .nav-badge {
+    display: none !important;
+  }
+
+  .app-sidebar .nav-item svg {
+    width: 1.4rem;
+    height: 1.4rem;
+  }
+
   main {
-    padding-bottom: 3.5rem;
+    padding-bottom: 4.4rem !important;
+    padding-left: 0.85rem !important;
+    padding-right: 0.85rem !important;
+  }
+
+  /* モーダルは下バー分を空け、内部スクロールルールは共通（body のみスクロール） */
+  .modal-overlay { padding: 0.5rem 0.5rem 4.4rem; }
+  .modal-card,
+  .modal-card--wide,
+  .modal-card--compact {
+    width: 100%;
+    max-height: calc(100vh - 4.9rem);
   }
 }

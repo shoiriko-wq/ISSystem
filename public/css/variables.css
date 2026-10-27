@@ -1,116 +1,992 @@
-/* ==========================================================================
-   ISSystem Theme Variables & Color Palette Definition
-   ========================================================================== */
+/**
+ * ==========================================================================
+ *  ISSystem Design Token System (16 themes)
+ *  Base palette tokens are defined per theme class on <html>.
+ *  Derived tokens (soft / inset / strong text / borders / glows) are computed
+ *  with color-mix() so each theme only needs a small set of base colors.
+ * ==========================================================================
+ */
 
-/* 1. Base Variables & Default Theme (Navy) */
-:root,
-.theme-navy {
-  --bg-main: #0b0f19;
-  --bg-header: rgba(15, 23, 42, 0.85);
-  --bg-sidebar: #0f172a;
-  --bg-card: rgba(30, 41, 59, 0.7);
-  --bg-card-hover: rgba(30, 41, 59, 0.9);
-  --bg-surface: #1e293b;
-  --bg-input: #0f172a;
-
-  --text-main: #f8fafc;
-  --text-muted: #94a3b8;
-  --text-inverse: #0f172a;
-
-  --border-color: rgba(51, 65, 85, 0.8);
-  --border-focus: #6366f1;
-
-  --accent-primary: #6366f1;
-  --accent-hover: #4f46e5;
-  --accent-light: rgba(99, 102, 241, 0.15);
-
-  --badge-bg: rgba(99, 102, 241, 0.2);
-  --badge-text: #a5b4fc;
-
-  --shadow-color: rgba(0, 0, 0, 0.35);
+/* --------------------------------------------------------------------------
+   0. Derived tokens (shared by all themes)
+   -------------------------------------------------------------------------- */
+:root {
   --glass-blur: blur(12px);
+
+  /* ---------- Base palette -> semantic token mapping ----------
+     Theme classes define --base-* tokens only. The final tokens are mapped here,
+     so readability.css (視認性・コントラスト調整レイヤー) can enhance them
+     per light/dark mode without circular references. */
+  --text-tint: var(--base-text-tint);
+  --bg-main: var(--base-bg-main);
+  --bg-header: var(--base-bg-header);
+  --bg-sidebar: var(--base-bg-sidebar);
+  --bg-card: var(--base-bg-card);
+  --bg-card-static: var(--base-bg-card-static);
+  --bg-surface: var(--base-bg-surface);
+  --bg-surface-strong: var(--base-bg-surface-strong);
+  --bg-surface-soft: var(--base-bg-surface-soft);
+  --bg-input: var(--base-bg-input);
+  --bg-elevated: var(--base-bg-elevated);
+  --bg-inset: var(--base-bg-inset);
+  --bg-overlay: var(--base-bg-overlay);
+  --bg-scrim: var(--base-bg-scrim);
+  --bg-muted: var(--base-bg-muted);
+  --text-main: var(--base-text-main);
+  /* Secondary ink is blended toward the theme tint so labels, timestamps and hints
+     keep 4.5:1 on tinted chips, chrome bars and dark cards. */
+  --text-soft: color-mix(in srgb, var(--base-text-soft) 70%, var(--text-tint));
+  --text-muted: color-mix(in srgb, var(--base-text-muted) 45%, var(--text-tint));
+  --text-faint: var(--base-text-faint);
+  --chrome-text: var(--base-text-main);
+  --text-inverse: var(--base-text-inverse);
+  --accent-primary: var(--base-accent-primary);
+  --accent-hover: var(--base-accent-hover);
+  --accent-alt: var(--base-accent-alt);
+  --success: var(--base-success);
+  --warning: var(--base-warning);
+  --danger: var(--base-danger);
+  --info: var(--base-info);
+  --border-main: var(--base-border-main);
+  --border-strong: var(--base-border-strong);
+  --border-divider: var(--base-border-divider);
+  --border-muted: var(--base-border-muted);
+  --shadow-color: var(--base-shadow-color);
+  --glass-bg: var(--base-glass-bg);
+  --glass-border: var(--base-glass-border);
+  --scrollbar-thumb: var(--base-scrollbar-thumb);
+  --scrollbar-track: var(--base-scrollbar-track);
+
+  /* ---------- Emphasis & motion tokens ---------- */
+  --border-width: 2px;
+  --border-width-thick: 3px;
+  --ring-width: 3px;
+  --hover-lift: -3px;
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 0.18s;
+  --duration-base: 0.32s;
+  --hover-ring: color-mix(in srgb, var(--accent-primary) 45%, transparent);
+  --card-glow: 0 12px 28px -10px var(--shadow-color), 0 4px 10px -6px var(--shadow-color);
+
+  /* ---------- Derived tokens ---------- */
+  --accent-strong: color-mix(in srgb, var(--accent-primary) 70%, var(--text-tint));
+  --accent-soft: color-mix(in srgb, var(--accent-primary) 22%, var(--bg-card));
+  --accent-inset: color-mix(in srgb, var(--accent-primary) 10%, var(--bg-card));
+  --accent-ring: color-mix(in srgb, var(--accent-primary) 25%, transparent);
+  --accent-border: color-mix(in srgb, var(--accent-primary) 45%, var(--border-main));
+  --accent-soft-alt: color-mix(in srgb, var(--accent-alt) 22%, var(--bg-card));
+
+  --success-strong: color-mix(in srgb, var(--success) 70%, var(--text-tint));
+  --success-soft: color-mix(in srgb, var(--success) 15%, var(--bg-card));
+  --success-inset: color-mix(in srgb, var(--success) 8%, var(--bg-card));
+  --success-border: color-mix(in srgb, var(--success) 45%, var(--border-main));
+  --success-border-soft: color-mix(in srgb, var(--success) 25%, var(--border-main));
+
+  --warning-strong: color-mix(in srgb, var(--warning) 70%, var(--text-tint));
+  --warning-soft: color-mix(in srgb, var(--warning) 15%, var(--bg-card));
+  --warning-inset: color-mix(in srgb, var(--warning) 8%, var(--bg-card));
+  --warning-border: color-mix(in srgb, var(--warning) 45%, var(--border-main));
+  --warning-border-soft: color-mix(in srgb, var(--warning) 25%, var(--border-main));
+
+  --danger-strong: color-mix(in srgb, var(--danger) 70%, var(--text-tint));
+  --danger-soft: color-mix(in srgb, var(--danger) 15%, var(--bg-card));
+  --danger-inset: color-mix(in srgb, var(--danger) 8%, var(--bg-card));
+  --danger-border: color-mix(in srgb, var(--danger) 45%, var(--border-main));
+  --danger-border-soft: color-mix(in srgb, var(--danger) 25%, var(--border-main));
+
+  --info-strong: color-mix(in srgb, var(--info) 70%, var(--text-tint));
+  --info-soft: color-mix(in srgb, var(--info) 15%, var(--bg-card));
+  --info-inset: color-mix(in srgb, var(--info) 8%, var(--bg-card));
+  --info-border: color-mix(in srgb, var(--info) 45%, var(--border-main));
+  --info-border-soft: color-mix(in srgb, var(--info) 25%, var(--border-main));
+
+  --border-focus: var(--accent-primary);
+
+  --accent-border-soft: color-mix(in srgb, var(--accent-primary) 30%, var(--border-main));
+  --accent-border-alt: color-mix(in srgb, var(--accent-alt) 45%, var(--border-main));
+  --success-border-strong: color-mix(in srgb, var(--success) 60%, var(--border-main));
+  --warning-border-strong: color-mix(in srgb, var(--warning) 60%, var(--border-main));
+  --danger-border-strong: color-mix(in srgb, var(--danger) 60%, var(--border-main));
+
+  --success-ring: color-mix(in srgb, var(--success) 30%, transparent);
+  --warning-ring: color-mix(in srgb, var(--warning) 35%, transparent);
+  --danger-ring: color-mix(in srgb, var(--danger) 35%, transparent);
+
+  /* Status colors are used both as link text and as labels on tinted (soft) chips,
+     so every text variant mixes 60% of the color with the theme tint. That keeps
+     light themes dark enough and dark themes bright enough for 4.5:1. */
+  --text-accent: color-mix(in srgb, var(--accent-primary) 60%, var(--text-tint));
+  --text-accent-strong: color-mix(in srgb, var(--accent-primary) 45%, var(--text-tint));
+  --text-accent-alt: color-mix(in srgb, var(--accent-alt) 60%, var(--text-tint));
+  --text-success: color-mix(in srgb, var(--success) 60%, var(--text-tint));
+  --text-success-strong: color-mix(in srgb, var(--success) 45%, var(--text-tint));
+  --text-warning: color-mix(in srgb, var(--warning) 60%, var(--text-tint));
+  --text-warning-strong: color-mix(in srgb, var(--warning) 45%, var(--text-tint));
+  --text-danger: color-mix(in srgb, var(--danger) 60%, var(--text-tint));
+  --text-danger-strong: color-mix(in srgb, var(--danger) 45%, var(--text-tint));
+  --text-info: color-mix(in srgb, var(--info) 60%, var(--text-tint));
+  --text-info-strong: color-mix(in srgb, var(--info) 45%, var(--text-tint));
+
+  --glow-accent: color-mix(in srgb, var(--accent-primary) 35%, transparent);
+  --glow-warning: color-mix(in srgb, var(--warning) 30%, transparent);
+  --glow-danger: color-mix(in srgb, var(--danger) 30%, transparent);
+  --glow-success: color-mix(in srgb, var(--success) 30%, transparent);
+
+  /* Aliases kept for legacy component styles */
+  --border-color: var(--border-main);
+  --bg-card-hover: var(--bg-surface);
+  --accent-light: var(--accent-ring);
+  --badge-bg: var(--bg-surface-soft);
+  --badge-text: var(--text-main);
+  --text-on-accent: var(--text-inverse);
+
+  /* Ink for text placed directly on accent / status-color filled surfaces.
+     Yellow and red surfaces need dark ink in every theme, so they are mixed
+     towards black instead of reusing the inverse token. */
+  --on-warning-ink: color-mix(in srgb, var(--warning) 20%, black);
+  --on-danger-ink: color-mix(in srgb, var(--danger) 20%, black);
+  --on-accent-shadow: 0 1px 1.5px color-mix(in srgb, var(--text-tint) 55%, transparent);
+  --on-status-shadow: 0 1px 1px rgba(255, 255, 255, 0.35);
 }
 
-/* 2. High Contrast Theme (視覚境界・コントラスト強調) */
-.theme-high-contrast {
-  --bg-main: #000000;
-  --bg-header: #0a0a0a;
-  --bg-sidebar: #050505;
-  --bg-card: #121212;
-  --bg-card-hover: #1a1a1a;
-  --bg-surface: #1a1a1a;
-  --bg-input: #000000;
 
-  --text-main: #ffffff;
-  --text-muted: #f1f5f9;
-  --text-inverse: #000000;
+/* --------------------------------------------------------------------------
+   1. Light themes
+   -------------------------------------------------------------------------- */
 
-  --border-color: #fbbf24;
-  --border-focus: #f59e0b;
-
-  --accent-primary: #fbbf24;
-  --accent-hover: #f59e0b;
-  --accent-light: rgba(251, 191, 36, 0.25);
-
-  --badge-bg: #fbbf24;
-  --badge-text: #000000;
-
-  --shadow-color: rgba(251, 191, 36, 0.2);
-  --glass-blur: none;
+/* 01 - ライト標準 (default) */
+:root, html.theme-light-standard {
+  --color-scheme: light;
+  --base-text-tint: #0f172a;
+  --base-bg-main: #f4f6fa;
+  --base-bg-header: #eaf0f7;
+  --base-bg-sidebar: #eaf0f7;
+  --base-bg-card: #ffffff;
+  --base-bg-card-static: #f8fafc;
+  --base-bg-surface: #f7f9fc;
+  --base-bg-surface-strong: #eef2f7;
+  --base-bg-surface-soft: #fafbfc;
+  --base-bg-input: #ffffff;
+  --base-bg-elevated: #ffffff;
+  --base-bg-inset: #eef2f7;
+  --base-bg-overlay: #eef2f7;
+  --base-bg-scrim: rgba(15, 23, 42, 0.45);
+  --base-bg-muted: #cbd5e1;
+  --base-text-main: #1e293b;
+  --base-text-soft: #475569;
+  --base-text-muted: #64748b;
+  --base-text-faint: #94a3b8;
+  --base-text-inverse: #f8fafc;
+  --base-accent-primary: #4f46e5;
+  --base-accent-hover: #4338ca;
+  --base-accent-alt: #9333ea;
+  --base-success: #059669;
+  --base-warning: #b45309;
+  --base-danger: #e11d48;
+  --base-info: #1d4ed8;
+  --base-border-main: #cbd5e1;
+  --base-border-strong: #94a3b8;
+  --base-border-divider: #e2e8f0;
+  --base-border-muted: #e2e8f0;
+  --base-shadow-color: rgba(15, 23, 42, 0.08);
+  --base-glass-bg: rgba(255, 255, 255, 0.72);
+  --base-glass-border: rgba(255, 255, 255, 0.4);
+  --base-scrollbar-thumb: rgba(148, 163, 184, 0.55);
+  --base-scrollbar-track: rgba(226, 232, 240, 0.6);
 }
 
-/* 3. Warm Wood Theme (落ち着いた暖色木目調) */
-.theme-warm {
-  --bg-main: #1c1917;
-  --bg-header: rgba(44, 26, 18, 0.9);
-  --bg-sidebar: #291d18;
-  --bg-card: rgba(44, 26, 18, 0.75);
-  --bg-card-hover: rgba(56, 33, 23, 0.9);
-  --bg-surface: #382117;
-  --bg-input: #1c1917;
-
-  --text-main: #fef3c7;
-  --text-muted: #d97706;
-  --text-inverse: #1c1917;
-
-  --border-color: rgba(146, 64, 14, 0.6);
-  --border-focus: #f59e0b;
-
-  --accent-primary: #d97706;
-  --accent-hover: #b45309;
-  --accent-light: rgba(217, 119, 6, 0.2);
-
-  --badge-bg: rgba(217, 119, 6, 0.25);
-  --badge-text: #fde68a;
-
-  --shadow-color: rgba(0, 0, 0, 0.5);
-  --glass-blur: blur(8px);
+/* 02 - ライトスカイブルー */
+html.theme-light-sky {
+  --color-scheme: light;
+  --base-text-tint: #0b2a3d;
+  --base-bg-main: #f1f6fb;
+  --base-bg-header: #e6eef7;
+  --base-bg-sidebar: #e6eef7;
+  --base-bg-card: #ffffff;
+  --base-bg-card-static: #f7fafc;
+  --base-bg-surface: #f5f9fd;
+  --base-bg-surface-strong: #eaf3fa;
+  --base-bg-surface-soft: #f9fcfd;
+  --base-bg-input: #ffffff;
+  --base-bg-elevated: #ffffff;
+  --base-bg-inset: #eaf4fb;
+  --base-bg-overlay: #eaf4fb;
+  --base-bg-scrim: rgba(12, 26, 42, 0.45);
+  --base-bg-muted: #c3d5e8;
+  --base-text-main: #1b3547;
+  --base-text-soft: #44627a;
+  --base-text-muted: #6b8699;
+  --base-text-faint: #9ab0c4;
+  --base-text-inverse: #ffffff;
+  --base-accent-primary: #0284c7;
+  --base-accent-hover: #0369a1;
+  --base-accent-alt: #0d9488;
+  --base-success: #059669;
+  --base-warning: #b45309;
+  --base-danger: #be123c;
+  --base-info: #0369a1;
+  --base-border-main: #c8dce9;
+  --base-border-strong: #9fb6cc;
+  --base-border-divider: #dfe9f1;
+  --base-border-muted: #d7e4ee;
+  --base-shadow-color: rgba(12, 26, 42, 0.08);
+  --base-glass-bg: rgba(255, 255, 255, 0.72);
+  --base-glass-border: rgba(255, 255, 255, 0.4);
+  --base-scrollbar-thumb: rgba(125, 160, 190, 0.55);
+  --base-scrollbar-track: rgba(210, 226, 240, 0.6);
 }
 
-/* 4. Deep Dark Mode (夜間作業向け) */
-.theme-dark {
-  --bg-main: #030712;
-  --bg-header: rgba(17, 24, 39, 0.9);
-  --bg-sidebar: #111827;
-  --bg-card: rgba(17, 24, 39, 0.8);
-  --bg-card-hover: rgba(31, 41, 55, 0.9);
-  --bg-surface: #1f2937;
-  --bg-input: #030712;
-
-  --text-main: #f9fafb;
-  --text-muted: #6b7280;
-  --text-inverse: #030712;
-
-  --border-color: #374151;
-  --border-focus: #3b82f6;
-
-  --accent-primary: #3b82f6;
-  --accent-hover: #2563eb;
-  --accent-light: rgba(59, 130, 246, 0.15);
-
-  --badge-bg: rgba(59, 130, 246, 0.2);
-  --badge-text: #93c5fd;
-
-  --shadow-color: rgba(0, 0, 0, 0.6);
-  --glass-blur: blur(10px);
+/* 03 - ライトフォレスト */
+html.theme-light-forest {
+  --color-scheme: light;
+  --base-text-tint: #12291a;
+  --base-bg-main: #f2f7f3;
+  --base-bg-header: #e8f1ea;
+  --base-bg-sidebar: #e8f1ea;
+  --base-bg-card: #ffffff;
+  --base-bg-card-static: #f7fbf8;
+  --base-bg-surface: #f6faf7;
+  --base-bg-surface-strong: #ecf4ec;
+  --base-bg-surface-soft: #fafdfb;
+  --base-bg-input: #ffffff;
+  --base-bg-elevated: #ffffff;
+  --base-bg-inset: #edf5ee;
+  --base-bg-overlay: #edf5ee;
+  --base-bg-scrim: rgba(20, 40, 26, 0.45);
+  --base-bg-muted: #c2d6c6;
+  --base-text-main: #1e3126;
+  --base-text-soft: #47604e;
+  --base-text-muted: #6c8372;
+  --base-text-faint: #98ae9d;
+  --base-text-inverse: #ffffff;
+  --base-accent-primary: #15803d;
+  --base-accent-hover: #166534;
+  --base-accent-alt: #65a30d;
+  --base-success: #15803d;
+  --base-warning: #b45309;
+  --base-danger: #be123c;
+  --base-info: #0369a1;
+  --base-border-main: #cddbd0;
+  --base-border-strong: #a3b8a8;
+  --base-border-divider: #dee9e1;
+  --base-border-muted: #d7e3d9;
+  --base-shadow-color: rgba(20, 40, 26, 0.08);
+  --base-glass-bg: rgba(255, 255, 255, 0.72);
+  --base-glass-border: rgba(255, 255, 255, 0.4);
+  --base-scrollbar-thumb: rgba(140, 170, 145, 0.55);
+  --base-scrollbar-track: rgba(220, 232, 222, 0.6);
 }
+
+/* 04 - ライトサクラ */
+html.theme-light-sakura {
+  --color-scheme: light;
+  --base-text-tint: #2c1424;
+  --base-bg-main: #fdf5f8;
+  --base-bg-header: #f9eaf1;
+  --base-bg-sidebar: #f9eaf1;
+  --base-bg-card: #ffffff;
+  --base-bg-card-static: #fcf7fa;
+  --base-bg-surface: #fcf7fa;
+  --base-bg-surface-strong: #f9eaf1;
+  --base-bg-surface-soft: #fefafc;
+  --base-bg-input: #ffffff;
+  --base-bg-elevated: #ffffff;
+  --base-bg-inset: #f9ecf3;
+  --base-bg-overlay: #f9ecf3;
+  --base-bg-scrim: rgba(46, 20, 36, 0.45);
+  --base-bg-muted: #d8c3cc;
+  --base-text-main: #3a2129;
+  --base-text-soft: #5e414b;
+  --base-text-muted: #7d616c;
+  --base-text-faint: #a48a95;
+  --base-text-inverse: #ffffff;
+  --base-accent-primary: #db2777;
+  --base-accent-hover: #be185d;
+  --base-accent-alt: #8b5cf6;
+  --base-success: #059669;
+  --base-warning: #b45309;
+  --base-danger: #be123c;
+  --base-info: #1d4ed8;
+  --base-border-main: #e3ccd5;
+  --base-border-strong: #c7a4b1;
+  --base-border-divider: #f0dce7;
+  --base-border-muted: #ecd8e2;
+  --base-shadow-color: rgba(46, 20, 36, 0.08);
+  --base-glass-bg: rgba(255, 255, 255, 0.72);
+  --base-glass-border: rgba(255, 255, 255, 0.4);
+  --base-scrollbar-thumb: rgba(205, 150, 175, 0.55);
+  --base-scrollbar-track: rgba(240, 220, 232, 0.6);
+}
+
+/* 05 - ライトセピア */
+html.theme-light-sepia {
+  --color-scheme: light;
+  --base-text-tint: #2a2013;
+  --base-bg-main: #f7f2e9;
+  --base-bg-header: #efe6d7;
+  --base-bg-sidebar: #efe6d7;
+  --base-bg-card: #fffdf8;
+  --base-bg-card-static: #faf6ee;
+  --base-bg-surface: #f7f3ea;
+  --base-bg-surface-strong: #efe6d7;
+  --base-bg-surface-soft: #fbf8f2;
+  --base-bg-input: #fffdf8;
+  --base-bg-elevated: #fffdf8;
+  --base-bg-inset: #f0e8db;
+  --base-bg-overlay: #f0e8db;
+  --base-bg-scrim: rgba(45, 32, 20, 0.45);
+  --base-bg-muted: #d3c4ad;
+  --base-text-main: #3b3126;
+  --base-text-soft: #5f5244;
+  --base-text-muted: #7c6e5c;
+  --base-text-faint: #a0917d;
+  --base-text-inverse: #ffffff;
+  --base-accent-primary: #b45309;
+  --base-accent-hover: #92400e;
+  --base-accent-alt: #a16207;
+  --base-success: #15803d;
+  --base-warning: #a16207;
+  --base-danger: #b91c1c;
+  --base-info: #0369a1;
+  --base-border-main: #dccdb8;
+  --base-border-strong: #b9a891;
+  --base-border-divider: #e8dcc9;
+  --base-border-muted: #e2d5c2;
+  --base-shadow-color: rgba(45, 32, 20, 0.1);
+  --base-glass-bg: rgba(255, 253, 248, 0.72);
+  --base-glass-border: rgba(255, 255, 255, 0.35);
+  --base-scrollbar-thumb: rgba(180, 155, 120, 0.55);
+  --base-scrollbar-track: rgba(232, 220, 203, 0.6);
+}
+
+
+/* 06 - ライトキャンディ */
+html.theme-light-candy {
+  --color-scheme: light;
+  --base-text-tint: #2c1030;
+  --base-bg-main: #fdf5f9;
+  --base-bg-header: #fbe6f0;
+  --base-bg-sidebar: #fbe6f0;
+  --base-bg-card: #ffffff;
+  --base-bg-card-static: #fcf8fb;
+  --base-bg-surface: #fcf7fa;
+  --base-bg-surface-strong: #fbe9f1;
+  --base-bg-surface-soft: #fefafc;
+  --base-bg-input: #ffffff;
+  --base-bg-elevated: #ffffff;
+  --base-bg-inset: #f7ecf3;
+  --base-bg-overlay: #f7ecf3;
+  --base-bg-scrim: rgba(50, 20, 40, 0.45);
+  --base-bg-muted: #d9c2cf;
+  --base-text-main: #341f2c;
+  --base-text-soft: #583f4c;
+  --base-text-muted: #7a5f6c;
+  --base-text-faint: #a18692;
+  --base-text-inverse: #ffffff;
+  --base-accent-primary: #e11d48;
+  --base-accent-hover: #be123c;
+  --base-accent-alt: #8b5cf6;
+  --base-success: #059669;
+  --base-warning: #d97706;
+  --base-danger: #e11d48;
+  --base-info: #2563eb;
+  --base-border-main: #e6cdd7;
+  --base-border-strong: #cba7b8;
+  --base-border-divider: #f2dee9;
+  --base-border-muted: #eed9e5;
+  --base-shadow-color: rgba(50, 20, 40, 0.08);
+  --base-glass-bg: rgba(255, 255, 255, 0.72);
+  --base-glass-border: rgba(255, 255, 255, 0.4);
+  --base-scrollbar-thumb: rgba(215, 150, 185, 0.55);
+  --base-scrollbar-track: rgba(242, 220, 233, 0.6);
+}
+
+/* 07 - ライトミント */
+html.theme-light-mint {
+  --color-scheme: light;
+  --base-text-tint: #0d2f27;
+  --base-bg-main: #f1f8f6;
+  --base-bg-header: #e6f2ee;
+  --base-bg-sidebar: #e6f2ee;
+  --base-bg-card: #ffffff;
+  --base-bg-card-static: #f7fbf9;
+  --base-bg-surface: #f5faf8;
+  --base-bg-surface-strong: #e9f4f0;
+  --base-bg-surface-soft: #fafdfc;
+  --base-bg-input: #ffffff;
+  --base-bg-elevated: #ffffff;
+  --base-bg-inset: #ecf5f1;
+  --base-bg-overlay: #ecf5f1;
+  --base-bg-scrim: rgba(15, 40, 34, 0.45);
+  --base-bg-muted: #bfd6d0;
+  --base-text-main: #16352f;
+  --base-text-soft: #3f5f58;
+  --base-text-muted: #66857e;
+  --base-text-faint: #93aca5;
+  --base-text-inverse: #ffffff;
+  --base-accent-primary: #0d9488;
+  --base-accent-hover: #0f766e;
+  --base-accent-alt: #06b6d4;
+  --base-success: #059669;
+  --base-warning: #b45309;
+  --base-danger: #be123c;
+  --base-info: #0284c7;
+  --base-border-main: #c9dcd6;
+  --base-border-strong: #9fb8b2;
+  --base-border-divider: #dde9e5;
+  --base-border-muted: #d6e4df;
+  --base-shadow-color: rgba(15, 40, 34, 0.08);
+  --base-glass-bg: rgba(255, 255, 255, 0.72);
+  --base-glass-border: rgba(255, 255, 255, 0.4);
+  --base-scrollbar-thumb: rgba(120, 175, 165, 0.55);
+  --base-scrollbar-track: rgba(222, 238, 233, 0.6);
+}
+
+/* 08 - ペーパー（ハイコントラスト） */
+html.theme-light-paper {
+  --color-scheme: light;
+  --base-text-tint: #000000;
+  --base-bg-main: #ffffff;
+  --base-bg-header: #f4f4f5;
+  --base-bg-sidebar: #f4f4f5;
+  --base-bg-card: #ffffff;
+  --base-bg-card-static: #fafafa;
+  --base-bg-surface: #fafafa;
+  --base-bg-surface-strong: #ececee;
+  --base-bg-surface-soft: #fafafa;
+  --base-bg-input: #ffffff;
+  --base-bg-elevated: #ffffff;
+  --base-bg-inset: #f4f4f5;
+  --base-bg-overlay: #f4f4f5;
+  --base-bg-scrim: rgba(0, 0, 0, 0.55);
+  --base-bg-muted: #a1a1aa;
+  --base-text-main: #0b0b0f;
+  --base-text-soft: #2f2f36;
+  --base-text-muted: #4b4b55;
+  --base-text-faint: #7a7a85;
+  --base-text-inverse: #ffffff;
+  --base-accent-primary: #1d4ed8;
+  --base-accent-hover: #1e3a8a;
+  --base-accent-alt: #6d28d9;
+  --base-success: #15803d;
+  --base-warning: #a16207;
+  --base-danger: #b91c1c;
+  --base-info: #1d4ed8;
+  --base-border-main: #94a3b8;
+  --base-border-strong: #475569;
+  --base-border-divider: #d4d4d8;
+  --base-border-muted: #c4c4cc;
+  --base-shadow-color: rgba(0, 0, 0, 0.14);
+  --base-glass-bg: rgba(255, 255, 255, 0.8);
+  --base-glass-border: rgba(255, 255, 255, 0.5);
+  --base-scrollbar-thumb: rgba(120, 120, 130, 0.6);
+  --base-scrollbar-track: rgba(220, 220, 225, 0.6);
+}
+
+
+/* --------------------------------------------------------------------------
+   2. Dark themes
+   -------------------------------------------------------------------------- */
+
+/* 09 - ダークネイビー (標準) */
+html.theme-dark-navy {
+  --color-scheme: dark;
+  --base-text-tint: #ffffff;
+  --base-bg-main: #0f172a;
+  --base-bg-header: #1e293b;
+  --base-bg-sidebar: #1e293b;
+  --base-bg-card: #1e293b;
+  --base-bg-card-static: #1e293b;
+  --base-bg-surface: #334155;
+  --base-bg-surface-strong: #1e293b;
+  --base-bg-surface-soft: #1e293b;
+  --base-bg-input: #0f172a;
+  --base-bg-elevated: #1e293b;
+  --base-bg-inset: #0f172a;
+  --base-bg-overlay: #1e293b;
+  --base-bg-scrim: rgba(0, 0, 0, 0.5);
+  --base-bg-muted: #64748b;
+  --base-text-main: #f8fafc;
+  --base-text-soft: #cbd5e1;
+  --base-text-muted: #94a3b8;
+  --base-text-faint: #64748b;
+  --base-text-inverse: #0f172a;
+  --base-accent-primary: #6366f1;
+  --base-accent-hover: #4f46e5;
+  --base-accent-alt: #a855f7;
+  --base-success: #10b981;
+  --base-warning: #f59e0b;
+  --base-danger: #f43f5e;
+  --base-info: #3b82f6;
+  --base-border-main: #334155;
+  --base-border-strong: #475569;
+  --base-border-divider: #334155;
+  --base-border-muted: #1e293b;
+  --base-shadow-color: rgba(0, 0, 0, 0.4);
+  --base-glass-bg: rgba(30, 41, 59, 0.8);
+  --base-glass-border: rgba(255, 255, 255, 0.1);
+  --base-scrollbar-thumb: rgba(51, 65, 85, 0.8);
+  --base-scrollbar-track: rgba(15, 23, 42, 0.6);
+}
+
+/* 10 - ミッドナイトブラック */
+html.theme-dark-midnight {
+  --color-scheme: dark;
+  --base-text-tint: #ffffff;
+  --base-bg-main: #0b1120;
+  --base-bg-header: #151d2d;
+  --base-bg-sidebar: #151d2d;
+  --base-bg-card: #151d2d;
+  --base-bg-card-static: #151d2d;
+  --base-bg-surface: #222c3d;
+  --base-bg-surface-strong: #151d2d;
+  --base-bg-surface-soft: #161e2e;
+  --base-bg-input: #0b1120;
+  --base-bg-elevated: #151d2d;
+  --base-bg-inset: #0b1120;
+  --base-bg-overlay: #151d2d;
+  --base-bg-scrim: rgba(0, 0, 0, 0.6);
+  --base-bg-muted: #4b586b;
+  --base-text-main: #e8eefc;
+  --base-text-soft: #b6c2d4;
+  --base-text-muted: #8892a5;
+  --base-text-faint: #5c687c;
+  --base-text-inverse: #0b1120;
+  --base-accent-primary: #818cf8;
+  --base-accent-hover: #6366f1;
+  --base-accent-alt: #c084fc;
+  --base-success: #34d399;
+  --base-warning: #fbbf24;
+  --base-danger: #fb7185;
+  --base-info: #60a5fa;
+  --base-border-main: #26334a;
+  --base-border-strong: #3a4a63;
+  --base-border-divider: #26334a;
+  --base-border-muted: #1b2536;
+  --base-shadow-color: rgba(0, 0, 0, 0.5);
+  --base-glass-bg: rgba(21, 29, 45, 0.85);
+  --base-glass-border: rgba(255, 255, 255, 0.1);
+  --base-scrollbar-thumb: rgba(43, 58, 82, 0.85);
+  --base-scrollbar-track: rgba(11, 17, 32, 0.6);
+}
+
+/* 11 - フォレストダーク */
+html.theme-dark-forest {
+  --color-scheme: dark;
+  --base-text-tint: #ffffff;
+  --base-bg-main: #0e1a14;
+  --base-bg-header: #17241c;
+  --base-bg-sidebar: #17241c;
+  --base-bg-card: #17241c;
+  --base-bg-card-static: #17241c;
+  --base-bg-surface: #24352b;
+  --base-bg-surface-strong: #17241c;
+  --base-bg-surface-soft: #18261d;
+  --base-bg-input: #0e1a14;
+  --base-bg-elevated: #17241c;
+  --base-bg-inset: #0e1a14;
+  --base-bg-overlay: #17241c;
+  --base-bg-scrim: rgba(4, 15, 10, 0.6);
+  --base-bg-muted: #46614f;
+  --base-text-main: #e8f5ec;
+  --base-text-soft: #b7ccbd;
+  --base-text-muted: #8ba092;
+  --base-text-faint: #5e7566;
+  --base-text-inverse: #0e1a14;
+  --base-accent-primary: #34d399;
+  --base-accent-hover: #10b981;
+  --base-accent-alt: #a3e635;
+  --base-success: #34d399;
+  --base-warning: #fbbf24;
+  --base-danger: #f87171;
+  --base-info: #38bdf8;
+  --base-border-main: #26392d;
+  --base-border-strong: #37503f;
+  --base-border-divider: #26392d;
+  --base-border-muted: #1a281f;
+  --base-shadow-color: rgba(0, 0, 0, 0.45);
+  --base-glass-bg: rgba(23, 36, 28, 0.85);
+  --base-glass-border: rgba(255, 255, 255, 0.1);
+  --base-scrollbar-thumb: rgba(48, 74, 56, 0.85);
+  --base-scrollbar-track: rgba(14, 26, 20, 0.6);
+}
+
+
+/* 12 - オーシャンディープ */
+html.theme-dark-ocean {
+  --color-scheme: dark;
+  --base-text-tint: #ffffff;
+  --base-bg-main: #0b1d2a;
+  --base-bg-header: #142938;
+  --base-bg-sidebar: #142938;
+  --base-bg-card: #142938;
+  --base-bg-card-static: #142938;
+  --base-bg-surface: #1d394e;
+  --base-bg-surface-strong: #142938;
+  --base-bg-surface-soft: #152939;
+  --base-bg-input: #0b1d2a;
+  --base-bg-elevated: #142938;
+  --base-bg-inset: #0b1d2a;
+  --base-bg-overlay: #142938;
+  --base-bg-scrim: rgba(0, 10, 20, 0.6);
+  --base-bg-muted: #49697f;
+  --base-text-main: #e6f2fa;
+  --base-text-soft: #b3ccdc;
+  --base-text-muted: #87a4b8;
+  --base-text-faint: #5b7b92;
+  --base-text-inverse: #0b1d2a;
+  --base-accent-primary: #38bdf8;
+  --base-accent-hover: #0ea5e9;
+  --base-accent-alt: #2dd4bf;
+  --base-success: #34d399;
+  --base-warning: #fbbf24;
+  --base-danger: #fb7185;
+  --base-info: #38bdf8;
+  --base-border-main: #22394d;
+  --base-border-strong: #31516a;
+  --base-border-divider: #22394d;
+  --base-border-muted: #17293a;
+  --base-shadow-color: rgba(0, 0, 0, 0.45);
+  --base-glass-bg: rgba(20, 41, 56, 0.85);
+  --base-glass-border: rgba(255, 255, 255, 0.1);
+  --base-scrollbar-thumb: rgba(38, 66, 88, 0.85);
+  --base-scrollbar-track: rgba(11, 29, 42, 0.6);
+}
+
+/* 13 - プラムダーク */
+html.theme-dark-plum {
+  --color-scheme: dark;
+  --base-text-tint: #ffffff;
+  --base-bg-main: #1a1226;
+  --base-bg-header: #261936;
+  --base-bg-sidebar: #261936;
+  --base-bg-card: #261936;
+  --base-bg-card-static: #261936;
+  --base-bg-surface: #382649;
+  --base-bg-surface-strong: #261936;
+  --base-bg-surface-soft: #271a36;
+  --base-bg-input: #1a1226;
+  --base-bg-elevated: #261936;
+  --base-bg-inset: #1a1226;
+  --base-bg-overlay: #261936;
+  --base-bg-scrim: rgba(10, 5, 16, 0.6);
+  --base-bg-muted: #584368;
+  --base-text-main: #f2e9fb;
+  --base-text-soft: #cfc0dd;
+  --base-text-muted: #9f8bb2;
+  --base-text-faint: #715f86;
+  --base-text-inverse: #1a1226;
+  --base-accent-primary: #c084fc;
+  --base-accent-hover: #a855f7;
+  --base-accent-alt: #f472b6;
+  --base-success: #34d399;
+  --base-warning: #fbbf24;
+  --base-danger: #fb7185;
+  --base-info: #60a5fa;
+  --base-border-main: #372a48;
+  --base-border-strong: #4c3a62;
+  --base-border-divider: #372a48;
+  --base-border-muted: #2a1e39;
+  --base-shadow-color: rgba(0, 0, 0, 0.5);
+  --base-glass-bg: rgba(38, 25, 54, 0.85);
+  --base-glass-border: rgba(255, 255, 255, 0.12);
+  --base-scrollbar-thumb: rgba(66, 49, 84, 0.85);
+  --base-scrollbar-track: rgba(26, 18, 38, 0.6);
+}
+
+/* 14 - サンセットダーク */
+html.theme-dark-sunset {
+  --color-scheme: dark;
+  --base-text-tint: #ffffff;
+  --base-bg-main: #20131a;
+  --base-bg-header: #2c1a22;
+  --base-bg-sidebar: #2c1a22;
+  --base-bg-card: #2c1a22;
+  --base-bg-card-static: #2c1a22;
+  --base-bg-surface: #3d2531;
+  --base-bg-surface-strong: #2c1a22;
+  --base-bg-surface-soft: #2e1b23;
+  --base-bg-input: #20131a;
+  --base-bg-elevated: #2c1a22;
+  --base-bg-inset: #20131a;
+  --base-bg-overlay: #2c1a22;
+  --base-bg-scrim: rgba(15, 5, 10, 0.6);
+  --base-bg-muted: #6b4a55;
+  --base-text-main: #fbe9ec;
+  --base-text-soft: #dcc0c7;
+  --base-text-muted: #a98a93;
+  --base-text-faint: #7a5d66;
+  --base-text-inverse: #20131a;
+  --base-accent-primary: #fb923c;
+  --base-accent-hover: #f97316;
+  --base-accent-alt: #f43f5e;
+  --base-success: #34d399;
+  --base-warning: #fbbf24;
+  --base-danger: #fb7185;
+  --base-info: #38bdf8;
+  --base-border-main: #412a33;
+  --base-border-strong: #583844;
+  --base-border-divider: #412a33;
+  --base-border-muted: #331f27;
+  --base-shadow-color: rgba(0, 0, 0, 0.5);
+  --base-glass-bg: rgba(44, 26, 34, 0.85);
+  --base-glass-border: rgba(255, 255, 255, 0.12);
+  --base-scrollbar-thumb: rgba(85, 52, 62, 0.85);
+  --base-scrollbar-track: rgba(32, 19, 26, 0.6);
+}
+
+
+/* 15 - チャコールダーク */
+html.theme-dark-charcoal {
+  --color-scheme: dark;
+  --base-text-tint: #ffffff;
+  --base-bg-main: #17191c;
+  --base-bg-header: #212428;
+  --base-bg-sidebar: #212428;
+  --base-bg-card: #212428;
+  --base-bg-card-static: #212428;
+  --base-bg-surface: #2f3338;
+  --base-bg-surface-strong: #212428;
+  --base-bg-surface-soft: #22262a;
+  --base-bg-input: #17191c;
+  --base-bg-elevated: #212428;
+  --base-bg-inset: #17191c;
+  --base-bg-overlay: #212428;
+  --base-bg-scrim: rgba(0, 0, 0, 0.6);
+  --base-bg-muted: #555a60;
+  --base-text-main: #e5e7eb;
+  --base-text-soft: #b4b8bd;
+  --base-text-muted: #8a8f95;
+  --base-text-faint: #61666b;
+  --base-text-inverse: #17191c;
+  --base-accent-primary: #e2e8f0;
+  --base-accent-hover: #cbd5e1;
+  --base-accent-alt: #94a3b8;
+  --base-success: #4ade80;
+  --base-warning: #fbbf24;
+  --base-danger: #f87171;
+  --base-info: #60a5fa;
+  --base-border-main: #32363b;
+  --base-border-strong: #464b51;
+  --base-border-divider: #32363b;
+  --base-border-muted: #262a2e;
+  --base-shadow-color: rgba(0, 0, 0, 0.5);
+  --base-glass-bg: rgba(33, 36, 40, 0.85);
+  --base-glass-border: rgba(255, 255, 255, 0.1);
+  --base-scrollbar-thumb: rgba(70, 75, 81, 0.85);
+  --base-scrollbar-track: rgba(23, 25, 28, 0.6);
+}
+
+/* 16 - ハイコントラスト（ダーク） */
+html.theme-high-contrast-dark {
+  --color-scheme: dark;
+  --base-text-tint: #ffffff;
+  --base-bg-main: #000000;
+  --base-bg-header: #101010;
+  --base-bg-sidebar: #101010;
+  --base-bg-card: #0d0d0d;
+  --base-bg-card-static: #141414;
+  --base-bg-surface: #1b1b1b;
+  --base-bg-surface-strong: #101010;
+  --base-bg-surface-soft: #121212;
+  --base-bg-input: #000000;
+  --base-bg-elevated: #101010;
+  --base-bg-inset: #000000;
+  --base-bg-overlay: #101010;
+  --base-bg-scrim: rgba(0, 0, 0, 0.7);
+  --base-bg-muted: #6b6b6b;
+  --base-text-main: #ffffff;
+  --base-text-soft: #e5e5e5;
+  --base-text-muted: #c7c7c7;
+  --base-text-faint: #a3a3a3;
+  --base-text-inverse: #000000;
+  --base-accent-primary: #fbbf24;
+  --base-accent-hover: #f59e0b;
+  --base-accent-alt: #22d3ee;
+  --base-success: #4ade80;
+  --base-warning: #fbbf24;
+  --base-danger: #f87171;
+  --base-info: #38bdf8;
+  --base-border-main: #525252;
+  --base-border-strong: #7a7a7a;
+  --base-border-divider: #3f3f3f;
+  --base-border-muted: #2b2b2b;
+  --base-shadow-color: rgba(255, 255, 255, 0.05);
+  --base-glass-bg: rgba(16, 16, 16, 0.9);
+  --base-glass-border: rgba(255, 255, 255, 0.2);
+  --base-scrollbar-thumb: rgba(115, 115, 115, 0.85);
+  --base-scrollbar-track: rgba(16, 16, 16, 0.6);
+}
+
+
+/* --------------------------------------------------------------------------
+   3. Legacy theme aliases (stored preferences keep working)
+   -------------------------------------------------------------------------- */
+html.theme-navy {
+  --color-scheme: dark;
+  --base-text-tint: #ffffff;
+  --base-bg-main: #0f172a;
+  --base-bg-header: #1e293b;
+  --base-bg-sidebar: #1e293b;
+  --base-bg-card: #1e293b;
+  --base-bg-card-static: #1e293b;
+  --base-bg-surface: #334155;
+  --base-bg-surface-strong: #1e293b;
+  --base-bg-surface-soft: #1e293b;
+  --base-bg-input: #0f172a;
+  --base-bg-elevated: #1e293b;
+  --base-bg-inset: #0f172a;
+  --base-bg-overlay: #1e293b;
+  --base-bg-scrim: rgba(0, 0, 0, 0.5);
+  --base-bg-muted: #64748b;
+  --base-text-main: #f8fafc;
+  --base-text-soft: #cbd5e1;
+  --base-text-muted: #94a3b8;
+  --base-text-faint: #64748b;
+  --base-text-inverse: #0f172a;
+  --base-accent-primary: #6366f1;
+  --base-accent-hover: #4f46e5;
+  --base-accent-alt: #a855f7;
+  --base-success: #10b981;
+  --base-warning: #f59e0b;
+  --base-danger: #f43f5e;
+  --base-info: #3b82f6;
+  --base-border-main: #334155;
+  --base-border-strong: #475569;
+  --base-border-divider: #334155;
+  --base-border-muted: #1e293b;
+  --base-shadow-color: rgba(0, 0, 0, 0.4);
+  --base-glass-bg: rgba(30, 41, 59, 0.8);
+  --base-glass-border: rgba(255, 255, 255, 0.1);
+  --base-scrollbar-thumb: rgba(51, 65, 85, 0.8);
+  --base-scrollbar-track: rgba(15, 23, 42, 0.6);
+}
+
+html.theme-dark, html.theme-warm {
+  --color-scheme: dark;
+  --base-text-tint: #ffffff;
+  --base-bg-main: #111318;
+  --base-bg-header: #1b1f26;
+  --base-bg-sidebar: #1b1f26;
+  --base-bg-card: #1b1f26;
+  --base-bg-card-static: #1b1f26;
+  --base-bg-surface: #2b3039;
+  --base-bg-surface-strong: #1b1f26;
+  --base-bg-surface-soft: #1c2027;
+  --base-bg-input: #111318;
+  --base-bg-elevated: #1b1f26;
+  --base-bg-inset: #111318;
+  --base-bg-overlay: #1b1f26;
+  --base-bg-scrim: rgba(0, 0, 0, 0.6);
+  --base-bg-muted: #565c66;
+  --base-text-main: #e9edf3;
+  --base-text-soft: #b9c0ca;
+  --base-text-muted: #8d949e;
+  --base-text-faint: #5f6672;
+  --base-text-inverse: #111318;
+  --base-accent-primary: #38bdf8;
+  --base-accent-hover: #0ea5e9;
+  --base-accent-alt: #a78bfa;
+  --base-success: #34d399;
+  --base-warning: #fbbf24;
+  --base-danger: #f87171;
+  --base-info: #38bdf8;
+  --base-border-main: #2c313b;
+  --base-border-strong: #414855;
+  --base-border-divider: #2c313b;
+  --base-border-muted: #22262e;
+  --base-shadow-color: rgba(0, 0, 0, 0.5);
+  --base-glass-bg: rgba(27, 31, 38, 0.85);
+  --base-glass-border: rgba(255, 255, 255, 0.1);
+  --base-scrollbar-thumb: rgba(59, 67, 80, 0.85);
+  --base-scrollbar-track: rgba(17, 19, 24, 0.6);
+}
+
+html.theme-high-contrast {
+  --color-scheme: dark;
+  --base-text-tint: #ffffff;
+  --base-bg-main: #000000;
+  --base-bg-header: #101010;
+  --base-bg-sidebar: #101010;
+  --base-bg-card: #0d0d0d;
+  --base-bg-card-static: #141414;
+  --base-bg-surface: #1b1b1b;
+  --base-bg-surface-strong: #101010;
+  --base-bg-surface-soft: #121212;
+  --base-bg-input: #000000;
+  --base-bg-elevated: #101010;
+  --base-bg-inset: #000000;
+  --base-bg-overlay: #101010;
+  --base-bg-scrim: rgba(0, 0, 0, 0.7);
+  --base-bg-muted: #6b6b6b;
+  --base-text-main: #ffffff;
+  --base-text-soft: #e5e5e5;
+  --base-text-muted: #c7c7c7;
+  --base-text-faint: #a3a3a3;
+  --base-text-inverse: #000000;
+  --base-accent-primary: #fbbf24;
+  --base-accent-hover: #f59e0b;
+  --base-accent-alt: #22d3ee;
+  --base-success: #4ade80;
+  --base-warning: #fbbf24;
+  --base-danger: #f87171;
+  --base-info: #38bdf8;
+  --base-border-main: #525252;
+  --base-border-strong: #7a7a7a;
+  --base-border-divider: #3f3f3f;
+  --base-border-muted: #2b2b2b;
+  --base-shadow-color: rgba(255, 255, 255, 0.05);
+  --base-glass-bg: rgba(16, 16, 16, 0.9);
+  --base-glass-border: rgba(255, 255, 255, 0.2);
+  --base-scrollbar-thumb: rgba(115, 115, 115, 0.85);
+  --base-scrollbar-track: rgba(16, 16, 16, 0.6);
+}
+
+
+/* --------------------------------------------------------------------------
+   4. Theme picker swatch colors
+   -------------------------------------------------------------------------- */
+html.theme-light-standard   { --swatch-a: #eef2f7; --swatch-b: #4f46e5; --swatch-c: #1e293b; }
+html.theme-light-sky        { --swatch-a: #eaf3fa; --swatch-b: #0284c7; --swatch-c: #1b3547; }
+html.theme-light-forest     { --swatch-a: #ecf4ec; --swatch-b: #15803d; --swatch-c: #1e3126; }
+html.theme-light-sakura     { --swatch-a: #f9eaf1; --swatch-b: #db2777; --swatch-c: #3a2129; }
+html.theme-light-sepia      { --swatch-a: #efe6d7; --swatch-b: #b45309; --swatch-c: #3b3126; }
+html.theme-light-candy      { --swatch-a: #fbe9f1; --swatch-b: #e11d48; --swatch-c: #341f2c; }
+html.theme-light-mint       { --swatch-a: #e9f4f0; --swatch-b: #0d9488; --swatch-c: #16352f; }
+html.theme-light-paper      { --swatch-a: #ffffff; --swatch-b: #1d4ed8; --swatch-c: #0b0b0f; }
+html.theme-dark-navy        { --swatch-a: #0f172a; --swatch-b: #6366f1; --swatch-c: #f8fafc; }
+html.theme-dark-midnight    { --swatch-a: #0b1120; --swatch-b: #818cf8; --swatch-c: #e8eefc; }
+html.theme-dark-forest      { --swatch-a: #0e1a14; --swatch-b: #34d399; --swatch-c: #e8f5ec; }
+html.theme-dark-ocean       { --swatch-a: #0b1d2a; --swatch-b: #38bdf8; --swatch-c: #e6f2fa; }
+html.theme-dark-plum        { --swatch-a: #1a1226; --swatch-b: #c084fc; --swatch-c: #f2e9fb; }
+html.theme-dark-sunset      { --swatch-a: #20131a; --swatch-b: #fb923c; --swatch-c: #fbe9ec; }
+html.theme-dark-charcoal    { --swatch-a: #17191c; --swatch-b: #e2e8f0; --swatch-c: #e5e7eb; }
+html.theme-high-contrast-dark { --swatch-a: #000000; --swatch-b: #fbbf24; --swatch-c: #ffffff; }
+html.theme-navy             { --swatch-a: #0f172a; --swatch-b: #6366f1; --swatch-c: #f8fafc; }
+html.theme-dark, html.theme-warm { --swatch-a: #111318; --swatch-b: #38bdf8; --swatch-c: #e9edf3; }
+html.theme-high-contrast    { --swatch-a: #000000; --swatch-b: #fbbf24; --swatch-c: #ffffff; }
+
+/* --------------------------------------------------------------------------
+   5. Swatch preview variants (used by the theme picker independent of active theme)
+   -------------------------------------------------------------------------- */
+.theme-swatch--light-standard { --swatch-a: #eef2f7; --swatch-b: #4f46e5; --swatch-c: #1e293b; }
+.theme-swatch--light-sky      { --swatch-a: #eaf3fa; --swatch-b: #0284c7; --swatch-c: #1b3547; }
+.theme-swatch--light-forest   { --swatch-a: #ecf4ec; --swatch-b: #15803d; --swatch-c: #1e3126; }
+.theme-swatch--light-sakura   { --swatch-a: #f9eaf1; --swatch-b: #db2777; --swatch-c: #3a2129; }
+.theme-swatch--light-sepia    { --swatch-a: #efe6d7; --swatch-b: #b45309; --swatch-c: #3b3126; }
+.theme-swatch--light-candy    { --swatch-a: #fbe9f1; --swatch-b: #e11d48; --swatch-c: #341f2c; }
+.theme-swatch--light-mint     { --swatch-a: #e9f4f0; --swatch-b: #0d9488; --swatch-c: #16352f; }
+.theme-swatch--light-paper    { --swatch-a: #ffffff; --swatch-b: #1d4ed8; --swatch-c: #0b0b0f; }
+.theme-swatch--dark-navy      { --swatch-a: #0f172a; --swatch-b: #6366f1; --swatch-c: #f8fafc; }
+.theme-swatch--dark-midnight  { --swatch-a: #0b1120; --swatch-b: #818cf8; --swatch-c: #e8eefc; }
+.theme-swatch--dark-forest    { --swatch-a: #0e1a14; --swatch-b: #34d399; --swatch-c: #e8f5ec; }
+.theme-swatch--dark-ocean     { --swatch-a: #0b1d2a; --swatch-b: #38bdf8; --swatch-c: #e6f2fa; }
+.theme-swatch--dark-plum      { --swatch-a: #1a1226; --swatch-b: #c084fc; --swatch-c: #f2e9fb; }
+.theme-swatch--dark-sunset    { --swatch-a: #20131a; --swatch-b: #fb923c; --swatch-c: #fbe9ec; }
+.theme-swatch--dark-charcoal  { --swatch-a: #17191c; --swatch-b: #e2e8f0; --swatch-c: #e5e7eb; }
+.theme-swatch--high-contrast-dark { --swatch-a: #000000; --swatch-b: #fbbf24; --swatch-c: #ffffff; }
+.theme-swatch--navy           { --swatch-a: #0f172a; --swatch-b: #6366f1; --swatch-c: #f8fafc; }
+.theme-swatch--dark,
+.theme-swatch--warm           { --swatch-a: #111318; --swatch-b: #38bdf8; --swatch-c: #e9edf3; }
+.theme-swatch--high-contrast  { --swatch-a: #000000; --swatch-b: #fbbf24; --swatch-c: #ffffff; }
+

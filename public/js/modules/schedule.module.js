@@ -12,11 +12,11 @@ let currentMonth = new Date();
 let schedulesCache = [];
 
 const CATEGORIES = [
-  { id: 'ALL', label: 'すべて', color: 'bg-slate-800 text-slate-200 border-slate-700' },
-  { id: 'SCHOOL', label: '全校行事', color: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30' },
-  { id: 'GRADE', label: '学年行事', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
-  { id: 'EXAM', label: '定期考査・テスト', color: 'bg-amber-500/20 text-amber-300 border-amber-500/30' },
-  { id: 'OFFICIAL', label: '出張・研修', color: 'bg-purple-500/20 text-purple-300 border-purple-500/30' }
+  { id: 'ALL', label: 'すべて', color: 'bg-surface text-main border-main' },
+  { id: 'SCHOOL', label: '全校行事', color: 'bg-accent-soft text-accent-strong border-accent-soft' },
+  { id: 'GRADE', label: '学年行事', color: 'bg-success-soft text-success-strong border-success-soft' },
+  { id: 'EXAM', label: '定期考査・テスト', color: 'bg-warning-soft text-warning-strong border-warning-soft' },
+  { id: 'OFFICIAL', label: '出張・研修', color: 'bg-accent-alt-soft text-accent-alt border-accent-alt' }
 ];
 
 /**
@@ -30,22 +30,22 @@ export function initScheduleModule() {
 
   container.innerHTML = `
     <!-- ヘッダーツールバー -->
-    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-surface-strong p-4 rounded-xl border border-divider">
       <div>
-        <h2 class="text-lg font-bold text-white flex items-center gap-2">
-          <i data-lucide="calendar" class="w-5 h-5 text-purple-400"></i> 校内行事・年間スケジュール
+        <h2 class="text-lg font-bold text-main flex items-center gap-2">
+          <i data-lucide="calendar" class="w-5 h-5 text-accent-alt"></i> 校内行事・年間スケジュール
         </h2>
-        <p class="text-xs text-slate-400">全校行事・学年予定・定期考査・出張等の月間スケジュール一覧です。</p>
+        <p class="text-xs text-muted">全校行事・学年予定・定期考査・出張等の月間スケジュール一覧です。</p>
       </div>
 
       <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
         <!-- 月切り替えナビゲーション -->
-        <div class="flex items-center bg-slate-800 rounded-lg p-1 border border-slate-700 text-xs">
-          <button id="sched-prev-month" class="p-1.5 hover:bg-slate-700 rounded text-slate-300">
+        <div class="flex items-center bg-surface rounded-lg p-1 border border-main text-xs">
+          <button id="sched-prev-month" class="p-1.5 hover-surface-strong rounded text-soft">
             <i data-lucide="chevron-left" class="w-4 h-4"></i>
           </button>
-          <span id="sched-month-label" class="font-bold text-slate-100 px-3 font-mono">${monthStr}</span>
-          <button id="sched-next-month" class="p-1.5 hover:bg-slate-700 rounded text-slate-300">
+          <span id="sched-month-label" class="font-bold text-main px-3 font-mono">${monthStr}</span>
+          <button id="sched-next-month" class="p-1.5 hover-surface-strong rounded text-soft">
             <i data-lucide="chevron-right" class="w-4 h-4"></i>
           </button>
         </div>
@@ -59,11 +59,11 @@ export function initScheduleModule() {
 
     <!-- カテゴリフィルター -->
     <div class="flex flex-wrap items-center gap-2 text-xs">
-      <span class="text-slate-400 font-bold mr-1 flex items-center gap-1">
+      <span class="text-muted font-bold mr-1 flex items-center gap-1">
         <i data-lucide="filter" class="w-3.5 h-3.5"></i> カテゴリ:
       </span>
       ${CATEGORIES.map(c => `
-        <button data-cat="${c.id}" class="sched-filter-btn px-3 py-1.5 rounded-lg border font-semibold transition-all ${c.id === 'ALL' ? 'active bg-slate-800 text-slate-200 border-slate-700' : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'}">
+        <button data-cat="${c.id}" class="sched-filter-btn px-3 py-1.5 rounded-lg border font-semibold transition-all ${c.id === 'ALL' ? 'active bg-surface text-main border-main' : 'bg-surface-strong text-muted border-divider hover-text-main'}">
           ${c.label}
         </button>
       `).join('')}
@@ -72,47 +72,47 @@ export function initScheduleModule() {
     <!-- 行事リストコンテナ -->
     <div class="card p-5">
       <div id="sched-list-container" class="space-y-3">
-        <div class="text-center py-10 text-xs text-slate-500">スケジュールデータを読み込み中...</div>
+        <div class="text-center py-10 text-xs text-muted">スケジュールデータを読み込み中...</div>
       </div>
     </div>
 
     <!-- ★ 行事追加モーダル (schedule-modal) -->
-    <div id="schedule-modal" class="modal-overlay hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
-      <div class="modal-card w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-5 max-h-[90vh] overflow-y-auto">
-        <div class="flex items-center justify-between mb-4">
-          <h3 class="text-base font-bold text-white flex items-center gap-2">
-            <i data-lucide="calendar-plus" class="w-5 h-5 text-purple-400"></i> 校内行事の追加
-          </h3>
-          <button id="schedule-modal-close" class="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800">
-            <i data-lucide="x" class="w-4 h-4"></i>
+    <div id="schedule-modal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 class="modal-title"><i data-lucide="calendar-plus" class="w-5 h-5 text-accent-alt"></i> 校内行事の追加</h3>
+          <button type="button" id="schedule-modal-close" class="modal-close modal-close-x" aria-label="閉じる" title="閉じる">
+            <i data-lucide="x" class="w-5 h-5"></i>
           </button>
         </div>
 
-        <form id="schedule-form" class="space-y-4">
-          <div>
-            <label class="block text-xs font-bold text-slate-300 mb-1">行事タイトル <span class="text-rose-400">*</span></label>
-            <input type="text" id="sched-title-input" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-purple-500" placeholder="例: 第3回 期末考査" required>
+        <form id="schedule-form" class="modal-form">
+          <div class="modal-body">
+            <div class="space-y-4">
+              <div>
+            <label class="block text-xs font-bold text-soft mb-1">行事タイトル <span class="text-danger">*</span></label>
+            <input type="text" id="sched-title-input" class="w-full bg-surface border border-main rounded-lg p-2 text-xs text-main focus:outline-none focus-border-accent" placeholder="例: 第3回 期末考査" required>
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label class="block text-xs font-bold text-slate-300 mb-1">実施日 <span class="text-rose-400">*</span></label>
-              <input type="date" id="sched-date-input" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-purple-500" required>
+              <label class="block text-xs font-bold text-soft mb-1">実施日 <span class="text-danger">*</span></label>
+              <input type="date" id="sched-date-input" class="w-full bg-surface border border-main rounded-lg p-2 text-xs text-main focus:outline-none focus-border-accent" required>
             </div>
             <div>
-              <label class="block text-xs font-bold text-slate-300 mb-1">開始時刻</label>
-              <input type="time" id="sched-start-time" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-purple-500">
+              <label class="block text-xs font-bold text-soft mb-1">開始時刻</label>
+              <input type="time" id="sched-start-time" class="w-full bg-surface border border-main rounded-lg p-2 text-xs text-main focus:outline-none focus-border-accent">
             </div>
             <div>
-              <label class="block text-xs font-bold text-slate-300 mb-1">終了時刻</label>
-              <input type="time" id="sched-end-time" step="600" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-purple-500">
+              <label class="block text-xs font-bold text-soft mb-1">終了時刻</label>
+              <input type="time" id="sched-end-time" step="600" class="w-full bg-surface border border-main rounded-lg p-2 text-xs text-main focus:outline-none focus-border-accent">
             </div>
           </div>
 
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="block text-xs font-bold text-slate-300 mb-1">カテゴリ <span class="text-rose-400">*</span></label>
-              <select id="sched-category-select" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-purple-500">
+              <label class="block text-xs font-bold text-soft mb-1">カテゴリ <span class="text-danger">*</span></label>
+              <select id="sched-category-select" class="w-full bg-surface border border-main rounded-lg p-2 text-xs text-main focus:outline-none focus-border-accent">
                 <option value="SCHOOL">全校行事</option>
                 <option value="GRADE">学年行事</option>
                 <option value="EXAM">定期考査・テスト</option>
@@ -120,8 +120,8 @@ export function initScheduleModule() {
               </select>
             </div>
             <div>
-              <label class="block text-xs font-bold text-slate-300 mb-1">対象学年</label>
-              <select id="sched-grade-select" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-purple-500">
+              <label class="block text-xs font-bold text-soft mb-1">対象学年</label>
+              <select id="sched-grade-select" class="w-full bg-surface border border-main rounded-lg p-2 text-xs text-main focus:outline-none focus-border-accent">
                 <option value="">全学年</option>
                 <option value="1">1年生</option>
                 <option value="2">2年生</option>
@@ -131,12 +131,13 @@ export function initScheduleModule() {
           </div>
 
           <div>
-            <label class="block text-xs font-bold text-slate-300 mb-1">内容・備考</label>
-            <textarea id="sched-desc-input" rows="3" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-purple-500" placeholder="内容、集合時間、持ち物等"></textarea>
+            <label class="block text-xs font-bold text-soft mb-1">内容・備考</label>
+            <textarea id="sched-desc-input" rows="3" class="w-full bg-surface border border-main rounded-lg p-2 text-xs text-main focus:outline-none focus-border-accent" placeholder="内容、集合時間、持ち物等"></textarea>
           </div>
-
-          <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
-            <button type="button" id="sched-btn-cancel" class="btn-secondary py-2 px-4 text-xs">キャンセル</button>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" id="sched-btn-cancel" class="modal-close btn-secondary py-2 px-4 text-xs">閉じる</button>
             <button type="submit" class="btn-primary py-2 px-4 text-xs font-bold flex items-center gap-1.5">
               <i data-lucide="plus" class="w-4 h-4"></i> 登録する
             </button>
@@ -189,11 +190,11 @@ function bindEvents() {
   document.querySelectorAll('.sched-filter-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.sched-filter-btn').forEach(b => {
-        b.classList.remove('active', 'bg-slate-800', 'text-slate-200', 'border-slate-700');
-        b.classList.add('bg-slate-900', 'text-slate-400', 'border-slate-800');
+        b.classList.remove('active', 'bg-surface', 'text-main', 'border-main');
+        b.classList.add('bg-surface-strong', 'text-muted', 'border-divider');
       });
-      btn.classList.add('active', 'bg-slate-800', 'text-slate-200', 'border-slate-700');
-      btn.classList.remove('bg-slate-900', 'text-slate-400', 'border-slate-800');
+      btn.classList.add('active', 'bg-surface', 'text-main', 'border-main');
+      btn.classList.remove('bg-surface-strong', 'text-muted', 'border-divider');
 
       selectedCategory = btn.getAttribute('data-cat') || 'ALL';
       renderScheduleList();
@@ -271,7 +272,7 @@ function renderScheduleList() {
   filtered.sort((a, b) => new Date(a.date) - new Date(b.date));
 
   if (filtered.length === 0) {
-    container.innerHTML = `<div class="text-center py-12 text-xs text-slate-500">該当する校内行事はありません。</div>`;
+    container.innerHTML = `<div class="text-center py-12 text-xs text-muted">該当する校内行事はありません。</div>`;
     return;
   }
 
@@ -285,26 +286,26 @@ function renderScheduleList() {
     const dStr = parts[2] || '15';
 
     return `
-      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3.5 rounded-lg bg-slate-900/60 border border-slate-800/80 hover:border-purple-500/40 transition-colors gap-3">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3.5 rounded-lg bg-surface-strong border border-divider hover-border-accent-alt transition-colors gap-3">
         <div class="flex items-center gap-3">
-          <div class="flex flex-col items-center justify-center w-12 h-12 rounded-lg bg-slate-800 border border-slate-700/80 flex-shrink-0">
-            <span class="text-[10px] text-slate-400 font-mono">${mStr}月</span>
-            <span class="text-base font-bold font-mono ${isWeekend ? 'text-amber-400' : 'text-slate-100'}">${dStr}</span>
+          <div class="flex flex-col items-center justify-center w-12 h-12 rounded-lg bg-surface border border-main flex-shrink-0">
+            <span class="text-[10px] text-muted font-mono">${mStr}月</span>
+            <span class="text-base font-bold font-mono ${isWeekend ? 'text-warning' : 'text-main'}">${dStr}</span>
           </div>
 
           <div>
             <div class="flex items-center gap-2 mb-1">
-              <span class="text-xs font-bold text-slate-400 font-mono">(${dayOfWeek})</span>
+              <span class="text-xs font-bold text-muted font-mono">(${dayOfWeek})</span>
               <span class="badge ${catConfig.color}">${catConfig.label}</span>
-              ${s.targetGrade ? `<span class="badge bg-slate-800 text-slate-300">${escapeHTML(s.targetGrade)}</span>` : ''}
+              ${s.targetGrade ? `<span class="badge bg-surface text-soft">${escapeHTML(s.targetGrade)}</span>` : ''}
             </div>
-            <h4 class="font-bold text-sm text-slate-100">${escapeHTML(s.title)}</h4>
-            ${s.description ? `<p class="text-xs text-slate-400 mt-0.5">${escapeHTML(s.description)}</p>` : ''}
+            <h4 class="font-bold text-sm text-main">${escapeHTML(s.title)}</h4>
+            ${s.description ? `<p class="text-xs text-muted mt-0.5">${escapeHTML(s.description)}</p>` : ''}
           </div>
         </div>
 
-        <div class="text-right text-[11px] text-slate-400 font-mono self-end sm:self-center">
-          担当: <span class="text-slate-300 font-semibold">${escapeHTML(s.authorName || '教務部')}</span>
+        <div class="text-right text-[11px] text-muted font-mono self-end sm:self-center">
+          担当: <span class="text-soft font-semibold">${escapeHTML(s.authorName || '教務部')}</span>
         </div>
       </div>
     `;

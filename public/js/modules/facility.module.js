@@ -66,7 +66,7 @@ const TIME_START_H = Math.floor(TIME_START_MIN / 60);
 const TIME_END_H = Math.floor(TIME_END_MIN / 60);
 const timeScaleCells = Array.from({ length: TIME_END_H - TIME_START_H }, (_, i) => {
   const hour = TIME_START_H + i;
-  return `<div class="flex-1 border-l border-slate-800/60 px-1 py-2 text-left">${String(hour).padStart(2, '0')}:00</div>`;
+  return `<div class="flex-1 border-l border-divider px-1 py-2 text-left">${String(hour).padStart(2, '0')}:00</div>`;
 }).join('');
 
 let reservationsCache = [];
@@ -80,21 +80,21 @@ export function initFacilityModule() {
 
   container.innerHTML = `
     <!-- ヘッダー・日付コントロール -->
-    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-surface-strong p-4 rounded-xl border border-divider">
       <div>
-        <h2 class="text-lg font-bold text-white flex items-center gap-2">
-          <i data-lucide="building-2" class="w-5 h-5 text-emerald-400"></i> 特別教室・施設予約タイムライン
+        <h2 class="text-lg font-bold text-main flex items-center gap-2">
+          <i data-lucide="building-2" class="w-5 h-5 text-success"></i> 特別教室・施設予約タイムライン
         </h2>
-        <p class="text-xs text-slate-400">体育館・PC教室・会議室等の予約状況確認および新規取得を行えます。</p>
+        <p class="text-xs text-muted">体育館・PC教室・会議室等の予約状況確認および新規取得を行えます。</p>
       </div>
 
       <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
-        <div class="flex items-center bg-slate-800 rounded-lg p-1 border border-slate-700 text-xs">
-          <button id="facility-prev-day" class="p-1.5 hover:bg-slate-700 rounded text-slate-300">
+        <div class="flex items-center bg-surface rounded-lg p-1 border border-main text-xs">
+          <button id="facility-prev-day" class="p-1.5 hover-surface-strong rounded text-soft">
             <i data-lucide="chevron-left" class="w-4 h-4"></i>
           </button>
-          <input type="date" id="facility-date-picker" class="bg-transparent text-slate-100 font-bold px-2 py-0.5 focus:outline-none text-xs" value="${selectedDate}">
-          <button id="facility-next-day" class="p-1.5 hover:bg-slate-700 rounded text-slate-300">
+          <input type="date" id="facility-date-picker" class="bg-transparent text-main font-bold px-2 py-0.5 focus:outline-none text-xs" value="${selectedDate}">
+          <button id="facility-next-day" class="p-1.5 hover-surface-strong rounded text-soft">
             <i data-lucide="chevron-right" class="w-4 h-4"></i>
           </button>
         </div>
@@ -108,81 +108,83 @@ export function initFacilityModule() {
 
     <!-- タイムラインマトリクス表示エリア (時間帯バンド表示) -->
     <div class="card p-4 overflow-hidden mt-4">
-      <div class="flex items-center justify-between mb-3 text-xs text-slate-400">
-        <span class="flex items-center gap-1.5"><i data-lucide="clock" class="w-3.5 h-3.5 text-emerald-400"></i> ${TIME_START_H}時〜${TIME_END_H}時の連続タイムライン (時限・10分刻み区切りなし)</span>
-        <span class="text-slate-500">バンドをクリック → 詳細 / キャンセル、空き帯域をクリック → 予約作成</span>
+      <div class="flex items-center justify-between mb-3 text-xs text-muted">
+        <span class="flex items-center gap-1.5"><i data-lucide="clock" class="w-3.5 h-3.5 text-success"></i> ${TIME_START_H}時〜${TIME_END_H}時の連続タイムライン (時限・10分刻み区切りなし)</span>
+        <span class="text-muted">バンドをクリック → 詳細 / キャンセル、空き帯域をクリック → 予約作成</span>
       </div>
       <div class="timeline-scroll-container overflow-x-auto">
         <div class="min-w-[880px]">
           <!-- 時間スケールヘッダー -->
-          <div class="flex border-b border-slate-800 bg-slate-900/80 text-[10px] text-slate-500 font-mono">
-            <div class="w-40 shrink-0 p-2 font-bold text-slate-300 font-sans">施設名称</div>
+          <div class="flex border-b border-divider bg-surface-strong text-[10px] text-muted font-mono">
+            <div class="w-40 shrink-0 p-2 font-bold text-soft font-sans">施設名称</div>
             <div class="flex-1 flex">
               ${timeScaleCells}
             </div>
           </div>
-          <div id="facility-matrix-body" class="divide-y divide-slate-800/60">
-            <div class="py-12 text-center text-slate-500 text-xs">予約データを読み込み中...</div>
+          <div id="facility-matrix-body" class="divide-y divide-divider">
+            <div class="py-12 text-center text-muted text-xs">予約データを読み込み中...</div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- モーダルダイアログ -->
-    <div id="facility-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
-      <div class="bg-slate-900 border border-slate-800 rounded-xl max-w-md w-full p-6 text-slate-100 shadow-2xl relative">
-        <div class="flex items-center justify-between pb-4 mb-4 border-b border-slate-800">
-          <h3 class="text-base font-bold flex items-center gap-2">
-            <i data-lucide="calendar-plus" class="w-5 h-5 text-emerald-400"></i> 施設・備品 新規予約
-          </h3>
-          <button id="facility-modal-close" class="text-slate-400 hover:text-white p-1">
+    <!-- モーダルダイアログ（統一仕様） -->
+    <div id="facility-modal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 class="modal-title"><i data-lucide="calendar-plus" class="w-5 h-5 text-success"></i> 施設・備品 新規予約</h3>
+          <button type="button" id="facility-modal-close" class="modal-close modal-close-x" aria-label="閉じる" title="閉じる">
             <i data-lucide="x" class="w-5 h-5"></i>
           </button>
         </div>
 
-        <form id="facility-form" class="space-y-4">
-          <div>
-            <label class="block text-xs font-bold text-slate-300 mb-1">対象施設・備品 <span class="text-rose-400">*</span></label>
-            <select id="facility-select" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs focus:outline-none focus:border-emerald-500 text-white" required>
+        <form id="facility-form" class="modal-form">
+          <div class="modal-body">
+            <div class="space-y-4">
+              <div>
+            <label class="block text-xs font-bold text-soft mb-1">対象施設・備品 <span class="text-danger">*</span></label>
+            <select id="facility-select" class="w-full bg-surface border border-main rounded-lg p-2 text-xs focus:outline-none focus-border-accent text-main" required>
             </select>
           </div>
 
           <div>
-            <label class="block text-xs font-bold text-slate-300 mb-1">利用日 <span class="text-rose-400">*</span></label>
-            <input type="date" id="facility-date-input" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs focus:outline-none focus:border-emerald-500 text-white" value="${selectedDate}" required>
+            <label class="block text-xs font-bold text-soft mb-1">利用日 <span class="text-danger">*</span></label>
+            <input type="date" id="facility-date-input" class="w-full bg-surface border border-main rounded-lg p-2 text-xs focus:outline-none focus-border-accent text-main" value="${selectedDate}" required>
           </div>
 
           <div>
-            <label class="block text-xs font-bold text-slate-300 mb-1">利用開始・終了時刻 <span class="text-rose-400">*</span></label>
-            <p class="text-[10px] text-slate-500 mb-2">時限・期間の区切りや10分刻みの制約はなく、8:00〜18:00 の任意の時刻 (分単位) で予約できます。</p>
+            <label class="block text-xs font-bold text-soft mb-1">利用開始・終了時刻 <span class="text-danger">*</span></label>
+            <p class="text-[10px] text-muted mb-2">時限・期間の区切りや10分刻みの制約はなく、8:00〜18:00 の任意の時刻 (分単位) で予約できます。</p>
             <div class="grid grid-cols-2 gap-3 mb-2">
               <div>
-                <span class="text-[10px] text-slate-400 block mb-0.5">開始時刻</span>
-                <input type="time" id="facility-start-time" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-emerald-500" value="08:50" required>
+                <span class="text-[10px] text-muted block mb-0.5">開始時刻</span>
+                <input type="time" id="facility-start-time" class="w-full bg-surface border border-main rounded-lg p-2 text-xs text-main focus:outline-none focus-border-accent" value="08:50" required>
               </div>
               <div>
-                <span class="text-[10px] text-slate-400 block mb-0.5">終了時刻</span>
-                <input type="time" id="facility-end-time" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-emerald-500" value="09:40" required>
+                <span class="text-[10px] text-muted block mb-0.5">終了時刻</span>
+                <input type="time" id="facility-end-time" class="w-full bg-surface border border-main rounded-lg p-2 text-xs text-main focus:outline-none focus-border-accent" value="09:40" required>
               </div>
             </div>
 
             <div class="flex flex-wrap gap-1 items-center">
-              <span class="text-[10px] text-slate-500 mr-1">時短:</span>
-              <button type="button" class="btn-duration text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2 py-1 rounded" data-minutes="30">30分</button>
-              <button type="button" class="btn-duration text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2 py-1 rounded" data-minutes="60">1時間</button>
-              <button type="button" class="btn-duration text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2 py-1 rounded" data-minutes="90">1時間30分</button>
-              <button type="button" class="btn-duration text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2 py-1 rounded" data-minutes="120">2時間</button>
-              <button type="button" class="btn-daylight text-[10px] bg-indigo-950 hover:bg-indigo-900 text-indigo-300 border border-indigo-700/60 px-2 py-1 rounded font-bold" data-start="08:00" data-end="18:00">終日 (8:00-18:00)</button>
+              <span class="text-[10px] text-muted mr-1">時短:</span>
+              <button type="button" class="btn-duration text-[10px] bg-surface hover-surface-strong text-soft border border-main px-2 py-1 rounded" data-minutes="30">30分</button>
+              <button type="button" class="btn-duration text-[10px] bg-surface hover-surface-strong text-soft border border-main px-2 py-1 rounded" data-minutes="60">1時間</button>
+              <button type="button" class="btn-duration text-[10px] bg-surface hover-surface-strong text-soft border border-main px-2 py-1 rounded" data-minutes="90">1時間30分</button>
+              <button type="button" class="btn-duration text-[10px] bg-surface hover-surface-strong text-soft border border-main px-2 py-1 rounded" data-minutes="120">2時間</button>
+              <button type="button" class="btn-daylight text-[10px] bg-accent-inset hover-accent-soft text-accent-strong border border-accent-soft px-2 py-1 rounded font-bold" data-start="08:00" data-end="18:00">終日 (8:00-18:00)</button>
             </div>
           </div>
 
           <div>
-            <label class="block text-xs font-bold text-slate-300 mb-1">利用目的・件名 <span class="text-rose-400">*</span></label>
-            <input type="text" id="facility-purpose-input" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs focus:outline-none focus:border-emerald-500 text-white" placeholder="例: 昼休み委員会集会、教務部定例会議" required>
+            <label class="block text-xs font-bold text-soft mb-1">利用目的・件名 <span class="text-danger">*</span></label>
+            <input type="text" id="facility-purpose-input" class="w-full bg-surface border border-main rounded-lg p-2 text-xs focus:outline-none focus-border-accent text-main" placeholder="例: 昼休み委員会集会、教務部定例会議" required>
           </div>
 
-          <div class="flex items-center justify-end gap-2 pt-4 border-t border-slate-800">
-            <button type="button" id="facility-btn-cancel" class="btn-secondary py-2 px-4 text-xs">キャンセル</button>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" id="facility-btn-cancel" class="modal-close btn-secondary py-2 px-4 text-xs">閉じる</button>
             <button type="submit" class="btn-primary py-2 px-4 text-xs font-bold">予約を確定する</button>
           </div>
         </form>
@@ -381,7 +383,7 @@ function renderMatrix() {
   // 1時間ごとのグリッド線 (8:00〜18:00)
   const gridLines = Array.from({ length: TIME_END_H - TIME_START_H + 1 }, (_, i) => {
     const pos = timeToPercent(TIME_START_MIN + i * 60);
-    return `<div class="absolute top-0 bottom-0 border-l border-slate-800/50 pointer-events-none" style="left:${pos}%"></div>`;
+    return `<div class="absolute top-0 bottom-0 border-l border-divider pointer-events-none" style="left:${pos}%"></div>`;
   }).join('');
 
   tbody.innerHTML = facilities.map(fac => {
@@ -400,21 +402,21 @@ function renderMatrix() {
       const left = timeToPercent(s);
       const width = Math.max(2, timeToPercent(e) - left);
       return `
-        <div class="reservation-chip absolute top-1 bottom-1 rounded-lg px-2 py-1 text-[11px] bg-emerald-950/80 border border-emerald-500/50 hover:border-emerald-400 transition-all cursor-pointer overflow-hidden"
+        <div class="reservation-chip absolute top-1 bottom-1 rounded-lg px-2 py-1 text-[11px] bg-success-inset border border-success hover-border-success transition-all cursor-pointer overflow-hidden"
              style="left:${left}%; width:${width}%" data-res-id="${res.id}" title="${escapeHTML(res.purpose)} (${res.timeRangeStr})">
-          <div class="font-bold text-emerald-200 truncate leading-tight">${escapeHTML(res.purpose)}</div>
-          <div class="text-[10px] text-emerald-400 font-mono flex items-center gap-1 mt-0.5">
+          <div class="font-bold text-success-strong truncate leading-tight">${escapeHTML(res.purpose)}</div>
+          <div class="text-[10px] text-success font-mono flex items-center gap-1 mt-0.5">
             <span>${res.timeRangeStr || '予約中'}</span>
-            <span class="text-emerald-300/80 truncate">${escapeHTML(res.userName)}</span>
+            <span class="text-success-strong truncate">${escapeHTML(res.userName)}</span>
           </div>
         </div>
       `;
     }).join('');
 
     return `
-      <div class="flex hover:bg-slate-900/30 transition-colors" data-facility-row="${fac.id}">
-        <div class="w-40 shrink-0 p-3 font-bold text-slate-200 bg-slate-900/40 border-r border-slate-800 flex items-center gap-2">
-          <i data-lucide="${getFacilityIcon(fac.type)}" class="w-4 h-4 text-emerald-400"></i>
+      <div class="flex hover-surface-soft transition-colors" data-facility-row="${fac.id}">
+        <div class="w-40 shrink-0 p-3 font-bold text-main bg-surface-strong border-r border-divider flex items-center gap-2">
+          <i data-lucide="${getFacilityIcon(fac.type)}" class="w-4 h-4 text-success"></i>
           <span class="truncate">${escapeHTML(fac.name)}</span>
         </div>
         <div class="flex-1 relative h-16 btn-quick-reserve-area cursor-crosshair" data-facility-id="${fac.id}">

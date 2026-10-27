@@ -11,8 +11,8 @@ import { escapeHTML, refreshLucideIcons, openModal, showToast, formatDate } from
 import { state } from '../state.js';
 
 const TYPE_META = {
-  LEAVE: { label: '年休等', icon: 'calendar-x-2', textClass: 'text-rose-400', borderClass: 'border-rose-500/30', bgClass: 'bg-rose-500/10' },
-  TRIP: { label: '出張', icon: 'briefcase', textClass: 'text-amber-400', borderClass: 'border-amber-500/30', bgClass: 'bg-amber-500/10' },
+  LEAVE: { label: '年休等', icon: 'calendar-x-2', textClass: 'text-danger', borderClass: 'border-danger-soft', bgClass: 'bg-danger-soft' },
+  TRIP: { label: '出張', icon: 'briefcase', textClass: 'text-warning', borderClass: 'border-warning-soft', bgClass: 'bg-warning-soft' },
 };
 
 let latestSummary = null;
@@ -53,8 +53,8 @@ export function initAbsenceModule() {
     btn.addEventListener('click', () => {
       currentFilter = btn.dataset.absenceFilter || 'ALL';
       document.querySelectorAll('.absence-filter-btn').forEach((b) => {
-        b.classList.toggle('border-indigo-500/60', b === btn);
-        b.classList.toggle('text-indigo-300', b === btn);
+        b.classList.toggle('border-accent', b === btn);
+        b.classList.toggle('text-accent-strong', b === btn);
       });
       renderAbsenceList();
     });
@@ -124,7 +124,7 @@ export async function loadAbsenceSummary(targetDate = null) {
     if (tripEl) tripEl.textContent = '--';
     const list = document.getElementById('absence-list');
     if (list) {
-      list.innerHTML = `<div class="text-center py-6 text-xs text-red-400">年休等・出張データの取得に失敗しました。</div>`;
+      list.innerHTML = `<div class="text-center py-6 text-xs text-danger">年休等・出張データの取得に失敗しました。</div>`;
       refreshLucideIcons();
     }
   }
@@ -163,8 +163,8 @@ function renderAbsenceCounts() {
   const noteEl = document.getElementById('absence-permission-note');
   if (noteEl) {
     noteEl.innerHTML = latestSummary.can_record
-      ? `<i data-lucide="shield-check" class="w-3.5 h-3.5 text-emerald-400"></i> 教務・管理職権限: 全教員の「年休等・出張」を記入できます。`
-      : `<i data-lucide="shield" class="w-3.5 h-3.5 text-slate-400"></i> 一般教員権限: 自分の分のみ記入できます（教務・管理職が全教員分を記入可）。`;
+      ? `<i data-lucide="shield-check" class="w-3.5 h-3.5 text-success"></i> 教務・管理職権限: 全教員の「年休等・出張」を記入できます。`
+      : `<i data-lucide="shield" class="w-3.5 h-3.5 text-muted"></i> 一般教員権限: 自分の分のみ記入できます（教務・管理職が全教員分を記入可）。`;
     refreshLucideIcons();
   }
 }
@@ -187,7 +187,7 @@ function renderAbsenceList() {
   }
 
   if (filtered.length === 0) {
-    list.innerHTML = `<div class="text-center py-8 text-xs text-slate-500">本日の「${filterLabel}」登録はありません。</div>`;
+    list.innerHTML = `<div class="text-center py-8 text-xs text-muted">本日の「${filterLabel}」登録はありません。</div>`;
     return;
   }
 
@@ -199,22 +199,22 @@ function renderAbsenceList() {
     const canDelete = latestSummary.can_record || isSelf;
 
     return `
-      <div class="flex items-center justify-between gap-3 p-3 rounded-lg border ${meta.borderClass} bg-slate-900/60">
+      <div class="flex items-center justify-between gap-3 p-3 rounded-lg border ${meta.borderClass} bg-surface-strong">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
             <span class="badge ${meta.bgClass} ${meta.textClass} font-bold">${meta.label}</span>
-            <span class="text-xs font-bold text-white truncate">${escapeHTML(r.user_name)} 先生</span>
-            ${isSelf ? '<span class="text-[9px] px-1.5 rounded bg-indigo-500/20 text-indigo-300 font-bold">自分</span>' : ''}
+            <span class="text-xs font-bold text-main truncate">${escapeHTML(r.user_name)} 先生</span>
+            ${isSelf ? '<span class="text-[9px] px-1.5 rounded bg-accent-soft text-accent-strong font-bold">自分</span>' : ''}
           </div>
-          <div class="text-[11px] text-slate-300 mt-1 truncate">
-            理由: ${escapeHTML(r.reason) || '<span class="text-slate-500">（未記入）</span>'}
+          <div class="text-[11px] text-soft mt-1 truncate">
+            理由: ${escapeHTML(r.reason) || '<span class="text-muted">（未記入）</span>'}
           </div>
-          <div class="text-[10px] text-slate-500 mt-0.5 font-mono">
+          <div class="text-[10px] text-muted mt-0.5 font-mono">
             ${escapeHTML(r.record_date)} 登録 by ${escapeHTML(r.recorded_by_name) || '不明'} / ${formatDate(r.updated_at, true)}
           </div>
         </div>
         ${canDelete
-          ? `<button data-absence-delete="${r.id}" class="btn-secondary py-1 px-2.5 text-[10px] text-rose-300 flex items-center gap-1 flex-shrink-0">
+          ? `<button data-absence-delete="${r.id}" class="btn-secondary py-1 px-2.5 text-[10px] text-danger-strong flex items-center gap-1 flex-shrink-0">
               <i data-lucide="eraser" class="w-3 h-3"></i> 取消
             </button>`
           : ''}
@@ -262,8 +262,8 @@ export function openAbsenceModal(filterType = 'ALL') {
 
   document.querySelectorAll('.absence-filter-btn').forEach((btn) => {
     const active = (btn.dataset.absenceFilter || 'ALL') === currentFilter;
-    btn.classList.toggle('border-indigo-500/60', active);
-    btn.classList.toggle('text-indigo-300', active);
+    btn.classList.toggle('border-accent', active);
+    btn.classList.toggle('text-accent-strong', active);
   });
 
   openModal('absence-modal');

@@ -451,3 +451,290 @@ VALUES
   ('abs_1', 't-takahashi', CURRENT_DATE, 'LEAVE', '年休（通院）', 'kyomu01', '教務 主任'),
   ('abs_2', 't-suzuki', CURRENT_DATE, 'TRIP', '県教育委員会 研修', 'kyomu01', '教務 主任')
 ON CONFLICT DO NOTHING;
+
+-- -------------------------------------------------------------
+-- 16. 定期考査 完全版スキーマ (考査登録・実施科目/出題者調査・時間割・出張登録・監督割)
+-- ※ 追加はすべて ADD COLUMN IF NOT EXISTS / CREATE TABLE IF NOT EXISTS のため既存DBにも安全に適用される
+-- -------------------------------------------------------------
+
+-- 16a. 考査マスター追加カラム (対象学年・時限時刻・作成者)
+ALTER TABLE exam_masters ADD COLUMN IF NOT EXISTS grades TEXT NOT NULL DEFAULT '[1,2,3]';
+ALTER TABLE exam_masters ADD COLUMN IF NOT EXISTS period_times TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE exam_masters ADD COLUMN IF NOT EXISTS created_by TEXT;
+
+-- 16b. 考査フェーズ状態 (4つの調査・公表フェーズを 1考査につき 1行で保持)
+-- subject_phase  : DRAFT(未設定) | SURVEY(調査中) | LOCKED(調査終了)
+-- timetable_phase: DRAFT(時間割作成中) | PUBLISHED(公表) | ENDED(公表終了)
+-- trip_phase     : DRAFT | SURVEY | LOCKED
+-- proctor_phase  : DRAFT(監督割作成中) | PUBLISHED(公表) | ENDED(公表終了)
+CREATE TABLE IF NOT EXISTS exam_phases (
+  exam_master_id TEXT PRIMARY KEY,
+  subject_phase TEXT NOT NULL DEFAULT 'DRAFT',
+  timetable_phase TEXT NOT NULL DEFAULT 'DRAFT',
+  trip_phase TEXT NOT NULL DEFAULT 'DRAFT',
+  proctor_phase TEXT NOT NULL DEFAULT 'DRAFT',
+  updated_by TEXT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (exam_master_id) REFERENCES exam_masters(id) ON DELETE CASCADE
+);
+
+-- 16c. 実施科目・出題者プラン (1科目 × 1学年 = 実施単位)
+-- grade   : 1|2|3、0 = 全学年共通（生徒全員が受ける科目）
+-- stream  : SCIENCE(理系) | ARTS(文系) | OTHER
+-- scope   : ALL(全学年が受ける) | GRADE(単独学年で実施)
+-- duration_slots : 1|2 (数学Ⅲの100分試験は 2)
+-- fixed_slot     : 固定開始コマ番号 (数学Ⅲ = 2 → 2限〜3限)
+-- shared_slot    : true = 3学年ともに同じ日・同じ時間に実施 (公共)
+-- broadcast_slot : true = 放送設備を使うため3学年で異なる時間 (英語コミュニケーション・リスニング)
+-- solo_subject   : true = 単独実施科目 (発展化学等 → 出題者が監督も担当)
+CREATE TABLE IF NOT EXISTS exam_subject_plan (
+  id TEXT PRIMARY KEY,
+  exam_master_id TEXT NOT NULL,
+  subject_name TEXT NOT NULL,
+  subject_id TEXT,
+  grade INTEGER NOT NULL,
+  stream TEXT NOT NULL DEFAULT 'OTHER',
+  scope TEXT NOT NULL DEFAULT 'GRADE',
+  setter_teacher_id TEXT,
+  duration_slots INTEGER NOT NULL DEFAULT 1,
+  fixed_slot INTEGER,
+  shared_slot BOOLEAN NOT NULL DEFAULT false,
+  broadcast_slot BOOLEAN NOT NULL DEFAULT false,
+  solo_subject BOOLEAN NOT NULL DEFAULT false,
+  notes TEXT,
+  submit_status TEXT NOT NULL DEFAULT 'PENDING',
+  updated_by TEXT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (exam_master_id) REFERENCES exam_masters(id) ON DELETE CASCADE,
+  UNIQUE (exam_master_id, subject_name, grade)
+);
+CREATE INDEX IF NOT EXISTS idx_subject_plan_master ON exam_subject_plan(exam_master_id);
+
+-- 16d. 考査期間の出張・欠席 (教員 × 日 × コマ)
+CREATE TABLE IF NOT EXISTS exam_trips (
+  id TEXT PRIMARY KEY,
+  exam_master_id TEXT NOT NULL,
+  teacher_id TEXT NOT NULL,
+  day_number INTEGER NOT NULL,
+  slot_number INTEGER NOT NULL,
+  reason TEXT DEFAULT '',
+  recorded_by TEXT,
+  recorded_by_name TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (exam_master_id) REFERENCES exam_masters(id) ON DELETE CASCADE,
+  UNIQUE (exam_master_id, teacher_id, day_number, slot_number)
+);
+CREATE INDEX IF NOT EXISTS idx_exam_trips_master ON exam_trips(exam_master_id, day_number, slot_number);
+
+-- 16e. 時間割ルール (制約設定 JSON)
+CREATE TABLE IF NOT EXISTS exam_timetable_rules (
+  exam_master_id TEXT PRIMARY KEY,
+  rules TEXT NOT NULL DEFAULT '{}',
+  updated_by TEXT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (exam_master_id) REFERENCES exam_masters(id) ON DELETE CASCADE
+);
+
+-- 16f. 監督割ルール (条件設定 JSON)
+CREATE TABLE IF NOT EXISTS exam_proctor_rules (
+  exam_master_id TEXT PRIMARY KEY,
+  rules TEXT NOT NULL DEFAULT '{}',
+  updated_by TEXT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (exam_master_id) REFERENCES exam_masters(id) ON DELETE CASCADE
+);
+
+-- 16g. 非常勤教員のコマ条件 (個別設定)
+-- consecutive_rule: NONE(制限なし) | MAX1(1日1コマ) | MAX2(2時間連続可) | MAX3(3時間連続可) | NO2(2時間連続不可)
+CREATE TABLE IF NOT EXISTS exam_parttime_staff (
+  exam_master_id TEXT NOT NULL,
+  teacher_id TEXT NOT NULL,
+  daily_limit INTEGER NOT NULL DEFAULT 1,
+  max_consecutive INTEGER NOT NULL DEFAULT 1,
+  consecutive_rule TEXT NOT NULL DEFAULT 'MAX1',
+  notes TEXT,
+  PRIMARY KEY (exam_master_id, teacher_id),
+  FOREIGN KEY (exam_master_id) REFERENCES exam_masters(id) ON DELETE CASCADE
+);
+
+-- 16h. 非常勤の出勤可能コマ
+CREATE TABLE IF NOT EXISTS exam_parttime_availability (
+  exam_master_id TEXT NOT NULL,
+  teacher_id TEXT NOT NULL,
+  day_number INTEGER NOT NULL,
+  slot_number INTEGER NOT NULL,
+  can_work BOOLEAN NOT NULL DEFAULT true,
+  PRIMARY KEY (exam_master_id, teacher_id, day_number, slot_number),
+  FOREIGN KEY (exam_master_id) REFERENCES exam_masters(id) ON DELETE CASCADE
+);
+
+-- 16i. 過去考査の科目・日分布 (後半/前半の偏り均等化用スナップショット)
+CREATE TABLE IF NOT EXISTS exam_slot_history (
+  id TEXT PRIMARY KEY,
+  exam_name TEXT NOT NULL,
+  subject_name TEXT NOT NULL,
+  grade INTEGER NOT NULL,
+  day_number INTEGER NOT NULL,
+  slot_number INTEGER NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_slot_history_subject ON exam_slot_history(subject_name, grade);
+
+-- 16j. 考査コマ・監督割当の追加情報
+-- room_type: CLASS(普通クラス) | SP1(別室1) | PREP1(予備1) | SP2(別室2)
+ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS slot_span INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS room_type TEXT NOT NULL DEFAULT 'CLASS';
+ALTER TABLE exam_proctor_assignments ADD COLUMN IF NOT EXISTS room_type TEXT NOT NULL DEFAULT 'CLASS';
+ALTER TABLE exam_proctor_assignments ADD COLUMN IF NOT EXISTS notes TEXT;
+
+-- 16k. 教員の非常勤フラグ（監督割の出勤条件・コマ上限判定に使用）
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_parttime BOOLEAN NOT NULL DEFAULT false;
+
+-- 16l. 考査フェーズに教室割フェーズを追加
+-- room_phase: DRAFT(教室割作成中) | PUBLISHED(公表) | ENDED(公表終了)
+ALTER TABLE exam_phases ADD COLUMN IF NOT EXISTS room_phase TEXT NOT NULL DEFAULT 'DRAFT';
+
+-- 16m. 考査教室マスタ（実施に使用する教室）
+-- room_type: CLASS(普通教室) | SP1(別室1) | SP2(別室2) | PREP1(予備1) | SPECIAL(特別教室)
+CREATE TABLE IF NOT EXISTS exam_rooms (
+  id TEXT PRIMARY KEY,
+  exam_master_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  room_type TEXT NOT NULL DEFAULT 'CLASS',
+  capacity INTEGER,
+  grades TEXT NOT NULL DEFAULT '[]',
+  notes TEXT,
+  updated_by TEXT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (exam_master_id) REFERENCES exam_masters(id) ON DELETE CASCADE,
+  UNIQUE (exam_master_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_exam_rooms_master ON exam_rooms(exam_master_id);
+
+-- 16n. 科目別標準教室設定（標準教室と予備教室の順序）
+CREATE TABLE IF NOT EXISTS exam_room_config (
+  id TEXT PRIMARY KEY,
+  exam_master_id TEXT NOT NULL,
+  subject_name TEXT NOT NULL,
+  grade INTEGER NOT NULL DEFAULT 0,
+  standard_room TEXT,
+  alt_rooms TEXT NOT NULL DEFAULT '[]',
+  notes TEXT,
+  updated_by TEXT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (exam_master_id) REFERENCES exam_masters(id) ON DELETE CASCADE,
+  UNIQUE (exam_master_id, subject_name, grade)
+);
+CREATE INDEX IF NOT EXISTS idx_room_config_master ON exam_room_config(exam_master_id);
+
+-- 16o. 教室割当結果（日 × 時限 × 学年）
+CREATE TABLE IF NOT EXISTS exam_room_assignments (
+  id TEXT PRIMARY KEY,
+  exam_master_id TEXT NOT NULL,
+  unit_id TEXT,
+  subject_name TEXT NOT NULL,
+  grade INTEGER NOT NULL,
+  day_number INTEGER NOT NULL,
+  slot_number INTEGER NOT NULL,
+  room_id TEXT,
+  room_name TEXT NOT NULL,
+  is_standard BOOLEAN NOT NULL DEFAULT true,
+  notes TEXT,
+  updated_by TEXT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (exam_master_id) REFERENCES exam_masters(id) ON DELETE CASCADE,
+  UNIQUE (exam_master_id, grade, day_number, slot_number)
+);
+
+-- -----------------------------------------------------------------------------
+-- 16s. 定期考査 実装整合用カラム（ユニットID・監督学年・出張出自・予備教室フラグ）
+-- -----------------------------------------------------------------------------
+ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS unit_id TEXT;
+ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS duration_slots INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS updated_by TEXT;
+ALTER TABLE exam_proctor_assignments ADD COLUMN IF NOT EXISTS grade INTEGER;
+ALTER TABLE exam_trips ADD COLUMN IF NOT EXISTS from_absence BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE exam_rooms ADD COLUMN IF NOT EXISTS is_alternate BOOLEAN NOT NULL DEFAULT false;
+
+-- -----------------------------------------------------------------------------
+-- 16t. 教員個別コマ制限（監督割当の配慮：1日上限・連続上限）
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS exam_teacher_constraints (
+  id TEXT PRIMARY KEY,
+  exam_master_id TEXT NOT NULL,
+  teacher_id TEXT NOT NULL,
+  constraint_type TEXT NOT NULL DEFAULT '{}',
+  notes TEXT,
+  updated_by TEXT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (exam_master_id) REFERENCES exam_masters(id) ON DELETE CASCADE,
+  UNIQUE (exam_master_id, teacher_id)
+);
+CREATE INDEX IF NOT EXISTS idx_exam_constraints_exam ON exam_teacher_constraints(exam_master_id);
+
+CREATE INDEX IF NOT EXISTS idx_room_assign_master ON exam_room_assignments(exam_master_id, day_number, slot_number);
+
+ALTER TABLE exam_parttime_staff ADD COLUMN IF NOT EXISTS updated_by TEXT;
+ALTER TABLE exam_parttime_staff ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE exam_parttime_availability ADD COLUMN IF NOT EXISTS updated_by TEXT;
+ALTER TABLE exam_parttime_availability ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+
+-- 16p. 実施科目プランの追加カラム（出題者公開・調査提出状態）
+ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS submit_status TEXT NOT NULL DEFAULT 'PENDING';
+ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS student_count INTEGER;
+
+-- -----------------------------------------------------------------------------
+-- 16u. 考査マスタ運用カラム（対象学年・時限時刻・作成者）
+-- -----------------------------------------------------------------------------
+ALTER TABLE exam_masters ADD COLUMN IF NOT EXISTS grades TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE exam_masters ADD COLUMN IF NOT EXISTS period_times TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE exam_masters ADD COLUMN IF NOT EXISTS created_by TEXT;
+ALTER TABLE exam_masters ADD COLUMN IF NOT EXISTS updated_by TEXT;
+
+ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS grade INTEGER;
+ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS subject_name TEXT;
+ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS setter_teacher_name TEXT;
+ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS slot_span INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS room_type TEXT NOT NULL DEFAULT 'CLASS';
+ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+ALTER TABLE exam_proctor_assignments ADD COLUMN IF NOT EXISTS subject_name TEXT;
+ALTER TABLE exam_proctor_assignments ADD COLUMN IF NOT EXISTS setter_teacher_id TEXT;
+ALTER TABLE exam_proctor_assignments ADD COLUMN IF NOT EXISTS setter_teacher_name TEXT;
+ALTER TABLE exam_proctor_assignments ADD COLUMN IF NOT EXISTS room_name TEXT;
+ALTER TABLE exam_proctor_assignments ADD COLUMN IF NOT EXISTS room_type TEXT NOT NULL DEFAULT 'CLASS';
+ALTER TABLE exam_proctor_assignments ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE exam_proctor_assignments ADD COLUMN IF NOT EXISTS updated_by TEXT;
+ALTER TABLE exam_proctor_assignments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS grade TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_parttime BOOLEAN NOT NULL DEFAULT false;
+
+-- -----------------------------------------------------------------------------
+-- 16v. 教室割ルール（制約設定 JSON）
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS exam_room_rules (
+  exam_master_id TEXT PRIMARY KEY,
+  rules TEXT NOT NULL DEFAULT '{}',
+  updated_by TEXT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (exam_master_id) REFERENCES exam_masters(id) ON DELETE CASCADE
+);
+
+
+-- 16q. 監督割当の追加カラム（出題者情報・表示用）
+ALTER TABLE exam_proctor_assignments ADD COLUMN IF NOT EXISTS subject_name TEXT;
+ALTER TABLE exam_proctor_assignments ADD COLUMN IF NOT EXISTS setter_teacher_id TEXT;
+ALTER TABLE exam_proctor_assignments ADD COLUMN IF NOT EXISTS setter_teacher_name TEXT;
+ALTER TABLE exam_proctor_assignments ADD COLUMN IF NOT EXISTS room_name TEXT;
+ALTER TABLE exam_proctor_assignments ADD COLUMN IF NOT EXISTS updated_by TEXT;
+ALTER TABLE exam_proctor_assignments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+-- 16r. 時間割スロットの追加カラム（科目名・学年・出題者表示）
+ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS subject_name TEXT;
+ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS grade INTEGER;
+ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS setter_teacher_name TEXT;
+ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS updated_by TEXT;
+ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+

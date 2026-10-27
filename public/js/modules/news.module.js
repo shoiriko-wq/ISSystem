@@ -28,12 +28,12 @@ export function initNewsModule() {
 
   container.innerHTML = `
     <!-- ヘッダーツールバー -->
-    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-surface-strong p-4 rounded-xl border border-divider">
       <div>
-        <h2 class="text-lg font-bold text-white flex items-center gap-2">
-          <i data-lucide="newspaper" class="w-5 h-5 text-indigo-400"></i> 最新教育動向 & ニュース速報
+        <h2 class="text-lg font-bold text-main flex items-center gap-2">
+          <i data-lucide="newspaper" class="w-5 h-5 text-accent"></i> 最新教育動向 & ニュース速報
         </h2>
-        <p class="text-xs text-slate-400">文科省発表・教育技術トレンド記事の閲覧および職員チャット・掲示板へのワンタップ共有を行えます。</p>
+        <p class="text-xs text-muted">文科省発表・教育技術トレンド記事の閲覧および職員チャット・掲示板へのワンタップ共有を行えます。</p>
       </div>
 
       <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
@@ -45,11 +45,11 @@ export function initNewsModule() {
 
     <!-- カテゴリフィルター -->
     <div class="flex flex-wrap items-center gap-2 text-xs">
-      <span class="text-slate-400 font-bold mr-1 flex items-center gap-1">
+      <span class="text-muted font-bold mr-1 flex items-center gap-1">
         <i data-lucide="tag" class="w-3.5 h-3.5"></i> テーマ:
       </span>
       ${NEWS_CATEGORIES.map(c => `
-        <button data-cat="${c.id}" class="news-filter-btn px-3 py-1.5 rounded-lg border font-semibold transition-all ${c.id === 'ALL' ? 'active bg-slate-800 text-slate-200 border-slate-700' : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'}">
+        <button data-cat="${c.id}" class="news-filter-btn px-3 py-1.5 rounded-lg border font-semibold transition-all ${c.id === 'ALL' ? 'active bg-surface text-main border-main' : 'bg-surface-strong text-muted border-divider hover-text-main'}">
           ${c.label}
         </button>
       `).join('')}
@@ -57,7 +57,7 @@ export function initNewsModule() {
 
     <!-- ニュース記事一覧コンテナ -->
     <div id="news-list-container" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div class="text-center py-12 text-xs text-slate-500 col-span-2">教育ニュースフィードを取得中...</div>
+      <div class="text-center py-12 text-xs text-muted col-span-2">教育ニュースフィードを取得中...</div>
     </div>
   `;
 
@@ -80,11 +80,11 @@ function bindEvents() {
   document.querySelectorAll('.news-filter-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.news-filter-btn').forEach(b => {
-        b.classList.remove('active', 'bg-slate-800', 'text-slate-200', 'border-slate-700');
-        b.classList.add('bg-slate-900', 'text-slate-400', 'border-slate-800');
+        b.classList.remove('active', 'bg-surface', 'text-main', 'border-main');
+        b.classList.add('bg-surface-strong', 'text-muted', 'border-divider');
       });
-      btn.classList.add('active', 'bg-slate-800', 'text-slate-200', 'border-slate-700');
-      btn.classList.remove('bg-slate-900', 'text-slate-400', 'border-slate-800');
+      btn.classList.add('active', 'bg-surface', 'text-main', 'border-main');
+      btn.classList.remove('bg-surface-strong', 'text-muted', 'border-divider');
 
       selectedNewsCategory = btn.getAttribute('data-cat') || 'ALL';
       renderNewsList();
@@ -119,34 +119,34 @@ function renderNewsList() {
   });
 
   if (filtered.length === 0) {
-    container.innerHTML = `<div class="text-center py-12 text-xs text-slate-500 col-span-2 bg-slate-900/30 rounded-xl border border-slate-800">該当する教育ニュースはありません。</div>`;
+    container.innerHTML = `<div class="text-center py-12 text-xs text-muted col-span-2 bg-surface-soft rounded-xl border border-divider">該当する教育ニュースはありません。</div>`;
     return;
   }
 
   container.innerHTML = filtered.map(item => `
-    <div class="card p-5 hover:border-indigo-500/50 transition-all flex flex-col justify-between space-y-3">
+    <div class="card p-5 hover-border-accent transition-all flex flex-col justify-between space-y-3">
       <div>
         <div class="flex items-center justify-between text-[11px] mb-2">
-          <span class="badge bg-indigo-500/20 text-indigo-300 border-indigo-500/30">${getCategoryLabel(item.category)}</span>
-          <span class="text-slate-400 font-mono">${formatDate(item.publishedAt, false)} (${escapeHTML(item.source)})</span>
+          <span class="badge bg-accent-soft text-accent-strong border-accent-soft">${getCategoryLabel(item.category)}</span>
+          <span class="text-muted font-mono">${formatDate(item.publishedAt, false)} (${escapeHTML(item.source)})</span>
         </div>
-        <h3 class="font-bold text-sm text-slate-100 mb-1.5 leading-snug">${escapeHTML(item.title)}</h3>
-        <p class="text-xs text-slate-300 line-clamp-3 leading-relaxed">${escapeHTML(item.summary)}</p>
+        <h3 class="font-bold text-sm text-main mb-1.5 leading-snug">${escapeHTML(item.title)}</h3>
+        <p class="text-xs text-soft line-clamp-3 leading-relaxed">${escapeHTML(item.summary)}</p>
       </div>
 
       <!-- ワンタップ共有アクションバー -->
-      <div class="pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
-        <a href="${escapeHTML(item.url || '#')}" target="_blank" rel="noopener noreferrer" class="text-indigo-400 hover:underline flex items-center gap-1 text-[11px]">
+      <div class="pt-3 border-t border-divider flex items-center justify-between text-xs">
+        <a href="${escapeHTML(item.url || '#')}" target="_blank" rel="noopener noreferrer" class="text-accent hover:underline flex items-center gap-1 text-[11px]">
           元記事を読む <i data-lucide="external-link" class="w-3 h-3"></i>
         </a>
 
         <div class="flex items-center gap-2">
-          <button class="btn-share-chat py-1 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded text-[11px] flex items-center gap-1 transition-colors" data-news-id="${item.id}">
-            <i data-lucide="message-square" class="w-3.5 h-3.5 text-indigo-400"></i> チャットへ共有
+          <button class="btn-share-chat py-1 px-2.5 bg-surface hover-surface-strong text-main border border-main rounded text-[11px] flex items-center gap-1 transition-colors" data-news-id="${item.id}">
+            <i data-lucide="message-square" class="w-3.5 h-3.5 text-accent"></i> チャットへ共有
           </button>
 
-          <button class="btn-share-bulletin py-1 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded text-[11px] flex items-center gap-1 transition-colors" data-news-id="${item.id}">
-            <i data-lucide="megaphone" class="w-3.5 h-3.5 text-amber-400"></i> 掲示板へ投稿
+          <button class="btn-share-bulletin py-1 px-2.5 bg-surface hover-surface-strong text-main border border-main rounded text-[11px] flex items-center gap-1 transition-colors" data-news-id="${item.id}">
+            <i data-lucide="megaphone" class="w-3.5 h-3.5 text-warning"></i> 掲示板へ投稿
           </button>
         </div>
       </div>

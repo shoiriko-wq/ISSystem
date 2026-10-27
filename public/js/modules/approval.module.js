@@ -13,7 +13,7 @@ let approvalsCache = [];
 const STATUS_CONFIG = {
   PENDING: { label: '承認待ち', class: 'badge-warning', icon: 'clock' },
   APPROVED: { label: '承認済み', class: 'badge-success', icon: 'check-circle' },
-  REJECTED: { label: '却下', class: 'badge bg-red-500/20 text-red-400 border-red-500/30', icon: 'x-circle' }
+  REJECTED: { label: '却下', class: 'badge bg-danger-soft text-danger border-danger-soft', icon: 'x-circle' }
 };
 
 const CATEGORY_LABELS = {
@@ -32,12 +32,12 @@ export function initApprovalModule() {
 
   container.innerHTML = `
     <!-- ヘッダーツールバー -->
-    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-surface-strong p-4 rounded-xl border border-divider">
       <div>
-        <h2 class="text-lg font-bold text-white flex items-center gap-2">
-          <i data-lucide="check-square" class="w-5 h-5 text-amber-400"></i> 簡易承認・物品請求ワークフロー
+        <h2 class="text-lg font-bold text-main flex items-center gap-2">
+          <i data-lucide="check-square" class="w-5 h-5 text-warning"></i> 簡易承認・物品請求ワークフロー
         </h2>
-        <p class="text-xs text-slate-400">校内備品購入・行事申請・予算利用の承認リクエストおよびステータス管理を行えます。</p>
+        <p class="text-xs text-muted">校内備品購入・行事申請・予算利用の承認リクエストおよびステータス管理を行えます。</p>
       </div>
 
       <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
@@ -49,18 +49,18 @@ export function initApprovalModule() {
 
     <!-- ステータスフィルター -->
     <div class="flex flex-wrap items-center gap-2 text-xs">
-      <span class="text-slate-400 font-bold mr-1 flex items-center gap-1">
+      <span class="text-muted font-bold mr-1 flex items-center gap-1">
         <i data-lucide="filter" class="w-3.5 h-3.5"></i> 状態:
       </span>
-      <button data-status="ALL" class="approval-filter-btn px-3 py-1.5 rounded-lg border font-semibold active bg-slate-800 text-slate-200 border-slate-700">すべて</button>
-      <button data-status="PENDING" class="approval-filter-btn px-3 py-1.5 rounded-lg border font-semibold bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200">承認待ち</button>
-      <button data-status="APPROVED" class="approval-filter-btn px-3 py-1.5 rounded-lg border font-semibold bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200">承認済み</button>
-      <button data-status="REJECTED" class="approval-filter-btn px-3 py-1.5 rounded-lg border font-semibold bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200">却下</button>
+      <button data-status="ALL" class="approval-filter-btn px-3 py-1.5 rounded-lg border font-semibold active bg-surface text-main border-main">すべて</button>
+      <button data-status="PENDING" class="approval-filter-btn px-3 py-1.5 rounded-lg border font-semibold bg-surface-strong text-muted border-divider hover-text-main">承認待ち</button>
+      <button data-status="APPROVED" class="approval-filter-btn px-3 py-1.5 rounded-lg border font-semibold bg-surface-strong text-muted border-divider hover-text-main">承認済み</button>
+      <button data-status="REJECTED" class="approval-filter-btn px-3 py-1.5 rounded-lg border font-semibold bg-surface-strong text-muted border-divider hover-text-main">却下</button>
     </div>
 
     <!-- 申請カード一覧 -->
     <div id="approval-list-container" class="space-y-3">
-      <div class="text-center py-12 text-xs text-slate-500">承認申請データを読み込み中...</div>
+      <div class="text-center py-12 text-xs text-muted">承認申請データを読み込み中...</div>
     </div>
   `;
 
@@ -84,11 +84,11 @@ function bindEvents() {
   document.querySelectorAll('.approval-filter-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.approval-filter-btn').forEach(b => {
-        b.classList.remove('active', 'bg-slate-800', 'text-slate-200', 'border-slate-700');
-        b.classList.add('bg-slate-900', 'text-slate-400', 'border-slate-800');
+        b.classList.remove('active', 'bg-surface', 'text-main', 'border-main');
+        b.classList.add('bg-surface-strong', 'text-muted', 'border-divider');
       });
-      btn.classList.add('active', 'bg-slate-800', 'text-slate-200', 'border-slate-700');
-      btn.classList.remove('bg-slate-900', 'text-slate-400', 'border-slate-800');
+      btn.classList.add('active', 'bg-surface', 'text-main', 'border-main');
+      btn.classList.remove('bg-surface-strong', 'text-muted', 'border-divider');
 
       currentFilterStatus = btn.getAttribute('data-status') || 'ALL';
       renderApprovalList();
@@ -147,7 +147,7 @@ function renderApprovalList() {
   filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
   if (filtered.length === 0) {
-    container.innerHTML = `<div class="text-center py-12 text-xs text-slate-500 bg-slate-900/30 rounded-xl border border-slate-800">該当する承認申請はありません。</div>`;
+    container.innerHTML = `<div class="text-center py-12 text-xs text-muted bg-surface-soft rounded-xl border border-divider">該当する承認申請はありません。</div>`;
     return;
   }
 
@@ -162,35 +162,35 @@ function renderApprovalList() {
       : '承認決裁待ち';
 
     return `
-      <div class="card p-4 hover:border-amber-500/40 transition-colors">
+      <div class="card p-4 hover-border-warning transition-colors">
         <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-2">
           <div class="flex items-center gap-2">
             <span class="badge ${statusInfo.class} flex items-center gap-1">
               <i data-lucide="${statusInfo.icon}" class="w-3 h-3"></i> ${statusInfo.label}
             </span>
-            <span class="badge bg-slate-800 text-slate-300 border-slate-700">${catLabel}</span>
-            ${item.amount ? `<span class="text-xs font-mono font-bold text-emerald-400">¥${Number(item.amount).toLocaleString()}</span>` : ''}
+            <span class="badge bg-surface text-soft border-main">${catLabel}</span>
+            ${item.amount ? `<span class="text-xs font-mono font-bold text-success">¥${Number(item.amount).toLocaleString()}</span>` : ''}
           </div>
-          <div class="text-[11px] text-slate-400 font-mono">
-            申請者: <strong class="text-slate-200">${escapeHTML(item.applicantName || '教員')}</strong> (${formatDate(item.createdAt)})
+          <div class="text-[11px] text-muted font-mono">
+            申請者: <strong class="text-main">${escapeHTML(item.applicantName || '教員')}</strong> (${formatDate(item.createdAt)})
           </div>
         </div>
 
-        <h3 class="font-bold text-sm text-slate-100 mb-1">${escapeHTML(item.title)}</h3>
-        <p class="text-xs text-slate-300 leading-relaxed mb-3">${escapeHTML(item.description)}</p>
+        <h3 class="font-bold text-sm text-main mb-1">${escapeHTML(item.title)}</h3>
+        <p class="text-xs text-soft leading-relaxed mb-3">${escapeHTML(item.description)}</p>
 
         <!-- 決裁エリア -->
-        <div class="flex items-center justify-between pt-3 border-t border-slate-800/80 text-xs">
-          <div class="text-[11px] text-slate-400 font-mono">
+        <div class="flex items-center justify-between pt-3 border-t border-divider text-xs">
+          <div class="text-[11px] text-muted font-mono">
             ${approvalStatusText}
           </div>
 
           ${item.status === 'PENDING' && isKyomuOrAdmin ? `
             <div class="flex items-center gap-2">
-              <button class="btn-approval-status py-1 px-3 bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 rounded font-bold transition-all text-[11px] flex items-center gap-1" data-id="${item.id}" data-action="REJECTED">
+              <button class="btn-approval-status py-1 px-3 bg-danger-soft hover-danger-soft text-danger-strong border border-danger-soft rounded font-bold transition-all text-[11px] flex items-center gap-1" data-id="${item.id}" data-action="REJECTED">
                 <i data-lucide="x" class="w-3.5 h-3.5"></i> 却下
               </button>
-              <button class="btn-approval-status py-1 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold transition-all text-[11px] flex items-center gap-1 shadow-md" data-id="${item.id}" data-action="APPROVED">
+              <button class="btn-approval-status py-1 px-3 bg-success hover-success-strong text-main rounded font-bold transition-all text-[11px] flex items-center gap-1 shadow-md" data-id="${item.id}" data-action="APPROVED">
                 <i data-lucide="check" class="w-3.5 h-3.5"></i> 承認する
               </button>
             </div>

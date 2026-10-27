@@ -34,12 +34,12 @@ export function initBulletinModule() {
 
   container.innerHTML = `
     <!-- ヘッダーツールバー -->
-    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800 mb-4">
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-surface-strong p-4 rounded-xl border border-divider mb-4">
       <div>
-        <h2 class="text-lg font-bold text-white flex items-center gap-2">
-          <i data-lucide="megaphone" class="w-5 h-5 text-indigo-400"></i> 職員連絡・掲示板
+        <h2 class="text-lg font-bold text-main flex items-center gap-2">
+          <i data-lucide="megaphone" class="w-5 h-5 text-accent"></i> 職員連絡・掲示板
         </h2>
-        <p class="text-xs text-slate-400">校内の全体連絡・指示・緊急連絡を一元共有します。</p>
+        <p class="text-xs text-muted">校内の全体連絡・指示・緊急連絡を一元共有します。</p>
       </div>
       <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
         <button id="bulletin-btn-create" class="btn-primary py-2 px-4 text-xs font-bold flex items-center gap-2">
@@ -49,39 +49,39 @@ export function initBulletinModule() {
     </div>
 
     <!-- ★ 投稿日（日ごと表示）フィルター -->
-    <div class="flex flex-wrap items-center gap-2 text-xs mb-3 bg-slate-900/40 border border-slate-800 rounded-xl p-2.5">
-      <span class="text-slate-400 font-semibold flex items-center gap-1.5"><i data-lucide="calendar-days" class="w-3.5 h-3.5 text-indigo-400"></i> 投稿日表示</span>
-      <button data-day="ALL" class="bulletin-day-btn px-2.5 py-1 rounded-lg border border-slate-700 bg-slate-800 text-slate-200 font-semibold">すべて</button>
-      <button data-day="TODAY" class="bulletin-day-btn px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200">本日</button>
-      <button data-day="YESTERDAY" class="bulletin-day-btn px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200">昨日</button>
-      <button data-day="WEEK" class="bulletin-day-btn px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200">直近7日</button>
-      <label class="flex items-center gap-1.5 ml-auto text-slate-400">
+    <div class="flex flex-wrap items-center gap-2 text-xs mb-3 bg-surface-strong border border-divider rounded-xl p-2.5">
+      <span class="text-muted font-semibold flex items-center gap-1.5"><i data-lucide="calendar-days" class="w-3.5 h-3.5 text-accent"></i> 投稿日表示</span>
+      <button data-day="ALL" class="bulletin-day-btn px-2.5 py-1 rounded-lg border border-main bg-surface text-main font-semibold">すべて</button>
+      <button data-day="TODAY" class="bulletin-day-btn px-2.5 py-1 rounded-lg border border-divider bg-surface-strong text-muted hover-text-main">本日</button>
+      <button data-day="YESTERDAY" class="bulletin-day-btn px-2.5 py-1 rounded-lg border border-divider bg-surface-strong text-muted hover-text-main">昨日</button>
+      <button data-day="WEEK" class="bulletin-day-btn px-2.5 py-1 rounded-lg border border-divider bg-surface-strong text-muted hover-text-main">直近7日</button>
+      <label class="flex items-center gap-1.5 ml-auto text-muted">
         特定の日付:
-        <input type="date" id="bulletin-day-date" class="py-1 px-2 rounded-lg border border-slate-700 bg-slate-900 text-slate-200 text-xs">
+        <input type="date" id="bulletin-day-date" class="py-1 px-2 rounded-lg border border-main bg-surface-strong text-main text-xs">
       </label>
-      <button id="bulletin-day-clear" class="btn-secondary px-2.5 py-1 rounded-lg text-[11px] text-slate-300 border-slate-700">リセット</button>
+      <button id="bulletin-day-clear" class="btn-secondary px-2.5 py-1 rounded-lg text-[11px] text-soft border-main">リセット</button>
     </div>
 
     <!-- 検索 & フィルタバー -->
     <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-center mb-4">
       <!-- カテゴリフィルター -->
       <div class="md:col-span-7 flex flex-wrap items-center gap-1.5 text-xs">
-        <button data-cat="ALL" class="bulletin-filter-btn px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-slate-200 font-semibold active">すべて</button>
-        <button data-cat="GENERAL" class="bulletin-filter-btn px-3 py-1.5 rounded-lg border border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200">一般掲示</button>
-        <button data-cat="CIRCULAR" class="bulletin-filter-btn px-3 py-1.5 rounded-lg border border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200">回覧・要承認</button>
-        <button data-cat="URGENT" class="bulletin-filter-btn px-3 py-1.5 rounded-lg border border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200">至急連絡</button>
+        <button data-cat="ALL" class="bulletin-filter-btn px-3 py-1.5 rounded-lg border border-main bg-surface text-main font-semibold active">すべて</button>
+        <button data-cat="GENERAL" class="bulletin-filter-btn px-3 py-1.5 rounded-lg border border-divider bg-surface-strong text-muted hover-text-main">一般掲示</button>
+        <button data-cat="CIRCULAR" class="bulletin-filter-btn px-3 py-1.5 rounded-lg border border-divider bg-surface-strong text-muted hover-text-main">回覧・要承認</button>
+        <button data-cat="URGENT" class="bulletin-filter-btn px-3 py-1.5 rounded-lg border border-divider bg-surface-strong text-muted hover-text-main">至急連絡</button>
       </div>
 
       <!-- キーワード検索 -->
       <div class="md:col-span-5 relative">
-        <i data-lucide="search" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+        <i data-lucide="search" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted"></i>
         <input type="text" id="bulletin-search-input" class="input-field pl-9 py-1.5 text-xs" placeholder="タイトルや本文から検索...">
       </div>
     </div>
 
     <!-- 掲示物カードグリッド -->
     <div id="bulletin-list-container" class="space-y-3">
-      <div class="text-center py-10 text-xs text-slate-400">掲示板データを読み込み中...</div>
+      <div class="text-center py-10 text-xs text-muted">掲示板データを読み込み中...</div>
     </div>
   `;
 
@@ -117,11 +117,11 @@ function bindEvents() {
   document.querySelectorAll('.bulletin-filter-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.bulletin-filter-btn').forEach(b => {
-        b.classList.remove('active', 'bg-slate-800', 'text-slate-200', 'border-slate-700');
-        b.classList.add('bg-slate-900', 'text-slate-400', 'border-slate-800');
+        b.classList.remove('active', 'bg-surface', 'text-main', 'border-main');
+        b.classList.add('bg-surface-strong', 'text-muted', 'border-divider');
       });
-      btn.classList.add('active', 'bg-slate-800', 'text-slate-200', 'border-slate-700');
-      btn.classList.remove('bg-slate-900', 'text-slate-400', 'border-slate-800');
+      btn.classList.add('active', 'bg-surface', 'text-main', 'border-main');
+      btn.classList.remove('bg-surface-strong', 'text-muted', 'border-divider');
 
       currentCategory = btn.getAttribute('data-cat') || 'ALL';
       renderBulletinList();
@@ -146,11 +146,11 @@ function bindEvents() {
   document.querySelectorAll('.bulletin-day-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.bulletin-day-btn').forEach(b => {
-        b.classList.remove('bg-slate-800', 'text-slate-200', 'border-slate-700', 'font-semibold');
-        b.classList.add('bg-slate-900', 'text-slate-400', 'border-slate-800');
+        b.classList.remove('bg-surface', 'text-main', 'border-main', 'font-semibold');
+        b.classList.add('bg-surface-strong', 'text-muted', 'border-divider');
       });
-      btn.classList.add('bg-slate-800', 'text-slate-200', 'border-slate-700', 'font-semibold');
-      btn.classList.remove('bg-slate-900', 'text-slate-400', 'border-slate-800');
+      btn.classList.add('bg-surface', 'text-main', 'border-main', 'font-semibold');
+      btn.classList.remove('bg-surface-strong', 'text-muted', 'border-divider');
 
       currentDayMode = btn.getAttribute('data-day') || 'ALL';
       currentDayDate = '';
@@ -274,7 +274,7 @@ function renderBulletinList() {
   });
 
   if (filtered.length === 0) {
-    container.innerHTML = `<div class="text-center py-12 text-xs text-slate-500 bg-slate-900/30 rounded-xl border border-slate-800">
+    container.innerHTML = `<div class="text-center py-12 text-xs text-muted bg-surface-soft rounded-xl border border-divider">
       ${currentDayMode === 'ALL' ? '該当する掲示連絡はありません。' : '選択した投稿日に掲示連絡はありません。'}
     </div>`;
     return;
@@ -288,23 +288,23 @@ function renderBulletinList() {
     const postedLabel = formatDate(b.postedAt || b.posted_at || b.createdAt || b.created_at);
 
     return `
-      <div class="card p-4 hover:border-indigo-500/50 transition-all cursor-pointer ${isUrgent ? 'border-l-4 border-l-amber-400 bg-slate-900/80' : ''}" data-bulletin-id="${b.id}">
+      <div class="card p-4 hover-border-accent transition-all cursor-pointer ${isUrgent ? 'border-l-4 border-l-warning bg-surface-strong' : ''}" data-bulletin-id="${b.id}">
         <div class="flex items-center justify-between text-xs mb-2">
           <div class="flex items-center gap-2">
             ${isUrgent ? '<span class="badge badge-warning flex items-center gap-1"><i data-lucide="alert-triangle" class="w-3 h-3"></i> 至急</span>' : ''}
-            <span class="badge ${isCircular ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' : 'badge'}">${isCircular ? '回覧・要承認' : '一般掲示'}</span>
-            ${!isRead ? '<span class="badge bg-red-500/20 text-red-400 border-red-500/30">未読</span>' : ''}
-            ${attachments.length > 0 ? `<span class="badge bg-indigo-500/20 text-indigo-300 border-indigo-500/30 flex items-center gap-1"><i data-lucide="paperclip" class="w-3 h-3"></i> 添付 ${attachments.length}</span>` : ''}
+            <span class="badge ${isCircular ? 'bg-warning-soft text-warning-strong border-warning-soft' : 'badge'}">${isCircular ? '回覧・要承認' : '一般掲示'}</span>
+            ${!isRead ? '<span class="badge bg-danger-soft text-danger border-danger-soft">未読</span>' : ''}
+            ${attachments.length > 0 ? `<span class="badge bg-accent-soft text-accent-strong border-accent-soft flex items-center gap-1"><i data-lucide="paperclip" class="w-3 h-3"></i> 添付 ${attachments.length}</span>` : ''}
           </div>
-          <div class="text-[11px] text-slate-400 font-mono">
-            投稿者: <strong class="text-slate-200">${escapeHTML(b.authorName || b.author_name || '教員')}</strong>
+          <div class="text-[11px] text-muted font-mono">
+            投稿者: <strong class="text-main">${escapeHTML(b.authorName || b.author_name || '教員')}</strong>
           </div>
         </div>
-        <h3 class="font-bold text-sm text-slate-100 mb-1 flex items-center justify-between">
+        <h3 class="font-bold text-sm text-main mb-1 flex items-center justify-between">
           <span>${escapeHTML(b.title)}</span>
-          <span class="text-[10px] text-slate-500 font-mono font-normal">投稿日: ${postedLabel}</span>
+          <span class="text-[10px] text-muted font-mono font-normal">投稿日: ${postedLabel}</span>
         </h3>
-        <p class="text-xs text-slate-300 line-clamp-2 leading-relaxed whitespace-pre-wrap">${escapeHTML(b.content)}</p>
+        <p class="text-xs text-soft line-clamp-2 leading-relaxed whitespace-pre-wrap">${escapeHTML(b.content)}</p>
       </div>
     `;
   }).join('');
@@ -349,9 +349,9 @@ async function openBulletinDetail(id) {
   if (titleEl) titleEl.textContent = item.title;
   if (metaEl) {
     metaEl.innerHTML = `
-      <span>種別: <strong class="text-indigo-300">${item.postType === 'CIRCULAR' ? '回覧板' : '一般掲示'}</strong></span>
+      <span>種別: <strong class="text-accent-strong">${item.postType === 'CIRCULAR' ? '回覧板' : '一般掲示'}</strong></span>
       <span>投稿者: ${escapeHTML(item.authorName || item.author_name || '教員')}</span>
-      <span>投稿日: <strong class="text-slate-200">${formatDate(item.postedAt || item.posted_at || item.createdAt || item.created_at)}</strong></span>
+      <span>投稿日: <strong class="text-main">${formatDate(item.postedAt || item.posted_at || item.createdAt || item.created_at)}</strong></span>
     `;
   }
   if (contentEl) contentEl.textContent = item.content;
@@ -363,17 +363,17 @@ async function openBulletinDetail(id) {
       attachEl.innerHTML = '';
     } else {
       attachEl.innerHTML = `
-        <p class="text-[11px] font-semibold text-slate-300 mb-1.5 flex items-center gap-1">
-          <i data-lucide="paperclip" class="w-3.5 h-3.5 text-indigo-400"></i> 添付ファイル (${atts.length})
+        <p class="text-[11px] font-semibold text-soft mb-1.5 flex items-center gap-1">
+          <i data-lucide="paperclip" class="w-3.5 h-3.5 text-accent"></i> 添付ファイル (${atts.length})
         </p>
         <ul class="space-y-1.5">
           ${atts.map(a => `
-            <li class="flex items-center gap-2 text-[11px] bg-slate-900/60 border border-slate-800 rounded-lg px-2.5 py-1.5">
-              <span class="truncate text-slate-200">${escapeHTML(a.name)}</span>
-              <span class="text-slate-500 shrink-0">${formatBytes(a.size)}</span>
-              ${a.kgs ? '<span class="badge bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">KAGOSHIMA EDU</span>' : ''}
+            <li class="flex items-center gap-2 text-[11px] bg-surface-strong border border-divider rounded-lg px-2.5 py-1.5">
+              <span class="truncate text-main">${escapeHTML(a.name)}</span>
+              <span class="text-muted shrink-0">${formatBytes(a.size)}</span>
+              ${a.kgs ? '<span class="badge bg-warning-soft text-warning-strong border border-warning-soft shrink-0">KAGOSHIMA EDU</span>' : ''}
               <a href="${API_BASE_URL}/bulletins/attachments/${a.id}" target="_blank" rel="noopener"
-                 class="ml-auto text-indigo-300 hover:text-indigo-200 shrink-0 flex items-center gap-1">
+                 class="ml-auto text-accent-strong hover-text-accent-strong shrink-0 flex items-center gap-1">
                 <i data-lucide="download" class="w-3.5 h-3.5"></i> ダウンロード
               </a>
             </li>
@@ -387,11 +387,11 @@ async function openBulletinDetail(id) {
     const isCircular = item.postType === 'CIRCULAR' || item.post_type === 'CIRCULAR';
     actionsEl.innerHTML = `
       ${isCircular ? `
-        <button id="btn-approve-bulletin" class="btn-primary py-1.5 px-3 text-xs bg-emerald-600 hover:bg-emerald-500 flex items-center gap-1.5">
+        <button id="btn-approve-bulletin" class="btn-primary py-1.5 px-3 text-xs bg-success hover-success-strong flex items-center gap-1.5">
           <i data-lucide="check-circle" class="w-3.5 h-3.5"></i> ワンクリック承認
         </button>
       ` : ''}
-      <button id="btn-revise-request" class="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1.5 text-amber-400 border-amber-500/30">
+      <button id="btn-revise-request" class="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1.5 text-warning border-warning-soft">
         <i data-lucide="message-square" class="w-3.5 h-3.5"></i> 補足・コメント
       </button>
       <button class="modal-close btn-secondary py-1.5 px-4 text-xs">閉じる</button>
@@ -521,10 +521,10 @@ function renderSelectedFiles(files = []) {
   }
 
   listEl.innerHTML = files.map(f => `
-    <li class="flex items-center gap-2 text-[11px] text-slate-300">
-      <i data-lucide="paperclip" class="w-3 h-3 text-indigo-400 shrink-0"></i>
+    <li class="flex items-center gap-2 text-[11px] text-soft">
+      <i data-lucide="paperclip" class="w-3 h-3 text-accent shrink-0"></i>
       <span class="truncate">${escapeHTML(f.name)}</span>
-      <span class="text-slate-500 shrink-0">${formatBytes(f.size)}</span>
+      <span class="text-muted shrink-0">${formatBytes(f.size)}</span>
     </li>
   `).join('');
   refreshLucideIcons();

@@ -69,13 +69,13 @@ export const ROLES = {
 // Application Constants
 export const APP_CONFIG = {
   NAME: 'ISSystem',
-  VERSION: 'v2.5.0-stable',
+  VERSION: 'v2.5.1',
   CLOCK_INTERVAL_MS: 1000,
   WEATHER_REFRESH_MS: 600000, // 10 minutes
-  DEFAULT_THEME: 'navy',
+  DEFAULT_THEME: 'light-standard',
   STORAGE_KEYS: {
-    AUTH_TOKEN: 'is_system_jwt_token',
-    USER_DATA: 'is_system_user_info',
-    THEME_PREF: 'is_system_theme_preference'
+    AUTH_TOKEN: 'is_system_jwt_token_v251',
+    USER_DATA: 'is_system_user_info_v251',
+    THEME_PREF: 'is_system_theme_preference_v251'
   }
 };

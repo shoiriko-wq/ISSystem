@@ -30,20 +30,20 @@ export function initExamModule() {
 
   container.innerHTML = `
     <!-- ヘッダーツールバー -->
-    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-surface-strong p-4 rounded-xl border border-divider">
       <div>
         <div class="flex items-center gap-2 mb-1">
           <span class="badge ${isKyomu ? 'badge-warning' : 'badge-info'}">${isKyomu ? '教務権限 (全項目編集可能)' : '一般権限 (教務許可項目のみ編集可能)'}</span>
-          <span class="text-xs text-slate-400 font-mono">第2回 中間考査</span>
+          <span class="text-xs text-muted font-mono">第2回 中間考査</span>
         </div>
-        <h2 class="text-lg font-bold text-white flex items-center gap-2">
-          <i data-lucide="award" class="w-5 h-5 text-amber-400"></i> 定期考査・試験監督割当最適化エンジン
+        <h2 class="text-lg font-bold text-main flex items-center gap-2">
+          <i data-lucide="award" class="w-5 h-5 text-warning"></i> 定期考査・試験監督割当最適化エンジン
         </h2>
-        <p class="text-xs text-slate-400">制約条件に基づく試験時間の自動重複回避、監督教員の一括最適割り当て、リアルタイム矛盾診断を行います。</p>
+        <p class="text-xs text-muted">制約条件に基づく試験時間の自動重複回避、監督教員の一括最適割り当て、リアルタイム矛盾診断を行います。</p>
       </div>
 
       <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
-        <button id="exam-btn-run-diag" class="btn-secondary py-2 px-3 text-xs flex items-center gap-1.5 text-amber-300 border-amber-500/30">
+        <button id="exam-btn-run-diag" class="btn-secondary py-2 px-3 text-xs flex items-center gap-1.5 text-warning-strong border-warning-soft">
           <i data-lucide="alert-triangle" class="w-4 h-4"></i> 矛盾診断を実行
         </button>
         <button id="exam-btn-run-opt" class="btn-primary py-2 px-4 text-xs font-bold flex items-center gap-1.5 shadow-lg ${!isKyomu ? 'opacity-50 cursor-not-allowed' : ''}" ${!isKyomu ? 'title="教務権限が必要です"' : ''}>
@@ -53,34 +53,34 @@ export function initExamModule() {
     </div>
 
     <!-- モード切替タブ & 診断アラートサマリー -->
-    <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 bg-slate-950/40 p-3 rounded-lg border border-slate-800">
+    <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 bg-inset p-3 rounded-lg border border-divider">
       <div class="flex items-center gap-2 text-xs">
-        <button id="exam-tab-matrix" class="exam-nav-tab px-4 py-2 rounded-lg font-bold transition-all border bg-slate-800 text-indigo-300 border-slate-700">
+        <button id="exam-tab-matrix" class="exam-nav-tab px-4 py-2 rounded-lg font-bold transition-all border bg-surface text-accent-strong border-main">
           <i data-lucide="grid" class="w-3.5 h-3.5 inline mr-1"></i> 監督割り当て表
         </button>
-        <button id="exam-tab-conflicts" class="exam-nav-tab px-4 py-2 rounded-lg font-bold transition-all border bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200">
+        <button id="exam-tab-conflicts" class="exam-nav-tab px-4 py-2 rounded-lg font-bold transition-all border bg-surface-strong text-muted border-divider hover-text-main">
           <i data-lucide="shield-alert" class="w-3.5 h-3.5 inline mr-1"></i> 矛盾・制約診断結果
           <span id="exam-conflict-badge" class="badge-count hidden">0</span>
         </button>
       </div>
 
-      <div id="exam-summary-text" class="text-xs text-slate-400 font-mono">
-        全コマ数: <strong class="text-slate-200" id="exam-total-slots">12</strong> / 監督割り当て完了率: <strong class="text-emerald-400" id="exam-completion-rate">100%</strong>
+      <div id="exam-summary-text" class="text-xs text-muted font-mono">
+        全コマ数: <strong class="text-main" id="exam-total-slots">12</strong> / 監督割り当て完了率: <strong class="text-success" id="exam-completion-rate">100%</strong>
       </div>
     </div>
 
     <!-- 1. 自動最適化プログレスパネル (実行時のみ表示) -->
-    <div id="exam-opt-progress-panel" class="card p-5 bg-gradient-to-r from-indigo-950/60 via-slate-900 to-slate-900 border-indigo-500/40 hidden space-y-3">
+    <div id="exam-opt-progress-panel" class="card p-5 bg-gradient-to-r from-accent-inset via-surface-strong to-surface-strong border-accent hidden space-y-3">
       <div class="flex items-center justify-between text-xs">
-        <span class="font-bold text-indigo-300 flex items-center gap-2">
-          <i data-lucide="loader-2" class="w-4 h-4 animate-spin text-indigo-400"></i> 定期考査・監督割り当て自動最適化アルゴリズム実行中...
+        <span class="font-bold text-accent-strong flex items-center gap-2">
+          <i data-lucide="loader-2" class="w-4 h-4 animate-spin text-accent"></i> 定期考査・監督割り当て自動最適化アルゴリズム実行中...
         </span>
-        <span id="exam-opt-percentage" class="font-mono font-bold text-indigo-400 text-sm">0%</span>
+        <span id="exam-opt-percentage" class="font-mono font-bold text-accent text-sm">0%</span>
       </div>
-      <div class="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden border border-slate-700">
-        <div id="exam-opt-bar" class="bg-indigo-500 h-full w-0 transition-all duration-200"></div>
+      <div class="w-full bg-surface h-2.5 rounded-full overflow-hidden border border-main">
+        <div id="exam-opt-bar" class="bg-accent h-full w-0 transition-all duration-200"></div>
       </div>
-      <p id="exam-opt-status-msg" class="text-[11px] text-slate-400 font-mono">初期化中... 教員の重複コマ、連続監督上限、試験時間割制約を計算しています。</p>
+      <p id="exam-opt-status-msg" class="text-[11px] text-muted font-mono">初期化中... 教員の重複コマ、連続監督上限、試験時間割制約を計算しています。</p>
     </div>
 
     <!-- 2. メインビュー: 監督割り当て表 (マトリクス) -->
@@ -88,16 +88,16 @@ export function initExamModule() {
       <div class="timeline-scroll-container">
         <table class="w-full text-left border-collapse text-xs min-w-[850px]">
           <thead>
-            <tr class="border-b border-slate-800 bg-slate-900/80">
-              <th class="p-3 w-32 text-slate-300 font-bold">試験日程 / 時限</th>
-              <th class="p-3 text-center border-l border-slate-800/80">1学年 (101〜104)</th>
-              <th class="p-3 text-center border-l border-slate-800/80">2学年 (201〜204)</th>
-              <th class="p-3 text-center border-l border-slate-800/80">3学年 (301〜304)</th>
+            <tr class="border-b border-divider bg-surface-strong">
+              <th class="p-3 w-32 text-soft font-bold">試験日程 / 時限</th>
+              <th class="p-3 text-center border-l border-divider">1学年 (101〜104)</th>
+              <th class="p-3 text-center border-l border-divider">2学年 (201〜204)</th>
+              <th class="p-3 text-center border-l border-divider">3学年 (301〜304)</th>
             </tr>
           </thead>
-          <tbody id="exam-matrix-tbody" class="divide-y divide-slate-800/60">
+          <tbody id="exam-matrix-tbody" class="divide-y divide-divider">
             <tr>
-              <td colspan="4" class="text-center py-12 text-slate-500">考査割当データを読み込み中...</td>
+              <td colspan="4" class="text-center py-12 text-muted">考査割当データを読み込み中...</td>
             </tr>
           </tbody>
         </table>
@@ -106,9 +106,9 @@ export function initExamModule() {
 
     <!-- 3. メインビュー: 矛盾診断リスト (非表示/切り替え) -->
     <div id="exam-view-conflicts" class="card p-5 hidden space-y-4">
-      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
-        <h3 class="font-bold text-sm text-slate-200 flex items-center gap-2">
-          <i data-lucide="shield-alert" class="w-4 h-4 text-amber-400"></i> 検出された制約違反・スケジュール矛盾
+      <div class="flex items-center justify-between pb-3 border-b border-divider">
+        <h3 class="font-bold text-sm text-main flex items-center gap-2">
+          <i data-lucide="shield-alert" class="w-4 h-4 text-warning"></i> 検出された制約違反・スケジュール矛盾
         </h3>
         <button id="exam-btn-recheck" class="btn-secondary py-1 px-3 text-xs">再診断</button>
       </div>
@@ -136,16 +136,16 @@ function bindEvents() {
 
   tabMatrix?.addEventListener('click', () => {
     activeTab = 'matrix';
-    tabMatrix.className = 'exam-nav-tab px-4 py-2 rounded-lg font-bold transition-all border bg-slate-800 text-indigo-300 border-slate-700';
-    tabConflicts.className = 'exam-nav-tab px-4 py-2 rounded-lg font-bold transition-all border bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200';
+    tabMatrix.className = 'exam-nav-tab px-4 py-2 rounded-lg font-bold transition-all border bg-surface text-accent-strong border-main';
+    tabConflicts.className = 'exam-nav-tab px-4 py-2 rounded-lg font-bold transition-all border bg-surface-strong text-muted border-divider hover-text-main';
     viewMatrix?.classList.remove('hidden');
     viewConflicts?.classList.add('hidden');
   });
 
   tabConflicts?.addEventListener('click', () => {
     activeTab = 'conflicts';
-    tabConflicts.className = 'exam-nav-tab px-4 py-2 rounded-lg font-bold transition-all border bg-slate-800 text-amber-300 border-slate-700';
-    tabMatrix.className = 'exam-nav-tab px-4 py-2 rounded-lg font-bold transition-all border bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200';
+    tabConflicts.className = 'exam-nav-tab px-4 py-2 rounded-lg font-bold transition-all border bg-surface text-warning-strong border-main';
+    tabMatrix.className = 'exam-nav-tab px-4 py-2 rounded-lg font-bold transition-all border bg-surface-strong text-muted border-divider hover-text-main';
     viewConflicts?.classList.remove('hidden');
     viewMatrix?.classList.add('hidden');
   });
@@ -188,29 +188,29 @@ function renderExamMatrix() {
   if (!tbody) return;
 
   if (examMatrixData.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="4" class="text-center py-10 text-slate-500">試験日程データが登録されていません。</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="text-center py-10 text-muted">試験日程データが登録されていません。</td></tr>`;
     return;
   }
 
   tbody.innerHTML = examMatrixData.map(slot => `
-    <tr class="hover:bg-slate-900/30 transition-colors">
-      <td class="p-3 font-bold text-slate-200 bg-slate-900/40 border-r border-slate-800">
-        <div class="text-xs text-indigo-300 font-mono">${escapeHTML(slot.dayLabel)}</div>
-        <div class="text-[11px] text-slate-400 font-mono font-normal">${escapeHTML(slot.periodLabel)} (${slot.time})</div>
+    <tr class="hover-surface-soft transition-colors">
+      <td class="p-3 font-bold text-main bg-surface-strong border-r border-divider">
+        <div class="text-xs text-accent-strong font-mono">${escapeHTML(slot.dayLabel)}</div>
+        <div class="text-[11px] text-muted font-mono font-normal">${escapeHTML(slot.periodLabel)} (${slot.time})</div>
       </td>
 
       <!-- 1学年 -->
-      <td class="p-2 border-l border-slate-800/80">
+      <td class="p-2 border-l border-divider">
         ${renderSlotCard(slot.id, 'g1', slot.g1)}
       </td>
 
       <!-- 2学年 -->
-      <td class="p-2 border-l border-slate-800/80">
+      <td class="p-2 border-l border-divider">
         ${renderSlotCard(slot.id, 'g2', slot.g2)}
       </td>
 
       <!-- 3学年 -->
-      <td class="p-2 border-l border-slate-800/80">
+      <td class="p-2 border-l border-divider">
         ${renderSlotCard(slot.id, 'g3', slot.g3)}
       </td>
     </tr>
@@ -234,23 +234,23 @@ function renderExamMatrix() {
  */
 function renderSlotCard(slotId, grade, data) {
   if (!data) {
-    return `<div class="p-2 rounded border border-dashed border-slate-800 text-center text-slate-600 text-[11px]">試験なし</div>`;
+    return `<div class="p-2 rounded border border-dashed border-divider text-center text-faint text-[11px]">試験なし</div>`;
   }
 
   const hasConflict = conflictsList.some(c => c.slotId === slotId && c.grade === grade);
 
   return `
-    <div class="p-2.5 rounded-lg bg-slate-900/80 border ${hasConflict ? 'border-red-500/80 bg-red-950/20' : 'border-slate-800'} hover:border-slate-700 transition-all">
+    <div class="p-2.5 rounded-lg bg-surface-strong border ${hasConflict ? 'border-danger bg-danger-inset' : 'border-divider'} hover-border-strong transition-all">
       <div class="flex items-center justify-between text-[11px] mb-1">
-        <span class="font-bold text-slate-200">${escapeHTML(data.subject)}</span>
-        <span class="text-[10px] text-slate-400 font-mono">${escapeHTML(data.room || '各教室')}</span>
+        <span class="font-bold text-main">${escapeHTML(data.subject)}</span>
+        <span class="text-[10px] text-muted font-mono">${escapeHTML(data.room || '各教室')}</span>
       </div>
-      <div class="flex items-center justify-between text-xs pt-1.5 border-t border-slate-800/80">
-        <span class="text-slate-300 font-semibold flex items-center gap-1">
-          <i data-lucide="user-check" class="w-3.5 h-3.5 ${hasConflict ? 'text-red-400' : 'text-emerald-400'}"></i>
+      <div class="flex items-center justify-between text-xs pt-1.5 border-t border-divider">
+        <span class="text-soft font-semibold flex items-center gap-1">
+          <i data-lucide="user-check" class="w-3.5 h-3.5 ${hasConflict ? 'text-danger' : 'text-success'}"></i>
           ${escapeHTML(data.supervisorName || '未割当')}
         </span>
-        <button class="btn-edit-supervisor text-[10px] text-indigo-400 hover:underline" data-slot-id="${slotId}" data-grade="${grade}">
+        <button class="btn-edit-supervisor text-[10px] text-accent hover:underline" data-slot-id="${slotId}" data-grade="${grade}">
           変更
         </button>
       </div>
@@ -336,8 +336,8 @@ function renderConflictsList() {
 
   if (conflictsList.length === 0) {
     container.innerHTML = `
-      <div class="p-4 rounded-xl bg-emerald-950/30 border border-emerald-500/40 text-emerald-300 text-xs flex items-center gap-2">
-        <i data-lucide="check-circle" class="w-5 h-5 text-emerald-400 flex-shrink-0"></i>
+      <div class="p-4 rounded-xl bg-success-inset border border-success-soft text-success-strong text-xs flex items-center gap-2">
+        <i data-lucide="check-circle" class="w-5 h-5 text-success flex-shrink-0"></i>
         <span>制約違反や重複割り当ては見つかりませんでした。すべての試験監督割当は正常です。</span>
       </div>
     `;
@@ -346,11 +346,11 @@ function renderConflictsList() {
   }
 
   container.innerHTML = conflictsList.map(c => `
-    <div class="p-3 rounded-lg bg-slate-900 border ${c.type === 'DOUBLE_BOOKING' ? 'border-red-500/60 bg-red-950/20' : 'border-amber-500/60 bg-amber-950/20'} text-xs flex items-start justify-between gap-3">
+    <div class="p-3 rounded-lg bg-surface-strong border ${c.type === 'DOUBLE_BOOKING' ? 'border-danger bg-danger-inset' : 'border-warning bg-warning-inset'} text-xs flex items-start justify-between gap-3">
       <div class="flex items-start gap-2">
-        <i data-lucide="${c.type === 'DOUBLE_BOOKING' ? 'alert-octagon' : 'help-circle'}" class="w-4 h-4 ${c.type === 'DOUBLE_BOOKING' ? 'text-red-400' : 'text-amber-400'} mt-0.5 flex-shrink-0"></i>
+        <i data-lucide="${c.type === 'DOUBLE_BOOKING' ? 'alert-octagon' : 'help-circle'}" class="w-4 h-4 ${c.type === 'DOUBLE_BOOKING' ? 'text-danger' : 'text-warning'} mt-0.5 flex-shrink-0"></i>
         <div>
-          <span class="font-bold text-slate-200">${escapeHTML(c.message)}</span>
+          <span class="font-bold text-main">${escapeHTML(c.message)}</span>
         </div>
       </div>
       <button class="btn-secondary py-1 px-2 text-[10px] flex-shrink-0" onclick="switchTab('exam')">割り当て表で確認</button>

@@ -13,13 +13,13 @@ let seatsData = [];
 let searchHighlightQuery = '';
 
 const STATUS_CONFIG = {
-  IN: { label: '在席', bgClass: 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300', badgeClass: 'bg-emerald-500/20 text-emerald-300' },
-  PRESENT: { label: '在席', bgClass: 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300', badgeClass: 'bg-emerald-500/20 text-emerald-300' },
-  OUT: { label: '離席', bgClass: 'bg-slate-900/60 border-slate-700/80 text-slate-400', badgeClass: 'bg-slate-800 text-slate-400' },
-  CLASS: { label: '授業中', bgClass: 'bg-indigo-950/60 border-indigo-500/50 text-indigo-300', badgeClass: 'bg-indigo-500/20 text-indigo-300' },
-  MEETING: { label: '会議中', bgClass: 'bg-indigo-950/60 border-indigo-500/50 text-indigo-300', badgeClass: 'bg-indigo-500/20 text-indigo-300' },
-  TRIP: { label: '出張', bgClass: 'bg-amber-950/60 border-amber-500/50 text-amber-300', badgeClass: 'bg-amber-500/20 text-amber-300' },
-  LEAVE: { label: '年休', bgClass: 'bg-rose-950/60 border-rose-500/50 text-rose-300', badgeClass: 'bg-rose-500/20 text-rose-300' }
+  IN: { label: '在席', bgClass: 'bg-success-inset border-success text-success-strong', badgeClass: 'bg-success-soft text-success-strong' },
+  PRESENT: { label: '在席', bgClass: 'bg-success-inset border-success text-success-strong', badgeClass: 'bg-success-soft text-success-strong' },
+  OUT: { label: '離席', bgClass: 'bg-surface-strong border-main text-muted', badgeClass: 'bg-surface text-muted' },
+  CLASS: { label: '授業中', bgClass: 'bg-accent-inset border-accent text-accent-strong', badgeClass: 'bg-accent-soft text-accent-strong' },
+  MEETING: { label: '会議中', bgClass: 'bg-accent-inset border-accent text-accent-strong', badgeClass: 'bg-accent-soft text-accent-strong' },
+  TRIP: { label: '出張', bgClass: 'bg-warning-inset border-warning text-warning-strong', badgeClass: 'bg-warning-soft text-warning-strong' },
+  LEAVE: { label: '年休', bgClass: 'bg-danger-inset border-danger text-danger-strong', badgeClass: 'bg-danger-soft text-danger-strong' }
 };
 
 /**
@@ -31,30 +31,30 @@ export function initSeatingModule() {
 
   container.innerHTML = `
     <!-- ヘッダー・操作ツールバー -->
-    <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
+    <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 bg-surface-strong p-4 rounded-xl border border-divider">
       <div>
-        <h2 class="text-lg font-bold text-white flex items-center gap-2">
-          <i data-lucide="layout-grid" class="w-5 h-5 text-indigo-400"></i> 職員室座席表 & 担当生徒検索
+        <h2 class="text-lg font-bold text-main flex items-center gap-2">
+          <i data-lucide="layout-grid" class="w-5 h-5 text-accent"></i> 職員室座席表 & 担当生徒検索
         </h2>
-        <p class="text-xs text-slate-400">リアルタイム在席状態の確認・更新および4桁生徒コードによる迅速な担当教員ピックアップを行えます。</p>
+        <p class="text-xs text-muted">リアルタイム在席状態の確認・更新および4桁生徒コードによる迅速な担当教員ピックアップを行えます。</p>
       </div>
 
       <!-- 検索 & グリッドサイズ設定 -->
       <div class="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-end">
         <!-- 4桁生徒コード・教員検索 -->
         <div class="relative flex-1 sm:w-64">
-          <i data-lucide="search" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+          <i data-lucide="search" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted"></i>
           <input type="text" id="seating-search-input" class="input-field pl-9 py-1.5 text-xs" placeholder="生徒コード(例:1204) / 教員名でハイライト...">
         </div>
 
         <!-- 可変グリッド設定 -->
-        <div class="flex items-center gap-1.5 bg-slate-800 p-1 rounded-lg border border-slate-700 text-xs">
-          <span class="text-slate-400 text-[11px] px-1 font-bold">行列:</span>
-          <select id="seating-rows-select" class="bg-slate-900 text-slate-200 rounded px-1.5 py-0.5 border border-slate-700 focus:outline-none">
+        <div class="flex items-center gap-1.5 bg-surface p-1 rounded-lg border border-main text-xs">
+          <span class="text-muted text-[11px] px-1 font-bold">行列:</span>
+          <select id="seating-rows-select" class="bg-surface-strong text-main rounded px-1.5 py-0.5 border border-main focus:outline-none">
             ${[3, 4, 5, 6, 7, 8].map(r => `<option value="${r}" ${r === gridRows ? 'selected' : ''}>${r}行</option>`).join('')}
           </select>
-          <span class="text-slate-500">×</span>
-          <select id="seating-cols-select" class="bg-slate-900 text-slate-200 rounded px-1.5 py-0.5 border border-slate-700 focus:outline-none">
+          <span class="text-muted">×</span>
+          <select id="seating-cols-select" class="bg-surface-strong text-main rounded px-1.5 py-0.5 border border-main focus:outline-none">
             ${[4, 5, 6, 7, 8, 10].map(c => `<option value="${c}" ${c === gridCols ? 'selected' : ''}>${c}列</option>`).join('')}
           </select>
         </div>
@@ -66,23 +66,23 @@ export function initSeatingModule() {
     </div>
 
     <!-- ステータス凡例 & サマリー -->
-    <div class="flex flex-wrap items-center justify-between gap-3 text-xs bg-slate-950/40 p-3 rounded-lg border border-slate-800/80">
+    <div class="flex flex-wrap items-center justify-between gap-3 text-xs bg-inset p-3 rounded-lg border border-divider">
       <div class="flex items-center gap-4">
-        <span class="text-slate-400 font-bold">ステータス:</span>
-        <span class="flex items-center gap-1.5 text-emerald-400"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> 在席</span>
-        <span class="flex items-center gap-1.5 text-indigo-400"><span class="w-2.5 h-2.5 rounded-full bg-indigo-500"></span> 授業・会議</span>
-        <span class="flex items-center gap-1.5 text-amber-400"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span> 出張</span>
-        <span class="flex items-center gap-1.5 text-slate-400"><span class="w-2.5 h-2.5 rounded-full bg-slate-600"></span> 離席・年休</span>
+        <span class="text-muted font-bold">ステータス:</span>
+        <span class="flex items-center gap-1.5 text-success"><span class="w-2.5 h-2.5 rounded-full bg-success"></span> 在席</span>
+        <span class="flex items-center gap-1.5 text-accent"><span class="w-2.5 h-2.5 rounded-full bg-accent"></span> 授業・会議</span>
+        <span class="flex items-center gap-1.5 text-warning"><span class="w-2.5 h-2.5 rounded-full bg-warning"></span> 出張</span>
+        <span class="flex items-center gap-1.5 text-muted"><span class="w-2.5 h-2.5 rounded-full bg-surface-strong"></span> 離席・年休</span>
       </div>
-      <div class="text-[11px] text-slate-400 font-mono" id="seating-stats-bar">
-        在席: <strong class="text-emerald-400" id="stat-in-count">0</strong>名 / 全員: <span id="stat-total-count">0</span>名
+      <div class="text-[11px] text-muted font-mono" id="seating-stats-bar">
+        在席: <strong class="text-success" id="stat-in-count">0</strong>名 / 全員: <span id="stat-total-count">0</span>名
       </div>
     </div>
 
     <!-- 可変グリッド表示コンテナ -->
     <div class="card p-4 overflow-x-auto">
       <div id="seating-grid-container" class="grid gap-3 min-w-[700px]">
-        <div class="text-center py-12 text-xs text-slate-500">座席表配置データを読み込み中...</div>
+        <div class="text-center py-12 text-xs text-muted">座席表配置データを読み込み中...</div>
       </div>
     </div>
   `;
@@ -198,31 +198,31 @@ function renderSeatingGrid() {
 
         htmlCells.push(`
           <div class="seat-card card p-3 rounded-xl border transition-all cursor-pointer flex flex-col justify-between h-28 relative ${stConfig.bgClass} ${
-            isMatch ? 'ring-2 ring-amber-400 border-amber-400 shadow-lg shadow-amber-500/20 scale-[1.02] z-10' : 'hover:border-indigo-400'
+            isMatch ? 'ring-2 ring-warning border-warning shadow-lg shadow-glow-warning scale-[1.02] z-10' : 'hover-border-accent'
           }" data-row="${r}" data-col="${c}">
             
             <div class="flex items-center justify-between text-[10px]">
-              <span class="font-bold text-slate-400 truncate">${escapeHTML(seat.subject || '教員')}</span>
+              <span class="font-bold text-muted truncate">${escapeHTML(seat.subject || '教員')}</span>
               <span class="badge ${stConfig.badgeClass} px-1.5 py-0.2">${stConfig.label}</span>
             </div>
 
             <div class="my-1">
-              <h4 class="font-bold text-sm text-slate-100 flex items-center justify-between">
+              <h4 class="font-bold text-sm text-main flex items-center justify-between">
                 <span>${escapeHTML(seat.teacherName)}</span>
-                ${seat.teacherId === state.currentUser?.id ? '<span class="text-[9px] bg-indigo-500 text-white px-1 rounded font-normal">自分</span>' : ''}
+                ${seat.teacherId === state.currentUser?.id ? '<span class="text-[9px] bg-accent text-main px-1 rounded font-normal">自分</span>' : ''}
               </h4>
-              <p class="text-[10px] text-slate-400 truncate mt-0.5">${escapeHTML(seat.note || '')}</p>
+              <p class="text-[10px] text-muted truncate mt-0.5">${escapeHTML(seat.note || '')}</p>
             </div>
 
-            <div class="mt-auto pt-1 border-t border-slate-700/40 flex items-center justify-between text-[10px]">
-              <span class="text-slate-400 font-mono truncate">コード: <strong class="text-slate-200">${escapeHTML(codesList || '-')}</strong></span>
-              <i data-lucide="edit-2" class="w-3 h-3 text-slate-500 hover:text-slate-300"></i>
+            <div class="mt-auto pt-1 border-t border-main flex items-center justify-between text-[10px]">
+              <span class="text-muted font-mono truncate">コード: <strong class="text-main">${escapeHTML(codesList || '-')}</strong></span>
+              <i data-lucide="edit-2" class="w-3 h-3 text-muted hover-text-main"></i>
             </div>
           </div>
         `);
       } else {
         htmlCells.push(`
-          <div class="seat-card p-3 rounded-xl border border-dashed border-slate-800/80 bg-slate-950/20 hover:border-slate-700 transition-all cursor-pointer flex items-center justify-center h-28 text-slate-600 hover:text-slate-400 text-xs font-mono" data-row="${r}" data-col="${c}">
+          <div class="seat-card p-3 rounded-xl border border-dashed border-divider bg-main hover-border-strong transition-all cursor-pointer flex items-center justify-center h-28 text-faint hover-text-soft text-xs font-mono" data-row="${r}" data-col="${c}">
             <div class="text-center">
               <i data-lucide="plus" class="w-4 h-4 mx-auto mb-1 opacity-50"></i>
               <span>空席 (${r}-${c})</span>

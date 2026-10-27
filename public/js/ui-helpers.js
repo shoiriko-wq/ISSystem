@@ -35,19 +35,19 @@ export function showToast(message, type = 'info', onClick = null) {
   };
 
   const colorMap = {
-    info: 'border-indigo-500/50 text-indigo-300',
-    success: 'border-emerald-500/50 text-emerald-300',
-    warning: 'border-amber-500/50 text-amber-300',
-    error: 'border-red-500/50 text-red-300'
+    info: 'border-accent text-accent-strong',
+    success: 'border-success text-success-strong',
+    warning: 'border-warning text-warning-strong',
+    error: 'border-danger text-danger-strong'
   };
 
-  toast.className = `toast ${colorMap[type] || colorMap.info} cursor-pointer hover:bg-slate-800/80 transition-all flex items-center justify-between gap-2`;
+  toast.className = `toast ${colorMap[type] || colorMap.info} cursor-pointer hover-surface transition-all flex items-center justify-between gap-2`;
   toast.innerHTML = `
     <div class="flex items-center gap-2 overflow-hidden">
       <i data-lucide="${iconMap[type] || 'info'}" class="w-4 h-4 flex-shrink-0"></i>
       <span class="truncate">${escapeHTML(message)}</span>
     </div>
-    <i data-lucide="chevron-right" class="w-3.5 h-3.5 text-slate-400 opacity-60 flex-shrink-0"></i>
+    <i data-lucide="chevron-right" class="w-3.5 h-3.5 text-muted opacity-60 flex-shrink-0"></i>
   `;
 
   if (typeof onClick === 'function') {
@@ -92,9 +92,9 @@ export function highlightElement(elementOrSelector) {
   const el = typeof elementOrSelector === 'string' ? document.querySelector(elementOrSelector) : elementOrSelector;
   if (!el) return;
   el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  el.classList.add('ring-2', 'ring-indigo-500', 'bg-indigo-500/20', 'transition-all', 'duration-500');
+  el.classList.add('ring-2', 'ring-accent', 'bg-accent-soft', 'transition-all', 'duration-500');
   setTimeout(() => {
-    el.classList.remove('ring-2', 'ring-indigo-500', 'bg-indigo-500/20');
+    el.classList.remove('ring-2', 'ring-accent', 'bg-accent-soft');
   }, 3000);
 }
 
@@ -134,7 +134,7 @@ export function updateNotificationUI() {
   if (!listEl) return;
 
   if (notificationHistory.length === 0) {
-    listEl.innerHTML = `<div class="px-4 py-6 text-center text-slate-500 text-[11px]">新着の通知はありません</div>`;
+    listEl.innerHTML = `<div class="px-4 py-6 text-center text-muted text-[11px]">新着の通知はありません</div>`;
     return;
   }
 
@@ -147,15 +147,15 @@ export function updateNotificationUI() {
 
   listEl.innerHTML = notificationHistory.map(n => {
     const timeStr = new Date(n.time).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
-    const unreadDot = !n.read ? '<span class="w-2 h-2 rounded-full bg-indigo-500 inline-block flex-shrink-0"></span>' : '<span class="w-2 h-2 inline-block flex-shrink-0"></span>';
+    const unreadDot = !n.read ? '<span class="w-2 h-2 rounded-full bg-accent inline-block flex-shrink-0"></span>' : '<span class="w-2 h-2 inline-block flex-shrink-0"></span>';
     return `
-      <div class="notification-item px-3 py-2.5 hover:bg-slate-800/80 cursor-pointer transition-colors flex items-start gap-2.5 text-slate-300" data-id="${n.id}">
-        <div class="mt-0.5 text-indigo-400 flex-shrink-0">
+      <div class="notification-item px-3 py-2.5 hover-surface cursor-pointer transition-colors flex items-start gap-2.5 text-soft" data-id="${n.id}">
+        <div class="mt-0.5 text-accent flex-shrink-0">
           <i data-lucide="${iconMap[n.type] || 'info'}" class="w-3.5 h-3.5"></i>
         </div>
         <div class="flex-1 min-w-0">
-          <p class="text-[11px] text-slate-200 leading-snug truncate">${escapeHTML(n.message)}</p>
-          <span class="text-[9px] text-slate-400 font-mono">${timeStr}</span>
+          <p class="text-[11px] text-main leading-snug truncate">${escapeHTML(n.message)}</p>
+          <span class="text-[9px] text-muted font-mono">${timeStr}</span>
         </div>
         <div class="flex items-center self-center">${unreadDot}</div>
       </div>
@@ -249,12 +249,36 @@ export function initModalListeners() {
         modal.classList.add('hidden');
       }
     });
-    
+
     modal.querySelectorAll('.modal-close').forEach(btn => {
       btn.addEventListener('click', () => {
         modal.classList.add('hidden');
       });
     });
+  });
+
+  /* 動的生成されるモーダル（チャット・施設・スケジュールなど init 後に注入されるもの）
+     でも閉じるが効くよう、document レベルの委譲で .modal-close と背景スクリーンを処理する。
+     data-lucide の SVG が子要素になるため closest() でボタンを辿る。 */
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest && e.target.closest('.modal-close');
+    if (btn) {
+      const modal = btn.closest('.modal-overlay');
+      if (modal) modal.classList.add('hidden');
+      return;
+    }
+    if (e.target.classList && e.target.classList.contains('modal-overlay')) {
+      e.target.classList.add('hidden');
+    }
+  });
+
+  /* ESC キーで最前面の開いているモーダルを閉じる（全モーダル共通ルール） */
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const openModals = Array.from(document.querySelectorAll('.modal-overlay'))
+      .filter(m => !m.classList.contains('hidden'));
+    if (openModals.length === 0) return;
+    openModals[openModals.length - 1].classList.add('hidden');
   });
 }
 

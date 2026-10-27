@@ -40,7 +40,7 @@ export function initDashboardModule() {
 
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
 
-      <div class="card p-5 bg-gradient-to-br from-indigo-900/40 via-slate-900/60 to-slate-900 border-indigo-500/30 md:col-span-2 flex flex-col justify-between">
+      <div class="card p-5 bg-gradient-to-br from-accent-soft via-surface-soft to-surface-strong border-accent-soft md:col-span-2 flex flex-col justify-between">
 
         <div>
 
@@ -48,13 +48,13 @@ export function initDashboardModule() {
 
             <span class="badge badge-warning">本日: ${formatDate(new Date(), false)}</span>
 
-            <span class="text-[11px] text-slate-400 font-mono">校内ネットワーク: 正常稼働</span>
+            <span class="text-[11px] text-muted font-mono">校内ネットワーク: 正常稼働</span>
 
           </div>
 
-          <h2 class="text-xl font-bold text-white mb-1">お疲れ様です、<span id="dash-user-name">先生</span></h2>
+          <h2 class="text-xl font-bold text-main mb-1">お疲れ様です、<span id="dash-user-name">先生</span></h2>
 
-          <p class="text-xs text-slate-300 leading-relaxed">
+          <p class="text-xs text-soft leading-relaxed">
 
             本日の全校行事・施設予約・重要掲示の最新サマリーです。緊急連絡や承認依頼が届いている場合は即座に確認できます。
 
@@ -62,7 +62,7 @@ export function initDashboardModule() {
 
         </div>
 
-        <div class="flex items-center gap-2 mt-4 pt-3 border-t border-slate-700/50 text-xs">
+        <div class="flex items-center gap-2 mt-4 pt-3 border-t border-main text-xs">
 
           <button id="dash-btn-bulletin" class="btn-primary py-1.5 px-3 text-xs flex items-center gap-1.5">
 
@@ -86,29 +86,29 @@ export function initDashboardModule() {
 
       <div class="card p-4 flex flex-col justify-between">
 
-        <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+        <div class="flex items-center justify-between text-xs text-muted mb-2">
 
-          <span class="font-bold text-slate-200">職員室 年休等・出張</span>
+          <span class="font-bold text-main">職員室 年休等・出張</span>
 
-          <i data-lucide="calendar-x-2" class="w-4 h-4 text-rose-400"></i>
+          <i data-lucide="calendar-x-2" class="w-4 h-4 text-danger"></i>
 
         </div>
 
         <div class="grid grid-cols-2 gap-2 text-center my-1">
 
-          <div id="dash-tile-leave" class="p-2 rounded-lg bg-rose-500/10 border border-rose-500/20 cursor-pointer hover:border-rose-400 transition-all">
+          <div id="dash-tile-leave" class="p-2 rounded-lg bg-danger-soft border border-danger-soft cursor-pointer hover-border-danger transition-all">
 
-            <span class="text-2xl font-black text-rose-400" id="dash-absence-leave">0</span>
+            <span class="text-2xl font-black text-danger" id="dash-absence-leave">0</span>
 
-            <span class="block text-[10px] text-slate-400">年休等（欠席）</span>
+            <span class="block text-[10px] text-muted">年休等（欠席）</span>
 
           </div>
 
-          <div id="dash-tile-trip" class="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 cursor-pointer hover:border-amber-400 transition-all">
+          <div id="dash-tile-trip" class="p-2 rounded-lg bg-warning-soft border border-warning-soft cursor-pointer hover-border-warning transition-all">
 
-            <span class="text-2xl font-black text-amber-400" id="dash-absence-trip">0</span>
+            <span class="text-2xl font-black text-warning" id="dash-absence-trip">0</span>
 
-            <span class="block text-[10px] text-slate-400">出張</span>
+            <span class="block text-[10px] text-muted">出張</span>
 
           </div>
 
@@ -116,9 +116,9 @@ export function initDashboardModule() {
 
         <div class="flex items-center justify-between gap-2 mt-1">
 
-          <span class="text-[10px] text-slate-500 font-mono" id="dash-absence-updated">登録: --</span>
+          <span class="text-[10px] text-muted font-mono" id="dash-absence-updated">登録: --</span>
 
-          <button id="dash-btn-absence" class="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1">
+          <button id="dash-btn-absence" class="text-[11px] text-accent hover-text-accent-strong font-semibold flex items-center gap-1">
             <i data-lucide="pen-line" class="w-3 h-3"></i> 記入する
           </button>
         </div>
@@ -130,35 +130,35 @@ export function initDashboardModule() {
 
       <div class="card p-4 flex flex-col justify-between">
 
-        <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+        <div class="flex items-center justify-between text-xs text-muted mb-2">
 
-          <span class="font-bold text-slate-200">要対応タスク</span>
+          <span class="font-bold text-main">要対応タスク</span>
 
-          <i data-lucide="check-square" class="w-4 h-4 text-amber-400"></i>
+          <i data-lucide="check-square" class="w-4 h-4 text-warning"></i>
 
         </div>
 
         <div class="space-y-2 text-xs my-1">
 
-          <div class="flex justify-between items-center p-2 rounded bg-slate-900/50 border border-slate-800">
+          <div class="flex justify-between items-center p-2 rounded bg-surface-strong border border-divider">
 
-            <span class="text-slate-300">未処理の承認・請求:</span>
+            <span class="text-soft">未処理の承認・請求:</span>
 
-            <span class="font-bold text-amber-400" id="dash-pending-approvals">0件</span>
+            <span class="font-bold text-warning" id="dash-pending-approvals">0件</span>
 
           </div>
 
-          <div class="flex justify-between items-center p-2 rounded bg-slate-900/50 border border-slate-800">
+          <div class="flex justify-between items-center p-2 rounded bg-surface-strong border border-divider">
 
-            <span class="text-slate-300">掲示板 未読連絡:</span>
+            <span class="text-soft">掲示板 未読連絡:</span>
 
-            <span class="font-bold text-indigo-400" id="dash-unread-bulletins">0件</span>
+            <span class="font-bold text-accent" id="dash-unread-bulletins">0件</span>
 
           </div>
 
         </div>
 
-        <button id="dash-btn-approval" class="text-[11px] text-amber-400 hover:text-amber-300 font-semibold text-right flex items-center justify-end gap-1 mt-1">
+        <button id="dash-btn-approval" class="text-[11px] text-warning hover-text-warning-strong font-semibold text-right flex items-center justify-end gap-1 mt-1">
 
           承認依頼一覧へ <i data-lucide="chevron-right" class="w-3 h-3"></i>
 
@@ -184,21 +184,21 @@ export function initDashboardModule() {
 
         <div class="card p-5">
 
-          <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-700/60">
+          <div class="flex items-center justify-between mb-4 pb-2 border-b border-main">
 
-            <h3 class="font-bold text-sm text-slate-100 flex items-center gap-2">
+            <h3 class="font-bold text-sm text-main flex items-center gap-2">
 
-              <i data-lucide="pin" class="w-4 h-4 text-red-400"></i> 本日の優先・重要連絡
+              <i data-lucide="pin" class="w-4 h-4 text-danger"></i> 本日の優先・重要連絡
 
             </h3>
 
-            <span class="text-[11px] text-slate-400">全校教職員対象</span>
+            <span class="text-[11px] text-muted">全校教職員対象</span>
 
           </div>
 
           <div id="dash-pinned-bulletins" class="space-y-3">
 
-            <div class="text-xs text-slate-400 py-4 text-center">読み込み中...</div>
+            <div class="text-xs text-muted py-4 text-center">読み込み中...</div>
 
           </div>
 
@@ -210,21 +210,21 @@ export function initDashboardModule() {
 
         <div class="card p-5">
 
-          <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-700/60">
+          <div class="flex items-center justify-between mb-4 pb-2 border-b border-main">
 
-            <h3 class="font-bold text-sm text-slate-100 flex items-center gap-2">
+            <h3 class="font-bold text-sm text-main flex items-center gap-2">
 
-              <i data-lucide="newspaper" class="w-4 h-4 text-indigo-400"></i> ピックアップ教育ニュース
+              <i data-lucide="newspaper" class="w-4 h-4 text-accent"></i> ピックアップ教育ニュース
 
             </h3>
 
-            <button id="dash-btn-news-more" class="text-xs text-indigo-400 hover:underline">すべて見る</button>
+            <button id="dash-btn-news-more" class="text-xs text-accent hover:underline">すべて見る</button>
 
           </div>
 
           <div id="dash-news-summary" class="grid grid-cols-1 md:grid-cols-2 gap-3">
 
-            <div class="text-xs text-slate-400 py-4 text-center col-span-2">ニュースを取得中...</div>
+            <div class="text-xs text-muted py-4 text-center col-span-2">ニュースを取得中...</div>
 
           </div>
 
@@ -242,21 +242,21 @@ export function initDashboardModule() {
 
         <div class="card p-5">
 
-          <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-700/60">
+          <div class="flex items-center justify-between mb-3 pb-2 border-b border-main">
 
-            <h3 class="font-bold text-sm text-slate-100 flex items-center gap-2">
+            <h3 class="font-bold text-sm text-main flex items-center gap-2">
 
-              <i data-lucide="building-2" class="w-4 h-4 text-emerald-400"></i> 本日の施設予約
+              <i data-lucide="building-2" class="w-4 h-4 text-success"></i> 本日の施設予約
 
             </h3>
 
-            <button id="dash-btn-facility" class="text-xs text-emerald-400 hover:underline">予約する</button>
+            <button id="dash-btn-facility" class="text-xs text-success hover:underline">予約する</button>
 
           </div>
 
           <div id="dash-today-facilities" class="space-y-2 text-xs">
 
-            <div class="text-slate-400 py-2 text-center">読み込み中...</div>
+            <div class="text-muted py-2 text-center">読み込み中...</div>
 
           </div>
 
@@ -268,21 +268,21 @@ export function initDashboardModule() {
 
         <div class="card p-5">
 
-          <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-700/60">
+          <div class="flex items-center justify-between mb-3 pb-2 border-b border-main">
 
-            <h3 class="font-bold text-sm text-slate-100 flex items-center gap-2">
+            <h3 class="font-bold text-sm text-main flex items-center gap-2">
 
-              <i data-lucide="calendar" class="w-4 h-4 text-purple-400"></i> 今日の校内行事
+              <i data-lucide="calendar" class="w-4 h-4 text-accent-alt"></i> 今日の校内行事
 
             </h3>
 
-            <button id="dash-btn-schedule" class="text-xs text-purple-400 hover:underline">カレンダー</button>
+            <button id="dash-btn-schedule" class="text-xs text-accent-alt hover:underline">カレンダー</button>
 
           </div>
 
           <div id="dash-today-schedules" class="space-y-2 text-xs">
 
-            <div class="text-slate-400 py-2 text-center">本日の行事は登録されていません</div>
+            <div class="text-muted py-2 text-center">本日の行事は登録されていません</div>
 
           </div>
 
@@ -374,19 +374,19 @@ export async function loadDashboardData() {
 
       listEl.innerHTML = bulletins.map(b => `
 
-        <div class="p-3 rounded-lg bg-slate-900/60 border border-slate-800 hover:border-indigo-500/50 transition-colors cursor-pointer">
+        <div class="p-3 rounded-lg bg-surface-strong border border-divider hover-border-accent transition-colors cursor-pointer">
 
           <div class="flex items-center justify-between text-[11px] mb-1">
 
             <span class="badge ${b.priority === 'URGENT' || b.category === 'URGENT' ? 'badge-warning' : 'badge'}">${b.postType || b.category || '全般'}</span>
 
-            <span class="text-slate-400 font-mono">${formatDate(b.createdAt || b.created_at)} (${escapeHTML(b.authorName || '教員')})</span>
+            <span class="text-muted font-mono">${formatDate(b.createdAt || b.created_at)} (${escapeHTML(b.authorName || '教員')})</span>
 
           </div>
 
-          <h4 class="font-bold text-xs text-slate-200 mb-1">${escapeHTML(b.title)}</h4>
+          <h4 class="font-bold text-xs text-main mb-1">${escapeHTML(b.title)}</h4>
 
-          <p class="text-[11px] text-slate-400 line-clamp-2">${escapeHTML(b.content)}</p>
+          <p class="text-[11px] text-muted line-clamp-2">${escapeHTML(b.content)}</p>
 
         </div>
 
@@ -394,7 +394,7 @@ export async function loadDashboardData() {
 
     } else if (listEl) {
 
-      listEl.innerHTML = '<p class="text-xs text-slate-500 text-center py-2">ピン留めされた緊急連絡はありません。</p>';
+      listEl.innerHTML = '<p class="text-xs text-muted text-center py-2">ピン留めされた緊急連絡はありません。</p>';
 
     }
 
@@ -406,19 +406,19 @@ export async function loadDashboardData() {
 
       listEl.innerHTML = `
 
-        <div class="p-3 rounded-lg bg-slate-900/60 border border-slate-800">
+        <div class="p-3 rounded-lg bg-surface-strong border border-divider">
 
           <div class="flex items-center justify-between text-[11px] mb-1">
 
             <span class="badge badge-warning">指示・依頼</span>
 
-            <span class="text-slate-400 font-mono">08:30 (教務部)</span>
+            <span class="text-muted font-mono">08:30 (教務部)</span>
 
           </div>
 
-          <h4 class="font-bold text-xs text-slate-200 mb-1">【重要】中間考査問題の提出期限について</h4>
+          <h4 class="font-bold text-xs text-main mb-1">【重要】中間考査問題の提出期限について</h4>
 
-          <p class="text-[11px] text-slate-400">各教科担当の先生方は、本日17時までに教務システムへアップロードをお願いします。</p>
+          <p class="text-[11px] text-muted">各教科担当の先生方は、本日17時までに教務システムへアップロードをお願いします。</p>
 
         </div>
 
@@ -474,27 +474,27 @@ export async function loadDashboardData() {
 
           return `
 
-            <div class="p-2.5 rounded-lg bg-slate-900/60 border border-slate-800 flex items-center justify-between">
+            <div class="p-2.5 rounded-lg bg-surface-strong border border-divider flex items-center justify-between">
 
               <div class="overflow-hidden pr-2">
 
                 <div class="flex items-center gap-1.5 mb-0.5">
 
-                  <span class="px-1.5 py-0.5 text-[9px] font-bold rounded bg-emerald-950 text-emerald-400 border border-emerald-500/30">
+                  <span class="px-1.5 py-0.5 text-[9px] font-bold rounded bg-success-inset text-success border border-success-soft">
 
                     ${escapeHTML(facilityName)}
 
                   </span>
 
-                  <span class="font-bold text-slate-200 text-xs truncate">${escapeHTML(title)}</span>
+                  <span class="font-bold text-main text-xs truncate">${escapeHTML(title)}</span>
 
                 </div>
 
-                <div class="text-[10px] text-slate-400 font-mono">${timeRange}</div>
+                <div class="text-[10px] text-muted font-mono">${timeRange}</div>
 
               </div>
 
-              <span class="text-[10px] text-slate-300 font-bold flex-shrink-0">${escapeHTML(userName)}</span>
+              <span class="text-[10px] text-soft font-bold flex-shrink-0">${escapeHTML(userName)}</span>
 
             </div>
 
@@ -504,13 +504,13 @@ export async function loadDashboardData() {
 
       } else {
 
-        facEl.innerHTML = '<div class="text-slate-500 py-2 text-center text-xs">本日の施設予約はありません</div>';
+        facEl.innerHTML = '<div class="text-muted py-2 text-center text-xs">本日の施設予約はありません</div>';
 
       }
 
     } catch (e) {
 
-      facEl.innerHTML = '<div class="text-slate-500 py-2 text-center text-xs">予約データの取得に失敗しました</div>';
+      facEl.innerHTML = '<div class="text-muted py-2 text-center text-xs">予約データの取得に失敗しました</div>';
 
     }
 
@@ -588,7 +588,7 @@ function renderWeatherGrid(weatherObj, force = false) {
 
   if (forecasts.length === 0) {
 
-    const emptyHtml = `<div class="col-span-full text-center py-6 text-slate-400 text-xs">週間予報データがありません。</div>`;
+    const emptyHtml = `<div class="col-span-full text-center py-6 text-muted text-xs">週間予報データがありません。</div>`;
 
     if (lastForecastHtml === emptyHtml && !force) return;
 
@@ -602,31 +602,31 @@ function renderWeatherGrid(weatherObj, force = false) {
 
   const html = forecasts.map(f => `
 
-    <div class="bg-slate-800/80 px-1.5 py-2.5 rounded-xl border border-slate-700 text-center flex flex-col justify-between h-full min-h-[128px]">
+    <div class="bg-surface px-1.5 py-2.5 rounded-xl border border-main text-center flex flex-col justify-between h-full min-h-[128px]">
 
       <div>
 
         <div class="h-4 mb-0.5 flex items-center justify-center">
 
-          ${f.isToday ? '<span class="px-1 py-0.5 rounded text-[8px] bg-amber-500/20 text-amber-300 font-bold leading-none">今日</span>' : ''}
+          ${f.isToday ? '<span class="px-1 py-0.5 rounded text-[8px] bg-warning-soft text-warning-strong font-bold leading-none">今日</span>' : ''}
 
         </div>
 
-        <div class="text-[10px] font-bold text-indigo-300 mb-1">${escapeHTML(f.dateLabel || f.rawDate || f.date || '')}</div>
+        <div class="text-[10px] font-bold text-accent-strong mb-1">${escapeHTML(f.dateLabel || f.rawDate || f.date || '')}</div>
 
-        <div class="my-1 flex justify-center"><i data-lucide="${f.icon || 'cloud-sun'}" class="w-4 h-4 text-amber-400"></i></div>
+        <div class="my-1 flex justify-center"><i data-lucide="${f.icon || 'cloud-sun'}" class="w-4 h-4 text-warning"></i></div>
 
-        <div class="text-[10px] font-bold text-white mb-1 leading-tight min-h-[28px] flex items-center justify-center px-0.5">${escapeHTML(f.weather || '')}</div>
+        <div class="text-[10px] font-bold text-main mb-1 leading-tight min-h-[28px] flex items-center justify-center px-0.5">${escapeHTML(f.weather || '')}</div>
 
-        <div class="text-[9px] text-slate-400 mb-1">降水: <span class="text-cyan-300 font-semibold">${escapeHTML(f.pop || '--')}</span></div>
+        <div class="text-[9px] text-muted mb-1">降水: <span class="text-info font-semibold">${escapeHTML(f.pop || '--')}</span></div>
 
       </div>
 
-      <div class="text-[9px] text-slate-300 space-y-0.5 pt-1 border-t border-slate-700/60">
+      <div class="text-[9px] text-soft space-y-0.5 pt-1 border-t border-main">
 
-        <div>高: <span class="text-rose-400 font-bold">${f.tempMax != null ? f.tempMax + '℃' : '--'}</span></div>
+        <div>高: <span class="text-danger font-bold">${f.tempMax != null ? f.tempMax + '℃' : '--'}</span></div>
 
-        <div>低: <span class="text-cyan-400 font-bold">${f.tempMin != null ? f.tempMin + '℃' : '--'}</span></div>
+        <div>低: <span class="text-info font-bold">${f.tempMin != null ? f.tempMin + '℃' : '--'}</span></div>
 
       </div>
 
@@ -672,7 +672,7 @@ function showWeatherGridSkeleton() {
 
   const skeleton = Array.from({ length: cols }, () =>
 
-    `<div class="bg-slate-800/50 rounded-xl border border-slate-700/60 min-h-[128px] shimmer-loading"></div>`
+    `<div class="bg-surface rounded-xl border border-main min-h-[128px] shimmer-loading"></div>`
 
   ).join('');
 
@@ -710,9 +710,9 @@ function renderWeatherWidget(widget, weatherObj) {
 
   const html = weatherText
 
-    ? `<i data-lucide="${iconName}" class="w-4 h-4 text-amber-400"></i> ${escapeHTML(weatherText)} ${escapeHTML(tempText)}`
+    ? `<i data-lucide="${iconName}" class="w-4 h-4 text-warning"></i> ${escapeHTML(weatherText)} ${escapeHTML(tempText)}`
 
-    : `<i data-lucide="cloud" class="w-4 h-4 text-slate-400"></i> 天気不明 (--℃)`;
+    : `<i data-lucide="cloud" class="w-4 h-4 text-muted"></i> 天気不明 (--℃)`;
 
   if (lastWidgetHtml === html) return;
 
@@ -823,7 +823,7 @@ export async function fetchWeatherData() {
 
       if (container) {
 
-        container.innerHTML = `<div class="col-span-7 text-center py-6 text-red-400 text-xs">気象データの取得に失敗しました。</div>`;
+        container.innerHTML = `<div class="col-span-7 text-center py-6 text-danger text-xs">気象データの取得に失敗しました。</div>`;
 
       }
 
@@ -873,7 +873,7 @@ export async function fetchWeatherData() {
 
    } catch (e) {
 
-     const fallbackHtml = `<i data-lucide="cloud" class="w-4 h-4 text-slate-400"></i> 天気不明 (--℃)`;
+     const fallbackHtml = `<i data-lucide="cloud" class="w-4 h-4 text-muted"></i> 天気不明 (--℃)`;
 
      if (lastWidgetHtml === fallbackHtml) return;
 

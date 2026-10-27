@@ -143,28 +143,71 @@ router.post('/seating/layouts/:id/lock', authenticateToken, safe(seatingControll
 router.delete('/seating/layouts/:id/lock', authenticateToken, safe(seatingController?.releaseEditingLock));
 
 // ==========================================
-// 8. 定期考査最適化 API (/api/exams)
+// 8. 定期考査 API (/api/exam)
 // ==========================================
-router.get('/exams', authenticateToken, safe(examController?.getExamMasters));
-router.get('/exams/:id/matrix', authenticateToken, safe(examController?.getExamMatrixWithValidation));
-router.get('/exam/matrix', authenticateToken, async (req, res, next) => {
-  req.params.id = 'exam_2026_1';
-  return safe(examController?.getExamMatrixWithValidation)(req, res, next);
-});
-router.get('/exam/status', authenticateToken, safe(examController?.getExamMasters));
-router.post('/exam/optimize', authenticateToken, requireKyomuRole, async (req, res, next) => {
-  req.params.id = req.body?.id || 'exam_2026_1';
-  return safe(examController?.autoAssignProctors)(req, res, next);
-});
-router.get('/exams/:id/diagnose', authenticateToken, safe(examController?.diagnoseConflicts));
-router.post('/exams/:id/auto-assign', authenticateToken, requireKyomuRole, safe(examController?.autoAssignProctors));
-router.put(
-  '/exams/:id/proctor',
-  authenticateToken,
-  checkEditingLock('exam'),
-  safe(examController?.updateProctorAssignment)
-);
-router.put('/exams/:id/slots', authenticateToken, checkEditingLock('exam'), safe(examController?.saveExamSlots));
+router.get('/exam', authenticateToken, safe(examController?.getActiveExam));
+router.get('/exam/masters', authenticateToken, safe(examController?.listMasters));
+router.post('/exam', authenticateToken, safe(examController?.createMaster));
+router.put('/exam/:id', authenticateToken, safe(examController?.updateMaster));
+router.post('/exam/:id/deactivate', authenticateToken, safe(examController?.deactivateMaster));
+router.get('/exam/:id/board', authenticateToken, safe(examController?.getBoard));
+router.get('/exam/:id/view', authenticateToken, safe(examController?.getPublishedView));
+router.get('/exam/:id/view/timetable', authenticateToken, safe(examController?.getPublishedTimetable));
+router.get('/exam/:id/view/rooms', authenticateToken, safe(examController?.getPublishedRooms));
+router.get('/exam/:id/view/proctors', authenticateToken, safe(examController?.getPublishedProctors));
+router.get('/exam/:id/view/trips', authenticateToken, safe(examController?.getPublishedTrips));
+router.post('/exam/:id/phase', authenticateToken, safe(examController?.setPhase));
+
+// 実施科目・出題者登録／調査
+router.get('/exam/:id/subjects', authenticateToken, safe(examController?.getSubjects));
+router.post('/exam/:id/subject-survey/start', authenticateToken, safe(examController?.startSubjectSurvey));
+router.post('/exam/:id/subject-row', authenticateToken, safe(examController?.saveSubjectRow));
+router.post('/exam/:id/subject-row/:rowId/submit', authenticateToken, safe(examController?.submitSubjectRow));
+router.delete('/exam/:id/subject-row/:rowId', authenticateToken, safe(examController?.deleteSubjectRow));
+router.post('/exam/:id/subject-survey/end', authenticateToken, safe(examController?.endSubjectSurvey));
+
+// 試験時間割
+router.get('/exam/:id/slots', authenticateToken, safe(examController?.getSlots));
+router.post('/exam/:id/timetable-rules', authenticateToken, safe(examController?.saveTimetableRules));
+router.post('/exam/:id/timetable', authenticateToken, safe(examController?.solveTimetable));
+router.post('/exam/:id/timetable/publish', authenticateToken, safe(examController?.publishTimetable));
+router.post('/exam/:id/timetable/end', authenticateToken, safe(examController?.endTimetable));
+
+// 試験教室
+router.get('/exam/:id/rooms', authenticateToken, safe(examController?.getRooms));
+router.get('/exam/:id/room-rules', authenticateToken, safe(examController?.getRoomRules));
+router.post('/exam/:id/room-rules', authenticateToken, safe(examController?.saveRoomRules));
+router.get('/exam/:id/room-config', authenticateToken, safe(examController?.getRoomConfig));
+router.post('/exam/:id/rooms', authenticateToken, safe(examController?.saveRooms));
+router.post('/exam/:id/room-config', authenticateToken, safe(examController?.saveRoomConfig));
+router.post('/exam/:id/room-assign', authenticateToken, safe(examController?.solveRoomAssignments));
+router.put('/exam/:id/room-assign', authenticateToken, safe(examController?.saveRoomAssignments));
+router.post('/exam/:id/room-assign/publish', authenticateToken, safe(examController?.publishRoomAssignments));
+router.post('/exam/:id/room-assign/end', authenticateToken, safe(examController?.endRoomPhase));
+
+// 出張等
+router.get('/exam/:id/trips/preview', authenticateToken, safe(examController?.previewTrips));
+router.get('/exam/:id/trips', authenticateToken, safe(examController?.getTrips));
+router.post('/exam/:id/trips', authenticateToken, safe(examController?.saveTrips));
+router.delete('/exam/:id/trips/:tripId', authenticateToken, safe(examController?.deleteTrip));
+router.post('/exam/:id/trips/end', authenticateToken, safe(examController?.endTripPhase));
+
+// 試験監督
+router.get('/staff/pool', authenticateToken, safe(examController?.getStaffPool));
+router.get('/exam/:id/proctor-board', authenticateToken, safe(examController?.getProctorBoard));
+router.post('/exam/:id/proctor-rules', authenticateToken, safe(examController?.saveProctorRules));
+router.post('/exam/:id/parttime-staff', authenticateToken, safe(examController?.saveParttimeStaff));
+router.delete('/exam/:id/parttime-staff/:staffRowId', authenticateToken, safe(examController?.deleteParttimeStaff));
+router.post('/exam/:id/parttime-availability', authenticateToken, safe(examController?.setParttimeAvailability));
+router.post('/exam/:id/teacher-constraint', authenticateToken, safe(examController?.saveTeacherConstraint));
+router.post('/exam/:id/exemption', authenticateToken, safe(examController?.addExemption));
+router.delete('/exam/:id/exemption/:teacherId', authenticateToken, safe(examController?.removeExemption));
+router.post('/exam/:id/proctor-assign', authenticateToken, safe(examController?.solveProctors));
+router.put('/exam/:id/proctor-assign', authenticateToken, safe(examController?.saveProctors));
+router.post('/exam/:id/proctor-assign/validate', authenticateToken, safe(examController?.validateProctorRows));
+router.post('/exam/:id/proctor-assign/publish', authenticateToken, safe(examController?.publishProctors));
+router.post('/exam/:id/proctor-assign/end', authenticateToken, safe(examController?.endProctorPhase));
+
 
 // ==========================================
 // 9. 教育ニュース・天気・ヘルスチェック API (/api/news)
