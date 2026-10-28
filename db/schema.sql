@@ -746,3 +746,49 @@ ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS setter_teacher_name TEXT;
 ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS updated_by TEXT;
 ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
 
+
+-- -----------------------------------------------------------------------------
+-- 17. スケジュールカテゴリマスタ (schedule_categories)・行事カテゴリ紐付け (schedule_category_map)
+-- ※ 1行事が複数カテゴリを持つ (多対多)。カテゴリ追加・削除はシステム管理者 (ADMIN) のみ
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS schedule_categories (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  color_key TEXT NOT NULL DEFAULT 'SLATE',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_schedule_category_name ON schedule_categories (lower(name));
+
+CREATE TABLE IF NOT EXISTS schedule_category_map (
+  schedule_id TEXT NOT NULL REFERENCES school_schedules(id) ON DELETE CASCADE,
+  category_id INTEGER NOT NULL REFERENCES schedule_categories(id) ON DELETE CASCADE,
+  PRIMARY KEY (schedule_id, category_id)
+);
+CREATE INDEX IF NOT EXISTS idx_scm_category ON schedule_category_map(category_id);
+
+-- 初期カテゴリ（1学年・2学年・3学年・教務・進路・総務・生徒部）
+INSERT INTO schedule_categories (id, name, color_key, sort_order)
+VALUES
+  (1, '1学年', 'INFO', 1),
+  (2, '2学年', 'SUCCESS', 2),
+  (3, '3学年', 'WARNING', 3),
+  (4, '教務', 'ACCENT', 4),
+  (5, '進路', 'PURPLE', 5),
+  (6, '総務', 'SLATE', 6),
+  (7, '生徒部', 'DANGER', 7)
+ON CONFLICT (id) DO NOTHING;
+
+SELECT setval(pg_get_serial_sequence('schedule_categories', 'id'), (SELECT MAX(id) FROM schedule_categories));
+
+-- デモ行事とカテゴリの紐付け（中間考査=全学年、定例会議=教務、避難訓練=生徒部）
+INSERT INTO schedule_category_map (schedule_id, category_id)
+VALUES ('sch_101', 1), ('sch_101', 2), ('sch_101', 3), ('sch_102', 4), ('sch_103', 7)
+ON CONFLICT DO NOTHING;
+
+-- システム管理者アカウント (ADMIN / 職員番号 T2026000 / 初期パスワード password123)
+INSERT INTO users (id, staff_code, name, email, password_hash, role, grade, department, extension_number)
+VALUES ('sys-admin', 'T2026000', 'システム 管理者', 'admin@school.ed.jp', '$2b$10$UaPLuLuZtQ.5DG3P33kdl.iM0Rl140Ky9Gv8JWXomI8LiRUxA8SCC', 'ADMIN', 'NONE', 'システム管理', '100')
+ON CONFLICT DO NOTHING;
+

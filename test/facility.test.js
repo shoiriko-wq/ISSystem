@@ -79,6 +79,7 @@ describe('Facility Reservation API (/api/facilities)', () => {
       .set('Authorization', bearer(token));
     expect(res.statusCode).toBe(200);
     expect(res.body.reservations.some((r) => r.id === reservationId)).toBe(true);
+    expect(res.body.reservations.every((r) => 'avatar_url' in r)).toBe(true);
   });
 
   it('DELETE /api/facilities/reservations/:id - 予約をキャンセルできること', async () => {

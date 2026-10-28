@@ -565,6 +565,17 @@ function initEventsAndListeners() {
       previewImg.classList.add('hidden');
       placeholderIcon.classList.remove('hidden');
     }
+    // パスワード変更欄はモーダルを開くたびに空へリセットする
+    ['profile-current-password', 'profile-new-password', 'profile-new-password-confirm'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    const pwErrEl = document.getElementById('pw-change-error');
+    if (pwErrEl) {
+      pwErrEl.textContent = '';
+      pwErrEl.classList.add('hidden');
+    }
+
     openModal('profile-modal');
     refreshLucideIcons();
   });
@@ -589,6 +600,75 @@ function initEventsAndListeners() {
     } catch (err) {
       showToast('プロフィールの更新に失敗しました: ' + err.message, 'error');
     }
+  });
+
+  // パスワード変更（現在の / 新しい / 確認 → PUT /api/auth/change-password）
+  const pwChangeBtn = document.getElementById('profile-password-change-btn');
+  const pwFieldIds = ['profile-current-password', 'profile-new-password', 'profile-new-password-confirm'];
+
+  const setPwError = (msg) => {
+    const errEl = document.getElementById('pw-change-error');
+    if (!errEl) return;
+    if (msg) {
+      errEl.textContent = msg;
+      errEl.classList.remove('hidden');
+    } else {
+      errEl.textContent = '';
+      errEl.classList.add('hidden');
+    }
+  };
+
+  pwChangeBtn?.addEventListener('click', async () => {
+    const currentPw = document.getElementById('profile-current-password')?.value || '';
+    const newPw = document.getElementById('profile-new-password')?.value || '';
+    const confirmPw = document.getElementById('profile-new-password-confirm')?.value || '';
+
+    setPwError('');
+
+    if (!currentPw) {
+      setPwError('現在のパスワードを入力してください。');
+      return;
+    }
+    if (newPw.length < 8) {
+      setPwError('新しいパスワードは8文字以上で入力してください。');
+      return;
+    }
+    if (newPw === currentPw) {
+      setPwError('新しいパスワードは現在のパスワードと別のものにしてください。');
+      return;
+    }
+    if (newPw !== confirmPw) {
+      setPwError('新しいパスワードと確認入力が一致しません。');
+      return;
+    }
+
+    pwChangeBtn.disabled = true;
+    try {
+      const res = await apiPut('/auth/change-password', { currentPassword: currentPw, newPassword: newPw });
+      if (res && res.success) {
+        pwFieldIds.forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) el.value = '';
+        });
+        showToast('パスワードを変更しました', 'success');
+      }
+    } catch (err) {
+      setPwError(err.message || 'パスワードの変更に失敗しました。');
+    } finally {
+      pwChangeBtn.disabled = false;
+    }
+  });
+
+  // 3つのパスワード欄で Enter を押すとフォーム送信ではなくパスワード変更を実行する
+  pwFieldIds.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        pwChangeBtn?.click();
+      }
+    });
   });
 
   // 職員一覧・ユーザー管理ボタン

@@ -126,6 +126,7 @@ describe('Absence API Endpoints (/api/absences)', () => {
     const leave = res.body.records.find((r) => r.record_type === 'LEAVE');
     expect(leave).toHaveProperty('record_type_label', '年休等');
     expect(leave).toHaveProperty('user_name', teacherUser.name);
+    expect(leave).toHaveProperty('avatar_url');
   });
 
   // 8. 教員セレクトの選択可否

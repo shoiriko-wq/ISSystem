@@ -7,7 +7,7 @@
  */
 
 import { apiGet, apiPost, apiDelete } from '../api.js';
-import { escapeHTML, refreshLucideIcons, openModal, showToast, formatDate } from '../ui-helpers.js';
+import { escapeHTML, refreshLucideIcons, openModal, showToast, formatDate, userAvatarHtml } from '../ui-helpers.js';
 import { state } from '../state.js';
 
 const TYPE_META = {
@@ -203,6 +203,7 @@ function renderAbsenceList() {
         <div class="min-w-0">
           <div class="flex items-center gap-2">
             <span class="badge ${meta.bgClass} ${meta.textClass} font-bold">${meta.label}</span>
+            ${userAvatarHtml({ name: r.user_name || '教員', avatarUrl: r.avatar_url || r.avatarUrl || null, size: 'xs' })}
             <span class="text-xs font-bold text-main truncate">${escapeHTML(r.user_name)} 先生</span>
             ${isSelf ? '<span class="text-[9px] px-1.5 rounded bg-accent-soft text-accent-strong font-bold">自分</span>' : ''}
           </div>

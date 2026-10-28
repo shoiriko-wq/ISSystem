@@ -170,7 +170,7 @@ export const chatModel = {
     const targetId = this.normalizeChannelId(channelId);
     try {
       const res = await query(
-        `SELECT cm.*, u.name as user_name, u.role, u.department 
+        `SELECT cm.*, u.name as user_name, u.role, u.department, u.avatar_url
          FROM chat_channel_members cm
          JOIN users u ON cm.user_id = u.id
          WHERE cm.channel_id = $1 OR cm.channel_id = $2`,
@@ -180,6 +180,32 @@ export const chatModel = {
     } catch (error) {
       return [];
     }
+  },
+
+  /**
+   * 指定ユーザーの概要（name・avatar_url）取得。既読回执やアバター表示に使用する。
+   * @param {string} userId
+   */
+  async getUserBrief(userId) {
+    if (!userId) return null;
+    try {
+      const res = await query(
+        `SELECT id, name, role, avatar_url FROM users WHERE id = $1 OR staff_code = $1`,
+        [String(userId)]
+      );
+      if (res.rows[0]) {
+        return {
+          id: res.rows[0].id || String(userId),
+          name: res.rows[0].name || String(userId),
+          avatar_url: res.rows[0].avatar_url || null
+        };
+      }
+    } catch (error) {
+      console.warn('[ChatModel PG Warning] getUserBrief failed:', error.message);
+    }
+    const cached = mockUsers.get(userId);
+    if (cached) return { id: userId, name: cached.name, avatar_url: cached.avatar_url || null };
+    return { id: String(userId), name: String(userId), avatar_url: null };
   },
 
   /**
@@ -195,15 +221,19 @@ export const chatModel = {
     const nowStr = nowIso();
 
     let senderName = messageData.sender_name || messageData.senderName;
+    let senderAvatar = messageData.sender_avatar || messageData.senderAvatar || null;
     try {
       await query(
         `INSERT INTO chat_messages (id, channel_id, sender_id, message, created_at)
          VALUES ($1, $2, $3, $4, $5)`,
         [id, channelId, senderId, messageText, nowStr]
       );
-      if (!senderName || senderName === '教員' || senderName === '教務 主任') {
-        const userRes = await query(`SELECT name FROM users WHERE id = $1 OR staff_code = $2`, [senderId, senderId]);
-        if (userRes.rows[0] && userRes.rows[0].name) senderName = userRes.rows[0].name;
+      const userRes = await query(`SELECT name, avatar_url FROM users WHERE id = $1 OR staff_code = $2`, [senderId, senderId]);
+      if (userRes.rows[0]) {
+        if (!senderName || senderName === '教員' || senderName === '教務 主任') {
+          if (userRes.rows[0].name) senderName = userRes.rows[0].name;
+        }
+        senderAvatar = userRes.rows[0].avatar_url || senderAvatar;
       }
     } catch (error) {
       console.warn('[ChatModel PG Warning] sendMessage DB insert failed:', error.message);
@@ -219,6 +249,9 @@ export const chatModel = {
       senderId: senderId,
       sender_name: senderName,
       senderName: senderName,
+      sender_avatar: senderAvatar || null,
+      senderAvatar: senderAvatar || null,
+      avatar_url: senderAvatar || null,
       message: messageText,
       message_text: messageText,
       text: messageText,
@@ -244,7 +277,7 @@ export const chatModel = {
         `SELECT m.id, m.channel_id, m.sender_id, 
                 m.message,
                 m.created_at,
-                COALESCE(u.name, m.sender_id) as sender_name, u.role as sender_role
+                COALESCE(u.name, m.sender_id) as sender_name, u.role as sender_role, u.avatar_url as sender_avatar
          FROM chat_messages m
          LEFT JOIN users u ON m.sender_id = u.id OR m.sender_id = u.staff_code
          WHERE m.channel_id = $1 OR m.channel_id = $2
@@ -263,7 +296,10 @@ export const chatModel = {
           senderName: r.sender_name || r.sender_id || '教員',
           sender_name: r.sender_name || r.sender_id || '教員',
           senderId: r.sender_id,
-          sender_id: r.sender_id
+          sender_id: r.sender_id,
+          senderAvatar: r.sender_avatar || r.avatar_url || null,
+          sender_avatar: r.sender_avatar || r.avatar_url || null,
+          avatar_url: r.sender_avatar || r.avatar_url || null
         }));
       }
     } catch (error) {

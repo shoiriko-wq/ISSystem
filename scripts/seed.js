@@ -22,7 +22,8 @@ const dummyUsers = [
   { id: 't-tanaka', staff_code: 'T2026002', name: '田中 先生', email: 'tanaka@school.ed.jp', role: 'TEACHER', grade: '1', department: '生徒指導部', extension_number: '102' },
   { id: 't-sato', staff_code: 'T2026003', name: '佐藤 先生', email: 'sato@school.ed.jp', role: 'TEACHER', grade: '2', department: 'キャリアガイダンス部', extension_number: '103' },
   { id: 't-suzuki', staff_code: 'T2026004', name: '鈴木 先生', email: 'suzuki@school.ed.jp', role: 'TEACHER', grade: '3', department: '特色推進部', extension_number: '104' },
-  { id: 't-takahashi', staff_code: 'T2026005', name: '高橋 先生', email: 'takahashi@school.ed.jp', role: 'TEACHER', grade: '1', department: '１学年', extension_number: '105' }
+  { id: 't-takahashi', staff_code: 'T2026005', name: '高橋 先生', email: 'takahashi@school.ed.jp', role: 'TEACHER', grade: '1', department: '１学年', extension_number: '105' },
+  { id: 'sys-admin', staff_code: 'T2026000', name: 'システム 管理者', email: 'admin@school.ed.jp', role: 'ADMIN', grade: 'NONE', department: 'システム管理', extension_number: '100' }
 ];
 
 // 2. 掲示板投稿
@@ -89,6 +90,25 @@ const dummySchedules = [
   { id: 'sch_101', title: '中間考査（第1日）', description: '全学年対象 9:00開始', event_date: '2026-10-15', category: 'EXAM', target_grade: null, created_by_user_id: 'kyomu01' },
   { id: 'sch_102', title: '職員定例会議', description: '第一会議室 15:30〜', event_date: '2026-10-15', category: 'MEETING', target_grade: null, created_by_user_id: 'kyomu01' },
   { id: 'sch_103', title: '避難訓練', description: 'グラウンド避難', event_date: '2026-10-20', category: 'SCHOOL', target_grade: null, created_by_user_id: 'kyomu01' }
+];
+
+// 9b. スケジュールカテゴリマスタ（初期7種）と行事カテゴリ紐付け（1行事→複数カテゴリ）
+const dummyScheduleCategories = [
+  { id: 1, name: '1学年', color_key: 'INFO', sort_order: 1 },
+  { id: 2, name: '2学年', color_key: 'SUCCESS', sort_order: 2 },
+  { id: 3, name: '3学年', color_key: 'WARNING', sort_order: 3 },
+  { id: 4, name: '教務', color_key: 'ACCENT', sort_order: 4 },
+  { id: 5, name: '進路', color_key: 'PURPLE', sort_order: 5 },
+  { id: 6, name: '総務', color_key: 'SLATE', sort_order: 6 },
+  { id: 7, name: '生徒部', color_key: 'DANGER', sort_order: 7 }
+];
+
+const dummyScheduleCategoryMap = [
+  { schedule_id: 'sch_101', category_id: 1 },
+  { schedule_id: 'sch_101', category_id: 2 },
+  { schedule_id: 'sch_101', category_id: 3 },
+  { schedule_id: 'sch_102', category_id: 4 },
+  { schedule_id: 'sch_103', category_id: 7 }
 ];
 
 // 10. クラス・科目マスタ
@@ -189,6 +209,8 @@ async function seedDatabase() {
   // INSERT OR REPLACE 相当：外部キー順序を考慮して関連テーブルを一括クリアする
   const truncateSql = `
     TRUNCATE TABLE
+      schedule_category_map,
+      schedule_categories,
       system_audit_logs,
       editing_locks,
       invitation_codes,
@@ -343,6 +365,30 @@ async function seedDatabase() {
         `INSERT INTO school_schedules (id, title, description, event_date, category, target_grade, created_by_user_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [sch.id, sch.title, sch.description, sch.event_date, sch.category, sch.target_grade, sch.created_by_user_id]
+      );
+    }
+
+    // カテゴリマスタ（初期7種）→ 行事カテゴリ紐付けの順で投入 (外部キー順序)
+    for (const cat of dummyScheduleCategories) {
+      await client.query(
+        `INSERT INTO schedule_categories (id, name, color_key, sort_order)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (id) DO UPDATE SET
+           name = EXCLUDED.name,
+           color_key = EXCLUDED.color_key,
+           sort_order = EXCLUDED.sort_order`,
+        [cat.id, cat.name, cat.color_key, cat.sort_order]
+      );
+    }
+    await client.query(
+      `SELECT setval(pg_get_serial_sequence('schedule_categories', 'id'), (SELECT MAX(id) FROM schedule_categories))`
+    );
+
+    for (const link of dummyScheduleCategoryMap) {
+      await client.query(
+        `INSERT INTO schedule_category_map (schedule_id, category_id)
+         VALUES ($1, $2) ON CONFLICT (schedule_id, category_id) DO NOTHING`,
+        [link.schedule_id, link.category_id]
       );
     }
 

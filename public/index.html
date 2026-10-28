@@ -533,6 +533,35 @@
             <input type="text" id="profile-extension" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" placeholder="例: 101">
           </div>
           </div>
+
+          <!-- パスワード変更セクション（現在の / 新しい / 確認） -->
+          <div class="mt-4 pt-4 border-t border-main">
+            <h4 class="font-bold text-main mb-2 flex items-center gap-1.5 text-sm">
+              <i data-lucide="key-round" class="w-4 h-4 text-warning"></i> パスワード変更
+            </h4>
+            <div class="space-y-3">
+              <div>
+                <label class="block text-xs font-semibold text-soft mb-1">現在のパスワード <span class="text-danger">*</span></label>
+                <input type="password" id="profile-current-password" autocomplete="current-password" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" placeholder="現在のパスワード">
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-semibold text-soft mb-1">新しいパスワード（8文字以上）</label>
+                  <input type="password" id="profile-new-password" autocomplete="new-password" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" placeholder="8文字以上">
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-soft mb-1">新しいパスワード（確認）</label>
+                  <input type="password" id="profile-new-password-confirm" autocomplete="new-password" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" placeholder="再度入力">
+                </div>
+              </div>
+              <div id="pw-change-error" class="hidden text-[11px] font-semibold text-danger"></div>
+              <div class="flex justify-end">
+                <button type="button" id="profile-password-change-btn" class="btn-secondary py-1.5 px-3 text-xs rounded flex items-center gap-1.5">
+                  <i data-lucide="key-round" class="w-3.5 h-3.5"></i> パスワードを変更
+                </button>
+              </div>
+            </div>
+          </div>
           <div class="modal-footer">
             <button type="button" class="modal-close btn-secondary px-4 py-2 text-xs rounded bg-surface text-soft hover-surface-strong">閉じる</button>
             <button type="submit" class="btn-primary px-4 py-2 text-xs rounded bg-accent text-main font-bold hover-primary">保存する</button>

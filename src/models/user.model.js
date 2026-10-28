@@ -204,8 +204,20 @@ export const userModel = {
    * パスワードハッシュの更新
    */
   async updatePasswordHash(userId, newPasswordHash) {
+    // モックキャッシュ (mockUsers) にも同一ハッシュを反映して、
+    // findByStaffCode / findById がキャッシュ経由で旧ハッシュを返すのを防ぐ
+    const cached = mockUsers.get(userId);
+    if (cached) {
+      cached.password_hash = newPasswordHash;
+    }
+    for (const u of mockUsers.values()) {
+      if (u && u.staff_code === (cached && cached.staff_code)) {
+        u.password_hash = newPasswordHash;
+      }
+    }
+
     try {
-      await query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [newPasswordHash, userId]);
+      await query(`UPDATE users SET password_hash = $1 WHERE id = $2 OR staff_code = $3`, [newPasswordHash, userId, userId]);
     } catch (err) {
       console.warn('[UserModel PG Warning] updatePasswordHash failed:', err.message);
     }

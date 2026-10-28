@@ -5,7 +5,7 @@
  */
 
 import { apiGet, apiPost, apiPut } from '../api.js';
-import { formatDate, escapeHTML, refreshLucideIcons, openModal, closeModal, showToast } from '../ui-helpers.js';
+import { formatDate, escapeHTML, refreshLucideIcons, openModal, closeModal, showToast, userAvatarHtml } from '../ui-helpers.js';
 import { state } from '../state.js';
 import { API_BASE_URL } from '../config.js';
 
@@ -586,7 +586,10 @@ function cardHtml(b) {
             <i data-lucide="message-square" class="w-3.5 h-3.5"></i> 補足・コメント</button>
           <button type="button" class="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1.5" data-bulletin-detail="${b.id}">
             <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i> 詳細</button>
-          <span class="ml-auto text-[10px] text-muted font-mono">投稿者: <strong class="text-soft">${escapeHTML(b.authorName || b.author_name || '教員')}</strong></span>
+          <div class="ml-auto flex items-center gap-1.5 text-[10px] text-muted font-mono">
+            ${userAvatarHtml({ name: b.authorName || b.author_name || '教員', avatarUrl: b.authorAvatar || b.author_avatar || null, size: 'xs' })}
+            <span>投稿者: <strong class="text-soft">${escapeHTML(b.authorName || b.author_name || '教員')}</strong></span>
+          </div>
         </div>
       </div>
     </div>`;
@@ -759,7 +762,7 @@ async function openBulletinDetail(id) {
   if (metaEl) {
     metaEl.innerHTML = `
       <span>種別: <strong class="text-accent-strong">${item.postType === 'CIRCULAR' ? '回覧板' : '一般掲示'}</strong></span>
-      <span>投稿者: ${escapeHTML(item.authorName || item.author_name || '教員')}</span>
+      <span class="flex items-center gap-1.5">投稿者: ${userAvatarHtml({ name: item.authorName || item.author_name || '教員', avatarUrl: item.authorAvatar || item.author_avatar || null, size: 'xs' })}${escapeHTML(item.authorName || item.author_name || '教員')}</span>
       <span>投稿日: <strong class="text-main">${formatDate(item.postedAt || item.posted_at || item.createdAt || item.created_at)}</strong></span>
     `;
   }

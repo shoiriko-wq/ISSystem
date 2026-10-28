@@ -38,6 +38,7 @@ function mapRecord(row) {
     reason: row.reason || '',
     recorded_by: row.recorded_by,
     recorded_by_name: row.recorded_by_name || '',
+    avatar_url: row.avatar_url || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -52,7 +53,7 @@ export const absenceModel = {
   async listByDate(targetDate, recordType = null) {
     const db = await openDb();
     const baseSql = `
-      SELECT ar.*, u.name AS user_name, u.staff_code, u.department
+      SELECT ar.*, u.name AS user_name, u.staff_code, u.department, u.avatar_url AS avatar_url
       FROM absence_records ar
       JOIN users u ON u.id = ar.user_id
     `;

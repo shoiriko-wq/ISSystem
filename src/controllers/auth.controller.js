@@ -185,6 +185,13 @@ export const authController = {
         });
       }
 
+      if (String(newPassword).trim().length < 8) {
+        return res.status(400).json({
+          success: false,
+          message: '新しいパスワードは8文字以上で入力してください。',
+        });
+      }
+
       const result = await authService.changePassword(userId, currentPassword, newPassword);
 
       return res.status(200).json({

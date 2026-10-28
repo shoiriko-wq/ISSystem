@@ -23,6 +23,7 @@ describe('Bulletin API (/api/bulletins)', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.count).toBeGreaterThanOrEqual(3);
     expect(res.body.data.some((p) => p.id === 'post_1')).toBe(true);
+    expect(res.body.data.every((p) => ('author_avatar' in p) || ('authorAvatar' in p))).toBe(true);
   });
 
   it('GET /api/bulletins/post_1 - 詳細と既読・確認率統計を取得できること', async () => {

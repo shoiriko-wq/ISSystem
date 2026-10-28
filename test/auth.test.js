@@ -18,6 +18,7 @@ describe('Auth API Endpoints (/api/auth)', () => {
 
   let adminToken = '';
   let invitationCode = '';
+  let newUserToken = '';
 
   // 1. 既存教員アカウントでのログイン
   it('POST /api/auth/login - 既存教員アカウントでJWTを取得できること', async () => {
@@ -76,6 +77,7 @@ describe('Auth API Endpoints (/api/auth)', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.user).toHaveProperty('staff_code', newStaffCode);
     expect(res.body.user.name).toBe('テスト 太郎');
+    newUserToken = res.body.token;
   });
 
   // 6. 招待コード消費後の再利用拒否と重複登録拒否
@@ -114,6 +116,52 @@ describe('Auth API Endpoints (/api/auth)', () => {
       .send({ staff_code: 'T2026001', password: 'wrong-password' });
     expect(res.statusCode).toBe(401);
     expect(res.body.success).toBe(false);
+  });
+
+  // 9. パスワード変更 (PUT /api/auth/change-password)
+  it('PUT /api/auth/change-password - 新パスワードが8文字未満なら 400 になること', async () => {
+    const res = await request(app)
+      .put('/api/auth/change-password')
+      .set('Authorization', `Bearer ${newUserToken}`)
+      .send({ currentPassword: newPassword, newPassword: 'short' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('PUT /api/auth/change-password - 現在のパスワードが誤りなら 401 になること', async () => {
+    const res = await request(app)
+      .put('/api/auth/change-password')
+      .set('Authorization', `Bearer ${newUserToken}`)
+      .send({ currentPassword: 'wrong-password', newPassword: 'Password789!' });
+    expect(res.statusCode).toBe(401);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('PUT /api/auth/change-password - 変更後は新しいパスワードでログインできること', async () => {
+    const changeRes = await request(app)
+      .put('/api/auth/change-password')
+      .set('Authorization', `Bearer ${newUserToken}`)
+      .send({ currentPassword: newPassword, newPassword: 'Password789!' });
+    expect(changeRes.statusCode).toBe(200);
+    expect(changeRes.body.success).toBe(true);
+
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ staff_code: newStaffCode, password: 'Password789!' });
+    expect(loginRes.statusCode).toBe(200);
+    expect(loginRes.body.user).toHaveProperty('staff_code', newStaffCode);
+
+    // 検証後は元のパスワードへ戻し、シード状態を維持する
+    const restoreRes = await request(app)
+      .put('/api/auth/change-password')
+      .set('Authorization', `Bearer ${loginRes.body.token}`)
+      .send({ currentPassword: 'Password789!', newPassword: newPassword });
+    expect(restoreRes.statusCode).toBe(200);
+
+    const backLoginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ staff_code: newStaffCode, password: newPassword });
+    expect(backLoginRes.statusCode).toBe(200);
   });
 
   afterAll(async () => {

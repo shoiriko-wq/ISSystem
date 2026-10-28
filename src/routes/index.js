@@ -4,7 +4,7 @@
  */
 
 import { Router } from 'express';
-import { authenticateToken, requireKyomuRole } from '../middlewares/auth.middleware.js';
+import { authenticateToken, requireKyomuRole, requireAdminRole } from '../middlewares/auth.middleware.js';
 import { checkEditingLock } from '../middlewares/lock.middleware.js';
 
 import authController from '../controllers/auth.controller.js';
@@ -18,7 +18,11 @@ import {
   getTodayTimeline,
   createSchedule,
   updateSchedule,
-  deleteSchedule
+  deleteSchedule,
+  getScheduleCategories,
+  createScheduleCategory,
+  updateScheduleCategory,
+  deleteScheduleCategory
 } from '../controllers/schedule.controller.js';
 
 import approvalController from '../controllers/approval.controller.js';
@@ -108,6 +112,12 @@ router.delete('/facilities/reservations/:reservationId', authenticateToken, safe
 // ==========================================
 // 5. 校内行事 & スケジュール API (/api/schedules)
 // ==========================================
+// カテゴリマスタ (追加・改名・削除はシステム管理者 ADMIN のみ)
+router.get('/schedules/categories', authenticateToken, safe(getScheduleCategories));
+router.post('/schedules/categories', authenticateToken, requireAdminRole, safe(createScheduleCategory));
+router.put('/schedules/categories/:id', authenticateToken, requireAdminRole, safe(updateScheduleCategory));
+router.delete('/schedules/categories/:id', authenticateToken, requireAdminRole, safe(deleteScheduleCategory));
+
 router.get('/schedules', authenticateToken, safe(getSchedulesByRange));
 router.get('/schedules/today', authenticateToken, safe(getTodayTimeline));
 router.post('/schedules', authenticateToken, safe(createSchedule));

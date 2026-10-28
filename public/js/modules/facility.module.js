@@ -4,7 +4,7 @@
  */
 
 import { apiGet, apiPost, apiDelete } from '../api.js';
-import { formatDate, escapeHTML, refreshLucideIcons, openModal, closeModal, showToast } from '../ui-helpers.js';
+import { formatDate, escapeHTML, refreshLucideIcons, openModal, closeModal, showToast, userAvatarHtml } from '../ui-helpers.js';
 import { state } from '../state.js';
 
 /**
@@ -360,7 +360,8 @@ export async function loadReservations() {
         timeRangeStr,
         purpose: r.title || r.purpose || '予約あり',
         userId: String(r.user_id || r.userId || ''),
-        userName: r.user_name || r.userName || '教員'
+        userName: r.user_name || r.userName || '教員',
+        avatarUrl: r.avatar_url || r.avatarUrl || null
       };
     });
 
@@ -407,6 +408,7 @@ function renderMatrix() {
           <div class="font-bold text-success-strong truncate leading-tight">${escapeHTML(res.purpose)}</div>
           <div class="text-[10px] text-success font-mono flex items-center gap-1 mt-0.5">
             <span>${res.timeRangeStr || '予約中'}</span>
+            ${userAvatarHtml({ name: res.userName, avatarUrl: res.avatarUrl, size: 'xs' })}
             <span class="text-success-strong truncate">${escapeHTML(res.userName)}</span>
           </div>
         </div>

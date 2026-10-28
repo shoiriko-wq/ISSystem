@@ -404,7 +404,8 @@ export const chatController = {
           io.to(`chat:channel:${channelId}`).emit('chat:read_receipt', {
             channelId,
             userId,
-            userName: req.user ? req.user.name : '教員',
+            userName: result.reader?.name || (req.user ? req.user.name : '教員'),
+            userAvatar: result.reader?.avatar_url || null,
             lastReadMessageId,
           });
         }

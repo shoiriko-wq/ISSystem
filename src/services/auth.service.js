@@ -228,7 +228,7 @@ export const authService = {
 
     const currentOk = await verifyPassword(currentPassword, user.password_hash);
     if (!currentOk) {
-      throw new ApiError(400, '現在のパスワードが正しくありません。');
+      throw new ApiError(401, '現在のパスワードが正しくありません。');
     }
 
     const newHash = await hashPassword(newPassword);

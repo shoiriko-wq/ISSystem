@@ -41,6 +41,12 @@ export const scheduleController = {
 
       const parsedGrade = targetGrade || grade ? parseInt(targetGrade || grade, 10) : null;
 
+      // カテゴリ複数選択 (categoryIds=1,2,3) -> いずれか1つ以上を含む行事のみを返す
+      const rawCategoryIds = req.query.categoryIds || req.query.category_ids || req.query.categories;
+      const categoryIds = Array.isArray(rawCategoryIds)
+        ? rawCategoryIds
+        : (rawCategoryIds ? String(rawCategoryIds).split(',') : []);
+
       let resultSchedules = [];
       let resultData = null;
 
@@ -48,7 +54,8 @@ export const scheduleController = {
         resultData = await scheduleService.getSchedulesByRange(
           startDate,
           endDate,
-          parsedGrade
+          parsedGrade,
+          categoryIds
         );
         resultSchedules = resultData.schedules || resultData;
       } catch (serviceErr) {
@@ -64,6 +71,7 @@ export const scheduleController = {
         startDate,
         endDate,
         targetGrade: parsedGrade,
+        categoryIds,
         count: schedulesList.length,
         data: schedulesList,
         schedules: schedulesList,
@@ -134,6 +142,8 @@ export const scheduleController = {
           end_time,
           category,
           target_grade,
+          // 行事は複数カテゴリを登録できる (category_ids / categoryIds の両方を受け付ける)
+          category_ids: req.body.category_ids ?? req.body.categoryIds,
         },
         user
       );
@@ -215,6 +225,109 @@ export const scheduleController = {
       });
     }
   },
+
+  /**
+   * スケジュールカテゴリマスタ一覧取得
+   * GET /api/schedules/categories
+   */
+  async getScheduleCategories(req, res, next) {
+    try {
+      const categories = await scheduleService.getCategories();
+      return res.status(200).json({
+        success: true,
+        count: categories.length,
+        data: categories,
+        categories
+      });
+    } catch (error) {
+      return res.status(error.statusCode || 400).json({
+        success: false,
+        message: error.message || 'カテゴリ一覧の取得に失敗しました。'
+      });
+    }
+  },
+
+  /**
+   * カテゴリ追加 (システム管理者 ADMIN のみ・ルーティングで requireAdminRole)
+   * POST /api/schedules/categories
+   */
+  async createScheduleCategory(req, res, next) {
+    try {
+      const category = await scheduleService.createCategory(req.body, req.user);
+
+      const io = req.app ? req.app.get('io') : null;
+      if (io) {
+        io.emit('schedule:categories_changed', { action: 'create', category, userId: req.user?.id, userName: req.user?.name });
+      }
+
+      return res.status(201).json({
+        success: true,
+        message: `カテゴリ「${category.name}」を追加しました。`,
+        data: category,
+        category
+      });
+    } catch (error) {
+      return res.status(error.statusCode || 400).json({
+        success: false,
+        message: error.message || 'カテゴリの追加に失敗しました。'
+      });
+    }
+  },
+
+  /**
+   * カテゴリ改名・色変更 (システム管理者 ADMIN のみ)
+   * PUT /api/schedules/categories/:id
+   */
+  async updateScheduleCategory(req, res, next) {
+    try {
+      const { id } = req.params;
+      const category = await scheduleService.updateCategory(id, req.body, req.user);
+
+      const io = req.app ? req.app.get('io') : null;
+      if (io) {
+        io.emit('schedule:categories_changed', { action: 'update', category, userId: req.user?.id, userName: req.user?.name });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: `カテゴリ「${category.name}」を更新しました。`,
+        data: category,
+        category
+      });
+    } catch (error) {
+      return res.status(error.statusCode || 400).json({
+        success: false,
+        message: error.message || 'カテゴリの更新に失敗しました。'
+      });
+    }
+  },
+
+  /**
+   * カテゴリ削除 (システム管理者 ADMIN のみ・行事側の紐付けは解除)
+   * DELETE /api/schedules/categories/:id
+   */
+  async deleteScheduleCategory(req, res, next) {
+    try {
+      const { id } = req.params;
+      const result = await scheduleService.deleteCategory(id, req.user);
+
+      const io = req.app ? req.app.get('io') : null;
+      if (io) {
+        io.emit('schedule:categories_changed', { action: 'delete', id, userId: req.user?.id, userName: req.user?.name });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: result.message,
+        affected_schedules: result.affected_schedules
+      });
+    } catch (error) {
+      return res.status(error.statusCode || 400).json({
+        success: false,
+        message: error.message || 'カテゴリの削除に失敗しました。'
+      });
+    }
+  }
 };
 
 // ルーティング定義とのエイリアス対応
@@ -228,6 +341,10 @@ export const {
   createSchedule,
   updateSchedule,
   deleteSchedule,
+  getScheduleCategories,
+  createScheduleCategory,
+  updateScheduleCategory,
+  deleteScheduleCategory,
 } = scheduleController;
 
 export default scheduleController;

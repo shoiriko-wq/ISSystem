@@ -23,6 +23,7 @@ describe('Approval API (/api/approvals)', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.approvals.length).toBeGreaterThanOrEqual(3);
     expect(res.body.approvals.some((a) => a.status === 'PENDING')).toBe(true);
+    expect(res.body.approvals.every((a) => 'applicant_avatar' in a)).toBe(true);
   });
 
   it('POST /api/approvals - 新規申請を 201 で作成できること', async () => {

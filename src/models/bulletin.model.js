@@ -79,6 +79,7 @@ export const bulletinModel = {
           p.attachments,
           p.is_deleted,
           u.name as authorName,
+          u.avatar_url as author_avatar,
           p.created_at as createdAt,
           p.posted_at as postedAt,
           p.posted_at,
@@ -118,6 +119,7 @@ export const bulletinModel = {
           p.target_scope,
           p.attachments,
           u.name as authorName,
+          u.avatar_url as author_avatar,
           p.created_at as createdAt,
           p.created_at,
           p.posted_at as postedAt,
@@ -197,7 +199,7 @@ export const bulletinModel = {
    */
   async findById(id) {
     const res = await query(
-      `SELECT p.*, u.name AS author_name
+      `SELECT p.*, u.name AS author_name, u.avatar_url AS author_avatar
        FROM posts p
        LEFT JOIN users u ON p.author_id = u.id
        WHERE p.id = $1 AND COALESCE(p.is_deleted, 0) = 0`,

@@ -62,21 +62,20 @@ export const chatService = {
     );
 
     const decorated = messages.map((m) => {
-      const unreaders = members
-        .filter((mem) => {
-          const memId = mem.user_id;
-          if (!memId) return false;
-          if (String(memId) === String(m.sender_id)) return false; // 送信者は自身の未読対象外
-          return !readSet.has(`${m.id}::${memId}`);
-        })
-        .map((mem) => mem.user_name || mem.user_id);
+      const unreadMemberList = members.filter((mem) => {
+        const memId = mem.user_id;
+        if (!memId) return false;
+        if (String(memId) === String(m.sender_id)) return false; // 送信者は自身の未読対象外
+        return !readSet.has(`${m.id}::${memId}`);
+      });
+      const readMemberList = members.filter((mem) => readSet.has(`${m.id}::${mem.user_id}`));
 
       return {
         ...m,
-        unreaders,
-        readers: members
-          .filter((mem) => readSet.has(`${m.id}::${mem.user_id}`))
-          .map((mem) => mem.user_name || mem.user_id),
+        unreaders: unreadMemberList.map((mem) => mem.user_name || mem.user_id),
+        unreadIds: unreadMemberList.map((mem) => String(mem.user_id)),
+        readers: readMemberList.map((mem) => mem.user_name || mem.user_id),
+        readIds: readMemberList.map((mem) => String(mem.user_id)),
       };
     });
 
@@ -331,7 +330,22 @@ export const chatService = {
       });
     } catch (err) {}
 
-    return { success: true, channelId, userId, recorded, unreadCount: remainingUnread };
+    return {
+      success: true,
+      channelId,
+      userId,
+      recorded,
+      unreadCount: remainingUnread,
+      reader: await chatModel.getUserBrief(userId),
+    };
+  },
+
+  /**
+   * ユーザー概要（name・avatar_url）取得。既読回执のアバター表示用。
+   * @param {string} userId
+   */
+  async getUserBrief(userId) {
+    return chatModel.getUserBrief(userId);
   },
 
   /**

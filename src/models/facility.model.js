@@ -117,7 +117,7 @@ export const facilityModel = {
 
     try {
       const res = await query(
-        `SELECT r.*, COALESCE(u.name, r.user_name) AS user_name,
+        `SELECT r.*, COALESCE(u.name, r.user_name) AS user_name, u.avatar_url AS avatar_url,
                 COALESCE(res.name, r.facility_id) AS facility_name,
                 COALESCE(r.resource_id, r.facility_id) AS facility_id
          FROM reservations r
@@ -151,7 +151,7 @@ export const facilityModel = {
     if (!start || !end) return this.getReservationsByDate(facilityId);
 
     const res = await query(
-      `SELECT r.*, COALESCE(u.name, r.user_name) AS user_name,
+      `SELECT r.*, COALESCE(u.name, r.user_name) AS user_name, u.avatar_url AS avatar_url,
               COALESCE(r.resource_id, r.facility_id) AS facility_id
        FROM reservations r
        LEFT JOIN users u ON r.user_id = u.id
@@ -218,7 +218,7 @@ export const facilityModel = {
 
     try {
       const res = await query(
-        `SELECT r.*, COALESCE(u.name, r.user_name) AS user_name
+        `SELECT r.*, COALESCE(u.name, r.user_name) AS user_name, u.avatar_url AS avatar_url
          FROM reservations r
          LEFT JOIN users u ON r.user_id = u.id
          WHERE COALESCE(r.resource_id, r.facility_id) = $1

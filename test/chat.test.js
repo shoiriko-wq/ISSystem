@@ -65,6 +65,7 @@ describe('Chat API (/api/chat)', () => {
       .set('Authorization', bearer(token));
     expect(res.statusCode).toBe(200);
     expect(res.body.data.some((m) => m.message === 'Jest確認メッセージ')).toBe(true);
+    expect(res.body.data.every((m) => 'sender_avatar' in m)).toBe(true);
   });
 
   it('PUT /api/chat/channels/:id/read - 既読位置を更新できること', async () => {

@@ -34,6 +34,11 @@ async function get(path) {
   console.log(`GET ${path} -> ${res.status}`, show(body));
 }
 
+async function getJson(path) {
+  const res = await fetch(`${BASE}${path}`, { headers });
+  return res.json().catch(() => ({}));
+}
+
 async function post(path, payload) {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
@@ -115,6 +120,7 @@ const sweep = [
   '/chat/channels/general/members',
   '/facilities/1/reservations?date=2026-11-20',
   '/schedules',
+  '/schedules/categories',
   '/schedules/today',
   '/seating/layouts',
   '/seating/master',
@@ -165,17 +171,31 @@ if (channelId) {
   await put(`/chat/channels/${channelId}/read`, {});
 }
 
-// --- スケジュール CRUD ---
+// --- スケジュール CRUD (カテゴリ複数紐付け・カテゴリフィルタ) ---
+const categoryRes = await getJson('/schedules/categories');
+const categories = categoryRes.categories || categoryRes.data || [];
+console.log('CATEGORIES', categories.length, categories.map((c) => `${c.id}:${c.name}:${c.color_key}`).join(' '));
+
 const schedule = await post('/schedules', {
   title: 'API確認予定',
   event_date: '2026-12-01',
   category: 'MEETING',
+  category_ids: categories.slice(0, 2).map((c) => c.id),
   created_by_user_id: 'kyomu01',
 });
 const scheduleId = schedule?.schedule?.id || schedule?.data?.id || schedule?.id;
 
 if (scheduleId) {
-  await put(`/schedules/${scheduleId}`, { title: 'API確認予定(更新)' });
+  const createdCatIds = (schedule?.schedule?.categoryIds || []).map(Number);
+  console.log('SCHEDULE_CATEGORY_IDS', JSON.stringify(createdCatIds), createdCatIds.length >= 2 ? 'OK (multi)' : 'NG');
+  // カテゴリフィルタ (いずれか1つ以上を含む行事のみ)
+  await get(`/schedules?startDate=2026-12-01&endDate=2026-12-01&categoryIds=${categories[0].id}`);
+  await get(`/schedules?startDate=2026-12-01&endDate=2026-12-01&categoryIds=${categories[1].id}`);
+  const outsideCat = categories.find((c) => !createdCatIds.includes(c.id));
+  const outside = await getJson(`/schedules?startDate=2026-12-01&endDate=2026-12-01&categoryIds=${outsideCat.id}`);
+  const listed = (outside.data || outside.schedules || []).some((s) => s.id === scheduleId);
+  console.log('CATEGORY_FILTER', listed ? 'NG (未選択カテゴリで混入)' : 'OK (OR条件で除外)');
+  await put(`/schedules/${scheduleId}`, { title: 'API確認予定(更新)', category_ids: [categories[0].id] });
   await del(`/schedules/${scheduleId}`);
 }
 

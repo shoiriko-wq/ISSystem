@@ -10,7 +10,7 @@
 
 import { apiGet } from '../api.js';
 
-import { formatDate, escapeHTML, refreshLucideIcons, openModal, showToast } from '../ui-helpers.js';
+import { formatDate, escapeHTML, refreshLucideIcons, openModal, showToast, userAvatarHtml } from '../ui-helpers.js';
 
 import { switchTab } from '../main.js';
 
@@ -380,7 +380,10 @@ export async function loadDashboardData() {
 
             <span class="badge ${b.priority === 'URGENT' || b.category === 'URGENT' ? 'badge-warning' : 'badge'}">${b.postType || b.category || '全般'}</span>
 
-            <span class="text-muted font-mono">${formatDate(b.createdAt || b.created_at)} (${escapeHTML(b.authorName || '教員')})</span>
+            <div class="flex items-center gap-1.5 text-muted font-mono">
+              ${userAvatarHtml({ name: b.authorName || '教員', avatarUrl: b.authorAvatar || b.author_avatar || null, size: 'xs' })}
+              <span>${formatDate(b.createdAt || b.created_at)} (${escapeHTML(b.authorName || '教員')})</span>
+            </div>
 
           </div>
 
@@ -456,6 +459,8 @@ export async function loadDashboardData() {
 
           const userName = r.user_name || r.userName || '教員';
 
+          const avatarUrl = r.avatar_url || r.avatarUrl || null;
+
 
 
           let timeRange = '';
@@ -494,7 +499,10 @@ export async function loadDashboardData() {
 
               </div>
 
-              <span class="text-[10px] text-soft font-bold flex-shrink-0">${escapeHTML(userName)}</span>
+              <div class="flex items-center gap-1.5 flex-shrink-0">
+                ${userAvatarHtml({ name: userName, avatarUrl, size: 'xs' })}
+                <span class="text-[10px] text-soft font-bold">${escapeHTML(userName)}</span>
+              </div>
 
             </div>
 

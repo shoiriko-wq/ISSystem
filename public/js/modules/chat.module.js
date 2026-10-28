@@ -4,7 +4,7 @@
  */
 
 import { apiGet, apiPost, apiPut, apiDelete } from '../api.js';
-import { formatDate, escapeHTML, refreshLucideIcons, showToast, openModal, closeModal } from '../ui-helpers.js';
+import { formatDate, escapeHTML, refreshLucideIcons, showToast, openModal, closeModal, userAvatarHtml } from '../ui-helpers.js';
 import { state, setUnreadCount } from '../state.js';
 import { socketClient } from '../socket.js';
 
@@ -55,11 +55,80 @@ function updateTotalUnread() {
 }
 
 /**
+ * メッセージ表示用メンバー名簿（user_id -> { name, avatar_url }）。未読者名簿の再計算に使う。
+ */
+const memberById = new Map();
+
+/**
+ * 現在ログイン中のユーザーID (staff_code も許容)
+ */
+function currentUserId() {
+  if (!state.currentUser) return null;
+  const id = state.currentUser.id || state.currentUser.staff_code || null;
+  return id ? String(id) : null;
+}
+
+/**
+ * 既読者名簿から指定ユーザーを除く。返り値は変更があったかどうか。
+ * unreadIds (ID名簿) があればIDで判定し、無ければ名前/unreadersで判定するフォールバック。
+ * @param {Object} msg
+ * @param {string} readerId
+ * @param {string} [readerName]
+ */
+function removeReaderFrom(msg, readerId, readerName = null) {
+  if (!readerId) return false;
+
+  if (Array.isArray(msg.unreadIds)) {
+    const filtered = msg.unreadIds.filter((id) => String(id) !== String(readerId));
+    if (filtered.length === msg.unreadIds.length) return false;
+    msg.unreadIds = filtered;
+    msg.unreaders = filtered.map((id) => memberById.get(String(id))?.name || String(id));
+    return true;
+  }
+
+  if (!Array.isArray(msg.unreaders)) return false;
+  const nameToRemove = readerName || memberById.get(String(readerId))?.name;
+  const filtered = msg.unreaders.filter((n) => String(n) !== String(readerId) && n !== nameToRemove);
+  if (filtered.length === msg.unreaders.length) return false;
+  msg.unreaders = filtered;
+  return true;
+}
+
+/**
+ * 自分の閲覧位置までをローカル未読名簿から除外し、既読badgeを差分更新する
+ * @param {string} channelId
+ * @param {string|null} uptoMessageId
+ */
+function applySelfRead(channelId, uptoMessageId = null) {
+  const list = messagesCache[channelId];
+  if (!Array.isArray(list)) return;
+  const myId = currentUserId();
+  if (!myId) return;
+
+  const uptoIdx = uptoMessageId
+    ? list.findIndex((m) => String(m.id) === String(uptoMessageId))
+    : list.length - 1;
+  const endIdx = uptoIdx === -1 ? list.length - 1 : uptoIdx;
+
+  const changed = [];
+  for (let i = 0; i <= endIdx; i++) {
+    if (removeReaderFrom(list[i], myId)) changed.push(list[i]);
+  }
+
+  if (changed.length > 0 && String(channelId) === String(currentChannelId)) {
+    changed.forEach((m) => patchReadFooter(m));
+  }
+}
+
+/**
  * チャンネルの閲覧位置（既読ログ）をサーバーに記録する
  * @param {string} channelId
  * @param {string|null} lastReadMessageId
  */
 async function markChannelRead(channelId, lastReadMessageId = null) {
+  // 閲覧した範囲は即座に自分の未読扱いを解除して表示を一致させる
+  applySelfRead(channelId, lastReadMessageId);
+
   try {
     const res = await apiPut(`/chat/channels/${channelId}/read`, { lastReadMessageId });
     const ch = chatChannels.find((c) => c.id === channelId);
@@ -291,11 +360,13 @@ function setupSocketListeners() {
           id: msgId,
           senderId: senderId,
           senderName: rawMsg.sender_name || rawMsg.senderName || '教員',
+          senderAvatar: rawMsg.sender_avatar || rawMsg.senderAvatar || rawMsg.avatar_url || null,
           text: text,
           hasApprovalCard: rawMsg.has_approval_card || rawMsg.hasApprovalCard || false,
           approved: rawMsg.is_approved || rawMsg.approved || false,
           createdAt: rawMsg.created_at || rawMsg.createdAt || new Date().toISOString(),
-          unreaders: rawMsg.unreaders || []
+          unreaders: rawMsg.unreaders || [],
+          unreadIds: rawMsg.unreadIds || rawMsg.unread_ids || null
         };
 
         const list = messagesCache[channelId];
@@ -303,6 +374,9 @@ function setupSocketListeners() {
         if (exactExists) {
           return;
         }
+
+        // 閲覧中かどうか（チャットタブ且在職チャンネル）
+        const isViewing = String(channelId).trim() === String(currentChannelId).trim() && state.currentTab === 'chat';
 
         // テンポラリ（楽観的更新）メッセージが存在する場合は置き換え、重複表示を防止
         const tempIndex = list.findIndex(m => 
@@ -312,13 +386,22 @@ function setupSocketListeners() {
         );
 
         if (tempIndex !== -1) {
+          const tempId = list[tempIndex].id;
           list[tempIndex] = msgObj;
+          // 該当行のみ差し替え（リスト全体の描き直しない）
+          if (isViewing) replaceMessageRow(tempId, msgObj);
         } else {
           list.push(msgObj);
+          // 新着行のみ追記（リスト全体の描き直しない）
+          if (isViewing) appendMessageRow(msgObj);
         }
 
-        if (String(channelId).trim() === String(currentChannelId).trim()) {
-          renderMessagesList();
+        if (isViewing) {
+          // 画面に表示済みの新着は既読位置に含む（未読残留を防ぐ）
+          const newest = list[list.length - 1];
+          if (newest && !String(newest.id).startsWith('msg-')) {
+            markChannelRead(channelId, newest.id);
+          }
         } else {
           const ch = chatChannels.find(c => c.id === channelId);
           if (ch) ch.unread = (ch.unread || 0) + 1;
@@ -393,21 +476,32 @@ function setupSocketListeners() {
       }
     });
 
-    // 既読回执（メンバーの既読完了表示）
+    // 既読回执（メンバーの既読完了表示：userId で判定し、badge だけ差分更新する）
     socketClient.socket.off('chat:read_receipt');
     socketClient.socket.on('chat:read_receipt', (data) => {
       const list = messagesCache[data.channelId];
-      if (Array.isArray(list) && data.lastReadMessageId) {
-        const idx = list.findIndex((m) => String(m.id) === String(data.lastReadMessageId));
-        const upto = idx === -1 ? list.length : idx;
-        list.slice(0, upto).forEach((m) => {
-          if (Array.isArray(m.unreaders)) {
-            m.unreaders = m.unreaders.filter((n) => n !== data.userName);
-          }
-        });
-        if (String(data.channelId) === String(currentChannelId)) {
-          renderMessagesList();
-        }
+      if (!Array.isArray(list)) return;
+
+      const readerId = data.userId || data.readerName;
+      if (!readerId) return;
+
+      const readerName = data.userName || data.readerName;
+      const idx = data.lastReadMessageId
+        ? list.findIndex((m) => String(m.id) === String(data.lastReadMessageId))
+        : -1;
+
+      // 既読位置が特定できない場合はチャンネル内全メッセージを対象にする
+      const uptoIdx = idx === -1 ? list.length - 1 : idx;
+      const changed = [];
+      for (let i = 0; i <= uptoIdx; i++) {
+        if (removeReaderFrom(list[i], readerId, readerName)) changed.push(list[i]);
+      }
+
+      if (changed.length === 0) return;
+
+      if (String(data.channelId) === String(currentChannelId)) {
+        // 該当行の既読badgeのみ更新（チャットエリアの再読み込みは行わない）
+        changed.forEach((m) => patchReadFooter(m));
       }
     });
 
@@ -419,7 +513,8 @@ function setupSocketListeners() {
       if (Array.isArray(list)) {
         messagesCache[channelId] = list.filter((m) => String(m.id) !== String(data.messageId));
         if (String(channelId) === String(currentChannelId)) {
-          renderMessagesList();
+          // 削除行のみ除去する（全体再描画しない）
+          removeMessageRow(data.messageId);
         }
       }
     });
@@ -651,7 +746,9 @@ export async function loadMessages(channelId = currentChannelId) {
     document.getElementById('chat-btn-renotify-all')?.addEventListener('click', handleRenotifyAll);
     document.getElementById('chat-btn-mark-read')?.addEventListener('click', () => {
       const msgs = messagesCache[channelId] || [];
-      markChannelRead(channelId, msgs.length > 0 ? msgs[0].id : null);
+      // 既読位置は最新メッセージまで（先頭では既読が-progress しない）
+      const newestId = msgs.length > 0 ? msgs[msgs.length - 1].id : null;
+      markChannelRead(channelId, newestId);
     });
     document.getElementById('chat-btn-toggle-visibility')?.addEventListener('click', () => {
       if (isHidden) {
@@ -670,15 +767,18 @@ export async function loadMessages(channelId = currentChannelId) {
       id: m.id,
       senderId: m.sender_id || m.senderId,
       senderName: m.sender_name || m.senderName || '教員',
+      senderAvatar: m.sender_avatar || m.senderAvatar || m.avatar_url || null,
       text: m.message_text || m.text || m.content || '',
       hasApprovalCard: m.has_approval_card || m.hasApprovalCard || false,
       approved: m.is_approved || m.approved || false,
       createdAt: m.created_at || m.createdAt,
-      unreaders: m.unreaders || []
+      unreaders: m.unreaders || [],
+      unreadIds: m.unreadIds || m.unread_ids || null
     }));
 
-    // 表示した範囲を既読としてサーバーの閲覧ログに記録する
-    const lastReadId = messagesCache[channelId].length > 0 ? messagesCache[channelId][0].id : null;
+    // 表示した範囲（最新メッセージまで）を既読としてサーバーの閲覧ログに記録する
+    const cached = messagesCache[channelId];
+    const lastReadId = cached.length > 0 ? cached[cached.length - 1].id : null;
     if (lastReadId && !hiddenChannels.has(channelId)) {
       markChannelRead(channelId, lastReadId);
     }
@@ -722,6 +822,18 @@ async function loadChannelMembers(channelId = currentChannelId) {
   try {
     const res = await apiGet(`/chat/channels/${channelId}/members`);
     const members = res.members || res.data || (Array.isArray(res) ? res : []);
+
+    // 既読者名簿の再計算用ユーザー名簿を構築する
+    memberById.clear();
+    members.forEach((m) => {
+      const uid = String(m.user_id || m.id || '');
+      if (uid) {
+        memberById.set(uid, {
+          name: m.user_name || m.name || '教員',
+          avatar_url: m.avatar_url || m.avatarUrl || null
+        });
+      }
+    });
 
     if (countEl) countEl.textContent = members.length;
 
@@ -811,6 +923,7 @@ async function openCreateGroupModal() {
         <label class="flex items-center justify-between p-1.5 hover-surface rounded cursor-pointer">
           <div class="flex items-center gap-2">
             <input type="checkbox" name="group-member" value="${u.id}" class="rounded border-main bg-surface text-accent focus-ring-accent" ${u.id === currentUserId ? 'checked' : ''}>
+            ${userAvatarHtml({ name: u.name, avatarUrl: u.avatar_url, size: 'xs' })}
             <span class="text-main">${escapeHTML(u.name)}</span>
           </div>
           <span class="text-[10px] text-muted">${escapeHTML(u.department || u.role || '')}</span>
@@ -871,95 +984,27 @@ function renderMessagesList() {
   if (!container) return;
 
   const msgs = messagesCache[currentChannelId] || [];
+  const prevTop = container.scrollTop;
+  const stickToBottom = isNearBottom(container);
 
   if (msgs.length === 0) {
-    container.innerHTML = `<div class="text-center py-12 text-xs text-muted">このチャンネルにはまだメッセージがありません。</div>`;
+    container.innerHTML = `<div data-empty-chat="1" class="text-center py-12 text-xs text-muted">このチャンネルにはまだメッセージがありません。</div>`;
+    refreshLucideIcons();
     return;
   }
 
-  const currentUserId = state.currentUser ? state.currentUser.id : 'me';
-  const currentStaffCode = state.currentUser ? state.currentUser.staff_code : null;
+  container.innerHTML = msgs.map(messageRowHtml).join('');
 
-  container.innerHTML = msgs.map(m => {
-    const isMe = String(m.senderId) === String(currentUserId) ||
-      (currentStaffCode && String(m.senderId) === String(currentStaffCode));
-    const unreadCount = (m.unreaders || []).length;
+  bindMessageAreaEvents(container);
 
-    return `
-      <div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} space-y-1">
-        <div class="flex items-center gap-2 text-[11px] text-muted">
-          <span class="font-bold text-soft">${escapeHTML(m.senderName || m.senderId)}</span>
-          <span class="font-mono text-[10px]">${formatDate(m.createdAt)}</span>
-        </div>
-        
-        <div class="max-w-[85%] md:max-w-[70%] rounded-2xl p-3 text-xs leading-relaxed ${
-          isMe 
-            ? 'bg-accent text-main rounded-tr-none shadow-md' 
-            : 'bg-surface text-main border border-main rounded-tl-none'
-        }">
-          <p class="whitespace-pre-wrap">${escapeHTML(m.text)}</p>
-
-          ${m.hasApprovalCard ? `
-            <div class="mt-3 pt-2.5 border-t border-divider flex flex-col gap-2">
-              <span class="text-[10px] font-bold text-accent-strong flex items-center gap-1">
-                <i data-lucide="check-square" class="w-3.5 h-3.5"></i> 承認・確認リクエスト
-              </span>
-              <div class="flex items-center gap-2">
-                <button class="btn-approval-action py-1 px-3 bg-success hover-success-strong text-main font-bold rounded text-[11px] transition-colors" data-msg-id="${m.id}" data-action="approve">
-                  確認・承認する
-                </button>
-                <span class="text-[10px] opacity-80" id="approval-status-${m.id}">${m.approved ? '✓ 承認済み' : '未承認'}</span>
-              </div>
-            </div>
-          ` : ''}
-        </div>
-
-        <div class="flex items-center gap-2 text-[10px] text-muted">
-          ${unreadCount > 0 ? `
-            <button class="btn-show-unreaders hover:underline text-warning flex items-center gap-1" data-msg-id="${m.id}">
-              <i data-lucide="eye-off" class="w-3 h-3"></i> 未読: ${unreadCount}名
-            </button>
-          ` : `
-            <span class="text-success flex items-center gap-1"><i data-lucide="check-check" class="w-3 h-3"></i> 全員既読</span>
-          `}
-          ${isMe ? `
-            <button class="chat-cancel-btn text-danger hover-text-danger-strong flex items-center gap-1" data-msg-id="${m.id}" title="このコメントを取り消す（自分の発言のみ取り消し可能）">
-              <i data-lucide="undo-2" class="w-3 h-3"></i> 取り消す
-            </button>
-          ` : ''}
-        </div>
-      </div>
-    `;
-  }).join('');
-
-  container.querySelectorAll('.btn-approval-action').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const msgId = btn.getAttribute('data-msg-id');
-      const statusEl = document.getElementById(`approval-status-${msgId}`);
-      if (statusEl) {
-        statusEl.textContent = '✓ 承認完了';
-        statusEl.className = 'text-[10px] text-success-strong font-bold';
-        btn.classList.add('hidden');
-        showToast('承認処理を行いました', 'success');
-      }
-    });
-  });
-
-  container.querySelectorAll('.btn-show-unreaders').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const msgId = btn.getAttribute('data-msg-id');
-      showUnreadersModal(msgId);
-    });
-  });
-
-  container.querySelectorAll('.chat-cancel-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      handleCancelMessage(btn.getAttribute('data-msg-id'));
-    });
-  });
-
-  container.scrollTop = container.scrollHeight;
   refreshLucideIcons();
+
+  // スクロールアンカー: 最下部を閲覧中の時だけ自動スクロールし、他メンバーの追記で位置が飛ばない
+  if (stickToBottom) {
+    container.scrollTop = container.scrollHeight;
+  } else {
+    container.scrollTop = prevTop;
+  }
 }
 
 /**
@@ -980,17 +1025,19 @@ async function sendMessage() {
     id: tempId,
     senderId: state.currentUser ? (state.currentUser.id || state.currentUser.staff_code) : 'me',
     senderName: state.currentUser ? state.currentUser.name : '自分',
+    senderAvatar: state.currentUser ? (state.currentUser.avatar_url || null) : null,
     text,
     hasApprovalCard,
     approved: false,
     createdAt: new Date().toISOString(),
-    unreaders: []
+    unreaders: [],
+    unreadIds: []
   };
 
-  // 楽観的UI更新：送信メッセージを即座にキャッシュに追加して描画（消える現象を防止）
+  // 楽観的UI更新：送信メッセージを即座にキャッシュへ追加し、該当行だけ追記する（全体再描画しない）
   if (!messagesCache[currentChannelId]) messagesCache[currentChannelId] = [];
   messagesCache[currentChannelId].push(newMsg);
-  renderMessagesList();
+  appendMessageRow(newMsg);
 
   textarea.value = '';
   if (approvalCheck) approvalCheck.checked = false;
@@ -1012,12 +1059,16 @@ async function sendMessage() {
           id: serverMsg.id || serverMsg._id || tempId,
           senderId: serverMsg.sender_id || serverMsg.senderId || newMsg.senderId,
           senderName: serverMsg.sender_name || serverMsg.senderName || newMsg.senderName,
+          senderAvatar: serverMsg.sender_avatar || serverMsg.senderAvatar || newMsg.senderAvatar || null,
           text: serverMsg.message || serverMsg.message_text || serverMsg.text || text,
           hasApprovalCard: serverMsg.has_approval_card || serverMsg.hasApprovalCard || hasApprovalCard,
           approved: serverMsg.is_approved || serverMsg.approved || false,
           createdAt: serverMsg.created_at || serverMsg.createdAt || newMsg.createdAt,
-          unreaders: serverMsg.unreaders || []
+          unreaders: serverMsg.unreaders || [],
+          unreadIds: serverMsg.unreadIds || serverMsg.unread_ids || null
         };
+        // 楽観行を実データへ差し替える（该行のみ更新）
+        replaceMessageRow(tempId, list[idx]);
       }
     }
 
@@ -1028,7 +1079,8 @@ async function sendMessage() {
     const list = messagesCache[currentChannelId];
     if (list) {
       messagesCache[currentChannelId] = list.filter(m => m.id !== tempId);
-      renderMessagesList();
+      // 失敗した楽観行のみ除去する
+      removeMessageRow(tempId);
     }
   }
 }
@@ -1036,20 +1088,247 @@ async function sendMessage() {
 function showUnreadersModal(msgId) {
   const msgs = messagesCache[currentChannelId] || [];
   const msg = msgs.find(m => String(m.id) === String(msgId));
-  if (!msg || !msg.unreaders) return;
+  if (!msg) return;
 
-  const listStr = msg.unreaders.join(', ');
+  const ids = Array.isArray(msg.unreadIds) ? msg.unreadIds.map((id) => String(id)) : [];
+  const names = (msg.unreaders || []).filter((n) => n);
+  const displayList = names.length > 0 ? names : ids.map((id) => memberById.get(id)?.name || id);
+
+  if (displayList.length === 0) {
+    showToast('このメッセージは全員既読です', 'success');
+    return;
+  }
+
+  const listStr = displayList.join(', ');
   const confirmRenotify = confirm(`【未読者リスト】\n${listStr}\n\n対象教員にリアルタイム再通知を送信しますか？`);
 
   if (confirmRenotify) {
-    apiPost('/chat/renotify', { messageId: msgId, targetUsers: msg.unreaders })
-      .then(() => showToast(`${msg.unreaders.length}名の未読教員へ再通知を送信しました`, 'success'))
+    // 対象はユーザーID名簿で特定する（表示名と実体の不一致を防ぐ）
+    const targetUserIds = ids.length > 0 ? ids : displayList;
+    apiPost('/chat/renotify', { messageId: msgId, targetUsers: targetUserIds })
+      .then(() => showToast(`${displayList.length}名の未読教員へ再通知を送信しました`, 'success'))
       .catch(() => showToast(`未読教員へ再通知を送信しました`, 'info'));
   }
 }
 
-function handleRenotifyAll() {
-  showToast('現在のチャンネルの未読教員へ一括再通知を送信しました', 'success');
+async function handleRenotifyAll() {
+  const list = messagesCache[currentChannelId] || [];
+  const ids = new Set();
+  list.forEach((m) => {
+    (m.unreadIds || []).forEach((id) => ids.add(String(id)));
+  });
+
+  if (ids.size === 0) {
+    showToast('未読者はいません（全員既読です）', 'success');
+    return;
+  }
+
+  try {
+    await apiPost('/chat/renotify', { channelId: currentChannelId, targetUsers: Array.from(ids) });
+    showToast(`${ids.size}名の未読教員へ再通知を送信しました`, 'success');
+  } catch (e) {
+    showToast(`${ids.size}名の未読教員へ再通知を送信しました`, 'info');
+  }
+}
+
+/**
+ * メッセージ表示領域が最下部（新着が見えている状態）かどうか
+ * @param {HTMLElement} el
+ * @param {number} [threshold]
+ */
+function isNearBottom(el, threshold = 160) {
+  if (!el) return true;
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
+}
+
+/**
+ * メッセージクリックを一元委譲する（描画ごとの再バインド・全体再描画を避ける）
+ * @param {HTMLElement} container
+ */
+function bindMessageAreaEvents(container) {
+  if (!container || container.dataset.msgDelegated === '1') return;
+  container.dataset.msgDelegated = '1';
+
+  container.addEventListener('click', (e) => {
+    const btn = e.target && e.target.closest ? e.target.closest('[data-msg-id]') : null;
+    if (!btn) return;
+    const msgId = btn.getAttribute('data-msg-id');
+
+    if (btn.classList.contains('btn-approval-action')) {
+      const statusEl = document.getElementById(`approval-status-${msgId}`);
+      if (statusEl) {
+        statusEl.textContent = '✓ 承認完了';
+        statusEl.className = 'text-[10px] text-success-strong font-bold';
+        btn.classList.add('hidden');
+        showToast('承認処理を行いました', 'success');
+      }
+      apiPut(`/chat/messages/${msgId}/approve`, { approved: true }).catch(() => {});
+      const msg = (messagesCache[currentChannelId] || []).find((m) => String(m.id) === String(msgId));
+      if (msg) msg.approved = true;
+    } else if (btn.classList.contains('chat-cancel-btn')) {
+      handleCancelMessage(msgId);
+    } else if (btn.classList.contains('btn-show-unreaders')) {
+      showUnreadersModal(msgId);
+    }
+  });
+}
+
+/**
+ * 自分自身の発言かどうか（id / staff_code の両方で判定）
+ * @param {Object} m
+ */
+function isMyMessage(m) {
+  const myId = currentUserId();
+  const myStaff = state.currentUser ? state.currentUser.staff_code : null;
+  return String(m.senderId) === String(myId) || String(m.senderId) === String(myStaff);
+}
+
+/**
+ * 既読badge部分のHTML（未読名 / 全員既読 / 取り消しボタン）
+ * @param {Object} m
+ */
+function readFooterInner(m) {
+  const unreadCount = (m.unreaders || []).length;
+  const isMe = isMyMessage(m);
+
+  const unreadPart = unreadCount > 0
+    ? `<button class="btn-show-unreaders hover:underline text-warning flex items-center gap-1" data-msg-id="${m.id}">
+        <i data-lucide="eye-off" class="w-3 h-3"></i> 未読: ${unreadCount}名
+      </button>`
+    : `<span class="text-success flex items-center gap-1"><i data-lucide="check-check" class="w-3 h-3"></i> 全員既読</span>`;
+
+  const cancelPart = isMe
+    ? `<button class="chat-cancel-btn text-danger hover-text-danger-strong flex items-center gap-1" data-msg-id="${m.id}" title="このコメントを取り消す（自分の発言のみ取り消し可能）">
+        <i data-lucide="undo-2" class="w-3 h-3"></i> 取り消す
+      </button>`
+    : '';
+
+  return `${unreadPart}${cancelPart}`;
+}
+
+/**
+ * 該当メッセージのDOM行を取得（data-msg-id で特定）
+ * @param {string} msgId
+ */
+function findMessageRow(msgId) {
+  const container = document.getElementById('chat-messages-container');
+  if (!container || msgId === undefined || msgId === null) return null;
+  const safe = String(msgId).replace(/"/g, '');
+  return container.querySelector(`[data-msg-id="${safe}"]`);
+}
+
+/**
+ * メッセージ行HTML（アバター + 発言者 + 本文 + 既読badge + 取り消しボタン）
+ * @param {Object} m
+ */
+function messageRowHtml(m) {
+  const isMe = isMyMessage(m);
+  const senderAvatarUrl = m.senderAvatar || m.sender_avatar || m.avatar_url || null;
+
+  return `
+    <div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} space-y-1" data-msg-id="${m.id}">
+      <div class="flex items-center gap-2 text-[11px] text-muted">
+        ${isMe ? '' : userAvatarHtml({ name: m.senderName || m.senderId, avatarUrl: senderAvatarUrl, size: 'xs' })}
+        <span class="font-bold text-soft">${escapeHTML(m.senderName || m.senderId)}</span>
+        <span class="font-mono text-[10px]">${formatDate(m.createdAt)}</span>
+        ${isMe ? userAvatarHtml({ name: state.currentUser?.name || '自分', avatarUrl: state.currentUser?.avatar_url || null, size: 'xs' }) : ''}
+      </div>
+
+      <div class="max-w-[85%] md:max-w-[70%] rounded-2xl p-3 text-xs leading-relaxed ${
+        isMe
+          ? 'bg-accent text-main rounded-tr-none shadow-md'
+          : 'bg-surface text-main border border-main rounded-tl-none'
+      }">
+        <p class="whitespace-pre-wrap">${escapeHTML(m.text)}</p>
+
+        ${m.hasApprovalCard ? `
+          <div class="mt-3 pt-2.5 border-t border-divider flex flex-col gap-2">
+            <span class="text-[10px] font-bold text-accent-strong flex items-center gap-1">
+              <i data-lucide="check-square" class="w-3.5 h-3.5"></i> 承認・確認リクエスト
+            </span>
+            <div class="flex items-center gap-2">
+              <button class="btn-approval-action py-1 px-3 bg-success hover-success-strong text-main font-bold rounded text-[11px] transition-colors" data-msg-id="${m.id}" data-action="approve">
+                確認・承認する
+              </button>
+              <span class="text-[10px] opacity-80" id="approval-status-${m.id}">${m.approved ? '✓ 承認済み' : '未承認'}</span>
+            </div>
+          </div>
+        ` : ''}
+      </div>
+
+      <div class="flex items-center gap-2 text-[10px] text-muted" data-read-footer>
+        ${readFooterInner(m)}
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * 新着メッセージ行を追記する（リスト全体を描き直さない差分更新）
+ * @param {Object} m
+ */
+function appendMessageRow(m) {
+  const container = document.getElementById('chat-messages-container');
+  if (!container) return;
+  const stickToBottom = isNearBottom(container);
+
+  if (container.querySelector('[data-empty-chat]')) container.innerHTML = '';
+
+  const temp = document.createElement('div');
+  temp.innerHTML = messageRowHtml(m);
+  const row = temp.firstElementChild;
+  if (!row) return;
+
+  container.appendChild(row);
+  refreshLucideIcons();
+
+  if (stickToBottom) container.scrollTop = container.scrollHeight;
+}
+
+/**
+ * 楽観更新（テンポラリID）を実メッセージへ差し替える
+ * @param {string} oldId
+ * @param {Object} m
+ */
+function replaceMessageRow(oldId, m) {
+  const row = findMessageRow(oldId);
+  const container = document.getElementById('chat-messages-container');
+  if (!row || !container) {
+    appendMessageRow(m);
+    return;
+  }
+
+  const temp = document.createElement('div');
+  temp.innerHTML = messageRowHtml(m);
+  const newRow = temp.firstElementChild;
+  if (!newRow) return;
+
+  const stickToBottom = isNearBottom(container);
+  row.replaceWith(newRow);
+  refreshLucideIcons();
+  if (stickToBottom) container.scrollTop = container.scrollHeight;
+}
+
+/**
+ * 削除されたメッセージ行を取り除く（再描画なし）
+ * @param {string} msgId
+ */
+function removeMessageRow(msgId) {
+  const row = findMessageRow(msgId);
+  if (row) row.remove();
+}
+
+/**
+ * 既読badgeのみを差分更新する
+ * @param {Object} m
+ */
+function patchReadFooter(m) {
+  const row = findMessageRow(m.id);
+  if (!row) return;
+  const footer = row.querySelector('[data-read-footer]');
+  if (!footer) return;
+  footer.innerHTML = readFooterInner(m);
+  refreshLucideIcons();
 }
 
 function getDummyMessages(channelId) {

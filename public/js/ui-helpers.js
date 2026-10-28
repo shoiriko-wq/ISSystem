@@ -14,6 +14,35 @@ export function refreshLucideIcons() {
 }
 
 /**
+ * ユーザーアバター（丸型アイコン）のHTML生成
+ * avatar_url があれば画像、無ければ lucide user アイコンをフォールバックとして描画する。
+ * @param {Object} opts
+ * @param {string} [opts.name] 表示名（alt とフォールバック頭文字に使用）
+ * @param {string} [opts.avatarUrl] アバター画像URL
+ * @param {'xs'|'sm'|'md'|'lg'} [opts.size='sm'] サイズ
+ * @returns {string} HTML
+ */
+export function userAvatarHtml({ name = '', avatarUrl = '', size = 'sm' } = {}) {
+  const sizeMap = {
+    xs: { box: 'w-5 h-5', icon: 'w-3 h-3', text: 'text-[9px]' },
+    sm: { box: 'w-6 h-6', icon: 'w-3.5 h-3.5', text: 'text-[10px]' },
+    md: { box: 'w-8 h-8', icon: 'w-4 h-4', text: 'text-xs' },
+    lg: { box: 'w-10 h-10', icon: 'w-5 h-5', text: 'text-sm' },
+  };
+  const s = sizeMap[size] || sizeMap.sm;
+  const initial = escapeHTML(String(name).trim().charAt(0) || '教');
+
+  if (avatarUrl) {
+    return `<div class="${s.box} rounded-full bg-accent-soft border border-accent flex items-center justify-center overflow-hidden shrink-0">
+      <img src="${escapeHTML(avatarUrl)}" class="w-full h-full object-cover" alt="${initial}">
+    </div>`;
+  }
+  return `<div class="${s.box} rounded-full bg-accent-soft border border-accent flex items-center justify-center text-accent-strong font-bold shrink-0">
+    ${initial}
+  </div>`;
+}
+
+/**
  * トースト通知メッセージの表示
  * @param {string} message 
  * @param {'info'|'success'|'warning'|'error'} [type='info'] 

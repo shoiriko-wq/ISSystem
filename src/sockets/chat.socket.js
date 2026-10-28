@@ -211,7 +211,8 @@ export function registerChatSocketHandlers(io, socket) {
       socket.to(`chat:channel:${channelId}`).emit('chat:read_receipt', {
         channelId,
         userId: user.id,
-        userName: user.name,
+        userName: result?.reader?.name || user.name,
+        userAvatar: result?.reader?.avatar_url || null,
         lastReadMessageId,
       });
     } catch (error) {

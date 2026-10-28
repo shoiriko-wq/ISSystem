@@ -4,7 +4,7 @@
  */
 
 import { apiGet, apiPost, apiPut } from '../api.js';
-import { formatDate, escapeHTML, refreshLucideIcons, openModal, closeModal, showToast } from '../ui-helpers.js';
+import { formatDate, escapeHTML, refreshLucideIcons, openModal, closeModal, showToast, userAvatarHtml } from '../ui-helpers.js';
 import { state } from '../state.js';
 
 let currentFilterStatus = 'ALL';
@@ -119,7 +119,9 @@ export async function loadApprovals() {
       status: item.status || 'PENDING',
       applicantId: item.applicant_id || item.applicantId,
       applicantName: item.applicant_name || item.applicantName || '教員',
+      applicantAvatar: item.applicant_avatar || item.applicantAvatar || null,
       approvedBy: item.approved_by || item.approvedBy,
+      approverAvatar: item.approver_avatar || item.approverAvatar || null,
       createdAt: item.created_at || item.createdAt,
       updatedAt: item.updated_at || item.updatedAt
     }));
@@ -171,8 +173,9 @@ function renderApprovalList() {
             <span class="badge bg-surface text-soft border-main">${catLabel}</span>
             ${item.amount ? `<span class="text-xs font-mono font-bold text-success">¥${Number(item.amount).toLocaleString()}</span>` : ''}
           </div>
-          <div class="text-[11px] text-muted font-mono">
-            申請者: <strong class="text-main">${escapeHTML(item.applicantName || '教員')}</strong> (${formatDate(item.createdAt)})
+          <div class="flex items-center gap-1.5 justify-end text-[11px] text-muted font-mono">
+            ${userAvatarHtml({ name: item.applicantName || '教員', avatarUrl: item.applicantAvatar, size: 'xs' })}
+            <span>申請者: <strong class="text-main">${escapeHTML(item.applicantName || '教員')}</strong> (${formatDate(item.createdAt)})</span>
           </div>
         </div>
 
@@ -181,7 +184,8 @@ function renderApprovalList() {
 
         <!-- 決裁エリア -->
         <div class="flex items-center justify-between pt-3 border-t border-divider text-xs">
-          <div class="text-[11px] text-muted font-mono">
+          <div class="flex items-center gap-1.5 text-[11px] text-muted font-mono">
+            ${item.status !== 'PENDING' && item.approverAvatar ? userAvatarHtml({ name: item.approvedBy || '教務主任', avatarUrl: item.approverAvatar, size: 'xs' }) : ''}
             ${approvalStatusText}
           </div>
 

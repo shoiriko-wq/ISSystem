@@ -45,7 +45,7 @@ export class ApprovalModel {
     const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
 
     const res = await query(
-      `SELECT a.*, u.name AS applicant_name, ap.name AS approver_name
+      `SELECT a.*, u.name AS applicant_name, u.avatar_url AS applicant_avatar, ap.name AS approver_name, ap.avatar_url AS approver_avatar
        FROM approvals a
        LEFT JOIN users u ON a.applicant_id = u.id
        LEFT JOIN users ap ON a.approver_id = ap.id
@@ -58,7 +58,7 @@ export class ApprovalModel {
 
   async findById(id) {
     const res = await query(
-      `SELECT a.*, u.name AS applicant_name, ap.name AS approver_name
+      `SELECT a.*, u.name AS applicant_name, u.avatar_url AS applicant_avatar, ap.name AS approver_name, ap.avatar_url AS approver_avatar
        FROM approvals a
        LEFT JOIN users u ON a.applicant_id = u.id
        LEFT JOIN users ap ON a.approver_id = ap.id
