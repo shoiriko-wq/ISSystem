@@ -264,7 +264,7 @@ export const chatModel = {
 
   /**
    * チャンネルのメッセージ履歴取得 (時系列昇順)
-   * ※ 存在しない m.message_text をクエリから完全除去
+   * ※ 取り消済み (is_cancelled=1) の行は本文を一切返さない（通信に載せない）
    * @param {string} channelId
    * @param {number} limit
    */
@@ -276,6 +276,8 @@ export const chatModel = {
       const res = await query(
         `SELECT m.id, m.channel_id, m.sender_id, 
                 m.message,
+                m.is_cancelled,
+                m.cancelled_at,
                 m.created_at,
                 COALESCE(u.name, m.sender_id) as sender_name, u.role as sender_role, u.avatar_url as sender_avatar
          FROM chat_messages m
@@ -289,18 +291,34 @@ export const chatModel = {
 
       if (rows && rows.length > 0) {
         // JS側でフロントエンド互換の全命名規則プロパティをセット
-        return rows.map(r => ({
-          ...r,
-          message_text: r.message,
-          content: r.message,
-          senderName: r.sender_name || r.sender_id || '教員',
-          sender_name: r.sender_name || r.sender_id || '教員',
-          senderId: r.sender_id,
-          sender_id: r.sender_id,
-          senderAvatar: r.sender_avatar || r.avatar_url || null,
-          sender_avatar: r.sender_avatar || r.avatar_url || null,
-          avatar_url: r.sender_avatar || r.avatar_url || null
-        }));
+        return rows.map(r => {
+          const isCancelled = r.is_cancelled === 1 || r.is_cancelled === true;
+          const decorated = {
+            ...r,
+            message_text: r.message,
+            content: r.message,
+            senderName: r.sender_name || r.sender_id || '教員',
+            sender_name: r.sender_name || r.sender_id || '教員',
+            senderId: r.sender_id,
+            sender_id: r.sender_id,
+            senderAvatar: r.sender_avatar || r.avatar_url || null,
+            sender_avatar: r.sender_avatar || r.avatar_url || null,
+            avatar_url: r.sender_avatar || r.avatar_url || null
+          };
+
+          // 取り消済み: 本文を除去し、取り消し状態のみ伝える（投稿時間は元の送信時刻のまま）
+          if (isCancelled) {
+            decorated.cancelled = true;
+            decorated.is_cancelled = true;
+            decorated.message = null;
+            decorated.message_text = null;
+            decorated.content = null;
+            decorated.text = null;
+            decorated.cancelledAt = r.cancelled_at || null;
+          }
+
+          return decorated;
+        });
       }
     } catch (error) {
       console.warn('[ChatModel PG Warning] getMessages DB query failed:', error.message);
@@ -310,10 +328,30 @@ export const chatModel = {
   },
 
   /**
-   * メッセージの削除（送信者による取り消し）
+   * メッセージの取り消し（送信者による取り消し）
+   * ※ 行は削除せず is_cancelled フラグを立てる。既読ログと投稿時間はそのまま残す。
    * @param {string} messageId
    */
   async deleteMessage(messageId) {
+    try {
+      const db = await getDb();
+      const res = await db.run(
+        `UPDATE chat_messages SET is_cancelled = 1, cancelled_at = ? WHERE id = ?`,
+        [nowIso(), messageId]
+      );
+      await db.close();
+      return (res?.changes ?? 0) > 0;
+    } catch (error) {
+      console.warn('[ChatModel] deleteMessage (cancel) failed:', error.message);
+      return false;
+    }
+  },
+
+  /**
+   * 取り消し状態のメッセージを物理削除する（運用整理用。取り消し処理では使わない）
+   * @param {string} messageId
+   */
+  async purgeMessage(messageId) {
     try {
       const db = await getDb();
       await db.run(`DELETE FROM chat_message_reads WHERE message_id = ?`, [messageId]);
@@ -321,7 +359,7 @@ export const chatModel = {
       await db.close();
       return true;
     } catch (error) {
-      console.warn('[ChatModel] deleteMessage failed:', error.message);
+      console.warn('[ChatModel] purgeMessage failed:', error.message);
       return false;
     }
   },
@@ -513,6 +551,7 @@ export const {
   getChannelMessages,
   toggleHideChannel,
   deleteMessage,
+  purgeMessage,
   findMessageById,
   getChannelReads,
   markChannelRead,

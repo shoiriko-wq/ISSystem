@@ -126,11 +126,21 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   sender_id TEXT NOT NULL,
   message TEXT NOT NULL,
   meta_data TEXT DEFAULT '{}',
+  is_cancelled INTEGER DEFAULT 0,
+  cancelled_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (channel_id) REFERENCES chat_channels(id) ON DELETE CASCADE,
   FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_chat_channel_time ON chat_messages(channel_id, created_at ASC);
+
+-- メッセージ取り消し (is_cancelled)
+-- 取り消し後は行を残し「取り消された」状態だけを保持する。本文 (message) は
+-- サーバー側に残すが、クライアントとの通信（履歴取得・リアルタイム通知）には一切載せない。
+-- 投稿時間 created_at は取り消し前の送信時刻のまま変更しない。
+ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS is_cancelled INTEGER DEFAULT 0;
+ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP;
+CREATE INDEX IF NOT EXISTS idx_chat_cancelled ON chat_messages(channel_id, is_cancelled);
 
 -- 5b. チャットメッセージ既読ログ (chat_message_reads)
 -- 「誰が・どのメッセージを・いつ既読したか」を記録し、未読者一覧と未読バッジ数を算出する

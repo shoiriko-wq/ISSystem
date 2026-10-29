@@ -221,8 +221,9 @@ export function registerChatSocketHandlers(io, socket) {
   });
 
   /**
-   * コメント取り消し（送信者本人のみ削除可）
+   * コメント取り消し（送信者本人のみ取り消し可）
    * event: 'chat:cancel_message'
+   * ※ 取り消した本文はクライアントとの通信に載せない。状態変更のみを通知する。
    */
   socket.on('chat:cancel_message', async (data, callback) => {
     try {
@@ -234,12 +235,12 @@ export function registerChatSocketHandlers(io, socket) {
 
       const result = await chatService.cancelMessage(messageId, user);
 
-      // チャンネル参加者へ取り消しを通知（列表からの即時除去）
-      socket.to(`chat:channel:${result.channelId}`).emit('chat:message_deleted', {
+      // チャンネル参加者へ取り消しを通知（本文は含めず、取り消し表示へ差し替える）
+      socket.to(`chat:channel:${result.channelId}`).emit('chat:message_cancelled', {
         channelId: result.channelId,
         messageId,
-        deletedBy: user.id,
-        deletedByName: user.name,
+        cancelledBy: user.id,
+        cancelledByName: user.name,
       });
 
       // 影響を受けたメンバーの未読バッジを再計算して同期

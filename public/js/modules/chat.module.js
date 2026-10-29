@@ -362,6 +362,7 @@ function setupSocketListeners() {
           senderName: rawMsg.sender_name || rawMsg.senderName || '教員',
           senderAvatar: rawMsg.sender_avatar || rawMsg.senderAvatar || rawMsg.avatar_url || null,
           text: text,
+          cancelled: rawMsg.cancelled === true || rawMsg.is_cancelled === 1,
           hasApprovalCard: rawMsg.has_approval_card || rawMsg.hasApprovalCard || false,
           approved: rawMsg.is_approved || rawMsg.approved || false,
           createdAt: rawMsg.created_at || rawMsg.createdAt || new Date().toISOString(),
@@ -505,17 +506,26 @@ function setupSocketListeners() {
       }
     });
 
-    // コメント取り消しのリアルタイム反映（グループ削除機能は廃止済み）
-    socketClient.socket.off('chat:message_deleted');
-    socketClient.socket.on('chat:message_deleted', (data) => {
+    // コメント取り消しのリアルタイム反映（本文は受信しない。取り消し表示へ差し替える）
+    socketClient.socket.off('chat:message_cancelled');
+    socketClient.socket.on('chat:message_cancelled', (data) => {
       const channelId = data.channelId;
       const list = messagesCache[channelId];
-      if (Array.isArray(list)) {
-        messagesCache[channelId] = list.filter((m) => String(m.id) !== String(data.messageId));
-        if (String(channelId) === String(currentChannelId)) {
-          // 削除行のみ除去する（全体再描画しない）
-          removeMessageRow(data.messageId);
-        }
+      if (!Array.isArray(list)) return;
+
+      const target = list.find((m) => String(m.id) === String(data.messageId));
+      if (!target) return;
+
+      target.cancelled = true;
+      target.cancelledAt = data.cancelledAt || new Date().toISOString();
+      target.text = '';
+      target.message = null;
+      target.message_text = null;
+      target.content = null;
+
+      // 該当行のみ取り消し表示へ差し替える（リスト全体は再描画しない）
+      if (String(channelId) === String(currentChannelId)) {
+        patchCancelledRow(target);
       }
     });
 
@@ -769,6 +779,8 @@ export async function loadMessages(channelId = currentChannelId) {
       senderName: m.sender_name || m.senderName || '教員',
       senderAvatar: m.sender_avatar || m.senderAvatar || m.avatar_url || null,
       text: m.message_text || m.text || m.content || '',
+      cancelled: m.cancelled === true || m.is_cancelled === 1 || m.is_cancelled === true,
+      cancelledAt: m.cancelled_at || m.cancelledAt || null,
       hasApprovalCard: m.has_approval_card || m.hasApprovalCard || false,
       approved: m.is_approved || m.approved || false,
       createdAt: m.created_at || m.createdAt,
@@ -794,17 +806,30 @@ export async function loadMessages(channelId = currentChannelId) {
 }
 
 /**
- * コメント（メッセージ）取り消し処理 ※送信者本人のみ削除可能
+ * コメント（メッセージ）取り消し処理 ※送信者本人のみ取り消し可能
+ * ※ 取り消した本文はクライアント側でも即座に破棄し、取り消し表示へ差し替える
  * @param {string} messageId
  */
 async function handleCancelMessage(messageId) {
-  if (!confirm('【コメント取り消し】\n送信したコメントを削除しますか？\n（この操作は元に戻せません）')) return;
+  if (!confirm('【コメント取り消し】\n送信したコメントを取り消しますか？\n（取り消したコメントの本文は表示されなくなり、この操作は元に戻せません）')) return;
 
   try {
     const res = await apiDelete(`/chat/messages/${messageId}`);
+
     const list = messagesCache[currentChannelId] || [];
-    messagesCache[currentChannelId] = list.filter((m) => String(m.id) !== String(messageId));
-    renderMessagesList();
+    const target = list.find((m) => String(m.id) === String(messageId));
+
+    if (target) {
+      // 本文をローカルキャッシュからも完全に除去し、取り消し表示へ差し替える
+      target.cancelled = true;
+      target.cancelledAt = new Date().toISOString();
+      target.text = '';
+      target.message = null;
+      target.message_text = null;
+      target.content = null;
+      patchCancelledRow(target);
+    }
+
     showToast(res.message || 'コメントを取り消しました', 'success');
   } catch (e) {
     showToast('コメントの取り消しに失敗しました: ' + e.message, 'error');
@@ -1188,6 +1213,8 @@ function isMyMessage(m) {
  * @param {Object} m
  */
 function readFooterInner(m) {
+  if (m.cancelled) return '';
+
   const unreadCount = (m.unreaders || []).length;
   const isMe = isMyMessage(m);
 
@@ -1219,9 +1246,12 @@ function findMessageRow(msgId) {
 
 /**
  * メッセージ行HTML（アバター + 発言者 + 本文 + 既読badge + 取り消しボタン）
+ * ※ 取り消済みメッセージは本文を一切表示しない（サーバーから本文は配信されない）
  * @param {Object} m
  */
 function messageRowHtml(m) {
+  if (m.cancelled) return cancelledMessageRowHtml(m);
+
   const isMe = isMyMessage(m);
   const senderAvatarUrl = m.senderAvatar || m.sender_avatar || m.avatar_url || null;
 
@@ -1262,6 +1292,60 @@ function messageRowHtml(m) {
     </div>
   `;
 }
+
+/**
+ * 取り消済みメッセージの行HTML
+ * ※ 本人が「メッセージは取り消されました。」と書いた発言と混同されないよう、
+ *   ダッシュ枠・斜体・「システム表示」バッジでシステム注記として描画する。
+ *   投稿時間は取り消す前の送信時刻のまま表示する（変更しない）。
+ * @param {Object} m
+ */
+function cancelledMessageRowHtml(m) {
+  const isMe = isMyMessage(m);
+  const senderAvatarUrl = m.senderAvatar || m.sender_avatar || m.avatar_url || null;
+
+  return `
+    <div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} space-y-1" data-msg-id="${m.id}" data-cancelled="1">
+      <div class="flex items-center gap-2 text-[11px] text-muted">
+        ${isMe ? '' : userAvatarHtml({ name: m.senderName || m.senderId, avatarUrl: senderAvatarUrl, size: 'xs' })}
+        <span class="font-bold text-soft">${escapeHTML(m.senderName || m.senderId)}</span>
+        <span class="font-mono text-[10px]">${formatDate(m.createdAt)}</span>
+        ${isMe ? userAvatarHtml({ name: state.currentUser?.name || '自分', avatarUrl: state.currentUser?.avatar_url || null, size: 'xs' }) : ''}
+      </div>
+
+      <div class="chat-cancelled-note max-w-[85%] md:max-w-[70%] rounded-2xl px-3 py-2 text-xs leading-relaxed">
+        <div class="flex items-center gap-1.5">
+          <i data-lucide="ban" class="w-3.5 h-3.5 shrink-0"></i>
+          <span>メッセージが取り消されました。</span>
+        </div>
+        <span class="chat-cancelled-badge mt-1.5">
+          <i data-lucide="shield-alert" class="w-3 h-3"></i> システム表示（${escapeHTML(m.senderName || m.senderId)} の取り消し操作）
+        </span>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * 取り消し表示へ差分更新する（該当行のみ差し替え、リスト全体は描き直さない）
+ * @param {Object} m
+ */
+function patchCancelledRow(m) {
+  const container = document.getElementById('chat-messages-container');
+  const row = findMessageRow(m.id);
+  if (!container || !row) return;
+
+  const temp = document.createElement('div');
+  temp.innerHTML = cancelledMessageRowHtml(m);
+  const newRow = temp.firstElementChild;
+  if (!newRow) return;
+
+  const stickToBottom = isNearBottom(container);
+  row.replaceWith(newRow);
+  refreshLucideIcons();
+  if (stickToBottom) container.scrollTop = container.scrollHeight;
+}
+
 
 /**
  * 新着メッセージ行を追記する（リスト全体を描き直さない差分更新）
