@@ -746,6 +746,22 @@ export const examService = {
     return { phases, derived_count: derived.length };
   },
 
+  /** 出張等登録を公表（教務のみ・登録開始済みであること） */
+  async publishTrips(examMasterId, user) {
+    ensureKyomu(user);
+    const master = await ensureMaster(examMasterId);
+    const phases = await examModel.getPhases(examMasterId);
+    if (phases.trip_phase === PHASE.DRAFT) {
+      const err = new Error('出張等登録が開始されていません。「出張等の登録を開始」後に公表できます。');
+      err.status = 400;
+      throw err;
+    }
+    const trips = await examModel.listTrips(examMasterId);
+    const updated = await examModel.setPhase(examMasterId, 'trip_phase', PHASE.PUBLISHED, user.id);
+    await audit('EXAM_TRIP_PUBLISH', user, 'exam_master', examMasterId, `考査「${master.title}」の出張等を公表（${trips.length}件）`);
+    return { phases: updated, published: trips.length };
+  },
+
   async addTripRow(examMasterId, row, user) {
     const phases = await examModel.getPhases(examMasterId);
     const kyomu = isKyomu(user);
@@ -798,7 +814,7 @@ export const examService = {
     const list = Array.isArray(rows) ? rows : [rows];
     const saved = [];
     for (const row of list) {
-      if (!kyomu && Number(row.teacher_id) !== Number(user.id)) {
+      if (!kyomu && String(row.teacher_id) !== String(user.id)) {
         const err = new Error('自分の出張・外出・私用・欠席のみ登録できます。');
         err.status = 403;
         throw err;
@@ -834,7 +850,7 @@ export const examService = {
       err.status = 404;
       throw err;
     }
-    if (!kyomu && Number(target.teacher_id) !== Number(user.id)) {
+    if (!kyomu && String(target.teacher_id) !== String(user.id)) {
       const err = new Error('自分の出張・外出・私用・欠席のみ削除できます。');
       err.status = 403;
       throw err;
@@ -1015,16 +1031,23 @@ export const examService = {
     });
 
     const parttimeStaff = (await examModel.listParttimeStaff(examMasterId)).map((p) => ({
-      teacher_id: p.staff_id,
+      id: p.id,
+      staff_id: p.staff_id ?? p.teacher_id,
+      teacher_id: p.staff_id ?? p.teacher_id,
       staff_name: p.staff_name ?? p.name ?? null,
       daily_limit: p.slot_condition?.max_slots_per_day ?? null,
       max_consecutive: p.slot_condition?.max_consecutive_slots ?? null,
+      consecutive_rule: p.consecutive_rule ?? 'MAX1',
+      notes: p.notes ?? null,
     }));
 
     const availability = (await examModel.listParttimeAvailability(examMasterId)).map((a) => ({
-      teacher_id: a.staff_id,
+      staff_id: a.staff_id ?? a.teacher_id,
+      teacher_id: a.staff_id ?? a.teacher_id,
+      staff_name: a.staff_name ?? null,
       day_number: Number(a.day_number),
       slot_number: Number(a.slot_number),
+      available: a.available !== false,
       can_work: a.available !== false,
     }));
 
@@ -1072,6 +1095,13 @@ export const examService = {
       availability,
       trips,
       exemptions,
+      constraints: constraints.map((c) => ({
+        teacher_id: c.teacher_id,
+        teacher_name: c.teacher_name ?? null,
+        max_slots_per_day: c.constraint_type?.max_slots_per_day ?? null,
+        max_consecutive_slots: c.constraint_type?.max_consecutive_slots ?? null,
+        notes: c.notes ?? null,
+      })),
       rules,
       timetable,
       input: {
@@ -1154,7 +1184,7 @@ export const examService = {
       proctor_name: r.proctor_name,
       setter_teacher_id: r.setter_teacher_id,
       setter_teacher_name: r.setter_teacher_name,
-      is_mine: Number(r.proctor_teacher_id) === Number(user.id),
+      is_mine: String(r.proctor_teacher_id) === String(user.id),
       notes: r.notes,
     }));
 
@@ -1176,6 +1206,7 @@ export const examService = {
       availability: built.availability,
       trips: built.trips,
       exemptions: built.exemptions,
+      constraints: built.constraints,
       rules: built.rules,
       special_rooms: built.roomConfig.special_rooms,
       diagnostics,
@@ -1217,7 +1248,7 @@ export const examService = {
     const isTeacher = !isKyomu(user);
     const grade = Number(user.grade) || 0;
     const filtered = isTeacher
-      ? plan.filter((p) => (grade === 0 || Number(p.grade) === grade) && Number(p.setter_teacher_id) === Number(user.id))
+      ? plan.filter((p) => (grade === 0 || Number(p.grade) === grade) && String(p.setter_teacher_id) === String(user.id))
       : plan;
     return { subjects: filtered, is_kyomu: isKyomu(user) };
   },
@@ -1354,7 +1385,7 @@ export const examService = {
   // ==========================================================
   async setPhase(examMasterId, phaseKey, phaseValue, user) {
     ensureKyomu(user);
-    const keys = ['subject_phase', 'timetable_phase', 'room_phase', 'proctor_phase'];
+    const keys = ['subject_phase', 'timetable_phase', 'room_phase', 'proctor_phase', 'trip_phase'];
     if (!keys.includes(phaseKey)) {
       const err = new Error('不明なフェーズです。');
       err.status = 400;

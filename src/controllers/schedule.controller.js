@@ -248,7 +248,7 @@ export const scheduleController = {
   },
 
   /**
-   * カテゴリ追加 (システム管理者 ADMIN のみ・ルーティングで requireAdminRole)
+   * カテゴリ追加 (教務部 KYOMU のみ・ルーティングで requireKyomuOnlyRole)
    * POST /api/schedules/categories
    */
   async createScheduleCategory(req, res, next) {
@@ -275,7 +275,7 @@ export const scheduleController = {
   },
 
   /**
-   * カテゴリ改名・色変更 (システム管理者 ADMIN のみ)
+   * カテゴリ改名・色変更 (教務部 KYOMU のみ)
    * PUT /api/schedules/categories/:id
    */
   async updateScheduleCategory(req, res, next) {
@@ -303,7 +303,7 @@ export const scheduleController = {
   },
 
   /**
-   * カテゴリ削除 (システム管理者 ADMIN のみ・行事側の紐付けは解除)
+   * カテゴリ削除 (教務部 KYOMU のみ・行事側の紐付けは解除)
    * DELETE /api/schedules/categories/:id
    */
   async deleteScheduleCategory(req, res, next) {

@@ -78,7 +78,7 @@ describe('Schedule API (/api/schedules)', () => {
 });
 
 /**
- * 行事カテゴリ (複数カテゴリ登録・カテゴリフィルタ・ADMIN 権限) を検証する
+ * 部署カテゴリ (プロフィール部署マスタ・複数カテゴリ登録・フィルタ・教務部 KYOMU 権限) を検証する
  */
 describe('Schedule categories (/api/schedules/categories)', () => {
   const adminCreds = { staff_code: 'T2026000', password: 'password123' };
@@ -89,7 +89,7 @@ describe('Schedule categories (/api/schedules/categories)', () => {
   let adminToken;
   let baseCatId = null;   // seed 済みのカテゴリ
   let otherCatId = null;  // 作成行事に紐付けないカテゴリ
-  let newCatId = null;    // ADMIN が作成したテスト用カテゴリ
+  let newCatId = null;    // 教務部 (KYOMU) が作成したテスト用部署カテゴリ
   let eventId = null;
 
   const monthQuery = (ids) =>
@@ -105,7 +105,7 @@ describe('Schedule categories (/api/schedules/categories)', () => {
       await request(app).delete(`/api/schedules/${eventId}`).set('Authorization', bearer(kyomuToken));
     }
     if (newCatId) {
-      await request(app).delete(`/api/schedules/categories/${newCatId}`).set('Authorization', bearer(adminToken));
+      await request(app).delete(`/api/schedules/categories/${newCatId}`).set('Authorization', bearer(kyomuToken));
     }
   });
 
@@ -121,24 +121,24 @@ describe('Schedule categories (/api/schedules/categories)', () => {
     expect(baseCatId).not.toBe(otherCatId);
   });
 
-  it('POST /api/schedules/categories - ADMIN 以外 (KYOMU) は 403', async () => {
+  it('POST /api/schedules/categories - 部署マスタは教務部限定 (ADMIN は 403)', async () => {
     const res = await request(app)
       .post('/api/schedules/categories')
-      .set('Authorization', bearer(kyomuToken))
+      .set('Authorization', bearer(adminToken))
       .send({ name: 'JEST権限確認', color_key: 'PURPLE' });
     expect(res.statusCode).toBe(403);
   });
 
-  it('POST /api/schedules/categories - ADMIN は新規カテゴリを作成できること (名前は12文字以内)', async () => {
+  it('POST /api/schedules/categories - 教務部 (KYOMU) は新規部署カテゴリを作成できること (名前は12文字以内)', async () => {
     const tooLong = await request(app)
       .post('/api/schedules/categories')
-      .set('Authorization', bearer(adminToken))
+      .set('Authorization', bearer(kyomuToken))
       .send({ name: 'カテ'.repeat(13), color_key: 'PURPLE' });
     expect(tooLong.statusCode).toBe(400);
 
     const res = await request(app)
       .post('/api/schedules/categories')
-      .set('Authorization', bearer(adminToken))
+      .set('Authorization', bearer(kyomuToken))
       .send({ name: 'JESTcat', color_key: 'PURPLE', sort_order: 90 });
     expect(res.statusCode).toBe(201);
     newCatId = res.body.category.id;
@@ -201,15 +201,15 @@ describe('Schedule categories (/api/schedules/categories)', () => {
     expect(afterNew.body.data.some((s) => s.id === eventId)).toBe(true);
   });
 
-  it('DELETE /api/schedules/categories/:id - ADMIN のみ削除できること', async () => {
+  it('DELETE /api/schedules/categories/:id - 教務部 (KYOMU) のみ削除できること', async () => {
     const forbidden = await request(app)
       .delete(`/api/schedules/categories/${newCatId}`)
-      .set('Authorization', bearer(kyomuToken));
+      .set('Authorization', bearer(adminToken));
     expect(forbidden.statusCode).toBe(403);
 
     const ok = await request(app)
       .delete(`/api/schedules/categories/${newCatId}`)
-      .set('Authorization', bearer(adminToken));
+      .set('Authorization', bearer(kyomuToken));
     expect(ok.statusCode).toBe(200);
 
     const after = await request(app).get('/api/schedules/categories').set('Authorization', bearer(kyomuToken));

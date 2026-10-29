@@ -88,6 +88,21 @@ if (firstReservationId) {
 }
 console.log('RESERVATION_CHECK', firstReservation?.success === true && secondReservation?.success === false ? 'OK (201 → 409)' : 'NG');
 
+// --- 招待コード発行とパスワード再設定 (新規登録・パスワード再設定で共用される共通コード) ---
+const invitation = await post('/auth/generate-invitation', {});
+const inviteCode = invitation?.code || invitation?.invitation?.code;
+console.log('INVITATION_CODE_CHECK', inviteCode ? `OK (${inviteCode})` : 'NG (code がトップレベルで返っていない)');
+
+// 未登録の教職員番号でのパスワード再設定 -> 404 期待 (このコードは消費されない)
+const resetRes = await fetch(`${BASE}/auth/reset-password-invitation`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ invitationCode: inviteCode, staff_code: 'T99999999', newPassword: 'ResetPass123!' }),
+});
+const resetJson = await resetRes.json().catch(() => ({}));
+console.log('POST /auth/reset-password-invitation ->', resetRes.status, show(JSON.stringify(resetJson), 220));
+console.log('RESET_PASSWORD_CHECK', resetRes.status === 404 ? 'OK (未登録教職員番号は 404)' : 'NG');
+
 // --- 決裁ワークフロー (approvals) と専用チャット自動連携の検証 ---
 const created = await post('/approvals', {
   title: 'API決裁申請確認',
@@ -175,6 +190,44 @@ if (channelId) {
 const categoryRes = await getJson('/schedules/categories');
 const categories = categoryRes.categories || categoryRes.data || [];
 console.log('CATEGORIES', categories.length, categories.map((c) => `${c.id}:${c.name}:${c.color_key}`).join(' '));
+
+// --- 部署カテゴリの権限検証 (追加・改名・削除は教務部 KYOMU のみ) ---
+const adminLogin = await fetch(`${BASE}/auth/login`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ staff_code: 'T2026000', password: 'password123' }),
+});
+const adminJson = await adminLogin.json().catch(() => ({}));
+const adminToken = adminJson.token || adminJson?.data?.token || adminJson?.user?.token;
+const asAdmin = async (method, path, payload = null) => {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
+  return { status: res.status, json: await res.json().catch(() => ({})) };
+};
+
+const adminCreate = await asAdmin('POST', '/schedules/categories', { name: 'API確認部署', color_key: 'SLATE', sort_order: 91 });
+console.log('CATEGORY_CREATE_BY_ADMIN', adminCreate.status, adminCreate.status === 403 ? 'OK (ADMIN拒否)' : 'NG');
+
+const kyomuCreateRes = await fetch(`${BASE}/schedules/categories`, {
+  method: 'POST',
+  headers,
+  body: JSON.stringify({ name: 'API確認部署', color_key: 'SLATE', sort_order: 91 }),
+});
+const kyomuCreate = await kyomuCreateRes.json().catch(() => ({}));
+const newCatId = kyomuCreate?.category?.id || kyomuCreate?.data?.id;
+console.log('CATEGORY_CREATE_BY_KYOMU', kyomuCreateRes.status, kyomuCreateRes.status === 201 ? 'OK' : 'NG');
+
+if (newCatId) {
+  const adminDel = await asAdmin('DELETE', `/schedules/categories/${newCatId}`);
+  console.log('CATEGORY_DELETE_BY_ADMIN', adminDel.status, adminDel.status === 403 ? 'OK (ADMIN拒否)' : 'NG');
+  const adminPut = await asAdmin('PUT', `/schedules/categories/${newCatId}`, { name: 'API確認部署' });
+  console.log('CATEGORY_UPDATE_BY_ADMIN', adminPut.status, adminPut.status === 403 ? 'OK (ADMIN拒否)' : 'NG');
+  const kyomuDelRes = await fetch(`${BASE}/schedules/categories/${newCatId}`, { method: 'DELETE', headers });
+  console.log('CATEGORY_DELETE_BY_KYOMU', kyomuDelRes.status, kyomuDelRes.status === 200 ? 'OK' : 'NG');
+}
 
 const schedule = await post('/schedules', {
   title: 'API確認予定',

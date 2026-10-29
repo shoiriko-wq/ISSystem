@@ -47,13 +47,13 @@ export async function apiFetch(endpoint, options = {}) {
       
       // ログインリクエストの場合はセッション切れ処理を行わず、サーバーのエラーメッセージをそのまま返す
       if (isLoginEndpoint) {
-        throw new Error(errorData.message || '教職員番号またはパスワードが正しくありません。');
+        throw new Error(errorData.message || errorData.error || '教職員番号またはパスワードが正しくありません。');
       }
 
       // 通常の保護されたAPI呼び出しで401/403が返った場合はセッション切れとして処理
       console.warn('[API] 認証セッションが無効です。再ログインが必要です。');
       setUserSession(null, null);
-      throw new Error(errorData.message || 'UNAUTHORIZED_OR_FORBIDDEN');
+      throw new Error(errorData.message || errorData.error || 'UNAUTHORIZED_OR_FORBIDDEN');
     }
 
     // レスポンスが 204 No Content の場合
@@ -64,7 +64,8 @@ export async function apiFetch(endpoint, options = {}) {
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(data.message || `APIエラー (Status: ${response.status})`);
+      // エラーミドルウェアは error キー、コントローラーは message キーで返すため両対応
+      throw new Error(data.message || data.error || `APIエラー (Status: ${response.status})`);
     }
 
     return data;

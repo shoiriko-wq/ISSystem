@@ -90,6 +90,15 @@ function rulesFormHtml(rules, editable) {
     '教務権限者のみ編集できます。保存後に「時間割を作成」で自動配置します。',
     `<div class="grid grid-cols-1 md:grid-cols-2 gap-2">${boxes}</div>
      <div class="flex flex-wrap gap-4 pt-1">${weights}</div>
+     ${editable
+       ? `<div class="flex gap-2 pt-1">
+            <button id="exam-tt-rules-save" class="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1">
+              <i data-lucide="save" class="w-3.5 h-3.5"></i> ルールを保存
+            </button>
+          </div>`
+       : `<p class="text-[10px] text-muted">ルール編集は教務権限者のみです。</p>`}`
+  );
+}
 
 function phaseBadgeSmall(phase) {
   const meta = {
@@ -205,16 +214,6 @@ function gridSectionHtml(master, plan, editable) {
   return sectionCard('grid-3x3', '時間割グリッド', '日 × 時限 × 学年。数学Ⅲ（100分＝2時限）は連結表示されます。', tables);
 }
 
-     ${editable
-       ? `<div class="flex gap-2 pt-1">
-            <button id="exam-tt-rules-save" class="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1">
-              <i data-lucide="save" class="w-3.5 h-3.5"></i> ルールを保存
-            </button>
-          </div>`
-       : `<p class="text-[10px] text-muted">ルール編集は教務権限者のみです。</p>`}`
-  );
-}
-
 function resultSectionHtml() {
   const parts = [];
   if (lastSolve) {
@@ -282,6 +281,7 @@ export function renderTimetableTab(container) {
     ${resultSectionHtml()}
   `;
   refreshLucideIcons();
+}
 
 /**
  * 時間割タブのイベント绑定
@@ -414,13 +414,11 @@ export function bindTimetableTab(container, reload) {
   });
 }
 
-export default { renderTimetableTab, bindTimetableTab, resetTimetableState };
-
-}
-
 export function resetTimetableState() {
   lastSolve = null;
   manualDiag = null;
   unitPos = new Map();
 }
+
+export default { renderTimetableTab, bindTimetableTab, resetTimetableState };
 

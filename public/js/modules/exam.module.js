@@ -180,7 +180,7 @@ function bindEvents() {
 /**
  * 試験割当データの取得
  */
-async function loadExamData() {
+export async function loadExamData() {
   if (!state.currentUser || !state.authToken) return;
   try {
     const data = await apiGet('/exam/matrix');

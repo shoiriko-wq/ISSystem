@@ -638,7 +638,15 @@ export const examModel = {
   async saveProctorAssignments(examMasterId, rows, updatedBy) {
     await query(`DELETE FROM exam_proctor_assignments WHERE exam_master_id = ?`, [examMasterId]);
     const saved = [];
+    // (exam_master_id, day_number, slot_number, class_id) が重複する行は後ろの行を優先して insertion 前に正規化
+    const dedupMap = new Map();
     for (const r of rows) {
+      const dayNumber = Number(r.day_number);
+      const slotNumber = Number(r.slot_number);
+      const classId = r.class_id || `G${Number(r.grade)}`;
+      dedupMap.set(`${dayNumber}|${slotNumber}|${classId}`, { ...r, day_number: dayNumber, slot_number: slotNumber, class_id: classId });
+    }
+    for (const r of dedupMap.values()) {
       const res = await query(
         `INSERT INTO exam_proctor_assignments
           (exam_master_id, day_number, slot_number, grade, class_id, subject_name, proctor_teacher_id,
@@ -647,10 +655,10 @@ export const examModel = {
          RETURNING *`,
         [
           examMasterId,
-          Number(r.day_number),
-          Number(r.slot_number),
+          r.day_number,
+          r.slot_number,
           Number(r.grade),
-          r.class_id || null,
+          r.class_id,
           r.subject_name || null,
           r.proctor_teacher_id || null,
           r.setter_teacher_id || null,

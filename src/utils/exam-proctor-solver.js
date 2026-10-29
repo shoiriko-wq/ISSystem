@@ -144,6 +144,8 @@ export function teacherCan(ctx, teacher, cell) {
   }
   // ソロ科目は出題者本人が監督（HARD）
   if (cell.solo && ctx.rules.solo_subject_self && teacher.id !== cell.setter) return false;
+  // 出題者本人は自科目の監督を避ける（HARD、ソロ科目を除く）
+  if (!cell.solo && ctx.rules.avoid_setter && teacher.id === cell.setter) return false;
   return true;
 }
 
@@ -308,6 +310,7 @@ export function localMove(ctx, maxPasses = 6) {
       if (cell.solo) continue;
       for (const t of sortedByLoad) {
         if (t.id === cur) break; // 昇順なので現担当より重い教員は検討しない
+        if (ctx.rules.avoid_setter && !cell.solo && t.id === cell.setter) continue;
         unassign(ctx, cell);
         let afterScore = Infinity;
         if (teacherCan(ctx, t, cell)) {
@@ -391,6 +394,9 @@ export function proctorDiagnostics(ctx, assignments) {
   for (const cell of ctx.cells) {
     if (cell.solo && ctx.assignment.get(cell.key) && ctx.assignment.get(cell.key) !== cell.setter) {
       out.push({ code: 'SOLO_NOT_SELF', level: 'SOFT', subject_name: cell.subject_name, day: cell.day, slot: cell.slot, msg: `ソロ科目「${cell.subject_name}」(${cell.day}日目${cell.slot}限) の監督が出題者本人ではありません。` });
+    }
+    if (!cell.solo && ctx.rules.avoid_setter && ctx.assignment.get(cell.key) === cell.setter) {
+      out.push({ code: 'SETTER_CLASH', level: 'HARD', grade: cell.grade, day: cell.day, slot: cell.slot, subject_name: cell.subject_name, teacher_id: cell.setter, msg: `出題者「${ctx.teacherById.get(cell.setter)?.name ?? cell.setter}」本人が自科目「${cell.subject_name}」(${cell.grade}年 ${cell.day}日目${cell.slot}限) の監督に割当られています。` });
     }
   }
 
@@ -577,6 +583,8 @@ export function validateProctor(input, rows) {
     pool: (input.teachers || []).map((t) => ({ id: t.id, name: t.name, parttime: !!t.is_parttime, kyomu: !!t.is_kyomu })),
   };
 
+  const soloSet = new Set((input.units || []).filter((u) => u.solo_subject).map((u) => `${Number(u.grade)}|${String(u.subject_name)}`));
+
   for (const r of rows || []) {
     const cell = {
       key: `${r.grade}#${r.day_number}#${r.slot_number}`,
@@ -585,7 +593,7 @@ export function validateProctor(input, rows) {
       slot: Number(r.slot_number),
       subject_name: r.subject_name,
       special_type: r.room_type ? String(r.room_type).toUpperCase() : null,
-      solo: false,
+      solo: soloSet.has(`${Number(r.grade)}|${String(r.subject_name)}`),
       setter: r.setter_teacher_id || null,
     };
     ctx.cells.push(cell);

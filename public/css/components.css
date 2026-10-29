@@ -493,3 +493,19 @@
   color: var(--text-soft);
   border: 1px solid var(--border-main);
 }
+
+/* ─── スケジュール部署カテゴリのフィルタチップ（選択/非選択の視認性） ─────── */
+/* 選択中: 着色バッジ + 二重リング + 太字 + check アイコン */
+.sched-cat-chip-selected {
+  box-shadow: 0 0 0 2px var(--accent-ring);
+  font-weight: 700;
+  border-style: solid;
+}
+
+/* 非選択: 破線枠・薄色・通常字（選択中と明確に区別） */
+.sched-cat-chip-unselected {
+  border-style: dashed;
+  opacity: 0.62;
+  font-weight: 500;
+}
+

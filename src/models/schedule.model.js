@@ -79,7 +79,7 @@ export const scheduleModel = {
       }));
   },
 
-  /** カテゴリ追加（システム管理者のみがサービス層で権限チェック後に呼ぶ） */
+  /** カテゴリ追加（教務部 KYOMU のみがサービス層で権限チェック後に呼ぶ） */
   async createCategory({ name, color_key = 'SLATE', sort_order = 0 }) {
     try {
       const res = await query(
@@ -106,7 +106,7 @@ export const scheduleModel = {
     }
   },
 
-  /** カテゴリ改名・色変更（ADMIN のみ） */
+  /** カテゴリ改名・色変更（教務部 KYOMU のみ） */
   async updateCategory(id, { name, color_key, sort_order }) {
     const catId = parseInt(id, 10);
     try {
@@ -149,7 +149,7 @@ export const scheduleModel = {
     return updated;
   },
 
-  /** カテゴリ削除（ADMIN のみ・行事側の紐付けは CASCADE で削除） */
+  /** カテゴリ削除（教務部 KYOMU のみ・行事側の紐付けは CASCADE で削除） */
   async deleteCategory(id) {
     const catId = parseInt(id, 10);
     const mockAffected = Array.from(mockCategoryMap.values())

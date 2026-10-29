@@ -103,8 +103,54 @@ export const authController = {
 
       return res.status(201).json({
         success: true,
-        message: '招待コードを発行しました。(有効期限: 24時間)',
+        message: '招待コードを発行しました。(有効期限: 24時間 / 新規登録・パスワード再設定のどちらでも利用可能)',
+        // フロントエンドが code / expiresAt をトップレベルで参照するため両形式で返す
+        code: result.code,
+        expiresAt: result.expiresAt,
+        createdBy: result.createdBy,
         invitation: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * 招待コードを利用したパスワード再設定 (公開エンドポイント / ログイン不要)
+   * POST /api/auth/reset-password-invitation
+   */
+  async resetPasswordWithInvitation(req, res, next) {
+    try {
+      const { invitationCode, staff_code, staffCode, newPassword } = req.body;
+      const targetStaffCode = staff_code || staffCode;
+      const newPass = newPassword;
+
+      if (!invitationCode || !targetStaffCode || !newPass) {
+        return res.status(400).json({
+          success: false,
+          message: '招待コード、教職員番号、新しいパスワードは必須です。',
+        });
+      }
+
+      if (String(newPass).trim().length < 8) {
+        return res.status(400).json({
+          success: false,
+          message: '新しいパスワードは8文字以上で入力してください。',
+        });
+      }
+
+      const ipAddress = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+
+      const result = await authService.resetPasswordWithInvitation(
+        { invitationCode, staff_code: targetStaffCode, newPassword: newPass },
+        ipAddress
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: 'パスワードを再設定しました。新しいパスワードでログインしました。',
+        token: result.token,
+        user: result.user,
       });
     } catch (error) {
       next(error);

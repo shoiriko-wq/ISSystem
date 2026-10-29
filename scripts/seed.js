@@ -92,23 +92,23 @@ const dummySchedules = [
   { id: 'sch_103', title: '避難訓練', description: 'グラウンド避難', event_date: '2026-10-20', category: 'SCHOOL', target_grade: null, created_by_user_id: 'kyomu01' }
 ];
 
-// 9b. スケジュールカテゴリマスタ（初期7種）と行事カテゴリ紐付け（1行事→複数カテゴリ）
+// 9b. スケジュールカテゴリマスタ＝プロフィールの部署名（初期7種・教務部が運用）と行事カテゴリ紐付け（1行事→複数カテゴリ）
 const dummyScheduleCategories = [
-  { id: 1, name: '1学年', color_key: 'INFO', sort_order: 1 },
-  { id: 2, name: '2学年', color_key: 'SUCCESS', sort_order: 2 },
-  { id: 3, name: '3学年', color_key: 'WARNING', sort_order: 3 },
-  { id: 4, name: '教務', color_key: 'ACCENT', sort_order: 4 },
-  { id: 5, name: '進路', color_key: 'PURPLE', sort_order: 5 },
-  { id: 6, name: '総務', color_key: 'SLATE', sort_order: 6 },
-  { id: 7, name: '生徒部', color_key: 'DANGER', sort_order: 7 }
+  { id: 1, name: '教務部', color_key: 'ACCENT', sort_order: 1 },
+  { id: 2, name: '生徒指導部', color_key: 'DANGER', sort_order: 2 },
+  { id: 3, name: 'キャリアガイダンス部', color_key: 'INFO', sort_order: 3 },
+  { id: 4, name: '特色推進部', color_key: 'PURPLE', sort_order: 4 },
+  { id: 5, name: '１学年', color_key: 'SUCCESS', sort_order: 5 },
+  { id: 6, name: '２学年', color_key: 'SLATE', sort_order: 6 },
+  { id: 7, name: '３学年', color_key: 'WARNING', sort_order: 7 }
 ];
 
 const dummyScheduleCategoryMap = [
-  { schedule_id: 'sch_101', category_id: 1 },
-  { schedule_id: 'sch_101', category_id: 2 },
-  { schedule_id: 'sch_101', category_id: 3 },
-  { schedule_id: 'sch_102', category_id: 4 },
-  { schedule_id: 'sch_103', category_id: 7 }
+  { schedule_id: 'sch_101', category_id: 5 },
+  { schedule_id: 'sch_101', category_id: 6 },
+  { schedule_id: 'sch_101', category_id: 7 },
+  { schedule_id: 'sch_102', category_id: 1 },
+  { schedule_id: 'sch_103', category_id: 2 }
 ];
 
 // 10. クラス・科目マスタ

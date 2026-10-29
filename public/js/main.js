@@ -17,6 +17,7 @@ import { initFacilityModule, loadReservations } from './modules/facility.module.
 import { initScheduleModule, loadSchedules } from './modules/schedule.module.js';
 import { initApprovalModule, loadApprovals } from './modules/approval.module.js';
 import { initAbsenceModule, loadAbsenceSummary } from './modules/absence.module.js';
+import { initExamModule, loadExamData } from './modules/exam.module.js';
 
 
 /**
@@ -47,6 +48,9 @@ export async function loadActiveTabData(tabName = state.currentTab) {
       break;
     case 'approval':
       await loadApprovals();
+      break;
+    case 'exam':
+      await loadExamData();
       break;
     default:
       break;
@@ -124,9 +128,20 @@ function renderAuthScreen() {
       }
       refreshLucideIcons();
     }
+
+    // 定期考査メニューはログイン時のみ表示（編集権限はモジュール内でロール判定）
+    const examNav = document.getElementById('nav-exam-item');
+    if (examNav) examNav.classList.remove('hidden');
+
+    // 教務/一般権限バッジを現在のロールで再描画し、考査データも最新化する
+    initExamModule();
   } else {
     loginScreen?.classList.remove('hidden');
     appContainer?.classList.add('hidden');
+
+    // 未ログイン時は定期考査メニューを非表示化
+    const examNav = document.getElementById('nav-exam-item');
+    if (examNav) examNav.classList.add('hidden');
 
     // 未ログイン時は安全に WebSocket 切断
     socketClient.disconnect();
@@ -193,6 +208,30 @@ function handleLogout() {
 }
 
 /**
+ * 発行された招待コードを職員一覧モーダル内に表示する
+ * 招待コードは新規登録・パスワード再設定のどちらでも利用される共通の許可証
+ */
+function displayInvitationCode(code, expiresAt) {
+  const display = document.getElementById('invitation-code-display');
+  const copyBtn = document.getElementById('copy-invitation-btn');
+  const expiryEl = document.getElementById('invitation-expiry');
+
+  if (display) {
+    display.textContent = code;
+    display.classList.remove('hidden');
+  }
+  if (copyBtn) copyBtn.classList.remove('hidden');
+
+  if (expiryEl) {
+    const exp = expiresAt ? new Date(expiresAt) : null;
+    const expiryText = exp && !Number.isNaN(exp.getTime()) ? exp.toLocaleString('ja-JP') : '24時間以内';
+    expiryEl.textContent = `有効期限: ${expiryText} / コードは1回のみ使用可`;
+    expiryEl.classList.remove('hidden');
+  }
+  refreshLucideIcons();
+}
+
+/**
  * イベントリスナーおよびステートバインディング初期化
  */
 function initEventsAndListeners() {
@@ -212,13 +251,8 @@ function initEventsAndListeners() {
   // ステート変化時のUI追従
   subscribeState((currState, key) => {
     if (key === 'currentUser') {
+      // renderAuthScreen 内でメニュー可視性・権限バッジの再描画を行う
       renderAuthScreen();
-      
-      const examNav = document.getElementById('nav-exam-item');
-      if (examNav) {
-        // 定期考査メニューは全教員が閲覧可能（編集権限は内部でロール判定）
-        examNav.classList.remove('hidden');
-      }
     }
 
     if (key === 'unreadCounts') {
@@ -249,26 +283,36 @@ function initEventsAndListeners() {
     });
   }
 
-  // ログイン画面のタブ切り替え
+  // ログイン画面のタブ切り替え (3タブ: ログイン / 新規登録 / パスワード再設定)
   const tabLoginBtn = document.getElementById('tab-login-btn');
   const tabRegisterBtn = document.getElementById('tab-register-btn');
+  const tabResetBtn = document.getElementById('tab-reset-btn');
   const loginForm = document.getElementById('login-form');
   const registerForm = document.getElementById('register-form');
+  const resetForm = document.getElementById('reset-form');
 
-  if (tabLoginBtn && tabRegisterBtn && loginForm && registerForm) {
-    tabLoginBtn.addEventListener('click', () => {
-      tabLoginBtn.className = 'flex-1 pb-2 text-accent border-b-2 border-accent transition-colors';
-      tabRegisterBtn.className = 'flex-1 pb-2 text-muted border-b-2 border-transparent hover-text-main transition-colors';
-      loginForm.classList.remove('hidden');
-      registerForm.classList.add('hidden');
+  const TAB_ACTIVE_CLASS = 'flex-1 pb-2 text-accent border-b-2 border-accent transition-colors';
+  const TAB_IDLE_CLASS = 'flex-1 pb-2 text-muted border-b-2 border-transparent hover-text-main transition-colors';
+
+  // ユーザー自身が「新規登録」か「パスワード忘れ」かをログイン画面で選択する
+  const loginTabs = [
+    { key: 'login', btn: tabLoginBtn, form: loginForm },
+    { key: 'register', btn: tabRegisterBtn, form: registerForm },
+    { key: 'reset', btn: tabResetBtn, form: resetForm },
+  ].filter((t) => t.btn && t.form);
+
+  const selectLoginTab = (activeKey) => {
+    loginTabs.forEach(({ key, btn, form }) => {
+      btn.className = key === activeKey ? TAB_ACTIVE_CLASS : TAB_IDLE_CLASS;
+      form.classList.toggle('hidden', key !== activeKey);
     });
-    tabRegisterBtn.addEventListener('click', () => {
-      tabRegisterBtn.className = 'flex-1 pb-2 text-accent border-b-2 border-accent transition-colors';
-      tabLoginBtn.className = 'flex-1 pb-2 text-muted border-b-2 border-transparent hover-text-main transition-colors';
-      registerForm.classList.remove('hidden');
-      loginForm.classList.add('hidden');
-    });
-  }
+    // 他タブのエラー表示をクリア
+    document.getElementById('login-error')?.classList.add('hidden');
+    document.getElementById('register-error')?.classList.add('hidden');
+    document.getElementById('reset-error')?.classList.add('hidden');
+  };
+
+  loginTabs.forEach(({ key, btn }) => btn.addEventListener('click', () => selectLoginTab(key)));
 
   // 招待コードでの新規登録フォーム送信
   registerForm?.addEventListener('submit', async (e) => {
@@ -304,20 +348,82 @@ function initEventsAndListeners() {
     }
   });
 
-  // 招待コード発行ボタン
+  // 招待コードによるパスワード再設定フォーム送信 (パスワード忘れた方向け)
+  resetForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errorEl = document.getElementById('reset-error');
+    try {
+      errorEl?.classList.add('hidden');
+      const invitationCode = document.getElementById('reset-invitation-code').value.trim();
+      const staff_code = document.getElementById('reset-staffcode').value.trim();
+      const newPassword = document.getElementById('reset-password').value.trim();
+      const confirmPassword = document.getElementById('reset-password-confirm').value.trim();
+
+      if (!invitationCode || !staff_code) {
+        throw new Error('招待コードと教職員番号を入力してください。');
+      }
+      if (newPassword.length < 8) {
+        throw new Error('新しいパスワードは8文字以上で入力してください。');
+      }
+      if (newPassword !== confirmPassword) {
+        throw new Error('新しいパスワードが確認用入力と一致しません。');
+      }
+
+      const res = await apiPost('/auth/reset-password-invitation', {
+        invitationCode,
+        staff_code,
+        newPassword
+      });
+
+      if (res && res.success && res.token) {
+        setUserSession(res.user, res.token);
+        renderAuthScreen();
+        resetForm.reset();
+        showToast('パスワードを再設定し、ログインしました', 'success');
+        switchTab(state.currentTab || 'dashboard');
+      }
+    } catch (err) {
+      if (errorEl) {
+        errorEl.textContent = err.message || 'パスワードの再設定に失敗しました。招待コードをご確認ください。';
+        errorEl.classList.remove('hidden');
+      }
+    }
+  });
+
+  // 招待コード発行ボタン (新規登録・パスワード再設定で共用される共通コード)
   document.getElementById('generate-invitation-btn')?.addEventListener('click', async () => {
     try {
       const res = await apiPost('/auth/generate-invitation', {});
-      if (res && res.success && res.code) {
-        const display = document.getElementById('invitation-code-display');
-        if (display) {
-          display.textContent = res.code;
-          display.classList.remove('hidden');
-        }
-        showToast('招待コードを発行しました（有効期限付き）', 'success');
+      const code = res.code || res.invitation?.code;
+      if (res && res.success && code) {
+        displayInvitationCode(code, res.expiresAt || res.invitation?.expiresAt);
+        showToast(`招待コード ${code} を発行しました`, 'success');
+      } else {
+        showToast('招待コードの発行に失敗しました（サーバーがコードを返していません）', 'error');
       }
     } catch (err) {
       showToast('招待コードの発行に失敗しました: ' + err.message, 'error');
+    }
+  });
+
+  // 発行済み招待コードのコピー
+  document.getElementById('copy-invitation-btn')?.addEventListener('click', async () => {
+    const code = document.getElementById('invitation-code-display')?.textContent.trim();
+    if (!code || code === '--') return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(code);
+      } else {
+        const temp = document.createElement('textarea');
+        temp.value = code;
+        document.body.appendChild(temp);
+        temp.select();
+        document.execCommand('copy');
+        temp.remove();
+      }
+      showToast(`招待コード ${code} をコピーしました`, 'success');
+    } catch (err) {
+      showToast('コピーに失敗しました: ' + err.message, 'error');
     }
   });
 
@@ -594,6 +700,16 @@ function initEventsAndListeners() {
       if (res && res.success) {
         const updatedUser = res.user || { ...state.currentUser, name, email, department, extension_number, avatar_url };
         setUserSession(updatedUser, res.token || state.authToken);
+        // パスワード欄はプロフィール保存とは無関係なので、保存後に空へ戻す（取り違い防止）
+        ['profile-current-password', 'profile-new-password', 'profile-new-password-confirm'].forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) el.value = '';
+        });
+        const pwErrEl = document.getElementById('pw-change-error');
+        if (pwErrEl) {
+          pwErrEl.textContent = '';
+          pwErrEl.classList.add('hidden');
+        }
         closeModal('profile-modal');
         renderAuthScreen();
       }
@@ -601,6 +717,13 @@ function initEventsAndListeners() {
       showToast('プロフィールの更新に失敗しました: ' + err.message, 'error');
     }
   });
+
+  // フッターの「保存する」は form 属性で profile-form を送信する（form 属性非対応環境は JS で補完）
+  const profileForm = document.getElementById('profile-form');
+  const profileSaveBtn = document.querySelector('#profile-modal .modal-footer button[type="submit"]');
+  if (profileForm && profileSaveBtn && !('form' in HTMLButtonElement.prototype)) {
+    profileSaveBtn.addEventListener('click', () => profileForm.requestSubmit());
+  }
 
   // パスワード変更（現在の / 新しい / 確認 → PUT /api/auth/change-password）
   const pwChangeBtn = document.getElementById('profile-password-change-btn');
@@ -723,7 +846,10 @@ async function loadUsersList() {
         </td>
         <td class="p-3 text-soft">${escapeHTML(u.department || '未設定')}</td>
         <td class="p-3 text-muted font-mono">${escapeHTML(u.extension_number || '-')}</td>
-        <td class="p-3 text-right">
+        <td class="p-3 text-right whitespace-nowrap">
+          <button class="btn-secondary py-1 px-2 text-[11px] rounded border border-main bg-surface text-main flex items-center gap-1 inline-flex invite-code-btn mr-2" data-staff-code="${escapeHTML(u.staff_code)}" data-user-label="${escapeHTML(u.name || u.staff_code)}">
+            <i data-lucide="key" class="w-3 h-3"></i> 再設定コード
+          </button>
           <button class="btn-danger py-1 px-2 text-[11px] bg-danger-soft text-danger-strong border border-danger-soft rounded hover-danger-soft delete-user-btn" data-user-id="${u.id}">
             削除
           </button>
@@ -743,6 +869,25 @@ async function loadUsersList() {
           } catch (err) {
             showToast('削除に失敗しました: ' + err.message, 'error');
           }
+        }
+      });
+    });
+    // 職員ごとの「パスワード再設定用招待コード」発行 (新規登録用と同じ手続き)
+    tbody.querySelectorAll('.invite-code-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const staffCode = btn.getAttribute('data-staff-code');
+        const label = btn.getAttribute('data-user-label') || staffCode;
+        try {
+          const res = await apiPost('/auth/generate-invitation', {});
+          const code = res.code || res.invitation?.code;
+          if (res && res.success && code) {
+            displayInvitationCode(code, res.expiresAt || res.invitation?.expiresAt);
+            showToast(`${label} さん用の招待コード: ${code}`, 'success');
+          } else {
+            showToast('招待コードの発行に失敗しました', 'error');
+          }
+        } catch (err) {
+          showToast('招待コードの発行に失敗しました: ' + err.message, 'error');
         }
       });
     });
@@ -771,6 +916,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initScheduleModule();
   initApprovalModule();
   initAbsenceModule();
+  // 定期考査モジュールは renderAuthScreen (ログイン時のロール判定込み) で初期化される
 
 
   // 4. 初期画面の描画

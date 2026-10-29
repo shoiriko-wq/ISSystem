@@ -39,6 +39,7 @@ const VIEW_MODE_KEY = 'isschedule_view_mode';
 
 let categoriesCache = [];
 let selectedCategoryIds = new Set();
+let selectionInit = false;   // フィルタ選択の初期化フラグ（デフォルトは全選択）
 let viewMode = localStorage.getItem(VIEW_MODE_KEY) === 'list' ? 'list' : 'calendar';
 let currentMonth = new Date();
 let schedulesCache = [];
@@ -80,8 +81,9 @@ function truncateTitle(title) {
   return t.length > TITLE_MAX ? `${t.slice(0, TITLE_MAX)}…` : t;
 }
 
-function isAdmin() {
-  return Boolean(state.currentUser && state.currentUser.role === 'ADMIN');
+/** 部署マスタ（カテゴリ）の追加・改名・削除は教務部 (KYOMU) のみ */
+function canManageCategories() {
+  return Boolean(state.currentUser && state.currentUser.role === 'KYOMU');
 }
 
 function canManageEvent(ev) {
@@ -102,8 +104,27 @@ function categoryById(id) {
   return categoriesCache.find((c) => c.id === Number(id)) || null;
 }
 
-/** カテゴリマスタの取得 (APIのカラーパレットキーに対応) */
-async function loadCategories(force = false) {
+/** 全カテゴリが選択された状態（＝フィルタなしで全行事を表示） */
+function isAllSelected() {
+  return categoriesCache.length === 0 || selectedCategoryIds.size >= categoriesCache.length;
+}
+
+/** 選択集合をカテゴリマスタに反映（未初期化時は全選択、削除カテゴリは除外、新規は選択扱い） */
+function syncSelection(addedId = null) {
+  const ids = new Set(categoriesCache.map((c) => Number(c.id)));
+  if (!selectionInit) {
+    selectedCategoryIds = new Set(ids);
+    selectionInit = true;
+    return;
+  }
+  for (const id of Array.from(selectedCategoryIds)) {
+    if (!ids.has(id)) selectedCategoryIds.delete(id);
+  }
+  if (addedId !== null) selectedCategoryIds.add(Number(addedId));
+}
+
+/** カテゴリマスタ（＝プロフィールの部署マスタ）の取得 (APIのカラーパレットキーに対応) */
+async function loadCategories(force = false, addedId = null) {
   if (categoriesCache.length > 0 && !force) return categoriesCache;
   try {
     const res = await apiGet('/schedules/categories');
@@ -117,17 +138,18 @@ async function loadCategories(force = false) {
     }));
   } catch (e) {
     console.warn('[Schedule] カテゴリ取得失敗:', e.message);
-    // 初期カテゴリでのフォールバック
+    // 初期部署カテゴリでのフォールバック
     categoriesCache = [
-      { id: 1, name: '1学年', color_key: 'INFO' },
-      { id: 2, name: '2学年', color_key: 'SUCCESS' },
-      { id: 3, name: '3学年', color_key: 'WARNING' },
-      { id: 4, name: '教務', color_key: 'ACCENT' },
-      { id: 5, name: '進路', color_key: 'PURPLE' },
-      { id: 6, name: '総務', color_key: 'SLATE' },
-      { id: 7, name: '生徒部', color_key: 'DANGER' }
+      { id: 1, name: '教務部', color_key: 'ACCENT' },
+      { id: 2, name: '生徒指導部', color_key: 'DANGER' },
+      { id: 3, name: 'キャリアガイダンス部', color_key: 'INFO' },
+      { id: 4, name: '特色推進部', color_key: 'PURPLE' },
+      { id: 5, name: '１学年', color_key: 'SUCCESS' },
+      { id: 6, name: '２学年', color_key: 'SLATE' },
+      { id: 7, name: '３学年', color_key: 'WARNING' }
     ];
   }
+  syncSelection(addedId);
   return categoriesCache;
 }
 
@@ -157,10 +179,11 @@ function mapEvent(s) {
   };
 }
 
-/** フィルタ判定：複数選択時は「選択カテゴリのうち少なくとも1つを含む」行事がtrue */
+/** フィルタ判定：全選択時は無条件true、部分選択時は「選択カテゴリのうち少なくとも1つを含む」 */
 function matchesFilter(ev) {
-  if (selectedCategoryIds.size === 0) return true;
-  return ev.categories.some((c) => selectedCategoryIds.has(c.id));
+  if (isAllSelected()) return true;
+  if (selectedCategoryIds.size === 0) return false;
+  return ev.categories.some((c) => selectedCategoryIds.has(Number(c.id)));
 }
 
 function filteredSchedules() {
@@ -204,9 +227,9 @@ function renderScheduleView() {
   const monthPrefix = `${y}-${String(m + 1).padStart(2, '0')}`;
   const list = filteredSchedules().filter((ev) => String(ev.date).startsWith(monthPrefix));
 
-  const adminBtn = isAdmin()
-    ? `<button type="button" id="sched-cat-admin-btn" class="btn-secondary px-2.5 py-1.5 text-xs rounded-lg flex items-center gap-1">
-         <i data-lucide="tags" class="w-3.5 h-3.5"></i> カテゴリ管理
+  const kyomuBtn = canManageCategories()
+    ? `<button type="button" id="sched-cat-admin-btn" class="btn-secondary px-2.5 py-1.5 text-xs rounded-lg flex items-center gap-1" title="部署カテゴリの追加・改名・削除（教務部のみ）">
+         <i data-lucide="tags" class="w-3.5 h-3.5"></i> 部署カテゴリ管理
        </button>`
     : '';
 
@@ -231,7 +254,7 @@ function renderScheduleView() {
         <button type="button" id="sched-add-btn" class="btn-primary px-2.5 py-1.5 text-xs rounded-lg flex items-center gap-1">
           <i data-lucide="plus" class="w-3.5 h-3.5"></i> 行事を追加
         </button>
-        ${adminBtn}
+        ${kyomuBtn}
       </div>
       <div id="sched-filter-chips" class="flex flex-wrap items-center gap-1.5"></div>
       <div id="sched-view-area"></div>
@@ -246,44 +269,82 @@ function renderScheduleView() {
   else renderListView(y, m, list);
 
   const sel = [...selectedCategoryIds].map((id) => (categoryById(id) || { name: '?' }).name);
-  document.getElementById('sched-summary').textContent = sel.length
-    ? `選択カテゴリ（${list.length}件）: ${sel.join(' / ')} のうち少なくとも1つを含む行事を表示中`
-    : `全カテゴリの行事を表示中（${list.length}件）`;
+  document.getElementById('sched-summary').textContent = isAllSelected()
+    ? `すべての部署（${categoriesCache.length}種）を選択中 — ${list.length}件の行事を表示`
+    : sel.length === 0
+      ? `すべての部署が非選択 — ${list.length}件（行事は表示されません）`
+      : `選択 ${sel.length} / ${categoriesCache.length}部署（${list.length}件）: ${sel.join(' / ')} のいずれかを含む行事を表示`;
 
   bindHeaderEvents();
   refreshLucideIcons();
 }
 
-/** カテゴリ複数選択チップ（「すべて」で選択解除） */
+/** 部署カテゴリチップ（選択中=着色+リング+check、非選択=破線・薄色、デフォルトは全選択） */
+function categoryChipHtml(cat, active) {
+  const pal = palette(cat.color_key);
+  const icon = active ? 'check' : 'circle';
+  const cls = active
+    ? `${pal.badge} sched-cat-chip-selected border border-accent`
+    : 'sched-cat-chip-unselected bg-surface text-muted border border-main';
+  const tip = active
+    ? `${escapeHTML(cat.name)} は表示中（クリックで非表示）`
+    : `${escapeHTML(cat.name)} は非表示（クリックで表示）`;
+  return `<button type="button" data-cat-id="${cat.id}" aria-pressed="${active ? 'true' : 'false'}"
+      class="sched-cat-chip flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] rounded-full transition-all ${cls}" title="${tip}">
+    <i data-lucide="${icon}" class="w-3.5 h-3.5 shrink-0"></i>
+    <span>${escapeHTML(cat.name)}</span>
+  </button>`;
+}
+
+/** カテゴリ（部署）複数選択チップ（「すべて」項目は廃止し、全選択をデフォルトとする） */
 function renderFilterChips() {
   const holder = document.getElementById('sched-filter-chips');
   if (!holder) return;
 
-  const allChip = `<button type="button" data-cat-id="all" class="sched-cat-chip px-2 py-1 text-[11px] font-semibold rounded-full border ${selectedCategoryIds.size === 0 ? 'bg-accent-soft text-accent-strong border-accent-soft ring-accent' : 'bg-surface text-soft border-main hover-surface-soft'}">すべて</button>`;
+  const total = categoriesCache.length;
+  const selCount = selectedCategoryIds.size;
+  const allSelected = isAllSelected();
 
-  const chips = categoriesCache.map((c) => {
-    const pal = palette(c.color_key);
-    const active = selectedCategoryIds.has(c.id);
-    return `<button type="button" data-cat-id="${c.id}" class="sched-cat-chip flex items-center gap-1 px-2 py-1 text-[11px] font-semibold rounded-full border ${active ? `${pal.badge} ring-accent` : 'bg-surface text-soft border-main hover-surface-soft'}" title="${escapeHTML(c.name)}">
-      <span class="w-1.5 h-1.5 rounded-full shrink-0 ${pal.dot}"></span>${escapeHTML(c.name)}
-    </button>`;
-  }).join('');
+  const summary = allSelected
+    ? `<span class="font-bold text-accent-strong">全選択中（${total}部署）</span><span class="text-muted">・すべての行事を表示</span>`
+    : selCount === 0
+      ? `<span class="font-bold text-danger-strong">すべて非選択</span><span class="text-muted">・${total}部署中 0 選択（行事は表示されません）</span>`
+      : `<span class="font-bold text-main">選択 ${selCount} / ${total}</span><span class="text-muted">・選択部署のいずれかを含む行事のみ表示</span>`;
 
-  holder.innerHTML = allChip + chips;
+  const resetBtn = allSelected
+    ? ''
+    : `<button type="button" id="sched-select-all" class="btn-secondary px-2 py-1 text-[11px] rounded-lg flex items-center gap-1">
+         <i data-lucide="list-checks" class="w-3.5 h-3.5"></i> 全選択に戻す
+       </button>`;
+
+  const chips = categoriesCache.map((c) => categoryChipHtml(c, selectedCategoryIds.has(Number(c.id)))).join('');
+
+  const chipsHtml = chips || '<span class="text-[11px] text-muted">部署カテゴリが登録されていません。</span>';
+
+  holder.innerHTML = `
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="inline-flex items-center gap-1.5 text-[11px]"><i data-lucide="filter" class="w-3.5 h-3.5 text-accent"></i>${summary}</span>
+      ${resetBtn}
+    </div>
+    <div id="sched-cat-chip-row" class="flex flex-wrap gap-1.5 mt-1">${chipsHtml}</div>
+  `;
 
   holder.querySelectorAll('.sched-cat-chip').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const raw = btn.dataset.catId;
-      if (raw === 'all') {
-        selectedCategoryIds.clear();
-      } else {
-        const id = Number(raw);
-        if (selectedCategoryIds.has(id)) selectedCategoryIds.delete(id);
-        else selectedCategoryIds.add(id);
-      }
+      const id = Number(btn.dataset.catId);
+      if (selectedCategoryIds.has(id)) selectedCategoryIds.delete(id);
+      else selectedCategoryIds.add(id);
       renderScheduleView();
     });
   });
+
+  const reset = document.getElementById('sched-select-all');
+  if (reset) {
+    reset.addEventListener('click', () => {
+      selectedCategoryIds = new Set(categoriesCache.map((c) => Number(c.id)));
+      renderScheduleView();
+    });
+  }
 }
 
 /** カレンダー形式（月グリッド・枠内に行事名チップ） */
@@ -436,7 +497,8 @@ export async function loadSchedules() {
   const end = `${y}-${String(m + 1).padStart(2, '0')}-${String(dim).padStart(2, '0')}`;
 
   const params = { startDate: start, endDate: end };
-  if (selectedCategoryIds.size > 0) params.categoryIds = [...selectedCategoryIds].join(',');
+  // 全選択時はフィルタパラメータを送らない（＝全行事を取得）
+  if (selectedCategoryIds.size > 0 && !isAllSelected()) params.categoryIds = [...selectedCategoryIds].join(',');
 
   try {
     const res = await apiGet('/schedules', params);
@@ -534,18 +596,18 @@ function ensureCategoryAdminDom() {
     <div id="schedule-category-modal" class="modal-overlay hidden">
       <div class="modal-card modal-card--wide">
         <div class="modal-header">
-          <h3 class="modal-title"><i data-lucide="tags" class="w-5 h-5 text-accent"></i> カテゴリ管理</h3>
+          <h3 class="modal-title"><i data-lucide="tags" class="w-5 h-5 text-accent"></i> 部署カテゴリ管理</h3>
           <button type="button" class="modal-close modal-close-x" aria-label="閉じる" title="閉じる"><i data-lucide="x" class="w-5 h-5"></i></button>
         </div>
         <div class="modal-body space-y-3">
           <div class="p-2 rounded-lg bg-info-soft border border-info-soft text-[11px] text-info-strong">
-            カテゴリはシステム管理者（ADMIN）のみ追加・改名・削除できます。行事はカテゴリを複数登録でき、
-            フィルタは選択したカテゴリの<b>いずれか1つ以上</b>を含む行事を表示します。
+            部署カテゴリ（プロフィールの部署）は<b>教務部 (KYOMU)</b> のみ追加・改名・削除できます。行事はカテゴリを複数登録でき、
+            フィルタは選択した部署の<b>いずれか1つ以上</b>を含む行事を表示します。初期状態は<b>全選択（全行事表示）</b>です。
           </div>
           <form id="sched-cat-add-form" class="flex flex-wrap items-end gap-2">
             <div class="flex-1 min-w-[140px]">
-              <label class="block text-xs font-semibold text-soft mb-1">カテゴリ名（12文字以内）</label>
-              <input id="sched-cat-name" maxlength="${NAME_MAX}" required class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" placeholder="例: 特別教室">
+              <label class="block text-xs font-semibold text-soft mb-1">部署名（12文字以内・プロフィールの部署と同じ）</label>
+              <input id="sched-cat-name" maxlength="${NAME_MAX}" required class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" placeholder="例: ３学年">
             </div>
             <div class="w-28">
               <label class="block text-xs font-semibold text-soft mb-1">色</label>
@@ -740,10 +802,10 @@ async function submitScheduleForm(event) {
   }
 }
 
-/** カテゴリ管理モーダル（ADMINのみ・カテゴリの追加改名削除と使用件数表示） */
+/** 部署カテゴリ管理モーダル（教務部 KYOMU のみ・追加改名削除と使用件数表示） */
 function openCategoryAdmin() {
-  if (!isAdmin()) {
-    showToast('カテゴリの追加・改名・削除はシステム管理者のみです。', 'error');
+  if (!canManageCategories()) {
+    showToast('部署カテゴリの追加・改名・削除は教務部のみです。', 'error');
     return;
   }
   ensureCategoryAdminDom();
@@ -818,11 +880,11 @@ function renderCategoryAdminList() {
   });
 }
 
-/** カテゴリ追加フォーム（ADMIN） */
+/** 部署カテゴリ追加フォーム（教務部 KYOMU） */
 async function submitCategoryAddForm(event) {
   event.preventDefault();
-  if (!isAdmin()) {
-    showToast('カテゴリ追加はシステム管理者のみです。', 'error');
+  if (!canManageCategories()) {
+    showToast('部署カテゴリの追加は教務部のみです。', 'error');
     return;
   }
 
@@ -837,8 +899,7 @@ async function submitCategoryAddForm(event) {
     showToast(`カテゴリ「${name}」を追加しました。`, 'success');
     document.getElementById('sched-cat-name').value = '';
     const newId = res.category ? res.category.id : null;
-    await loadCategories(true);
-    if (newId) selectedCategoryIds.add(newId);
+    await loadCategories(true, newId);
     renderCategoryAdminList();
     renderScheduleView();
   } catch (e) {

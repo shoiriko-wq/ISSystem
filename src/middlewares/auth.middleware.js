@@ -109,6 +109,28 @@ export function requireKyomuRole(req, res, next) {
 /**
  * システム管理者権限 (ADMIN) を要求するミドルウェア
  */
+/**
+ * 教務部 (KYOMU) のみを許可する (システム管理者 ADMIN は対象外)
+ * 部署マスタ＝スケジュールカテゴリの追加・改名・削除用
+ */
+export function requireKyomuOnlyRole(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({
+      error: 'Unauthorized',
+      message: '認証情報が存在しません。'
+    });
+  }
+
+  if (req.user.role === 'KYOMU') {
+    return next();
+  }
+
+  return res.status(403).json({
+    error: 'Forbidden',
+    message: 'この機能は教務部 (KYOMU) の権限が必要です。'
+  });
+}
+
 export function requireAdminRole(req, res, next) {
   if (!req.user || req.user.role !== 'ADMIN') {
     return res.status(403).json({
@@ -124,5 +146,6 @@ export default {
   optionalAuth,
   requireRoles,
   requireKyomuRole,
+  requireKyomuOnlyRole,
   requireAdminRole
 };

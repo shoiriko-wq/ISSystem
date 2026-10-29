@@ -15,12 +15,23 @@ html {
   color-scheme: var(--color-scheme, light);
 }
 
+/* App shell: header・sidebar は固定し、main だけをスクロールさせる。
+   body を viewport 高さに固定（min/max 両方が 100vh）すると、ウィンドウスクロールが発生せず
+   サイドメニューがメインスクロールに追随しない。 */
 body {
   background-color: var(--bg-main);
   color: var(--text-main);
   transition: background-color 0.25s ease, color 0.25s ease;
   overflow-x: hidden;
+  overflow-y: hidden;
   min-height: 100vh;
+  max-height: 100vh;
+  height: 100vh;
+}
+
+/* モバイルのブラウザツールバーを考慮（dvh 非対応環境は 100vh にフォールバック） */
+@supports (height: 100dvh) {
+  body { min-height: 100dvh; max-height: 100dvh; height: 100dvh; }
 }
 
 /* 2. Custom Scrollbar Styling */

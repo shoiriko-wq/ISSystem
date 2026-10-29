@@ -28,7 +28,7 @@ export const scheduleService = {
   },
 
   /**
-   * カテゴリ追加 (呼び出し側で ADMIN 権限を requireAdminRole で保証する)
+   * カテゴリ追加 (呼び出し側で requireKyomuOnlyRole により教務部 KYOMU 権限を保証する)
    * @param {Object} data - { name, color_key, sort_order }
    * @param {Object} user
    */
@@ -66,7 +66,7 @@ export const scheduleService = {
   },
 
   /**
-   * カテゴリ改名・色変更 (ADMIN のみ)
+   * カテゴリ改名・色変更 (教務部 KYOMU のみ)
    */
   async updateCategory(id, data, user) {
     const catId = parseInt(id, 10);
@@ -117,7 +117,7 @@ export const scheduleService = {
   },
 
   /**
-   * カテゴリ削除 (ADMIN のみ・行事側の紐付けは CASCADE で解除)
+   * カテゴリ削除 (教務部 KYOMU のみ・行事側の紐付けは CASCADE で解除)
    */
   async deleteCategory(id, user) {
     const catId = parseInt(id, 10);

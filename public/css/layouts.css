@@ -80,6 +80,11 @@
   background-color: var(--bg-card);
 }
 
+/* main の余白は p-4 (1rem) / md:p-6 (1.5rem) なので、md 以上では上下 3rem を引く */
+@media (min-width: 768px) {
+  .chat-layout { height: calc(100vh - 7rem); }
+}
+
 .chat-sidebar-channels {
   width: 16rem;
   border-right: 1px solid var(--border-color);

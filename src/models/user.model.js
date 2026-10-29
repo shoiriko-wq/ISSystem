@@ -266,6 +266,7 @@ export const userModel = {
       code,
       created_by_user_id: createdByUserId,
       is_used: 0,
+      used_for: null,
       expires_at: expiresAt instanceof Date ? expiresAt.toISOString() : expiresAt,
       created_at: new Date().toISOString()
     };
@@ -293,13 +294,24 @@ export const userModel = {
     }
   },
 
-  async markInvitationCodeUsed(code, usedByUserId) {
+  /**
+   * 招待コードを消費済みとして記録する
+   * 発行時点では「新規登録用」か「パスワード再設定用」かが確定しないため、
+   * 消費時に used_for へ利用目的を記録する (REGISTER / PASSWORD_RESET)
+   */
+  async markInvitationCodeUsed(code, usedByUserId, usedFor = 'REGISTER') {
     try {
-      await query(`UPDATE invitation_codes SET is_used = 1, used_by_user_id = $1 WHERE code = $2`, [usedByUserId, code]);
+      await query(
+        `UPDATE invitation_codes SET is_used = 1, used_by_user_id = $1, used_for = $2 WHERE code = $3`,
+        [usedByUserId, usedFor, code]
+      );
     } catch (err) {
+      console.warn('[UserModel PG Warning] markInvitationCodeUsed failed:', err.message);
       if (mockInvitationCodes.has(code)) {
         const inv = mockInvitationCodes.get(code);
         inv.is_used = 1;
+        inv.used_by_user_id = usedByUserId;
+        inv.used_for = usedFor;
       }
     }
   }

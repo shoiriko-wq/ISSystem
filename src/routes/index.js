@@ -4,7 +4,7 @@
  */
 
 import { Router } from 'express';
-import { authenticateToken, requireKyomuRole, requireAdminRole } from '../middlewares/auth.middleware.js';
+import { authenticateToken, requireKyomuRole, requireKyomuOnlyRole, requireAdminRole } from '../middlewares/auth.middleware.js';
 import { checkEditingLock } from '../middlewares/lock.middleware.js';
 
 import authController from '../controllers/auth.controller.js';
@@ -48,6 +48,7 @@ const safe = (fn) => (req, res, next) => {
 // ==========================================
 router.post('/auth/login', safe(authController?.login));
 router.post('/auth/register-invitation', safe(authController?.registerWithInvitation));
+router.post('/auth/reset-password-invitation', safe(authController?.resetPasswordWithInvitation));
 router.post('/auth/generate-invitation', authenticateToken, safe(authController?.generateInvitation));
 router.get('/auth/me', authenticateToken, safe(authController?.getProfile));
 router.put('/auth/profile', authenticateToken, safe(authController?.updateProfile));
@@ -62,6 +63,7 @@ router.delete('/users/:id', authenticateToken, safe(authController?.deleteUser))
 
 // エイリアス
 router.post('/auth/register', safe(authController?.registerWithInvitation));
+router.post('/auth/reset-password', safe(authController?.resetPasswordWithInvitation));
 router.post('/auth/invite-code', authenticateToken, safe(authController?.generateInvitation));
 
 // ==========================================
@@ -112,11 +114,11 @@ router.delete('/facilities/reservations/:reservationId', authenticateToken, safe
 // ==========================================
 // 5. 校内行事 & スケジュール API (/api/schedules)
 // ==========================================
-// カテゴリマスタ (追加・改名・削除はシステム管理者 ADMIN のみ)
+// カテゴリマスタ (＝プロフィールの部署マスタ。追加・改名・削除は教務部 KYOMU のみ)
 router.get('/schedules/categories', authenticateToken, safe(getScheduleCategories));
-router.post('/schedules/categories', authenticateToken, requireAdminRole, safe(createScheduleCategory));
-router.put('/schedules/categories/:id', authenticateToken, requireAdminRole, safe(updateScheduleCategory));
-router.delete('/schedules/categories/:id', authenticateToken, requireAdminRole, safe(deleteScheduleCategory));
+router.post('/schedules/categories', authenticateToken, requireKyomuOnlyRole, safe(createScheduleCategory));
+router.put('/schedules/categories/:id', authenticateToken, requireKyomuOnlyRole, safe(updateScheduleCategory));
+router.delete('/schedules/categories/:id', authenticateToken, requireKyomuOnlyRole, safe(deleteScheduleCategory));
 
 router.get('/schedules', authenticateToken, safe(getSchedulesByRange));
 router.get('/schedules/today', authenticateToken, safe(getTodayTimeline));
@@ -200,6 +202,8 @@ router.post('/exam/:id/room-assign/end', authenticateToken, safe(examController?
 // 出張等
 router.get('/exam/:id/trips/preview', authenticateToken, safe(examController?.previewTrips));
 router.get('/exam/:id/trips', authenticateToken, safe(examController?.getTrips));
+router.post('/exam/:id/trips/start', authenticateToken, safe(examController?.startTripSurvey));
+router.post('/exam/:id/trips/publish', authenticateToken, safe(examController?.publishTrips));
 router.post('/exam/:id/trips', authenticateToken, safe(examController?.saveTrips));
 router.delete('/exam/:id/trips/:tripId', authenticateToken, safe(examController?.deleteTrip));
 router.post('/exam/:id/trips/end', authenticateToken, safe(examController?.endTripPhase));

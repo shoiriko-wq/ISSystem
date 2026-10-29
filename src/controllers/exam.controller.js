@@ -59,11 +59,11 @@ export const examController = {
   }),
 
   submitSubjectRow: wrap(async (req, res) => {
-    ok(res, await examService.submitSubjectRow(req.params.id, Number(req.params.rowId), req.user), '提出を完了しました。');
+    ok(res, await examService.submitSubjectRow(req.params.id, req.params.rowId, req.user), '提出を完了しました。');
   }),
 
   deleteSubjectRow: wrap(async (req, res) => {
-    ok(res, await examService.deleteSubjectRow(req.params.id, Number(req.params.rowId), req.user), '実施科目を削除しました。');
+    ok(res, await examService.deleteSubjectRow(req.params.id, req.params.rowId, req.user), '実施科目を削除しました。');
   }),
 
   endSubjectSurvey: wrap(async (req, res) => {
@@ -134,6 +134,15 @@ export const examController = {
   }),
 
   // ===== 出張等 =====
+
+  startTripSurvey: wrap(async (req, res) => {
+    ok(res, await examService.startTripSurvey(req.params.id, req.user), '出張等の登録を開始しました。');
+  }),
+
+  publishTrips: wrap(async (req, res) => {
+    ok(res, await examService.publishTrips(req.params.id, req.user), '出張等を公表しました。');
+  }),
+
   previewTrips: wrap(async (req, res) => {
     ok(res, await examService.previewTrips(req.params.id, req.user));
   }),
@@ -147,7 +156,7 @@ export const examController = {
   }),
 
   deleteTrip: wrap(async (req, res) => {
-    ok(res, await examService.deleteTrip(req.params.id, Number(req.params.tripId), req.user), '出張等を削除しました。');
+    ok(res, await examService.deleteTrip(req.params.id, req.params.tripId, req.user), '出張等を削除しました。');
   }),
 
   endTripPhase: wrap(async (req, res) => {
@@ -178,7 +187,7 @@ export const examController = {
   }),
 
   deleteParttimeStaff: wrap(async (req, res) => {
-    ok(res, await examService.deleteParttimeStaff(req.params.id, Number(req.params.staffRowId), req.user), '非常勤教員条件を削除しました。');
+    ok(res, await examService.deleteParttimeStaff(req.params.id, req.params.staffRowId, req.user), '非常勤教員条件を削除しました。');
   }),
 
   setParttimeAvailability: wrap(async (req, res) => {
@@ -194,7 +203,7 @@ export const examController = {
   }),
 
   removeExemption: wrap(async (req, res) => {
-    ok(res, await examService.removeExemption(req.params.id, Number(req.params.teacherId), req.user), '監督免除を解除しました。');
+    ok(res, await examService.removeExemption(req.params.id, req.params.teacherId, req.user), '監督免除を解除しました。');
   }),
 
   solveProctors: wrap(async (req, res) => {

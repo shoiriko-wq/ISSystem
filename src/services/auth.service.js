@@ -163,7 +163,7 @@ export const authService = {
 
     const newUserId = newUser._id || newUser.id;
 
-    await userModel.markInvitationCodeUsed(invitationCode, newUserId);
+    await userModel.markInvitationCodeUsed(invitationCode, newUserId, 'REGISTER');
 
     try {
       if (auditModel && typeof auditModel.logAction === 'function') {
@@ -181,6 +181,56 @@ export const authService = {
     }
 
     return this.login(staff_code, password, ipAddress);
+  },
+
+  /**
+   * 招待コードを利用したパスワード再設定 (パスワード忘れた方向け)
+   * 招待コードは発行時点で利用目的が確定しないため、ログイン画面でユーザーが目的を選ぶ
+   * 消費済みコードは再利用不可 (markInvitationCodeUsed で used_for を記録)
+   */
+  async resetPasswordWithInvitation(resetData, ipAddress = '') {
+    const { invitationCode, staff_code, newPassword } = resetData;
+
+    if (!invitationCode || !staff_code || !newPassword) {
+      throw new ApiError(400, '招待コード、教職員番号、新しいパスワードは必須です。');
+    }
+
+    if (String(newPassword).trim().length < 8) {
+      throw new ApiError(400, '新しいパスワードは8文字以上で入力してください。');
+    }
+
+    const validCode = await userModel.findInvitationCode(invitationCode);
+    if (!validCode) {
+      throw new ApiError(400, '無効または有効期限切れの招待コードです。');
+    }
+
+    const targetUser = await userModel.findByStaffCode(staff_code);
+    if (!targetUser) {
+      throw new ApiError(404, 'この教職員番号のアカウントは登録されていません。「招待コードで新規登録」タブで登録してください。');
+    }
+
+    const targetId = targetUser._id || targetUser.id;
+    const newHash = await hashPassword(newPassword);
+    await userModel.updatePasswordHash(targetId, newHash);
+    await userModel.markInvitationCodeUsed(invitationCode, targetId, 'PASSWORD_RESET');
+
+    try {
+      if (auditModel && typeof auditModel.logAction === 'function') {
+        await auditModel.logAction({
+          userId: targetId,
+          action: 'RESET_PASSWORD_VIA_INVITATION',
+          targetEntity: 'USER',
+          targetId,
+          changesJson: JSON.stringify({ invitedBy: validCode.created_by_user_id, code: invitationCode }),
+          ipAddress,
+        });
+      }
+    } catch (auditErr) {
+      console.warn('[Audit Log Warning]', auditErr.message);
+    }
+
+    // 再設定後は新パスワードで即ログイン (ログイン画面でそのままアプリへ入れる)
+    return this.login(staff_code, newPassword, ipAddress);
   },
 
   /**

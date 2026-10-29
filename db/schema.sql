@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS invitation_codes (
   code TEXT UNIQUE NOT NULL,
   created_by_user_id TEXT NOT NULL,
   used_by_user_id TEXT,
+  used_for TEXT,
   is_used INTEGER NOT NULL DEFAULT 0,
   expires_at TIMESTAMP NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -42,6 +43,8 @@ CREATE TABLE IF NOT EXISTS invitation_codes (
 );
 CREATE INDEX IF NOT EXISTS idx_invitation_code ON invitation_codes(code);
 CREATE INDEX IF NOT EXISTS idx_invitation_expires ON invitation_codes(expires_at);
+-- 招待コードは発行時点で利用目的 (REGISTER / PASSWORD_RESET) が確定しないため、消費時に記録する
+ALTER TABLE invitation_codes ADD COLUMN IF NOT EXISTS used_for TEXT;
 
 -- 2. 掲示板・回覧板投稿 (posts)
 CREATE TABLE IF NOT EXISTS posts (
@@ -256,10 +259,12 @@ CREATE TABLE IF NOT EXISTS invitation_codes (
   code TEXT UNIQUE NOT NULL,
   created_by_user_id TEXT,
   used_by_user_id TEXT,
+  used_for TEXT,
   is_used INTEGER DEFAULT 0,
   expires_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE invitation_codes ADD COLUMN IF NOT EXISTS used_for TEXT;
 
 -- 12. 排他編集ロック (editing_locks)
 CREATE TABLE IF NOT EXISTS editing_locks (
@@ -759,7 +764,8 @@ ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CUR
 
 -- -----------------------------------------------------------------------------
 -- 17. スケジュールカテゴリマスタ (schedule_categories)・行事カテゴリ紐付け (schedule_category_map)
--- ※ 1行事が複数カテゴリを持つ (多対多)。カテゴリ追加・削除はシステム管理者 (ADMIN) のみ
+-- ※ 1行事が複数カテゴリを持つ (多対多)。カテゴリ＝プロフィールの部署マスタ。
+--    追加・改名・削除は教務部 (KYOMU) のみ
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS schedule_categories (
   id SERIAL PRIMARY KEY,
@@ -778,23 +784,23 @@ CREATE TABLE IF NOT EXISTS schedule_category_map (
 );
 CREATE INDEX IF NOT EXISTS idx_scm_category ON schedule_category_map(category_id);
 
--- 初期カテゴリ（1学年・2学年・3学年・教務・進路・総務・生徒部）
+-- 初期カテゴリ（プロフィールの部署名と同名・教務部が運用）
 INSERT INTO schedule_categories (id, name, color_key, sort_order)
 VALUES
-  (1, '1学年', 'INFO', 1),
-  (2, '2学年', 'SUCCESS', 2),
-  (3, '3学年', 'WARNING', 3),
-  (4, '教務', 'ACCENT', 4),
-  (5, '進路', 'PURPLE', 5),
-  (6, '総務', 'SLATE', 6),
-  (7, '生徒部', 'DANGER', 7)
+  (1, '教務部', 'ACCENT', 1),
+  (2, '生徒指導部', 'DANGER', 2),
+  (3, 'キャリアガイダンス部', 'INFO', 3),
+  (4, '特色推進部', 'PURPLE', 4),
+  (5, '１学年', 'SUCCESS', 5),
+  (6, '２学年', 'SLATE', 6),
+  (7, '３学年', 'WARNING', 7)
 ON CONFLICT (id) DO NOTHING;
 
 SELECT setval(pg_get_serial_sequence('schedule_categories', 'id'), (SELECT MAX(id) FROM schedule_categories));
 
--- デモ行事とカテゴリの紐付け（中間考査=全学年、定例会議=教務、避難訓練=生徒部）
+-- デモ行事とカテゴリの紐付け（中間考査=1〜3学年、職員定例会議=教務部、避難訓練=生徒指導部）
 INSERT INTO schedule_category_map (schedule_id, category_id)
-VALUES ('sch_101', 1), ('sch_101', 2), ('sch_101', 3), ('sch_102', 4), ('sch_103', 7)
+VALUES ('sch_101', 5), ('sch_101', 6), ('sch_101', 7), ('sch_102', 1), ('sch_103', 2)
 ON CONFLICT DO NOTHING;
 
 -- システム管理者アカウント (ADMIN / 職員番号 T2026000 / 初期パスワード password123)
