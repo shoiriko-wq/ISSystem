@@ -5,7 +5,7 @@
 
 import { state } from '../../state.js';
 import { escapeHTML, refreshLucideIcons, showToast } from '../../ui-helpers.js';
-import { examStore, examApi, loadBoard, resolveActiveExamId, phaseBadge } from './exam.shared.js';
+import { examStore, examApi, loadBoard, resolveActiveExamId, phaseBadge, isKyomuUser, syncRoleKyomu } from './exam.shared.js';
 import { renderMasterTab, bindMasterTab } from './exam.master.ui.js';
 import { renderSubjectTab, bindSubjectTab } from './exam.subject.ui.js';
 import { renderTimetableTab, bindTimetableTab, resetTimetableState } from './exam.timetable.ui.js';
@@ -21,8 +21,25 @@ const SUB_TABS = [
   { id: 'room', label: '教室割の作成', icon: 'layout-grid' },
   { id: 'trip', label: '出張等の登録', icon: 'plane' },
   { id: 'proctor', label: '監督割の作成', icon: 'shield-check' },
-  { id: 'view', label: '公表・自分の担当', icon: 'eye' },
+  { id: 'view', label: '公表・自分の担当', icon: 'eye', openToAll: true },
 ];
+
+/**
+ * 現在ロールで表示可能なサブタブ
+ * 教務権限者: 6つの作成メニュー + 公表ビュー、一般教員: 公表ビューのみ
+ */
+function visibleSubTabs() {
+  const kyomu = isKyomuUser();
+  return SUB_TABS.filter((t) => kyomu || t.openToAll);
+}
+
+/** examStore.sub を表示可能なサブタブに正規化する（教務=先頭メニュー、教員=公表ビュー） */
+function ensureSubTab() {
+  const kyomu = isKyomuUser();
+  if (!visibleSubTabs().some((t) => t.id === examStore.sub)) {
+    examStore.sub = kyomu ? visibleSubTabs()[0].id : 'view';
+  }
+}
 
 const PHASE_KEYS = [
   ['subject_phase', '実施科目'],
@@ -53,6 +70,7 @@ async function reload() {
 }
 
 function renderActivePanel() {
+  ensureSubTab();
   const sub = examStore.sub;
   for (const t of SUB_TABS) {
     const p = panels[t.id];
@@ -101,14 +119,16 @@ function renderHeader() {
 function renderSubTabs() {
   const bar = document.getElementById('exam-subtabs');
   if (!bar) return;
-  bar.innerHTML = SUB_TABS.map(
+  bar.innerHTML = visibleSubTabs().map(
     (t) => `<button data-subtab="${t.id}" class="nav-item flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-soft hover-surface transition-all border border-transparent ${
       t.id === examStore.sub ? 'border-accent bg-accent-soft text-accent-strong' : ''
     }">
         <i data-lucide="${t.icon}" class="w-4 h-4 ${t.id === 'view' ? 'text-info' : 'text-warning'}"></i>
         <span>${t.label}</span>
       </button>`
-  ).join('');
+  ).join('') + (isKyomuUser()
+    ? ''
+    : '<span class="px-3 py-2 text-[10px] text-muted">作成メニューは教務権限者のみ</span>');
   refreshLucideIcons();
 }
 
@@ -116,6 +136,10 @@ function renderSubTabs() {
 export function initExamModule() {
   const container = document.getElementById('view-exam');
   if (!container) return;
+
+  // ロールで教務権限を判定し、初期サブタブを選ぶ（教務=考査の登録、教員=公表ビュー）
+  syncRoleKyomu();
+  examStore.sub = isKyomuUser() ? 'master' : 'view';
 
   container.innerHTML = `
     <div id="exam-header-bar" class="bg-surface-strong p-4 rounded-xl border border-divider space-y-1"></div>
@@ -162,11 +186,19 @@ export async function loadExamData() {
       examStore.examId = null;
       renderHeader();
       renderSubTabs();
-      const p = panels[examStore.sub];
+      const noExamText = isKyomuUser()
+        ? 'active な考査がありません。「考査の登録」タブから作成してください。'
+        : '現在閲覧できる公開中の考査がありません。教務による公表を待ちください。';
+      // 教員は公表ビューのみ、教務は「考査の登録」から作成できる
+      const targetSub = isKyomuUser() ? 'master' : 'view';
+      for (const t of SUB_TABS) panels[t.id]?.classList.toggle('hidden', t.id !== targetSub);
+      examStore.sub = targetSub;
+      const p = panels[targetSub];
       if (p) {
         p.classList.remove('hidden');
-        p.innerHTML = `<div class="card p-6 text-center text-xs text-muted">active な考査がありません。「考査の登録」タブから作成してください。</div>`;
+        p.innerHTML = `<div class="card p-6 text-center text-xs text-muted">${noExamText}</div>`;
       }
+      renderSubTabs();
       refreshLucideIcons();
       return;
     }

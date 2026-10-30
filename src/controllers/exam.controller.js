@@ -83,6 +83,10 @@ export const examController = {
     ok(res, await examService.solveTimetable(req.params.id, req.user), '試験時間割を作成しました。');
   }),
 
+  saveTimetableSlots: wrap(async (req, res) => {
+    ok(res, await examService.saveTimetableSlots(req.params.id, req.body, req.user), '時間割コマを保存しました。');
+  }),
+
   publishTimetable: wrap(async (req, res) => {
     ok(res, await examService.publishTimetable(req.params.id, req.user), '試験時間割を公表しました。');
   }),
@@ -91,6 +95,23 @@ export const examController = {
     ok(res, await examService.getSlots(req.params.id, req.user));
   }),
 
+  // ===== ×（使用不能コマ） =====
+
+  getScheduleCells: wrap(async (req, res) => {
+    ok(res, await examService.getScheduleCells(req.params.id, req.user));
+  }),
+
+  saveScheduleCells: wrap(async (req, res) => {
+    ok(res, await examService.saveScheduleCells(req.params.id, req.body, req.user), '全学年共通 × を保存しました。');
+  }),
+
+  saveGradeBlocked: wrap(async (req, res) => {
+    ok(res, await examService.saveGradeBlocked(req.params.id, req.body, req.user), '学年固有 × を保存しました。');
+  }),
+
+  validateTimetableRows: wrap(async (req, res) => {
+    ok(res, await examService.validateTimetableRows(req.params.id, req.body, req.user));
+  }),
 
   // ===== 試験教室 =====
   getRooms: wrap(async (req, res) => {

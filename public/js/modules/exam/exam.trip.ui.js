@@ -14,6 +14,7 @@ import {
   showToast,
   isKyomuUser,
 } from './exam.shared.js';
+import { dayDateLabel, examDayList } from './exam.timetable.ui.js';
 
 const REASONS = ['出張', '外出', '私用', '欠席'];
 
@@ -42,8 +43,12 @@ function syncTrips() {
 }
 
 function dayOptions(sel, days) {
-  return Array.from({ length: days }, (_, i) => i + 1)
-    .map((d) => `<option value="${d}" ${Number(sel) === d ? 'selected' : ''}>${d}日目</option>`)
+  const list = Array.isArray(days) ? days : Array.from({ length: days }, (_, i) => i + 1);
+  return list
+    .map((d) => {
+      const date = dayDateLabel(d);
+      return `<option value="${d}" ${Number(sel) === d ? 'selected' : ''}>${d}日目${date ? `（${date}）` : ''}</option>`;
+    })
     .join('');
 }
 
@@ -102,7 +107,7 @@ export function renderTripTab(container) {
   phase = board.phases.trip_phase;
   const kyomu = isKyomuUser();
   const editable = board.editable.trip;
-  const days = Number(board.master.days_count) || 0;
+  const days = examDayList(board.master);
   const slots = Number(board.master.daily_slots) || 0;
   if (lastExamId !== examStore.examId) syncTrips();
 

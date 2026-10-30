@@ -458,7 +458,8 @@ INSERT INTO classes (id, grade, class_num, name)
 VALUES
   ('1-1', 1, 1, '1年1組'),
   ('1-2', 1, 2, '1年2組'),
-  ('2-1', 2, 1, '2年1組')
+  ('2-1', 2, 1, '2年1組'),
+  ('3-1', 3, 1, '3年1組')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO subjects (id, name)
@@ -807,4 +808,19 @@ ON CONFLICT DO NOTHING;
 INSERT INTO users (id, staff_code, name, email, password_hash, role, grade, department, extension_number)
 VALUES ('sys-admin', 'T2026000', 'システム 管理者', 'admin@school.ed.jp', '$2b$10$UaPLuLuZtQ.5DG3P33kdl.iM0Rl140Ky9Gv8JWXomI8LiRUxA8SCC', 'ADMIN', 'NONE', 'システム管理', '100')
 ON CONFLICT DO NOTHING;
+
+-- -------------------------------------------------------------
+-- 定期考査「×（使用不能コマ）」対応（既存DB向けマイグレーション）
+-- 全学年共通の × : exam_masters.schedule_cells（暦日×時限の排除リスト）
+-- 学年固有の ×   : exam_slots.is_blocked（subject_name = NULL）
+-- day_number は「試験実施日番号」（暦日を飛ばした実施日の連番）
+-- -------------------------------------------------------------
+ALTER TABLE exam_masters ADD COLUMN IF NOT EXISTS schedule_cells TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE exam_masters ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS notes TEXT;
+-- × と科目配置が同じ (日, 時限, クラス) に並存できるよう複合ユニークを拡張
+ALTER TABLE exam_slots DROP CONSTRAINT IF EXISTS exam_slots_exam_master_id_day_number_slot_number_class_id_key;
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_exam_slot_cell ON exam_slots(exam_master_id, day_number, slot_number, class_id, is_blocked);
+
 

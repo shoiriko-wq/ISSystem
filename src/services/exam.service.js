@@ -7,7 +7,22 @@
 import { examModel } from '../models/exam.model.js';
 import { query } from '../../config/database.js';
 import { logAction } from '../models/audit.model.js';
-import { solveTimetable, validateTimetable, DEFAULT_TIMETABLE_RULES } from '../utils/exam-timetable-solver.js';
+import { solveTimetable, validateTimetable, expandUnits, DEFAULT_TIMETABLE_RULES } from '../utils/exam-timetable-solver.js';
+import {
+  buildDaySlots,
+  buildBlockedSet,
+  enabledDays,
+  dateToExamDay,
+  calendarToExamDay,
+  examDateRange,
+  weekdayOf,
+  remapDays,
+  mapExamDays,
+  unassignedUnits,
+  normalizeScheduleCells,
+  availableCellCount,
+  countBlocked,
+} from '../utils/exam-schedule.js';
 import { solveRooms, DEFAULT_ROOM_RULES } from '../utils/exam-room-solver.js';
 import { solveProctor, validateProctor, DEFAULT_PROCTOR_RULES } from '../utils/exam-proctor-solver.js';
 
@@ -26,7 +41,7 @@ function isKyomu(user) {
 function ensureKyomu(user) {
   if (!isKyomu(user)) {
     const err = new Error('この操作には教務権限が必要です。');
-    err.status = 403;
+    err.statusCode = 403;
     throw err;
   }
 }
@@ -35,7 +50,7 @@ function ensureMaster(examMasterId) {
   return examModel.findExamMasterById(examMasterId).then((m) => {
     if (!m) {
       const err = new Error('考査が見つかりません。');
-      err.status = 404;
+      err.statusCode = 404;
       throw err;
     }
     return m;
@@ -78,11 +93,12 @@ function planToUnits(plan) {
   }));
 }
 
-/** 時間割スロット → ソルバー入力 timetable [{unit_id, grade, day, slot, duration_slots}] */
+/** 時間割スロット → ソルバー入力 timetable [{unit_id, grade, day, slot, duration_slots}]（×行は除外） */
 function slotsToTimetable(slots) {
   const seen = new Set();
   const out = [];
   for (const s of slots) {
+    if (s.is_blocked) continue;
     const key = `${s.grade}:${s.day_number}:${s.slot_number}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -98,6 +114,62 @@ function slotsToTimetable(slots) {
   return out;
 }
 
+/**
+ * 「×（使用不能コマ）」情報の算出（全学年共通 × + 学年固有 ×）
+ * @param {object} master 考査マスタ（schedule_cells を含む）
+ * @param {Array} slots exam_slots 全行（is_blocked を含む）
+ * @returns {{daySlots:Array, examSlots:Array, gradeBlocks:Array, blocked:Set, enabledByDay:Map, calendar:Array}}
+ */
+function scheduleContext(master, slots) {
+  const grades = (master.grades || []).map(Number);
+  const daySlots = buildDaySlots(master);
+  const examSlots = (slots || []).filter((s) => !s.is_blocked);
+  const gradeBlocks = (slots || [])
+    .filter((s) => s.is_blocked)
+    .map((s) => ({ grade: Number(s.grade), day: Number(s.day_number), slot: Number(s.slot_number) }));
+  const blocked = buildBlockedSet(daySlots, gradeBlocks, grades);
+  const enabledByDay = new Map(daySlots.map((d) => [d.day, new Set(d.enabled_slots)]));
+  // 学年固有 × を差し引いた「その学年が使えるコマ」集合（grade|day → Set(slot)）
+  const usableByGrade = new Map();
+  for (const g of grades) {
+    for (const d of daySlots) {
+      const usable = new Set(d.enabled_slots);
+      for (const b of gradeBlocks) {
+        if (b.grade === g && b.day === d.day) usable.delete(b.slot);
+      }
+      usableByGrade.set(`${g}|${d.day}`, usable);
+    }
+  }
+  return { daySlots, examSlots, gradeBlocks, blocked, enabledByDay, usableByGrade };
+}
+
+/** 実施科目プランと実配置コマから未割当科目を算出（× で使用不能なコマ分は計画から除外） */
+function computeUnassigned(plan, master, ctx) {
+  return unassignedUnits(plan, ctx.examSlots, ctx.daySlots, ctx.gradeBlocks, (master.grades || []).map(Number));
+}
+
+/** 依存テーブル（出張・教室割当・監督割当・非常勤出勤）の実施日番号を新実施日へ追随 */
+async function renumberDependentTables(examMasterId, mapping, newDays) {
+  const tables = ['exam_trips', 'exam_proctor_assignments', 'exam_room_assignments', 'exam_parttime_availability'];
+  const touched = { renumbered: 0, deleted: 0 };
+  for (const t of tables) {
+    touched.renumbered += await examModel.renumberExamDays(t, examMasterId, mapping);
+    touched.deleted += await examModel.deleteExamRowsOutsideDays(t, examMasterId, newDays);
+  }
+  return touched;
+}
+
+/** 考査データに現れている実施日番号の集合（× 圧縮時のマッピング対象） */
+async function collectExamDays(examMasterId) {
+  const tables = ['exam_slots', 'exam_trips', 'exam_proctor_assignments', 'exam_room_assignments', 'exam_parttime_availability'];
+  const days = new Set();
+  for (const t of tables) {
+    const res = await query(`SELECT DISTINCT day_number FROM ${t} WHERE exam_master_id = ?`, [examMasterId]);
+    for (const r of res.rows) days.add(Number(r.day_number));
+  }
+  return days;
+}
+
 /** 学年別在籍生徒数（クラス数 × 1クラス想定人数） */
 function gradeStudentsFromClasses(classes, perClass = 40) {
   const out = {};
@@ -108,9 +180,9 @@ function gradeStudentsFromClasses(classes, perClass = 40) {
   return out;
 }
 
-/** 出欠記録 → 出張コマ（考査期間・全コマ）の集合 */
-function absencesToTrips(absences, master, teachers) {
-  const dates = dateRange(master.start_date, master.end_date);
+/** 出欠記録 → 出張コマ（考査期間・使用可能コマのみ）の集合 */
+function absencesToTrips(absences, master, teachers, daySlots = null) {
+  const slots = daySlots || buildDaySlots(master);
   const byDate = new Map();
   for (const a of absences) {
     if (!byDate.has(a.record_date)) byDate.set(a.record_date, []);
@@ -118,15 +190,14 @@ function absencesToTrips(absences, master, teachers) {
   }
   const trips = [];
   for (const t of teachers) {
-    for (let d = 1; d <= master.days_count; d++) {
-      const date = dates[d - 1];
-      const recs = (byDate.get(date) || []).filter((a) => a.user_id === t.id);
+    for (const d of slots) {
+      const recs = (byDate.get(d.date) || []).filter((a) => a.user_id === t.id);
       if (recs.length === 0) continue;
-      for (let s = 1; s <= master.daily_slots; s++) {
+      for (const s of d.enabled_slots) {
         trips.push({
           teacher_id: t.id,
           teacher_name: t.name,
-          day_number: d,
+          day_number: d.day,
           slot_number: s,
           reason: recs.map((r) => r.reason || r.record_type).join(' / '),
           record_type: recs[0].record_type,
@@ -198,7 +269,7 @@ export const examService = {
     ensureKyomu(user);
     if (!payload.title) {
       const err = new Error('考査名を入力してください。');
-      err.status = 400;
+      err.statusCode = 400;
       throw err;
     }
     const created = await examModel.createExamMaster({
@@ -251,6 +322,9 @@ export const examService = {
     const rulesTable = await examModel.getRulesTable('exam_timetable_rules', examMasterId, DEFAULT_TIMETABLE_RULES);
     const proctorRules = await examModel.getRulesTable('exam_proctor_rules', examMasterId, DEFAULT_PROCTOR_RULES);
 
+    const ctx = scheduleContext(master, slots);
+    const unassigned = computeUnassigned(plan, master, ctx);
+
     const editable = {
       subject: kyomu || phases.subject_phase === PHASE.SURVEY,
       subject_kyomu: kyomu,
@@ -268,6 +342,13 @@ export const examService = {
         can_edit: kyomu || (phases.subject_phase === PHASE.SURVEY && p.setter_teacher_id === user.id),
       })),
       slots,
+      day_slots: ctx.daySlots,
+      grade_blocks: ctx.gradeBlocks,
+      blocked: [...ctx.blocked].map((k) => {
+        const [grade, day, slot] = k.split('|').map(Number);
+        return { grade, day, slot, global: false };
+      }),
+      unassigned,
       rooms,
       room_config: roomConfig,
       room_assignments: roomAssignments,
@@ -313,12 +394,12 @@ export const examService = {
     if (!kyomu) {
       if (phases.subject_phase !== PHASE.SURVEY) {
         const err = new Error('調査期間中でない実施科目は編集できません。');
-        err.status = 403;
+        err.statusCode = 403;
         throw err;
       }
       if (row.setter_teacher_id !== user.id) {
         const err = new Error('自分の出題コマのみ編集できます。');
-        err.status = 403;
+        err.statusCode = 403;
         throw err;
       }
     }
@@ -337,12 +418,12 @@ export const examService = {
     const row = (await examModel.listSubjectPlan(examMasterId)).find((r) => r.id === id);
     if (!row) {
       const err = new Error('プラン行が見つかりません。');
-      err.status = 404;
+      err.statusCode = 404;
       throw err;
     }
     if (!isKyomu(user) && row.setter_teacher_id !== user.id) {
       const err = new Error('自分の出題コマのみ提出できます。');
-      err.status = 403;
+      err.statusCode = 403;
       throw err;
     }
     return examModel.upsertSubjectPlanRow({ ...row, submit_status: 'SUBMITTED', updated_by: user.id });
@@ -375,58 +456,166 @@ export const examService = {
     const master = await ensureMaster(examMasterId);
     if (master.timetable_phase === PHASE.ENDED) {
       const err = new Error('時間割フェーズは終了済みです。');
-      err.status = 403;
+      err.statusCode = 403;
       throw err;
     }
 
     const plan = await examModel.listSubjectPlan(examMasterId);
     if (plan.length === 0) {
       const err = new Error('実施科目が登録されていません。');
-      err.status = 400;
+      err.statusCode = 400;
       throw err;
     }
 
+    const allSlots = await examModel.listSlots(examMasterId);
+    const ctx = scheduleContext(master, allSlots);
     const rules = await examModel.getRulesTable('exam_timetable_rules', examMasterId, DEFAULT_TIMETABLE_RULES);
     const historyRows = await examModel.fetchSlotHistory(200);
 
     const units = planToUnits(plan);
     const grades = master.grades.map((g) => Number(g));
 
-    const result = solveTimetable({
-      units,
-      days: master.days_count,
-      slots: master.daily_slots,
-      rules,
-      grades,
-      history: historyRows,
-    });
+    const result = solveTimetable(
+      {
+        units,
+        days: ctx.daySlots.length,
+        slots: master.daily_slots,
+        rules,
+        grades,
+        history: historyRows,
+      },
+      { blocked: ctx.blocked, enabledSlots: ctx.enabledByDay },
+    );
 
     if (!result.feasible && result.assignments.length === 0) {
-      return { ...result, saved: 0 };
+      return { ...result, saved: 0, unassigned: computeUnassigned(plan, master, ctx), day_slots: ctx.daySlots };
     }
 
     const unitsById = new Map(units.map((u) => [u.id, u]));
     const rows = result.assignments.map((a) => {
       const u = unitsById.get(a.unit_id) || {};
       return {
-        class_id: `G${a.grade}`,
         grade: a.grade,
-        subject_id: a.unit_id,
+        subject_id: u.subject_id || null,
         subject_name: a.subject_name || u.subject_name || null,
         subject_teacher_id: u.setter_teacher_id || null,
         setter_teacher_name: u.setter_teacher_name || null,
         day_number: a.day,
         slot_number: a.slot,
-        slot_span: a.duration_slots,
+        slot_span: Math.max(1, Number(a.duration_slots) || 1),
         room_type: 'CLASS',
       };
     });
 
+    // 制約で全コマが埋められない考査では、未配置の単位（科目×学年）を空コマに格納する。
+    // class_id は exam.model.saveSlots 側でクラスマスタの ID へ正規化される（学年単位で渡す）。
+    const placedKeys = new Set(result.assignments.map((a) => `${a.unit_id}#${a.grade}`));
+    const unplacedUnits = expandUnits(units, grades).filter((u) => !placedKeys.has(u.id));
+
+    const occupied = new Set();
+    for (const r of rows) {
+      for (let i = 0; i < r.slot_span; i++) {
+        occupied.add(`${r.grade}:${r.day_number}:${r.slot_number + i}`);
+      }
+    }
+
+    const isSpanFree = (grade, span, day, slot) => {
+      const enabled = ctx.enabledByDay.get(day);
+      if (!enabled) return false;
+      for (let i = 0; i < span; i++) {
+        const s = slot + i;
+        if (!enabled.has(s)) return false; // × を跨ぐ配置は不可
+        if (occupied.has(`${grade}:${day}:${s}`)) return false;
+      }
+      return true;
+    };
+
+    // 1限は全員参加科目（H1）を守るため、基本は 2 限以降に空コマを埋める（初日 1 限も利用可）
+    const groups = new Map();
+    for (const u of unplacedUnits) {
+      const key = u.shared_slot ? `shared:${u.subject_name}` : `solo:${u.id}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(u);
+    }
+
+    let unplacedLeft = 0;
+    for (const members of groups.values()) {
+      const groupSpan = Math.max(1, Number(members[0].duration_slots) || 1);
+      // 公共科目は全学年で同じ日・時限に配置する（H4）
+      let sharedPos = null;
+      if (members.length > 1) {
+        for (const d of [...ctx.daySlots].reverse()) {
+          const firstSlot = d.day === 1 ? 1 : 2;
+          for (const slot of d.enabled_slots) {
+            if (slot < firstSlot) continue;
+            if (members.every((m) => isSpanFree(m.grade, groupSpan, d.day, slot))) {
+              sharedPos = { day: d.day, slot };
+              break;
+            }
+          }
+        }
+      }
+      for (const m of members) {
+        const span = Math.max(1, Number(m.duration_slots) || 1);
+        let pos = sharedPos;
+        if (!pos) {
+          for (const d of [...ctx.daySlots].reverse()) {
+            const firstSlot = d.day === 1 ? 1 : 2;
+            for (const slot of d.enabled_slots) {
+              if (slot < firstSlot) continue;
+              if (isSpanFree(m.grade, span, d.day, slot)) {
+                pos = { day: d.day, slot };
+                break;
+              }
+            }
+          }
+        }
+        if (!pos) {
+          unplacedLeft++;
+          continue;
+        }
+        for (let i = 0; i < span; i++) {
+          occupied.add(`${m.grade}:${pos.day}:${pos.slot + i}`);
+        }
+        const u = unitsById.get(m.unit_id) || {};
+        rows.push({
+          grade: m.grade,
+          subject_id: u.subject_id || null,
+          subject_name: m.subject_name,
+          subject_teacher_id: m.setter_teacher_id || null,
+          setter_teacher_name: u.setter_teacher_name || null,
+          day_number: pos.day,
+          slot_number: pos.slot,
+          slot_span: span,
+          room_type: 'CLASS',
+        });
+      }
+    }
+
+    const covered = new Set();
+    for (const r of rows) {
+      const span = Math.max(1, Number(r.slot_span) || 1);
+      for (let i = 0; i < span; i++) {
+        covered.add(`${r.grade}:${r.day_number}:${r.slot_number + i}`);
+      }
+    }
+    const totalCells = availableCellCount(ctx.daySlots, grades, ctx.blocked);
+    const stats = {
+      totalCells,
+      filledCells: covered.size,
+      fillRate: totalCells ? Math.round((covered.size / totalCells) * 100) : 0,
+      unplacedUnits: unplacedLeft,
+      blockedCells: countBlocked(ctx.daySlots, ctx.blocked, grades),
+      penalty: result.penalty,
+    };
+
+    const unassigned = unassignedUnits(plan, rows, ctx.daySlots, ctx.gradeBlocks, grades);
+
     await examModel.saveSlots(examMasterId, rows, user.id);
     await examModel.setPhase(examMasterId, 'timetable_phase', PHASE.DRAFT, user.id);
-    await audit('EXAM_TIMETABLE_SOLVE', user, 'exam_master', examMasterId, `試験時間割を自動作成（ペナルティ ${result.penalty} / 未配置 ${result.stats.unplacedUnits}）`);
+    await audit('EXAM_TIMETABLE_SOLVE', user, 'exam_master', examMasterId, `試験時間割を自動作成（ペナルティ ${result.penalty} / 未配置 ${unplacedLeft}）`);
 
-    return { ...result, saved: rows.length };
+    return { ...result, stats, penalty: result.penalty, saved: rows.length, unassigned, day_slots: ctx.daySlots };
   },
 
   async saveTimetableSlots(examMasterId, rows, user) {
@@ -434,50 +623,245 @@ export const examService = {
     const master = await ensureMaster(examMasterId);
     if (master.timetable_phase === PHASE.ENDED) {
       const err = new Error('時間割フェーズは終了済みです。');
-      err.status = 403;
+      err.statusCode = 403;
       throw err;
     }
 
     const plan = await examModel.listSubjectPlan(examMasterId);
-    const units = planToUnits(plan);
-    const normalized = rows.map((r) => ({
-      unit_id: r.subject_id,
-      grade: Number(r.grade),
-      day: Number(r.day_number),
-      slot: Number(r.slot_number),
-      duration_slots: Number(r.slot_span) || 1,
-    }));
-
-    const rules = await examModel.getRulesTable('exam_timetable_rules', examMasterId, DEFAULT_TIMETABLE_RULES);
-    const diagnostics = validateTimetable({
-      days: master.days_count,
-      slots: master.daily_slots,
-      grades: master.grades.map((g) => Number(g)),
-      units,
-      rules,
-      history: await examModel.fetchSlotHistory(200),
-      assignments: normalized,
-    });
-
+    const existing = await examModel.listSlots(examMasterId);
+    const grades = master.grades.map((g) => Number(g));
+    const ctx = scheduleContext(master, existing);
+    const daySlots = ctx.daySlots;
+    const enabledByDay = ctx.enabledByDay;
     const setterNames = new Map(plan.map((p) => [p.id, p.setter_teacher_name]));
 
-    const slotRows = rows.map((r) => ({
-      class_id: r.class_id || `G${Number(r.grade)}`,
-      grade: Number(r.grade),
-      subject_id: r.subject_id,
-      subject_name: r.subject_name,
-      subject_teacher_id: r.subject_teacher_id,
-      setter_teacher_name: r.setter_teacher_name || setterNames.get(r.subject_id) || null,
-      day_number: Number(r.day_number),
-      slot_number: Number(r.slot_number),
-      slot_span: Number(r.slot_span) || 1,
-      room_type: r.room_type || 'CLASS',
-    }));
+    // ── ×（使用不能コマ）検証 ───────────────────────────
+    const violations = [];
+    const examRows = [];
+    const blockRows = [];
+    for (const r of rows) {
+      const grade = Number(r.grade) || 0;
+      const day = Number(r.day_number) || 0;
+      const slot = Number(r.slot_number) || 0;
 
-    await examModel.saveSlots(examMasterId, slotRows, user.id);
-    await audit('EXAM_TIMETABLE_SAVE', user, 'exam_master', examMasterId, `試験時間割を手動編集（${rows.length}コマ）`);
+      if (!grades.includes(grade)) {
+        violations.push({ type: 'GRADE_OUT_OF_RANGE', grade, day, slot, message: `対象学年 ${grade} は考査の対象外です` });
+        continue;
+      }
+      const enabled = enabledByDay.get(day);
+      if (!enabled) {
+        violations.push({ type: 'DAY_OUT_OF_RANGE', grade, day, slot, message: `${day}日目は試験実施日ではありません` });
+        continue;
+      }
+      const usable = ctx.usableByGrade.get(`${grade}|${day}`) || new Set();
 
-    return { saved: slotRows.length, diagnostics, violations: diagnostics.hard };
+      if (r.is_blocked) {
+        blockRows.push({
+          class_id: r.class_id || `G${grade}`,
+          grade,
+          subject_id: null,
+          subject_name: null,
+          subject_teacher_id: null,
+          setter_teacher_name: null,
+          day_number: day,
+          slot_number: slot,
+          slot_span: 1,
+          duration_slots: 1,
+          room_type: 'CLASS',
+          is_blocked: true,
+          notes: r.notes ?? null,
+        });
+        continue;
+      }
+
+      if (!usable.has(slot)) {
+        violations.push({ type: 'BLOCKED_CELL', grade, day, slot, message: `${grade}年 ${day}日目 ${slot}限は ×（使用不能コマ）です` });
+        continue;
+      }
+
+      const span = Math.max(1, Number(r.slot_span) || 1);
+      let fits = true;
+      for (let i = 0; i < span; i++) {
+        if (!usable.has(slot + i)) {
+          violations.push({
+            type: 'SPAN_OVERFLOW',
+            grade,
+            day,
+            slot,
+            message: `${grade}年 ${day}日目 ${slot}限からの ${span} コマ連結は ×（使用不能コマ）を跨ぎます`,
+          });
+          fits = false;
+          break;
+        }
+      }
+      if (!fits) continue;
+
+      examRows.push({
+        class_id: r.class_id || `G${grade}`,
+        grade,
+        subject_id: r.subject_id ?? null,
+        subject_name: r.subject_name ?? null,
+        subject_teacher_id: r.subject_teacher_id ?? null,
+        setter_teacher_name: r.setter_teacher_name || setterNames.get(r.subject_id) || null,
+        day_number: day,
+        slot_number: slot,
+        slot_span: span,
+        duration_slots: span,
+        room_type: r.room_type || 'CLASS',
+        is_blocked: false,
+        notes: r.notes ?? null,
+      });
+    }
+
+    if (violations.length) {
+      const err = new Error(violations[0].message);
+      err.statusCode = 400;
+      err.violations = violations;
+      err.details = violations;
+
+      throw err;
+    }
+
+    // ── 実施日の圧縮（配置コマが使う実施日へ追随）─────────
+    const oldExamDays = ctx.examSlots.map((s) => Number(s.day_number));
+    const newExamDays = examRows.map((r) => r.day_number);
+    const mapping = mapExamDays(oldExamDays, newExamDays);
+    const keepDays = new Set(newExamDays);
+    const renumbered = await renumberDependentTables(examMasterId, mapping, keepDays);
+
+    const merged = [...examRows, ...blockRows];
+    await examModel.saveSlots(examMasterId, merged, user.id);
+    await examModel.deleteBlockedCellsOutside(examMasterId, ctx.daySlots);
+
+    const rules = await examModel.getRulesTable('exam_timetable_rules', examMasterId, DEFAULT_TIMETABLE_RULES);
+    const blocks = blockRows.map((b) => ({ grade: b.grade, day: b.day_number, slot: b.slot_number }));
+    const diagnostics = validateTimetable(
+      {
+        days: daySlots.length,
+        slots: master.daily_slots,
+        grades,
+        units: planToUnits(plan),
+        rules,
+        history: await examModel.fetchSlotHistory(200),
+        assignments: examRows.map((r) => ({
+          unit_id: r.subject_id,
+          grade: r.grade,
+          day: r.day_number,
+          slot: r.slot_number,
+          duration_slots: r.slot_span,
+        })),
+      },
+      { blocked: buildBlockedSet(daySlots, blocks, grades), enabledSlots: enabledByDay },
+    );
+
+    const unassigned = unassignedUnits(plan, examRows, daySlots, blocks, grades);
+
+    await audit(
+      'EXAM_TIMETABLE_SAVE',
+      user,
+      'exam_master',
+      examMasterId,
+      `試験時間割を手動編集（${examRows.length}コマ／× ${blockRows.length}コマ）`,
+    );
+
+    return {
+      saved: merged.length,
+      blocked_saved: blockRows.length,
+      diagnostics,
+      violations: diagnostics.hard,
+      unassigned,
+      day_slots: daySlots,
+      renumbered,
+    };
+  },
+
+  /** 保存候補コマの検証（× 違反と硬質／软質制約 diagnostics を返す） */
+  async validateTimetableRows(examMasterId, rows, user) {
+    const master = await ensureMaster(examMasterId);
+    const existing = await examModel.listSlots(examMasterId);
+    const plan = await examModel.listSubjectPlan(examMasterId);
+    const ctx = scheduleContext(master, existing);
+    const grades = master.grades.map((g) => Number(g));
+
+    const violations = [];
+    const assignments = [];
+    const blocks = [];
+    const examRows = [];
+    const reqBlocked = new Set();
+    for (const r of rows) {
+      const grade = Number(r.grade) || 0;
+      const day = Number(r.day_number) || 0;
+      const slot = Number(r.slot_number) || 0;
+      const span = Math.max(1, Number(r.slot_span) || 1);
+
+      if (r.is_blocked) {
+        blocks.push({ grade, day, slot });
+        reqBlocked.add(`${grade}|${day}|${slot}`);
+        continue;
+      }
+      const enabled = ctx.enabledByDay.get(day);
+      if (!enabled) {
+        violations.push({
+          type: 'DAY_OUT_OF_RANGE',
+          grade,
+          day,
+          slot,
+          message: `${grade}年 ${day}日目は試験実施日ではありません`,
+        });
+        continue;
+      }
+      const usable = ctx.usableByGrade.get(`${grade}|${day}`) || new Set();
+      if (!usable.has(slot) || reqBlocked.has(`${grade}|${day}|${slot}`)) {
+        violations.push({
+          type: 'BLOCKED_CELL',
+          grade,
+          day,
+          slot,
+          message: `${grade}年 ${day}日目 ${slot}限は ×（使用不能コマ）です`,
+        });
+        continue;
+      }
+      let fits = true;
+      for (let i = 0; i < span; i++) {
+        if (!usable.has(slot + i) || reqBlocked.has(`${grade}|${day}|${slot + i}`)) {
+          fits = false;
+          break;
+        }
+      }
+      if (!fits) {
+        violations.push({
+          type: 'SPAN_OVERFLOW',
+          grade,
+          day,
+          slot,
+          message: `${grade}年 ${day}日目 ${slot}限からの ${span} コマ連結が ×（使用不能コマ）を跨ぎます`,
+        });
+        continue;
+      }
+      examRows.push({ grade, day, slot, span, subject_name: r.subject_name });
+      assignments.push({ unit_id: r.subject_id, grade, day, slot, duration_slots: span });
+    }
+
+    const rules = await examModel.getRulesTable('exam_timetable_rules', examMasterId, DEFAULT_TIMETABLE_RULES);
+    const diagnostics = validateTimetable(
+      {
+        days: ctx.daySlots.length,
+        slots: master.daily_slots,
+        grades,
+        units: planToUnits(plan),
+        rules,
+        history: await examModel.fetchSlotHistory(200),
+        assignments,
+      },
+      { blocked: buildBlockedSet(ctx.daySlots, [...ctx.gradeBlocks, ...blocks], grades), enabledSlots: ctx.enabledByDay },
+    );
+
+    return {
+      diagnostics,
+      violations: [...violations, ...diagnostics.hard],
+      unassigned: unassignedUnits(plan, examRows, ctx.daySlots, [...ctx.gradeBlocks, ...blocks], grades),
+      day_slots: ctx.daySlots,
+    };
   },
 
   async publishTimetable(examMasterId, user) {
@@ -486,7 +870,7 @@ export const examService = {
     const slots = await examModel.listSlots(examMasterId);
     if (slots.length === 0) {
       const err = new Error('時間割が作成されていません。先に自動作成または手動編集を行ってください。');
-      err.status = 400;
+      err.statusCode = 400;
       throw err;
     }
     const phases = await examModel.setPhase(examMasterId, 'timetable_phase', PHASE.PUBLISHED, user.id);
@@ -497,6 +881,191 @@ export const examService = {
   async endTimetable(examMasterId, user) {
     ensureKyomu(user);
     return examModel.setPhase(examMasterId, 'timetable_phase', PHASE.ENDED, user.id);
+  },
+
+  // ==========================================================
+  // ×（使用不能コマ）管理
+  //  - 全学年共通 × : 暦日 × 時限（exam_masters.schedule_cells）
+  //  - 学年固有 ×   : 実施日 × 時限（exam_slots.is_blocked）
+  // ==========================================================
+  async getScheduleCells(examMasterId, user) {
+    const master = await ensureMaster(examMasterId);
+    const slots = await examModel.listSlots(examMasterId);
+    const plan = await examModel.listSubjectPlan(examMasterId);
+    const ctx = scheduleContext(master, slots);
+
+    const dates = examDateRange(master.start_date, master.end_date);
+    const globalCells = new Set(
+      normalizeScheduleCells(master.schedule_cells, master.days_count, master.daily_slots).map((c) => `${c.day}|${c.slot}`),
+    );
+
+    const calendar = [];
+    for (let cal = 1; cal <= master.days_count; cal++) {
+      const examDay = calendarToExamDay(ctx.daySlots, cal);
+      const cells = [];
+      for (let s = 1; s <= master.daily_slots; s++) {
+        cells.push({ slot: s, blocked: globalCells.has(`${cal}|${s}`) });
+      }
+      calendar.push({
+        cal_day: cal,
+        date: dates[cal - 1] || '',
+        weekday: weekdayOf(dates[cal - 1]),
+        exam_day: examDay,
+        is_exam_day: examDay != null,
+        slots: cells,
+      });
+    }
+
+    return {
+      master,
+      calendar,
+      day_slots: ctx.daySlots,
+      grade_blocks: ctx.gradeBlocks,
+      unassigned: computeUnassigned(plan, master, ctx),
+      is_kyomu: isKyomu(user),
+    };
+  },
+
+  /** 全学年共通 × を保存し、実施日の圧縮を依存データ（出張・監督・教室・非常勤）へ追随させる */
+  async saveScheduleCells(examMasterId, cells, user) {
+    ensureKyomu(user);
+    const master = await ensureMaster(examMasterId);
+    const rawCells = Array.isArray(cells) ? cells : (cells?.cells ?? []);
+    const normalized = normalizeScheduleCells(rawCells, master.days_count, master.daily_slots);
+
+    const oldDaySlots = buildDaySlots(master);
+    const newDaySlots = buildDaySlots({ ...master, schedule_cells: normalized });
+
+    const oldDays = await collectExamDays(examMasterId);
+    const mapping = remapDays(oldDaySlots, newDaySlots, oldDays);
+    const keepDays = new Set(newDaySlots.map((d) => d.day));
+
+    const slotsRenumbered = await examModel.renumberExamDays('exam_slots', examMasterId, mapping);
+    const slotsDeleted = await examModel.deleteExamRowsOutsideDays('exam_slots', examMasterId, keepDays);
+    const dependent = await renumberDependentTables(examMasterId, mapping, keepDays);
+    const blockedPruned = await examModel.deleteBlockedCellsOutside(examMasterId, newDaySlots);
+
+    await examModel.updateExamMaster(examMasterId, { schedule_cells: normalized, updated_by: user.id });
+    await audit(
+      'EXAM_BLOCKED_SAVE',
+      user,
+      'exam_master',
+      examMasterId,
+      `全学年共通 × を ${normalized.length} コマ設定（実施日 ${newDaySlots.length} 日／追随 ${dependent.renumbered} 件）`,
+    );
+
+    return {
+      saved: normalized.length,
+      calendar_days: master.days_count,
+      day_slots: newDaySlots,
+      enabled_days: enabledDays(newDaySlots),
+      renumbered: dependent.renumbered + slotsRenumbered,
+      deleted: dependent.deleted + slotsDeleted,
+      blocked_pruned: blockedPruned,
+    };
+  },
+
+  /** 学年固有 ×（実施日 × 時限）を保存する */
+  async saveGradeBlocked(examMasterId, payload, user) {
+    ensureKyomu(user);
+    const master = await ensureMaster(examMasterId);
+    const slots = await examModel.listSlots(examMasterId);
+    const plan = await examModel.listSubjectPlan(examMasterId);
+    const ctx = scheduleContext(master, slots);
+    const grades = master.grades.map((g) => Number(g));
+
+    const grade = Number(payload.grade) || 0;
+    if (!grades.includes(grade)) {
+      const err = new Error('対象学年が考査に登録されていません。');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const requested = (payload.slots || [])
+      .map((s) => ({ day: Number(s.day_number ?? s.day) || 0, slot: Number(s.slot_number ?? s.slot) || 0 }))
+      .filter((c) => c.day > 0 && c.slot > 0);
+
+    const violations = [];
+    for (const c of requested) {
+      const enabled = ctx.enabledByDay.get(c.day);
+      if (!enabled) {
+        violations.push({ grade, day: c.day, slot: c.slot, message: `${grade}年 ${c.day}日目は試験実施日ではありません` });
+        continue;
+      }
+      if (!enabled.has(c.slot)) {
+        violations.push({
+          grade,
+          day: c.day,
+          slot: c.slot,
+          message: `${grade}年 ${c.day}日目 ${c.slot}限は全学年共通 × のため学年 × を設定できません`,
+        });
+      }
+    }
+    if (violations.length) {
+      const err = new Error(violations[0].message);
+      err.details = violations;
+
+      err.statusCode = 400;
+      err.violations = violations;
+      throw err;
+    }
+
+    // 試験実施コマ（× ではない行）はそのまま保持し、対象学年の × 行だけ作り替える
+    const keep = ctx.examSlots.map((s) => ({
+      class_id: s.class_id,
+      grade: Number(s.grade),
+      subject_id: s.subject_id ?? null,
+      subject_name: s.subject_name ?? null,
+      subject_teacher_id: s.subject_teacher_id ?? null,
+      setter_teacher_name: s.setter_teacher_name ?? null,
+      day_number: Number(s.day_number),
+      slot_number: Number(s.slot_number),
+      slot_span: Number(s.slot_span) || 1,
+      room_type: s.room_type || 'CLASS',
+    }));
+    const others = ctx.gradeBlocks
+      .filter((b) => b.grade !== grade)
+      .map((b) => ({
+        class_id: `G${b.grade}`,
+        grade: b.grade,
+        subject_id: null,
+        subject_name: null,
+        subject_teacher_id: null,
+        setter_teacher_name: null,
+        day_number: b.day,
+        slot_number: b.slot,
+        slot_span: 1,
+        room_type: 'CLASS',
+        is_blocked: true,
+      }));
+    const blocks = requested.map((c) => ({
+      class_id: `G${grade}`,
+      grade,
+      subject_id: null,
+      subject_name: null,
+      subject_teacher_id: null,
+      setter_teacher_name: null,
+      day_number: c.day,
+      slot_number: c.slot,
+      slot_span: 1,
+      room_type: 'CLASS',
+      is_blocked: true,
+      notes: payload.notes ?? null,
+    }));
+
+    const merged = [...keep, ...others, ...blocks];
+    await examModel.saveSlots(examMasterId, merged, user.id);
+    const unassigned = unassignedUnits(plan, ctx.examSlots, ctx.daySlots, [...others, ...blocks], grades);
+
+    await audit(
+      'EXAM_BLOCKED_SAVE',
+      user,
+      'exam_master',
+      examMasterId,
+      `${grade}年の × を ${blocks.length} コマ設定（未割当 ${unassigned.length} 科目）`,
+    );
+
+    return { saved: blocks.length, grade, day_slots: ctx.daySlots, unassigned };
   },
 
 
@@ -510,7 +1079,7 @@ export const examService = {
     for (const room of list) {
       if (!room.name) {
         const err = new Error('教室名を入力してください。');
-        err.status = 400;
+        err.statusCode = 400;
         throw err;
       }
       saved.push(
@@ -581,21 +1150,22 @@ export const examService = {
     const master = await ensureMaster(examMasterId);
     if (master.room_phase === PHASE.ENDED) {
       const err = new Error('教室割当フェーズは終了済みです。');
-      err.status = 403;
+      err.statusCode = 403;
       throw err;
     }
 
-    const slots = await examModel.listSlots(examMasterId);
-    if (slots.length === 0) {
+    const allSlots = await examModel.listSlots(examMasterId);
+    const ctx = scheduleContext(master, allSlots);
+    if (ctx.examSlots.length === 0) {
       const err = new Error('試験時間割が作成されていません。先に時間割を作成してください。');
-      err.status = 400;
+      err.statusCode = 400;
       throw err;
     }
 
     const rooms = await examModel.listRooms(examMasterId);
     if (rooms.length === 0) {
       const err = new Error('教室マスタが登録されていません。');
-      err.status = 400;
+      err.statusCode = 400;
       throw err;
     }
 
@@ -617,7 +1187,7 @@ export const examService = {
 
     const gradeStudents = await examModel.getGradeStudents(master.grades.map((g) => Number(g)));
 
-    const assignments = slotsToTimetable(slots).map((t) => {
+    const assignments = slotsToTimetable(ctx.examSlots).map((t) => {
       const u = unitsById.get(t.unit_id) || {};
       return {
         unit_id: t.unit_id,
@@ -638,7 +1208,7 @@ export const examService = {
     }));
 
     const result = solveRooms({
-      days: master.days_count,
+      days: ctx.daySlots.length,
       slots: master.daily_slots,
       grades: master.grades.map((g) => Number(g)),
       rooms: roomRows,
@@ -682,7 +1252,7 @@ export const examService = {
     const master = await ensureMaster(examMasterId);
     if (master.room_phase === PHASE.ENDED) {
       const err = new Error('教室割当フェーズは終了済みです。');
-      err.status = 403;
+      err.statusCode = 403;
       throw err;
     }
     const normalized = rows.map((r) => ({
@@ -705,7 +1275,7 @@ export const examService = {
     const assignments = await examModel.listRoomAssignments(examMasterId);
     if (assignments.length === 0) {
       const err = new Error('教室割当が存在しません。');
-      err.status = 400;
+      err.statusCode = 400;
       throw err;
     }
     const phases = await examModel.setPhase(examMasterId, 'room_phase', PHASE.PUBLISHED, user.id);
@@ -753,7 +1323,7 @@ export const examService = {
     const phases = await examModel.getPhases(examMasterId);
     if (phases.trip_phase === PHASE.DRAFT) {
       const err = new Error('出張等登録が開始されていません。「出張等の登録を開始」後に公表できます。');
-      err.status = 400;
+      err.statusCode = 400;
       throw err;
     }
     const trips = await examModel.listTrips(examMasterId);
@@ -767,12 +1337,12 @@ export const examService = {
     const kyomu = isKyomu(user);
     if (!kyomu && phases.trip_phase !== PHASE.SURVEY) {
       const err = new Error('登録期間中でない出張項目は編集できません。');
-      err.status = 403;
+      err.statusCode = 403;
       throw err;
     }
     if (!kyomu && row.teacher_id !== user.id) {
       const err = new Error('自分の出張・外出・私用・欠席のみ登録できます。');
-      err.status = 403;
+      err.statusCode = 403;
       throw err;
     }
     const saved = await examModel.upsertTrip({
@@ -808,7 +1378,7 @@ export const examService = {
     const kyomu = isKyomu(user);
     if (!kyomu && phases.trip_phase !== PHASE.SURVEY) {
       const err = new Error('登録期間中でない出張項目は編集できません。');
-      err.status = 403;
+      err.statusCode = 403;
       throw err;
     }
     const list = Array.isArray(rows) ? rows : [rows];
@@ -816,7 +1386,7 @@ export const examService = {
     for (const row of list) {
       if (!kyomu && String(row.teacher_id) !== String(user.id)) {
         const err = new Error('自分の出張・外出・私用・欠席のみ登録できます。');
-        err.status = 403;
+        err.statusCode = 403;
         throw err;
       }
       saved.push(
@@ -840,19 +1410,19 @@ export const examService = {
     const kyomu = isKyomu(user);
     if (!kyomu && phases.trip_phase !== PHASE.SURVEY) {
       const err = new Error('登録期間中でない出張項目は削除できません。');
-      err.status = 403;
+      err.statusCode = 403;
       throw err;
     }
     const rows = await examModel.listTrips(examMasterId);
     const target = rows.find((r) => r.id === id);
     if (!target) {
       const err = new Error('対象レコードが見つかりません。');
-      err.status = 404;
+      err.statusCode = 404;
       throw err;
     }
     if (!kyomu && String(target.teacher_id) !== String(user.id)) {
       const err = new Error('自分の出張・外出・私用・欠席のみ削除できます。');
-      err.status = 403;
+      err.statusCode = 403;
       throw err;
     }
     await examModel.deleteTrip(examMasterId, target.teacher_id, target.day_number, target.slot_number);
@@ -865,7 +1435,7 @@ export const examService = {
     const kyomu = isKyomu(user);
     if (!kyomu && phases.trip_phase !== PHASE.SURVEY) {
       const err = new Error('登録期間中でない出張項目は削除できません。');
-      err.status = 403;
+      err.statusCode = 403;
       throw err;
     }
     if (!kyomu) {
@@ -873,12 +1443,12 @@ export const examService = {
       const target = rows.find((r) => r.id === id);
       if (!target) {
         const err = new Error('対象レコードが見つかりません。');
-        err.status = 404;
+        err.statusCode = 404;
         throw err;
       }
       if (target.teacher_id !== user.id) {
         const err = new Error('自分の出張項目のみ削除できます。');
-        err.status = 403;
+        err.statusCode = 403;
         throw err;
       }
       await examModel.deleteTrip(examMasterId, target.teacher_id, target.day_number, target.slot_number);
@@ -889,7 +1459,7 @@ export const examService = {
     const target = rows.find((r) => r.id === id);
     if (!target) {
       const err = new Error('対象レコードが見つかりません。');
-      err.status = 404;
+      err.statusCode = 404;
       throw err;
     }
     await examModel.deleteTrip(examMasterId, target.teacher_id, target.day_number, target.slot_number);
@@ -1001,7 +1571,9 @@ export const examService = {
   /** 監督割当ソルバー入力の構築（時間割・教室割当・出欠・非常勤・免除・ルール） */
   async buildProctorInput(examMasterId, user) {
     const master = await ensureMaster(examMasterId);
-    const slots = await examModel.listSlots(examMasterId);
+    const allSlots = await examModel.listSlots(examMasterId);
+    const ctx = scheduleContext(master, allSlots);
+    const slots = ctx.examSlots;
     const plan = await examModel.listSubjectPlan(examMasterId);
     const units = planToUnits(plan);
     const unitsById = new Map(units.map((u) => [u.id, u]));
@@ -1084,6 +1656,8 @@ export const examService = {
 
     return {
       master,
+      day_slots: ctx.daySlots,
+      grade_blocks: ctx.gradeBlocks,
       unitsById,
       roomAssignMap,
       roomTypeByName,
@@ -1105,7 +1679,7 @@ export const examService = {
       rules,
       timetable,
       input: {
-        days: master.days_count,
+        days: ctx.daySlots.length,
         slots: master.daily_slots,
         units,
         timetable,
@@ -1126,14 +1700,14 @@ export const examService = {
     const master = await ensureMaster(examMasterId);
     if (master.proctor_phase === PHASE.ENDED) {
       const err = new Error('監督割当フェーズは終了済みです。');
-      err.status = 403;
+      err.statusCode = 403;
       throw err;
     }
 
     const built = await this.buildProctorInput(examMasterId, user);
     if (built.timetable.length === 0) {
       const err = new Error('試験時間割が作成されていません。先に時間割を作成してください。');
-      err.status = 400;
+      err.statusCode = 400;
       throw err;
     }
 
@@ -1325,7 +1899,7 @@ export const examService = {
     const master = await ensureMaster(examMasterId);
     if (master.proctor_phase === PHASE.ENDED) {
       const err = new Error('監督割当フェーズは終了済みです。');
-      err.status = 403;
+      err.statusCode = 403;
       throw err;
     }
 
@@ -1352,13 +1926,13 @@ export const examService = {
     const list = await examModel.listProctorAssignments(examMasterId);
     if (list.length === 0) {
       const err = new Error('監督割当が存在しません。先に自動作成を行ってください。');
-      err.status = 400;
+      err.statusCode = 400;
       throw err;
     }
     const unassigned = list.filter((p) => !p.proctor_teacher_id).length;
     if (unassigned > 0) {
       const err = new Error(`未割当のコマが ${unassigned} 件あります。監督教員を割り当ててから公表してください。`);
-      err.status = 400;
+      err.statusCode = 400;
       throw err;
     }
     const phases = await examModel.setPhase(examMasterId, 'proctor_phase', PHASE.PUBLISHED, user.id);
@@ -1388,19 +1962,19 @@ export const examService = {
     const keys = ['subject_phase', 'timetable_phase', 'room_phase', 'proctor_phase', 'trip_phase'];
     if (!keys.includes(phaseKey)) {
       const err = new Error('不明なフェーズです。');
-      err.status = 400;
+      err.statusCode = 400;
       throw err;
     }
     const values = [PHASE.DRAFT, PHASE.SURVEY, PHASE.PUBLISHED, PHASE.ENDED];
     if (!values.includes(phaseValue)) {
       const err = new Error('不明なフェーズ状態です。');
-      err.status = 400;
+      err.statusCode = 400;
       throw err;
     }
     const phases = await examModel.getPhases(examMasterId);
     if (phaseKey === 'proctor_phase' && phaseValue === PHASE.PUBLISHED && phases.timetable_phase !== PHASE.PUBLISHED && phases.timetable_phase !== PHASE.ENDED) {
       const err = new Error('時間割が作成されていないため、監督割当を公表できません。');
-      err.status = 400;
+      err.statusCode = 400;
       throw err;
     }
     await logPhase(examMasterId, phaseKey, phases[phaseKey], phaseValue, user.id);

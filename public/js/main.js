@@ -17,7 +17,7 @@ import { initFacilityModule, loadReservations } from './modules/facility.module.
 import { initScheduleModule, loadSchedules } from './modules/schedule.module.js';
 import { initApprovalModule, loadApprovals } from './modules/approval.module.js';
 import { initAbsenceModule, loadAbsenceSummary } from './modules/absence.module.js';
-import { initExamModule, loadExamData } from './modules/exam.module.js';
+import { initExamModule, loadExamData } from './modules/exam/exam.module.js';
 
 
 /**
@@ -95,6 +95,23 @@ export function switchTab(tabName) {
 }
 
 /**
+ * サイドメニュー「定期考査」の権限バッジを現在のロールで描画する
+ * 教務権限 (KYOMU / ADMIN / is_kyomu) は「教務」、それ以外は「教員」
+ * @param {Object|null} user
+ */
+function setExamNavBadge(user) {
+  const badge = document.getElementById('nav-exam-badge');
+  if (!badge) return;
+  const kyomu = user && (user.is_kyomu === true || user.role === 'KYOMU' || user.role === 'ADMIN');
+  badge.textContent = kyomu ? '教務' : '教員';
+  badge.classList.toggle('bg-warning-soft', kyomu);
+  badge.classList.toggle('text-warning-strong', kyomu);
+  badge.classList.toggle('border', kyomu);
+  badge.classList.toggle('bg-info-soft', !kyomu);
+  badge.classList.toggle('text-info-strong', !kyomu);
+}
+
+/**
  * ログイン画面/メイン画面の表示切り替え
  */
 function renderAuthScreen() {
@@ -129,9 +146,10 @@ function renderAuthScreen() {
       refreshLucideIcons();
     }
 
-    // 定期考査メニューはログイン時のみ表示（編集権限はモジュール内でロール判定）
+    // 定期考査メニューはログイン時のみ表示（6つの作成メニューはモジュール内で教務権限判定）
     const examNav = document.getElementById('nav-exam-item');
     if (examNav) examNav.classList.remove('hidden');
+    setExamNavBadge(state.currentUser);
 
     // 教務/一般権限バッジを現在のロールで再描画し、考査データも最新化する
     initExamModule();

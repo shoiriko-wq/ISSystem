@@ -17,6 +17,35 @@ function genId(prefix) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
 }
 
+/**
+ * exam_slots / exam_proctor_assignments の class_id をクラスマスタの ID に正規化する。
+ * 外部キーは classes(id) を参照するが、UI・ソルバーは学年単位の "G<grade>" を渡すため、
+ * クラスマスタに存在しない値は対象学年のクラス ID（複数クラスは最初のクラス）へ読み替える。
+ * 解決できない行（該当学年のクラスが未登録）は除外する。
+ * @param {Array<object>} rows class_id / grade を持つ行
+ * @returns {Promise<Array<object>>} 正規化された行
+ */
+async function normalizeClassIds(rows) {
+  const res = await query(`SELECT id, grade FROM classes ORDER BY grade ASC, id ASC`);
+  const known = new Set(res.rows.map((c) => c.id));
+  const firstByGrade = new Map();
+  for (const c of res.rows) {
+    const g = Number(c.grade);
+    if (!firstByGrade.has(g)) firstByGrade.set(g, c.id);
+  }
+  const out = [];
+  for (const r of rows) {
+    const grade = Number(r.grade) || 0;
+    const cid = r.class_id;
+    if (cid && known.has(cid)) {
+      out.push({ ...r, class_id: cid });
+    } else if (firstByGrade.has(grade)) {
+      out.push({ ...r, class_id: firstByGrade.get(grade) });
+    }
+  }
+  return out;
+}
+
 let phaseHistoryReady = false;
 
 export const examModel = {
@@ -27,21 +56,31 @@ export const examModel = {
     const res = await query(
       `SELECT * FROM exam_masters WHERE is_active = true ORDER BY start_date DESC`
     );
-    return res.rows.map((r) => ({ ...r, grades: safeJson(r.grades, [1, 2, 3]), period_times: safeJson(r.period_times, []) }));
+    return res.rows.map((r) => ({
+      ...r,
+      grades: safeJson(r.grades, [1, 2, 3]),
+      period_times: safeJson(r.period_times, []),
+      schedule_cells: safeJson(r.schedule_cells, []),
+    }));
   },
 
   async findExamMasterById(id) {
     const res = await query(`SELECT * FROM exam_masters WHERE id = ?`, [id]);
     const row = res.rows[0];
     if (!row) return null;
-    return { ...row, grades: safeJson(row.grades, [1, 2, 3]), period_times: safeJson(row.period_times, []) };
+    return {
+      ...row,
+      grades: safeJson(row.grades, [1, 2, 3]),
+      period_times: safeJson(row.period_times, []),
+      schedule_cells: safeJson(row.schedule_cells, []),
+    };
   },
 
   async createExamMaster(data) {
     const id = data.id || genId('exam');
     const res = await query(
-      `INSERT INTO exam_masters (id, title, start_date, end_date, days_count, daily_slots, is_active, grades, period_times, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, true, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `INSERT INTO exam_masters (id, title, start_date, end_date, days_count, daily_slots, is_active, grades, period_times, schedule_cells, notes, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, true, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
        RETURNING *`,
       [
         id,
@@ -52,12 +91,19 @@ export const examModel = {
         Number(data.daily_slots) || 3,
         JSON.stringify(data.grades || [1, 2, 3]),
         JSON.stringify(data.period_times || []),
+        JSON.stringify(data.schedule_cells || []),
+        data.notes ?? null,
         data.created_by || null,
       ]
     );
     await examModel.ensurePhaseRow(id, data.created_by);
     const row = res.rows[0];
-    return { ...row, grades: safeJson(row.grades, [1, 2, 3]), period_times: safeJson(row.period_times, []) };
+    return {
+      ...row,
+      grades: safeJson(row.grades, [1, 2, 3]),
+      period_times: safeJson(row.period_times, []),
+      schedule_cells: safeJson(row.schedule_cells, []),
+    };
   },
 
   async updateExamMaster(id, data) {
@@ -85,6 +131,18 @@ export const examModel = {
       sets.push('period_times = ?');
       params.push(JSON.stringify(data.period_times));
     }
+    if (data.schedule_cells !== undefined) {
+      sets.push('schedule_cells = ?');
+      params.push(JSON.stringify(data.schedule_cells || []));
+    }
+    if (data.notes !== undefined) {
+      sets.push('notes = ?');
+      params.push(data.notes ?? null);
+    }
+    if (data.updated_by !== undefined) {
+      sets.push('updated_by = ?');
+      params.push(data.updated_by ?? null);
+    }
     if (sets.length === 0) return examModel.findExamMasterById(id);
 
     params.push(id);
@@ -93,7 +151,9 @@ export const examModel = {
       params
     );
     const row = res.rows[0];
-    return row ? { ...row, grades: safeJson(row.grades, [1, 2, 3]), period_times: safeJson(row.period_times, []) } : null;
+    return row
+      ? { ...row, grades: safeJson(row.grades, [1, 2, 3]), period_times: safeJson(row.period_times, []), schedule_cells: safeJson(row.schedule_cells, []) }
+      : null;
   },
 
   async deactivateExamMaster(id) {
@@ -330,11 +390,14 @@ export const examModel = {
   async saveSlots(examMasterId, rows, updatedBy) {
     await query(`DELETE FROM exam_slots WHERE exam_master_id = ?`, [examMasterId]);
     const saved = [];
-    for (const r of rows) {
+    // class_id は classes(id) への外部キー → クラスマスタの ID に正規化してから登録する
+    const normalizedRows = await normalizeClassIds(rows);
+    for (const r of normalizedRows) {
+      const blocked = !!r.is_blocked;
       const res = await query(
-        `INSERT INTO exam_slots (exam_master_id, unit_id, day_number, slot_number, class_id, grade, subject_id, subject_name, subject_teacher_id, setter_teacher_name, slot_span, duration_slots, room_type, updated_by, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-         ON CONFLICT (exam_master_id, day_number, slot_number, class_id) DO UPDATE SET
+        `INSERT INTO exam_slots (exam_master_id, unit_id, day_number, slot_number, class_id, grade, subject_id, subject_name, subject_teacher_id, setter_teacher_name, slot_span, duration_slots, room_type, is_blocked, notes, updated_by, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT (exam_master_id, day_number, slot_number, class_id, is_blocked) DO UPDATE SET
            unit_id = EXCLUDED.unit_id,
            grade = EXCLUDED.grade,
            subject_id = EXCLUDED.subject_id,
@@ -344,23 +407,26 @@ export const examModel = {
            slot_span = EXCLUDED.slot_span,
            duration_slots = EXCLUDED.duration_slots,
            room_type = EXCLUDED.room_type,
+           notes = EXCLUDED.notes,
            updated_by = EXCLUDED.updated_by,
            updated_at = CURRENT_TIMESTAMP
          RETURNING *`,
         [
           examMasterId,
-          r.unit_id || null,
+          blocked ? null : r.unit_id || null,
           Number(r.day_number),
           Number(r.slot_number),
           r.class_id,
           Number(r.grade) || 0,
-          r.subject_id || null,
-          r.subject_name || null,
-          r.subject_teacher_id || null,
-          r.setter_teacher_name || null,
-          Number(r.slot_span) || 1,
-          Number(r.duration_slots) || Number(r.slot_span) || 1,
+          blocked ? null : r.subject_id || null,
+          blocked ? null : r.subject_name || null,
+          blocked ? null : r.subject_teacher_id || null,
+          blocked ? null : r.setter_teacher_name || null,
+          1,
+          1,
           r.room_type || 'CLASS',
+          blocked,
+          blocked ? r.notes || '×（使用不能コマ）' : r.notes ?? null,
           updatedBy,
         ]
       );
@@ -368,6 +434,106 @@ export const examModel = {
     }
     return saved;
   },
+
+  /**
+   * 試験実施日番号の集合外（暦日を × で全コマ除外した日）の exam_slots 行を削除する
+   * @param {string} examMasterId
+   * @param {Set<number>} keepDays 保持する実施日番号（1..N）
+   * @returns {Promise<number>} 削除件数
+   */
+  async deleteSlotsOutsideDays(examMasterId, keepDays) {
+    const list = [...keepDays].map(Number);
+    if (!list.length) {
+      const res = await query(`DELETE FROM exam_slots WHERE exam_master_id = ?`, [examMasterId]);
+      return res.rowCount ?? 0;
+    }
+    const res = await query(
+      `DELETE FROM exam_slots WHERE exam_master_id = ? AND day_number NOT IN (${list.map(() => '?').join(', ')})`,
+      [examMasterId, ...list]
+    );
+    return res.rowCount ?? 0;
+  },
+
+  /**
+   * day_number を新実施日番号へ再採番する（× で実施日が削減された後の追随）
+   * 衝突を避けるため一旦マイナスへ逃がしてから書き換える。
+   * @param {string} table 対象テーブル（exam_slots / exam_trips / exam_proctor_assignments / exam_room_assignments / exam_parttime_availability）
+   * @param {string} examMasterId
+   * @param {Map<number, number>} mapping 旧実施日番号 → 新実施日番号
+   */
+  async renumberExamDays(table, examMasterId, mapping) {
+    const ALLOWED = [
+      'exam_slots',
+      'exam_trips',
+      'exam_proctor_assignments',
+      'exam_room_assignments',
+      'exam_parttime_availability',
+    ];
+    if (!ALLOWED.includes(table)) throw new Error(`renumberExamDays: 不正なテーブル ${table}`);
+    if (!mapping.size) return 0;
+    await query(`UPDATE ${table} SET day_number = -day_number WHERE exam_master_id = ? AND day_number > 0`, [examMasterId]);
+    let touched = 0;
+    for (const [from, to] of mapping) {
+      const res = await query(
+        `UPDATE ${table} SET day_number = ? WHERE exam_master_id = ? AND day_number = ?`,
+        [to, examMasterId, -Number(from)]
+      );
+      touched += res.rowCount ?? 0;
+    }
+    // 再採番対象外（旧実施日が全コマ×で実施日外になった行）は 0 に寄せて削除対象化する
+    await query(`UPDATE ${table} SET day_number = 0 WHERE exam_master_id = ? AND day_number < 0`, [examMasterId]);
+    return touched;
+  },
+
+  /**
+   * 実施日番号が実施日外（暦日が全コマ × で実施日でなくなった）の行を削除する
+   * @param {string} table 対象テーブル（再採番可能なテーブルに限定）
+   * @param {string} examMasterId
+   * @param {Set<number>} keepDays 保持する実施日番号
+   */
+  async deleteExamRowsOutsideDays(table, examMasterId, keepDays) {
+    const ALLOWED = [
+      'exam_slots',
+      'exam_trips',
+      'exam_proctor_assignments',
+      'exam_room_assignments',
+      'exam_parttime_availability',
+    ];
+    if (!ALLOWED.includes(table)) throw new Error(`deleteExamRowsOutsideDays: 不正なテーブル ${table}`);
+    const list = [...keepDays].map(Number);
+    if (!list.length) {
+      const res = await query(`DELETE FROM ${table} WHERE exam_master_id = ?`, [examMasterId]);
+      return res.rowCount ?? 0;
+    }
+    const res = await query(
+      `DELETE FROM ${table} WHERE exam_master_id = ? AND day_number NOT IN (${list.map(() => '?').join(', ')})`,
+      [examMasterId, ...list]
+    );
+    return res.rowCount ?? 0;
+  },
+  /**
+   * 全学年共通 × の圧縮で実施日外へ出た学年固有 ×（exam_slots.is_blocked）行を削除する
+   * @param {string} examMasterId
+   * @param {Array} daySlots 現在の buildDaySlots 結果（実施日連番と使用可能コマ）
+   * @returns {number} 削除した行数
+   */
+  async deleteBlockedCellsOutside(examMasterId, daySlots) {
+    const usable = new Set((daySlots || []).flatMap((d) => (d.enabled_slots || []).map((s) => `${Number(d.day)}|${Number(s)}`)));
+    const res = await query(
+      `SELECT id, day_number, slot_number FROM exam_slots WHERE exam_master_id = ? AND is_blocked = true`,
+      [examMasterId]
+    );
+    const stale = res.rows.filter((r) => !usable.has(`${Number(r.day_number)}|${Number(r.slot_number)}`));
+    if (!stale.length) return 0;
+    const deleted = await query(
+      `DELETE FROM exam_slots WHERE id IN (${stale.map(() => '?').join(', ')})`,
+      [examMasterId, ...stale.map((r) => r.id)]
+    );
+    return deleted.rowCount ?? 0;
+  },
+
+
+
 
 
   // ==========================================================
@@ -638,12 +804,14 @@ export const examModel = {
   async saveProctorAssignments(examMasterId, rows, updatedBy) {
     await query(`DELETE FROM exam_proctor_assignments WHERE exam_master_id = ?`, [examMasterId]);
     const saved = [];
+    // class_id は classes(id) への外部キー → クラスマスタの ID に正規化する
+    const normalizedRows = await normalizeClassIds(rows);
     // (exam_master_id, day_number, slot_number, class_id) が重複する行は後ろの行を優先して insertion 前に正規化
     const dedupMap = new Map();
-    for (const r of rows) {
+    for (const r of normalizedRows) {
       const dayNumber = Number(r.day_number);
       const slotNumber = Number(r.slot_number);
-      const classId = r.class_id || `G${Number(r.grade)}`;
+      const classId = r.class_id;
       dedupMap.set(`${dayNumber}|${slotNumber}|${classId}`, { ...r, day_number: dayNumber, slot_number: slotNumber, class_id: classId });
     }
     for (const r of dedupMap.values()) {

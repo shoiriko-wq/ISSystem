@@ -103,10 +103,21 @@ function createGrid(grades, days, slots) {
   return grid;
 }
 
-/** 求解コンテキスト（可変台帳）を生成 */
-function createContext(blocks, grades, days, slots, rules) {
+/** 求解コンテキスト（可変台帳）を生成
+ * @param {Set<string>} [blocked] 学年固有×の集合 `${grade}|${day}|${slot}`
+ * @param {Map<number, number[]>} [enabledSlots] day → 使用可能時限（省略時は全時限）
+ *        （全学年共通の×は「試験実施日そのもの」を day 数から除外して渡す）
+ */
+function createContext(blocks, grades, days, slots, rules, options = {}) {
   const dayStreams = new Map();
   for (let d = 1; d <= days; d++) dayStreams.set(d, { SCIENCE: 0, ARTS: 0, OTHER: 0 });
+
+  const allSlots = Array.from({ length: slots }, (_, i) => i + 1);
+  const enabledSlots = new Map();
+  for (let d = 1; d <= days; d++) {
+    const given = options.enabledSlots?.get(d);
+    enabledSlots.set(d, given ? allSlots.filter((s) => given.includes(s)) : allSlots.slice());
+  }
 
   return {
     grid: createGrid(grades, days, slots),
@@ -119,8 +130,23 @@ function createContext(blocks, grades, days, slots, rules) {
     slots,
     rules,
     blockDuration: 1,
+    blocked: options.blocked instanceof Set ? options.blocked : new Set(),
+    enabledSlots,
   };
 }
+
+/** その (grade, day, slot) が使用可能コマか（× を除く） */
+export function isCellUsable(ctx, grade, day, slot) {
+  const list = ctx.enabledSlots?.get(day);
+  if (list && !list.includes(slot)) return false;
+  return !(ctx.blocked && ctx.blocked.has(`${Number(grade)}|${Number(day)}|${Number(slot)}`));
+}
+
+/** その日の使用可能時限リスト */
+export function enabledSlotsForDay(ctx, day) {
+  return (ctx.enabledSlots?.get(day) || Array.from({ length: ctx.slots }, (_, i) => i + 1)).slice();
+}
+
 
 /** ブロックの全アイテムが同一 (day, startSlot) に配置可能か（HARD 判定） */
 export function canPlaceBlock(ctx, block, day, startSlot) {
@@ -142,6 +168,7 @@ export function canPlaceBlock(ctx, block, day, startSlot) {
     if (!perDay) return false;
     for (let s = startSlot; s < startSlot + item.duration_slots; s++) {
       if (perDay[day][s]) return false;
+      if (!isCellUsable(ctx, item.grade, day, s)) return false;
     }
   }
 
@@ -268,13 +295,14 @@ export function softPenalty(placements, items, { days, slots, rules, history }) 
   return Math.round(penalty * 100) / 100;
 }
 
-/** 最終日が全コマ埋まっているか（全員受験科目で覆われているか） */
+/** 最終日が使用可能コマで埋まっているか（全員受験科目で覆われているか） */
 function lastDayCoveredCtx(ctx) {
   if (!ctx.rules.last_day_all) return true;
   for (const g of ctx.grades) {
     const perDay = ctx.grid.get(g);
     if (!perDay) return false;
-    for (let s = 1; s <= ctx.slots; s++) {
+    for (const s of enabledSlotsForDay(ctx, ctx.days)) {
+      if (!isCellUsable(ctx, g, ctx.days, s)) continue;
       if (!perDay[ctx.days][s]) return false;
     }
   }
@@ -390,6 +418,7 @@ export function repairLastDay(ctx, blocks) {
     if (!perDay) continue;
 
     for (let s = 1; s <= ctx.slots; s++) {
+      if (!isCellUsable(ctx, g, ctx.days, s)) continue;
       if (perDay[ctx.days][s]) continue;
 
       for (const block of blocks) {
@@ -408,8 +437,8 @@ export function repairLastDay(ctx, blocks) {
 }
 
 /** assignments( [{unit_id, grade, day, slot}] ) からコンテキストを再構築 */
-export function ctxFromAssignments(assignments, blocks, grades, days, slots, rules) {
-  const ctx = createContext(blocks, grades, days, slots, rules);
+export function ctxFromAssignments(assignments, blocks, grades, days, slots, rules, options = {}) {
+  const ctx = createContext(blocks, grades, days, slots, rules, options);
   const byId = new Map();
   for (const item of blocks.flat()) byId.set(item.id, item);
 
@@ -451,10 +480,11 @@ export function validateTimetable(input) {
   const rules = { ...DEFAULT_TIMETABLE_RULES, ...(input.rules || {}) };
   rules.weights = { ...DEFAULT_TIMETABLE_RULES.weights, ...(rules.weights || {}) };
   const assignments = input.assignments || [];
+  const options = solverOptions(input);
 
   const items = expandUnits(units, grades);
   const blocks = buildBlocks(items);
-  const ctx = ctxFromAssignments(assignments, blocks, grades, days, slots, rules);
+  const ctx = ctxFromAssignments(assignments, blocks, grades, days, slots, rules, options);
 
   const hard = [];
   const soft = [];
@@ -473,6 +503,12 @@ export function validateTimetable(input) {
     }
     if (item.fixed_slot && p.slot !== item.fixed_slot) {
       hard.push({ type: 'FIXED_SLOT', message: `「${item.subject_name}」(${item.grade}学年) は固定コマ(${item.fixed_slot}限)以外に配置されています。` });
+    }
+    for (let s = p.slot; s < p.slot + item.duration_slots && s <= slots; s++) {
+      if (!isCellUsable(ctx, item.grade, p.day, s)) {
+        hard.push({ type: 'BLOCKED_CELL', message: `「${item.subject_name}」(${item.grade}学年) は ×（使用不能コマ）: ${p.day}日目 ${s}限 に配置されています。` });
+        break;
+      }
     }
     if (!placedByGrade.has(item.grade)) placedByGrade.set(item.grade, []);
     placedByGrade.get(item.grade).push({ day: p.day, slot: p.slot, item });
@@ -525,6 +561,7 @@ export function validateTimetable(input) {
         }
       }
       for (let s = 1; s <= slots; s++) {
+        if (!isCellUsable(ctx, g, days, s)) continue;
         if (!lastDayCells[s]) {
           hard.push({ type: 'LAST_DAY_ALL', message: `最終日(${days}日目) ${g}学年 ${s}限が空いています。全員受験科目で埋める必要があります。` });
         } else if (lastDayCells[s].scope !== 'ALL') {
@@ -616,7 +653,8 @@ export function validateTimetable(input) {
   }
 
   // 9. 統計
-  const totalCells = grades.length * days * slots;
+  const usableCells = usableCellCount(ctx, grades, days, slots);
+  const totalCells = usableCells;
   const uniqueCells = [...cellCount.values()].reduce((s, v) => s + v, 0);
 
   return {
@@ -630,6 +668,35 @@ export function validateTimetable(input) {
       penalty: softPenalty(ctx.placements, items, { days, slots, rules, history: input.history || [] }),
     },
   };
+}
+
+/** input（validateTimetable / solveTimetable 用）から × 情報を抽出 */
+export function solverOptions(input) {
+  const blocked = input.blocked instanceof Set ? input.blocked : new Set(input.blocked || []);
+  let enabledSlots = null;
+  if (input.enabledSlots instanceof Map) {
+    enabledSlots = input.enabledSlots;
+  } else if (Array.isArray(input.enabledSlots)) {
+    enabledSlots = new Map();
+    for (const e of input.enabledSlots) {
+      const list = Array.isArray(e.slots) ? e.slots.map(Number) : [];
+      enabledSlots.set(Number(e.day), list);
+    }
+  }
+  return { blocked, enabledSlots };
+}
+
+/** ctx における実配置コマ数（× を除いた総コマ数） */
+export function usableCellCount(ctx, grades, days, slots) {
+  let total = 0;
+  for (const g of grades) {
+    for (let d = 1; d <= days; d++) {
+      for (let s = 1; s <= slots; s++) {
+        if (isCellUsable(ctx, g, d, s)) total += 1;
+      }
+    }
+  }
+  return total;
 }
 
 /**
@@ -650,9 +717,10 @@ export function solveTimetable(input) {
   const items = expandUnits(units, grades);
   const blocks = buildBlocks(items);
   const meta = { days, slots, rules, history };
+  const options = solverOptions(input);
 
   // 1. HARD 制約下での完全探索
-  let ctx = createContext(blocks, grades, days, slots, rules);
+  let ctx = createContext(blocks, grades, days, slots, rules, options);
   let placements = searchPlacements(blocks, ctx);
   let relaxed = false;
 
@@ -660,15 +728,15 @@ export function solveTimetable(input) {
   if (!placements) {
     relaxed = true;
     const relaxedRules = { ...rules, first_period_all: false, last_day_all: false };
-    ctx = createContext(blocks, grades, days, slots, relaxedRules);
+    ctx = createContext(blocks, grades, days, slots, relaxedRules, options);
     placements = searchPlacements(blocks, ctx);
     meta.rules = relaxedRules;
   }
 
   if (!placements) {
-    const stats = { totalCells: grades.length * days * slots, filledCells: 0, fillRate: 0, unplacedUnits: items.length, penalty: 0 };
+    const stats = { totalCells: usableCellCount(ctx, grades, days, slots), filledCells: 0, fillRate: 0, unplacedUnits: items.length, penalty: 0 };
     const diag = {
-      hard: [{ type: 'INFEASIBLE', message: '設定された制約では時間割を組むことができません。実施科目数・コマ数・固定コマ指定を見直してください。' }],
+      hard: [{ type: 'INFEASIBLE', message: '設定された制約では時間割を組むことができません。実施科目数・コマ数・固定コマ指定・×（使用不能コマ）を見直してください。' }],
       soft: [],
       stats,
     };
@@ -692,7 +760,7 @@ export function solveTimetable(input) {
     });
   }
 
-  const diagnostics = validateTimetable({ days, slots, grades, units, rules, history, assignments });
+  const diagnostics = validateTimetable({ days, slots, grades, units, rules, history, assignments, blocked: options.blocked, enabledSlots: options.enabledSlots });
 
   return {
     feasible: diagnostics.hard.length === 0,

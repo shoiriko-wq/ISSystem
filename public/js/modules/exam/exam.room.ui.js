@@ -13,6 +13,7 @@ import {
   showToast,
   isKyomuUser,
 } from './exam.shared.js';
+import { dayDateLabel, examDayList, isBlockedFor, isGlobalBlocked } from './exam.timetable.ui.js';
 
 const ROOM_TYPES = ['CLASS', 'SP1', 'SP2', 'PREP1'];
 const ROOM_TYPE_LABEL = { CLASS: '普通教室', SP1: '別室1', SP2: '別室2', PREP1: '予備教室' };
@@ -213,8 +214,8 @@ function slotCellMap(slots) {
 }
 
 function roomGridHtml(master, slots, rooms, kyomu, editable, phase) {
-  const days = Number(master.days_count) || 0;
   const slotN = Number(master.daily_slots) || 0;
+  const dayList = examDayList(master);
   const cellMap = slotCellMap(slots);
   const roomOptions = (selected) =>
     `<option value="">（空）</option>` +
@@ -229,10 +230,16 @@ function roomGridHtml(master, slots, rooms, kyomu, editable, phase) {
         Array.from({ length: slotN }, (_, i) => i + 1)
           .map((s) => `<th class="px-2 py-1.5 text-[10px] text-muted font-bold bg-inset text-center">${s}限</th>`)
           .join('');
-      const rows = Array.from({ length: days }, (_, di) => di + 1)
+      const rows = dayList
         .map((d) => {
           const cells = Array.from({ length: slotN }, (_, si) => si + 1)
             .map((s) => {
+              if (isBlockedFor(g, d, s)) {
+                return `<td class="border border-divider p-1 align-top bg-inset">
+                    <span class="text-[12px] font-bold text-muted block">×</span>
+                    <span class="badge bg-surface text-muted text-[9px] px-1 block">${isGlobalBlocked(d, s) ? '共通' : `${g}年`}</span>
+                  </td>`;
+              }
               const key = `${Number(g)}|${d}|${s}`;
               const unit = cellMap.get(key);
               if (!unit) {
@@ -247,7 +254,8 @@ function roomGridHtml(master, slots, rooms, kyomu, editable, phase) {
               return `<td class="border border-divider p-1 align-top">${inner}</td>`;
             })
             .join('');
-          return `<tr class="border-t border-divider"><th class="px-2 py-1.5 text-[10px] font-bold text-main bg-inset">${d}日目</th>${cells}</tr>`;
+          const dateLabel = dayDateLabel(d);
+          return `<tr class="border-t border-divider"><th class="px-2 py-1.5 text-[10px] font-bold text-main bg-inset">${d}日目${dateLabel ? `<span class="text-[9px] font-normal text-muted block">${dateLabel}</span>` : ''}</th>${cells}</tr>`;
         })
         .join('');
       return `<div class="mt-2"><h4 class="text-xs font-bold text-main mb-1">${g}学年 の教室割</h4>

@@ -15,6 +15,7 @@ import {
   refreshLucideIcons,
   showToast,
   isKyomuUser,
+  loadScheduleCells,
 } from './exam.shared.js';
 
 const RULE_ITEMS = [
@@ -35,6 +36,104 @@ const WEIGHT_ITEMS = [
 let unitPos = new Map();
 let lastSolve = null;
 let manualDiag = null;
+
+// ============================================================
+// ×（使用不能コマ）
+//  - 全学年共通 × : 暦日 × 時限（exam_masters.schedule_cells）
+//  - 学年固有 ×   : 実施日 × 時限（exam_slots.is_blocked）
+// ============================================================
+
+/** ×編集モード: 'global' = 全学年共通 × / 学年番号 = 学年固有 × */
+let blockMode = 'global';
+
+function cellsData() {
+  return examStore.cells || null;
+}
+
+/** 試験実施日の連番（全時限 × の暦日は実施日から除外され日番号が繰り上がる） */
+export function examDayList(master) {
+  const daySlots = cellsData()?.day_slots;
+  if (Array.isArray(daySlots) && daySlots.length) return daySlots.map((d) => Number(d.day));
+  return Array.from({ length: Number(master.days_count) || 0 }, (_, i) => i + 1);
+}
+
+/** 実施日番号 → 暦日（MM-DD）ラベル */
+export function dayDateLabel(day) {
+  const d = cellsData()?.day_slots?.find((x) => Number(x.day) === Number(day));
+  return d ? String(d.date).slice(5) : '';
+}
+
+/** 全学年共通 × か（暦日単位） */
+export function isGlobalBlocked(day, slot) {
+  const cal = cellsData()?.calendar || [];
+  const entry = cal.find((c) => Number(c.exam_day) === Number(day));
+  if (!entry) return true;
+  const cell = (entry.slots || []).find((s) => Number(s.slot) === Number(slot));
+  return cell ? cell.blocked === true : true;
+}
+
+/** 学年固有 × か（実施日 × 時限） */
+export function isGradeBlocked(grade, day, slot) {
+  const gb = cellsData()?.grade_blocks || [];
+  return gb.some(
+    (b) => Number(b.grade) === Number(grade) && Number(b.day) === Number(day) && Number(b.slot) === Number(slot),
+  );
+}
+
+/** 当該学年の当該コマが使用不能か */
+export function isBlockedFor(grade, day, slot) {
+  return isGlobalBlocked(day, slot) || isGradeBlocked(grade, day, slot);
+}
+
+/** 編集モード対応の × をトグル（server 保存前にローカル状態を反映） */
+function toggleBlock(grade, day, slot) {
+  const data = cellsData();
+  if (!data) return;
+  const d = Number(day);
+  const s = Number(slot);
+  if (grade === 0) {
+    const entry = (data.calendar || []).find((c) => Number(c.exam_day) === d);
+    const cell = (entry?.slots || []).find((x) => Number(x.slot) === s);
+    if (cell) cell.blocked = !cell.blocked;
+    return;
+  }
+  const list = data.grade_blocks || (data.grade_blocks = []);
+  const i = list.findIndex((b) => Number(b.grade) === grade && Number(b.day) === d && Number(b.slot) === s);
+  if (i >= 0) list.splice(i, 1);
+  else list.push({ grade, day: d, slot: s });
+}
+
+/** 全学年共通 × の保存ペイロード（暦日連番 day_number） */
+function globalCellsPayload(master) {
+  const data = cellsData();
+  const cells = [];
+  for (const entry of data?.calendar || []) {
+    for (const c of entry.slots || []) {
+      if (c.blocked) cells.push({ day_number: Number(entry.cal_day), slot_number: Number(c.slot), grade: 0 });
+    }
+  }
+  const m = data?.master || master;
+  return { cells, start_date: m?.start_date ?? null, end_date: m?.end_date ?? null };
+}
+
+/** 学年固有 × の保存ペイロード（実施日連番） */
+function gradeBlocksPayload(grade) {
+  const data = cellsData();
+  return (data?.grade_blocks || [])
+    .filter((b) => Number(b.grade) === Number(grade))
+    .map((b) => ({ day_number: Number(b.day), slot_number: Number(b.slot) }));
+}
+
+function blockModeControlHtml(master) {
+  const opts = [`<option value="global" ${blockMode === 'global' ? 'selected' : ''}>全学年共通 ×</option>`]
+    .concat(
+      (master.grades || []).map(
+        (g) => `<option value="${g}" ${String(blockMode) === String(g) ? 'selected' : ''}>${g}年 ×</option>`,
+      ),
+    )
+    .join('');
+  return `<select id="exam-tt-block-mode" class="input-field w-auto py-1 text-[10px]">${opts}</select>`;
+}
 
 /** plan行 → 配置キー（ソルバーの unit_id と同一形式） */
 function unitKeyFor(p, grade) {
@@ -137,7 +236,12 @@ function toolbarHtml(master, editable, phase) {
       <span class="text-[10px] text-muted ml-auto">${kyomu ? '教務：全タブ編集可' : '教員：公表閲覧のみ'}</span>
     </div>
     ${editable
-      ? `<p class="text-[10px] text-muted">セルの科目を教務権限者が差し替えられます（保存時に制約チェックが走り、違反は表示されます）。</p>`
+      ? `<div class="flex flex-wrap items-center gap-2 pt-1">
+          <span class="text-[10px] font-bold text-main">×（使用不能コマ）編集モード</span>
+          ${blockModeControlHtml(master)}
+          <span class="text-[10px] text-muted">× マス（または空コマの「×」）をクリックで設定／解除します。</span>
+        </div>
+        <p class="text-[10px] text-muted">全学年共通 × で試験日が丸ごと消えると日番号が繰り上がり、教室割当・監督割・試験日行動・出欠抽出は自動補正されます。セルの科目差し替えは保存時に制約チェックが走り、違反は表示されます。</p>`
       : `<p class="text-[10px] text-muted">公表中のグリッドは閲覧のみです。編集は教務権限者に行ってください。</p>`}
   </div>`;
 }
@@ -166,8 +270,8 @@ function cellPickerHtml(units, g, d, s, selected, editable) {
 }
 
 function gridSectionHtml(master, plan, editable) {
-  const days = Number(master.days_count) || 0;
   const slots = Number(master.daily_slots) || 0;
+  const days = examDayList(master);
 
   const tables = (master.grades || [])
     .map((g) => {
@@ -177,13 +281,24 @@ function gridSectionHtml(master, plan, editable) {
           .map((s) => `<th class="px-2 py-1.5 text-[10px] text-muted font-bold bg-inset text-center">${s}限${periodLabel(master, s)}</th>`)
           .join('')}`;
 
-      const rows = Array.from({ length: days }, (_, di) => di + 1)
+      const rows = days
         .map((d) => {
           const cells = Array.from({ length: slots }, (_, si) => si + 1)
             .map((s) => {
+              if (isBlockedFor(g, d, s)) {
+                const global = isGlobalBlocked(d, s);
+                const click = editable ? ` data-block-cell data-block-grade="${g}" data-block-day="${d}" data-block-slot="${s}"` : '';
+                return `<td class="border border-divider p-1 align-top bg-inset${click ? ' cursor-pointer' : ''}"${click} title="クリックで × を設定／解除">
+                    <span class="text-[12px] font-bold text-muted block">×</span>
+                    <span class="badge bg-surface text-muted text-[9px] px-1 block">${global ? '共通' : `${g}年`}</span>
+                  </td>`;
+              }
               const u = cellUnit(unitPos, g, d, s);
               if (!u) {
-                return `<td class="border border-divider p-1 align-top">${cellPickerHtml(units, g, d, s, '', editable) || '<span class="text-[10px] text-muted">空</span>'}</td>`;
+                const xBtn = editable
+                  ? `<button data-block-cell data-block-grade="${g}" data-block-day="${d}" data-block-slot="${s}" class="text-[9px] text-muted hover:text-main mt-0.5" title="このコマを ×（使用不能）に設定">× 設定</button>`
+                  : '';
+                return `<td class="border border-divider p-1 align-top">${cellPickerHtml(units, g, d, s, '', editable) || '<span class="text-[10px] text-muted">空</span>'}${xBtn}</td>`;
               }
               if (!u.isStart) {
                 return `<td class="border border-divider p-1 align-top bg-accent-inset">
@@ -198,7 +313,8 @@ function gridSectionHtml(master, plan, editable) {
               return `<td class="border border-divider p-1 align-top">${inner}</td>`;
             })
             .join('');
-          return `<tr class="border-t border-divider"><th class="px-2 py-1.5 text-[10px] font-bold text-main bg-inset">${d}日目</th>${cells}</tr>`;
+          const dateLabel = dayDateLabel(d);
+          return `<tr class="border-t border-divider"><th class="px-2 py-1.5 text-[10px] font-bold text-main bg-inset">${d}日目${dateLabel ? `<span class="text-[9px] font-normal text-muted block">${dateLabel}</span>` : ''}</th>${cells}</tr>`;
         })
         .join('');
 
@@ -211,7 +327,7 @@ function gridSectionHtml(master, plan, editable) {
     })
     .join('');
 
-  return sectionCard('grid-3x3', '時間割グリッド', '日 × 時限 × 学年。数学Ⅲ（100分＝2時限）は連結表示されます。', tables);
+  return sectionCard('grid-3x3', '時間割グリッド', '日 × 時限 × 学年。数学Ⅲ（100分＝2時限）は連結表示され、×（使用不能コマ）は科目配置対象外になります。', tables);
 }
 
 function resultSectionHtml() {
@@ -293,6 +409,55 @@ export function bindTimetableTab(container, reload) {
     await reload();
     renderTimetableTab(container);
   };
+
+  // ×（使用不能コマ）編集モード切替
+  container.querySelector('#exam-tt-block-mode')?.addEventListener('change', (e) => {
+    blockMode = e.target.value;
+    renderTimetableTab(container);
+  });
+
+  // × マスのクリックで設定／解除
+  container.addEventListener('click', async (e) => {
+    const cell = e.target.closest('[data-block-cell]');
+    if (!cell) return;
+    const board = examStore.board;
+    if (!board?.editable?.timetable) return;
+    const master = board.master;
+    const g = Number(cell.dataset.blockGrade);
+    const d = Number(cell.dataset.blockDay);
+    const s = Number(cell.dataset.blockSlot);
+    const mode = blockMode === 'global' ? 0 : Number(blockMode);
+
+    // × 化により当該コマを覆す科目配置を退去させる
+    for (const [k, pos] of [...unitPos.entries()]) {
+      if (pos.grade === g && pos.day === d && pos.slot < s + 1 && pos.slot + pos.span > s) unitPos.delete(k);
+    }
+    toggleBlock(mode, d, s);
+
+    try {
+      if (mode === 0) {
+        const res = await examApi.put(`/exam/${examStore.examId}/schedule-cells`, globalCellsPayload(master));
+        const days = (res.day_slots || []).length;
+        const pruned = res.blocked_pruned || 0;
+        showToast(
+          `× を保存（${res.saved} コマ・実施日 ${days} 日）${pruned ? `／学年× ${pruned} 件圧縮` : ''}`,
+          'success',
+        );
+      } else {
+        const res = await examApi.put(`/exam/${examStore.examId}/timetable/blocked`, {
+          grade: mode,
+          slots: gradeBlocksPayload(mode),
+        });
+        const un = (res.unassigned || []).length;
+        showToast(`× を保存（${res.saved} コマ・未割当 ${un} 科目）`, un ? 'warning' : 'success');
+      }
+    } catch (err) {
+      const others = (err.details || []).length - 1;
+      showToast(others > 0 ? `${err.message}（他 ${others} 件）` : err.message || '× の保存に失敗しました', 'error');
+    }
+    await loadScheduleCells(examStore.examId);
+    await rerender();
+  });
 
   container.addEventListener('change', (e) => {
     const sel = e.target.closest('[data-cell-grade]');
@@ -420,5 +585,14 @@ export function resetTimetableState() {
   unitPos = new Map();
 }
 
-export default { renderTimetableTab, bindTimetableTab, resetTimetableState };
+export default {
+  renderTimetableTab,
+  bindTimetableTab,
+  resetTimetableState,
+  examDayList,
+  dayDateLabel,
+  isBlockedFor,
+  isGlobalBlocked,
+  isGradeBlocked,
+};
 

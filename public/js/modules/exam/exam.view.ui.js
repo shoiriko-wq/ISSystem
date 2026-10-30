@@ -15,6 +15,7 @@ import {
   showToast,
   isKyomuUser,
 } from './exam.shared.js';
+import { dayDateLabel, examDayList, isBlockedFor, isGlobalBlocked } from './exam.timetable.ui.js';
 
 let view = null;
 let allProctors = null;
@@ -44,7 +45,7 @@ function roomKeyMap() {
 
 function gridTablesHtml(grades) {
   const master = view.master;
-  const days = Array.from({ length: Number(master.days_count) || 0 }, (_, i) => i + 1);
+  const days = examDayList(master);
   const slots = Array.from({ length: Number(master.daily_slots) || 0 }, (_, i) => i + 1);
   const mySet = myProctorKeys();
   const roomMap = roomKeyMap();
@@ -59,6 +60,12 @@ function gridTablesHtml(grades) {
         .map((d) => {
           const tds = slots
             .map((s) => {
+              if (isBlockedFor(g, d, s)) {
+                return `<td class="border border-divider p-1 align-top bg-inset">
+                    <span class="text-[12px] font-bold text-muted block">×</span>
+                    <span class="badge bg-surface text-muted text-[9px] px-1 block">${isGlobalBlocked(d, s) ? '共通' : `${g}年`}</span>
+                  </td>`;
+              }
               const key = `${Number(g)}|${d}|${s}`;
               const cell = tGrid.find((t) => Number(t.grade) === Number(g) && Number(t.day) === d && Number(t.slot) === s);
               if (!cell) return `<td class="border border-divider p-1 align-top bg-inset"><span class="text-[10px] text-muted">実施なし</span></td>`;
@@ -72,7 +79,8 @@ function gridTablesHtml(grades) {
               return `<td class="border border-divider p-1 align-top">${body}</td>`;
             })
             .join('');
-          return `<tr class="border-t border-divider"><th class="px-2 py-1.5 text-[10px] font-bold text-main bg-inset">${d}日目</th>${tds}</tr>`;
+          const dateLabel = dayDateLabel(d);
+          return `<tr class="border-t border-divider"><th class="px-2 py-1.5 text-[10px] font-bold text-main bg-inset">${d}日目${dateLabel ? `<span class="text-[9px] font-normal text-muted block">${dateLabel}</span>` : ''}</th>${tds}</tr>`;
         })
         .join('');
       return `<div class="mt-2"><h4 class="text-xs font-bold text-main mb-1">${escapeHTML(String(g))}学年 の試験時間割・教室</h4>

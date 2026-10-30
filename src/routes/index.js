@@ -184,8 +184,14 @@ router.post('/exam/:id/subject-survey/end', authenticateToken, safe(examControll
 router.get('/exam/:id/slots', authenticateToken, safe(examController?.getSlots));
 router.post('/exam/:id/timetable-rules', authenticateToken, safe(examController?.saveTimetableRules));
 router.post('/exam/:id/timetable', authenticateToken, safe(examController?.solveTimetable));
+  router.post('/exam/:id/timetable/slots', authenticateToken, safe(examController?.saveTimetableSlots));
+
 router.post('/exam/:id/timetable/publish', authenticateToken, safe(examController?.publishTimetable));
 router.post('/exam/:id/timetable/end', authenticateToken, safe(examController?.endTimetable));
+router.post('/exam/:id/timetable/validate', authenticateToken, safe(examController?.validateTimetableRows));
+router.get('/exam/:id/schedule-cells', authenticateToken, safe(examController?.getScheduleCells));
+router.put('/exam/:id/schedule-cells', authenticateToken, safe(examController?.saveScheduleCells));
+router.put('/exam/:id/timetable/blocked', authenticateToken, safe(examController?.saveGradeBlocked));
 
 // 試験教室
 router.get('/exam/:id/rooms', authenticateToken, safe(examController?.getRooms));

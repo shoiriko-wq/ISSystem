@@ -103,8 +103,11 @@ function examFormHtml(master, kyomu) {
 
 function roomsHtml(rooms, kyomu, master) {
   const rows = rooms.map((r) => roomRowHtml(r, kyomu)).join('');
+  const cellsData = examStore.cells;
+  const enabledDays = cellsData?.day_slots?.length;
+  const globalBlocks = (cellsData?.global_blocks || []).length;
   const grid = master
-    ? `<span class="text-[11px] text-muted">期間 ${escapeHTML(String(master.start_date).slice(0, 10))} 〜 ${escapeHTML(String(master.end_date).slice(0, 10))} ／ ${master.days_count}日間 × ${master.daily_slots}時限 ／ ${(master.grades || []).map((g) => `${g}年`).join(' / ')}</span>`
+    ? `<span class="text-[11px] text-muted">期間 ${escapeHTML(String(master.start_date).slice(0, 10))} 〜 ${escapeHTML(String(master.end_date).slice(0, 10))} ／ 暦日 ${master.days_count}日間 × ${master.daily_slots}時限${enabledDays ? ` → 実施 ${enabledDays}日` : ''}${globalBlocks ? ` ／ 全学年× ${globalBlocks}コマ` : ''} ／ ${(master.grades || []).map((g) => `${g}年`).join(' / ')}</span>`
     : '<span class="text-[11px] text-muted">考査が登録されていません。</span>';
   return sectionCard(
     'layout-grid',

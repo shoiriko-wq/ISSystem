@@ -15,6 +15,7 @@ import {
   isKyomuUser,
   diagnosticsHtml,
 } from './exam.shared.js';
+import { dayDateLabel, examDayList, isBlockedFor, isGlobalBlocked } from './exam.timetable.ui.js';
 
 const PROCTOR_DEFAULTS = {
   solo_subject_self: true,
@@ -99,10 +100,17 @@ function staffOptions(sel, includeEmpty = false) {
 }
 
 function days() {
-  return Array.from({ length: Number(board.master.days_count) || 0 }, (_, i) => i + 1);
+  return examDayList(board.master);
 }
 function slots() {
   return Array.from({ length: Number(board.master.daily_slots) || 0 }, (_, i) => i + 1);
+}
+
+/** 当該コマ（実施日 × 時限）で試験が行われているか（全学年） */
+function examAt(day, slot) {
+  const d = Number(day);
+  const s = Number(slot);
+  return cells.some((c) => Number(c.day_number) === d && Number(c.slot_number) === s);
 }
 
 function tripsSet() {
@@ -263,8 +271,11 @@ function availabilityCardHtml(kyomu) {
       days()
         .map(
           (d) => `<tr>
-            <td class="border border-divider p-1.5 text-[11px] font-bold text-main">${escapeHTML(p.staff_name)}<span class="text-[10px] text-muted font-normal"> ${d}日目</span></td>
+            <td class="border border-divider p-1.5 text-[11px] font-bold text-main">${escapeHTML(p.staff_name)}<span class="text-[10px] text-muted font-normal"> ${d}日目${dayDateLabel(d) ? `（${dayDateLabel(d)}）` : ''}</span></td>
             ${ss.map((s) => {
+              if (isGlobalBlocked(d, s) || !examAt(d, s)) {
+                return `<td class="border border-divider p-1 text-center bg-inset"><span class="text-[11px] font-bold text-muted">×</span></td>`;
+              }
               const on = avail.get(aKey(p.staff_id, d, s)) === true;
               return `<td class="border border-divider p-1 text-center"><input data-avail="${p.staff_id}|${d}|${s}" type="checkbox" ${on ? 'checked' : ''} ${kyomu ? '' : 'disabled'} class="rounded" /></td>`;
             }).join('')}
@@ -373,6 +384,12 @@ function proctorGridHtml(kyomu, editable) {
         .map((d) => {
           const tds = ss
             .map((s) => {
+              if (isBlockedFor(g, d, s)) {
+                return `<td class="border border-divider p-1 align-top bg-inset">
+                    <span class="text-[12px] font-bold text-muted block">×</span>
+                    <span class="badge bg-surface text-muted text-[9px] px-1 block">${isGlobalBlocked(d, s) ? '共通' : `${g}年`}</span>
+                  </td>`;
+              }
               const c = cellAt(g, d, s);
               if (!c) return `<td class="border border-divider p-1 align-top bg-inset"><span class="text-[10px] text-muted">実施なし</span></td>`;
               const room = c.room_type ? `<span class="text-[10px] text-info ml-1">${c.room_type}</span>` : '';
@@ -383,7 +400,8 @@ function proctorGridHtml(kyomu, editable) {
               return `<td class="border border-divider p-1 align-top">${inner}</td>`;
             })
             .join('');
-          return `<tr class="border-t border-divider"><th class="px-2 py-1.5 text-[10px] font-bold text-main bg-inset">${d}日目</th>${tds}</tr>`;
+          const dateLabel = dayDateLabel(d);
+          return `<tr class="border-t border-divider"><th class="px-2 py-1.5 text-[10px] font-bold text-main bg-inset">${d}日目${dateLabel ? `<span class="text-[9px] font-normal text-muted block">${dateLabel}</span>` : ''}</th>${tds}</tr>`;
         })
         .join('');
       return `<div class="mt-2"><h4 class="text-xs font-bold text-main mb-1">${g}学年 の監督割</h4>

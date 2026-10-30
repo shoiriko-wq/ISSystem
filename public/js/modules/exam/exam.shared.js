@@ -6,15 +6,36 @@
 
 import { apiGet, apiPost, apiPut, apiDelete } from '../../api.js';
 import { escapeHTML, refreshLucideIcons, showToast } from '../../ui-helpers.js';
+import { state } from '../../state.js';
 
 /** 考査モジュール共通状態 */
 export const examStore = {
   examId: null,
   board: null,
+  /** ×（使用不能コマ）データ（/exam/:id/schedule-cells のレスポンス） */
+  cells: null,
   isKyomu: false,
-  sub: 'timetable',
+  /** ログインユーザーのロールから判定した教務権限（board 読み込み前の初期描画用） */
+  roleKyomu: false,
+  sub: 'view',
   masters: [],
 };
+
+/**
+ * ロールによる教務権限判定（KYOMU / ADMIN / is_kyomu）
+ * @param {Object} user
+ */
+export function isKyomuRole(user = state.currentUser) {
+  if (!user) return false;
+  const role = String(user.role || '').toUpperCase();
+  return user.is_kyomu === true || role === 'KYOMU' || role === 'ADMIN';
+}
+
+/** ログインロールを共有状態に反映する（モジュール初期化時に呼ぶ） */
+export function syncRoleKyomu() {
+  examStore.roleKyomu = isKyomuRole();
+  return examStore.roleKyomu;
+}
 
 /** フェーズ表示メタ */
 export const PHASE_META = {
@@ -49,7 +70,7 @@ export async function resolveActiveExamId() {
   return examStore.masters.length ? examStore.masters[0].id : null;
 }
 
-/** 考査ボード一括取得（master / phases / 全割当データ） */
+/** 考査ボード一括取得（master / phases / 全割当データ + ×（使用不能コマ）） */
 export async function loadBoard(examId) {
   const id = examId || examStore.examId;
   if (!id) return null;
@@ -58,11 +79,31 @@ export async function loadBoard(examId) {
   examStore.board = board;
   examStore.isKyomu = !!board.is_kyomu;
   if (!examStore.masters.length) examStore.masters = [board.master];
+  await loadScheduleCells(id);
   return board;
 }
 
+/** ×（使用不能コマ）データの再取得（暦日 ×・学年固有 ×・実施日連番） */
+export async function loadScheduleCells(examId) {
+  const id = examId || examStore.examId;
+  if (!id) return null;
+  try {
+    examStore.cells = await examApi.get(`/exam/${id}/schedule-cells`);
+  } catch (e) {
+    console.warn('[Exam] schedule-cells', e);
+    examStore.cells = null;
+  }
+  return examStore.cells;
+}
+
+/**
+ * 教務権限の判定
+ * board が読み込み済みならサーバー返す board.is_kyomu を正とし、
+ * 未読み込み（初期描画）時はログインユーザーのロールで判定する
+ */
 export function isKyomuUser() {
-  return examStore.isKyomu;
+  if (examStore.board) return !!examStore.board.is_kyomu;
+  return examStore.roleKyomu;
 }
 
 /** フェーズバッジ */

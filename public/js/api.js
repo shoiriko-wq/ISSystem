@@ -41,16 +41,22 @@ export async function apiFetch(endpoint, options = {}) {
     // ログインエンドポイントかどうかの判定
     const isLoginEndpoint = endpoint.includes('/auth/login') || endpoint.includes('/login');
 
-    // 401 または 403 認証・権限エラー時の判定
+    // 401 / 403 の認証・権限エラー時の判定
     if (response.status === 401 || response.status === 403) {
       const errorData = await response.json().catch(() => ({}));
-      
+
       // ログインリクエストの場合はセッション切れ処理を行わず、サーバーのエラーメッセージをそのまま返す
       if (isLoginEndpoint) {
         throw new Error(errorData.message || errorData.error || '教職員番号またはパスワードが正しくありません。');
       }
 
-      // 通常の保護されたAPI呼び出しで401/403が返った場合はセッション切れとして処理
+      // 403 は権限不足（セッションは有効）。ログアウトさせずサーバーメッセージを表示する
+      if (response.status === 403) {
+        console.warn('[API] 権限不足で拒否されました。');
+        throw new Error(errorData.message || errorData.error || 'この操作を行う権限がありません。');
+      }
+
+      // 401 はセッション切れとして処理
       console.warn('[API] 認証セッションが無効です。再ログインが必要です。');
       setUserSession(null, null);
       throw new Error(errorData.message || errorData.error || 'UNAUTHORIZED_OR_FORBIDDEN');
@@ -65,7 +71,9 @@ export async function apiFetch(endpoint, options = {}) {
 
     if (!response.ok) {
       // エラーミドルウェアは error キー、コントローラーは message キーで返すため両対応
-      throw new Error(data.message || data.error || `APIエラー (Status: ${response.status})`);
+      const err = new Error(data.message || data.error || `APIエラー (Status: ${response.status})`);
+      err.details = data.details ?? null;
+      throw err;
     }
 
     return data;
