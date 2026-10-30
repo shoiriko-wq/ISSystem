@@ -824,3 +824,33 @@ ALTER TABLE exam_slots DROP CONSTRAINT IF EXISTS exam_slots_exam_master_id_day_n
 CREATE UNIQUE INDEX IF NOT EXISTS uniq_exam_slot_cell ON exam_slots(exam_master_id, day_number, slot_number, class_id, is_blocked);
 
 
+
+-- -------------------------------------------------------------
+-- 18. 教科マスタ拡張 (subjects) と教員の担当教科 (users.subjects)
+-- 教科マスタの追加・改名・削除は教務部 (KYOMU) のみ
+-- users.subjects: JSON文字列の複数選択 (例 ["国語","数学"])
+-- -------------------------------------------------------------
+ALTER TABLE subjects ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE subjects ADD COLUMN IF NOT EXISTS color_key TEXT NOT NULL DEFAULT 'SLATE';
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_subject_name ON subjects (lower(name));
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS subjects TEXT NOT NULL DEFAULT '[]';
+
+-- 教科マスタの初期データ (教務部が追加・改名・削除できる)
+INSERT INTO subjects (id, name, sort_order, color_key)
+VALUES
+  ('ko01', '国語', 1, 'ACCENT'),
+  ('ko02', '数学', 2, 'SUCCESS'),
+  ('ko03', '英語', 3, 'INFO'),
+  ('ko04', '社会', 4, 'WARNING'),
+  ('ko05', '理科', 5, 'PURPLE'),
+  ('ko06', '音楽', 6, 'DANGER'),
+  ('ko07', '美術', 7, 'SLATE'),
+  ('ko08', '保健体育', 8, 'SLATE'),
+  ('ko09', '技術・家庭', 9, 'SLATE'),
+  ('ko10', '情報', 10, 'SLATE')
+ON CONFLICT DO NOTHING;
+
+-- デモ教員の担当教科 (教務部が職員一覧から設定する想定の初期値)
+UPDATE users SET subjects = '["国語","社会"]' WHERE id = 't-tanaka' AND (subjects IS NULL OR subjects = '[]');
+UPDATE users SET subjects = '["数学","理科"]' WHERE id = 't-sato' AND (subjects IS NULL OR subjects = '[]');

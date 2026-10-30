@@ -5,6 +5,7 @@
 
 import authService from '../services/auth.service.js';
 import userModel from '../models/user.model.js';
+import subjectService from '../services/subject.service.js';
 import jwt from 'jsonwebtoken';
 import config from '../../config/default.js';
 
@@ -56,7 +57,7 @@ export const authController = {
   async registerWithInvitation(req, res, next) {
     try {
       // staff_code を必須登録項目として受け取る (email は任意)
-      const { invitationCode, staff_code, staffCode, password, name, email, grade, department } = req.body;
+      const { invitationCode, staff_code, staffCode, password, name, email, grade, department, subjects } = req.body;
       const targetStaffCode = staff_code || staffCode;
 
       if (!invitationCode || !targetStaffCode || !password) {
@@ -68,6 +69,11 @@ export const authController = {
 
       const ipAddress = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
+      // 担当教科は教科マスタの名称のみ採用 (複数選択)
+      const normalizedSubjects = subjects !== undefined
+        ? await subjectService.normalizeUserSubjects(subjects)
+        : [];
+
       const result = await authService.registerWithInvitation(
         { 
           invitationCode, 
@@ -76,7 +82,8 @@ export const authController = {
           name: name || '', // 初回未設定時は空文字（ログイン後に設定可能）
           email: email || null, // email は任意
           grade, 
-          department 
+          department,
+          subjects: normalizedSubjects
         },
         ipAddress
       );
@@ -175,6 +182,7 @@ export const authController = {
           is_kyomu: user.is_kyomu || user.role === 'KYOMU',
           grade: user.grade,
           department: user.department,
+          subjects: user.subjects || [],
           status: user.status || 'PRESENT',
         },
       });
@@ -190,8 +198,17 @@ export const authController = {
   async updateProfile(req, res, next) {
     try {
       const userId = req.user.id || req.user._id;
-      const { name, email, department, extension_number, avatar_url } = req.body;
-      const updated = await userModel.updateProfile(userId, { name, email, department, extension_number, avatar_url });
+      const { name, email, department, extension_number, avatar_url, subjects } = req.body;
+
+      // 担当教科は教科マスタに登録された名称のみ採用 (複数選択)
+      const normalizedSubjects = subjects !== undefined
+        ? await subjectService.normalizeUserSubjects(subjects)
+        : undefined;
+
+      const updated = await userModel.updateProfile(userId, {
+        name, email, department, extension_number, avatar_url,
+        ...(normalizedSubjects !== undefined ? { subjects: normalizedSubjects } : {}),
+      });
       
       if (!updated) {
         return res.status(400).json({ success: false, message: 'プロファイルの更新に失敗しました。ユーザーが見つからないかデータ形式に問題があります。' });
@@ -316,13 +333,18 @@ export const authController = {
    */
   async createUser(req, res, next) {
     try {
-      const { staff_code, name, email, password, role, grade, department, extension_number, avatar_url } = req.body;
+      const { staff_code, name, email, password, role, grade, department, extension_number, avatar_url, subjects } = req.body;
       if (!staff_code || !password || !name) {
         return res.status(400).json({ success: false, message: '教職員番号、氏名、パスワードは必須です。' });
       }
       const bcrypt = await import('bcrypt');
       const password_hash = await bcrypt.default.hash(password, 10);
-      
+
+      // 担当教科は教科マスタの名称のみ (教務部は他教員分も設定可能)
+      const normalizedSubjects = subjects !== undefined
+        ? await subjectService.normalizeUserSubjects(subjects)
+        : [];
+
       const newUser = await userModel.create({
         staff_code,
         name,
@@ -332,7 +354,8 @@ export const authController = {
         grade,
         department,
         extension_number,
-        avatar_url
+        avatar_url,
+        subjects: normalizedSubjects
       });
 
       const operator = req.user || { name: '管理者' };

@@ -9,6 +9,7 @@ import jwt from 'jsonwebtoken';
 import config from '../../config/default.js';
 import userModel from '../models/user.model.js';
 import auditModel from '../models/audit.model.js';
+import { parseSubjectList } from '../models/subject.model.js';
 import { ApiError } from '../middlewares/error.middleware.js';
 
 const BCRYPT_ROUNDS = 10;
@@ -119,6 +120,7 @@ export const authService = {
         is_kyomu: isKyomuRole,
         grade: user.grade,
         department: user.department,
+        subjects: parseSubjectList(user.subjects),
         status: user.status || 'PRESENT',
       },
     };
@@ -128,7 +130,7 @@ export const authService = {
    * 自主分散招待コードを用いた新規教職員ユーザー登録
    */
   async registerWithInvitation(registerData, ipAddress = '') {
-    const { invitationCode, staff_code, password, name, email, grade, department } = registerData;
+    const { invitationCode, staff_code, password, name, email, grade, department, subjects } = registerData;
 
     if (!invitationCode || !staff_code || !password) {
       throw new ApiError(400, '招待コード、教職員番号、パスワードは必須です。');
@@ -157,6 +159,7 @@ export const authService = {
       role: 'TEACHER',
       grade: grade ? String(grade) : null,
       department: department || null,
+      subjects: subjects || [],
       is_kyomu: false,
       invited_by_user_id: validCode.created_by_user_id,
     });
@@ -313,6 +316,7 @@ export const authService = {
       role: user.role || 'TEACHER',
       is_kyomu: isKyomuRole,
       department: user.department || null,
+      subjects: parseSubjectList(user.subjects),
     };
 
     const jwtSecret = (config && config.auth && config.auth.jwtSecret)

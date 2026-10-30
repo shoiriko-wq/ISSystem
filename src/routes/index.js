@@ -30,6 +30,7 @@ import seatingController from '../controllers/seating.controller.js';
 import examController from '../controllers/exam.controller.js';
 import newsController from '../controllers/news.controller.js';
 import absenceController from '../controllers/absence.controller.js';
+import subjectController from '../controllers/subject.controller.js';
 import auditService from '../services/audit.service.js';
 
 const router = Router();
@@ -60,6 +61,15 @@ router.post('/auth/logout', authenticateToken, safe(authController?.logout));
 router.get('/users', authenticateToken, safe(authController?.listUsers));
 router.post('/users', authenticateToken, safe(authController?.createUser));
 router.delete('/users/:id', authenticateToken, safe(authController?.deleteUser));
+
+// 教科マスタ API (一覧は全教職員 / 追加・改名・削除は教務部 KYOMU のみ)
+router.get('/subjects', authenticateToken, safe(subjectController?.listSubjects));
+router.post('/subjects', authenticateToken, requireKyomuRole, safe(subjectController?.createSubject));
+router.put('/subjects/:id', authenticateToken, requireKyomuRole, safe(subjectController?.updateSubject));
+router.delete('/subjects/:id', authenticateToken, requireKyomuRole, safe(subjectController?.deleteSubject));
+
+// 教員の担当教科設定 (自分自身は全教職員、他教員の変更は教務部のみ service 側で検証)
+router.put('/users/:id/subjects', authenticateToken, safe(subjectController?.setUserSubjects));
 
 // エイリアス
 router.post('/auth/register', safe(authController?.registerWithInvitation));

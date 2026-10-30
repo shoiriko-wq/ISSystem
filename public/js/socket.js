@@ -13,6 +13,7 @@ import { loadSeatingData } from './modules/seating.module.js';
 import { fetchWeatherData } from './modules/dashboard.module.js';
 import { loadAbsenceSummary } from './modules/absence.module.js';
 import { loadBulletins } from './modules/bulletin.module.js';
+import { loadSubjects } from './modules/subjects.module.js';
 
 
 let socket = null;
@@ -84,6 +85,20 @@ export const socketClient = {
       const banner = document.getElementById('connection-status-banner');
       if (banner) banner.classList.remove('hidden');
       if (typeof window.refreshLucideIcons === 'function') window.refreshLucideIcons();
+    });
+
+    // 0-a. 教科マスタ変更受信 (教務部の追加・改名・削除で教科マスタキャッシュを再取得)
+    socket.on('subjects:changed', (payload) => {
+      loadSubjects(true);
+    });
+
+    // 0-b. 教員の担当教科変更受信 (自分の担当教科が変わった場合はセッションへ反映)
+    socket.on('subjects:user_changed', (payload) => {
+      loadSubjects(true);
+      const currentUserId = state.currentUser?.id;
+      if (payload && currentUserId && String(payload.user_id) === String(currentUserId)) {
+        state.currentUser.subjects = payload.subjects || [];
+      }
     });
 
     // 1. リアルタイムチャットメッセージ受信 (他人からのメッセージ受信時にトースト通知表示)

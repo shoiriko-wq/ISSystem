@@ -5,10 +5,17 @@
 
 import { query } from '../../config/database.js';
 import { openDb, nowIso } from '../utils/db.js';
+import { parseSubjectList } from './subject.model.js';
 
 /** モデル層用 SQLite 互換アダプタ (共有プール借用 / close() は no-op) */
 async function getDb() {
   return openDb();
+}
+
+/** users.rows の担当教科 (JSON文字列) を配列へ正規化 */
+function withSubjects(row) {
+  if (!row) return row;
+  return { ...row, subjects: parseSubjectList(row.subjects) };
 }
 
 // 自動マイグレーション: avatar_url カラムの存在確認と追加 (PostgreSQL)
@@ -47,10 +54,10 @@ export const userModel = {
 
     try {
       const res = await query(
-        `SELECT id, staff_code, email, name, role, grade, department, extension_number, password_hash FROM users WHERE id = $1`,
+        `SELECT id, staff_code, email, name, role, grade, department, extension_number, subjects, password_hash FROM users WHERE id = $1`,
         [id]
       );
-      return res.rows[0] || null;
+      return withSubjects(res.rows[0] || null);
     } catch (err) {
       console.warn('[UserModel PG Warning] findById failed:', err.message);
       return null;
@@ -71,11 +78,11 @@ export const userModel = {
 
     try {
       const res = await query(
-        `SELECT id, staff_code, email, name, role, grade, department, extension_number, password_hash
+        `SELECT id, staff_code, email, name, role, grade, department, extension_number, subjects, password_hash
          FROM users WHERE UPPER(staff_code) = UPPER($1) OR UPPER(id) = UPPER($2)`,
         [staffCode, staffCode]
       );
-      return res.rows[0] || null;
+      return withSubjects(res.rows[0] || null);
     } catch (err) {
       console.warn('[UserModel PG Warning] findByStaffCode failed:', err.message);
       return null;
@@ -94,10 +101,10 @@ export const userModel = {
 
     try {
       const res = await query(
-        `SELECT id, staff_code, email, name, role, grade, department, extension_number, password_hash FROM users WHERE LOWER(email) = LOWER($1)`,
+        `SELECT id, staff_code, email, name, role, grade, department, extension_number, subjects, password_hash FROM users WHERE LOWER(email) = LOWER($1)`,
         [email]
       );
-      return res.rows[0] || null;
+      return withSubjects(res.rows[0] || null);
     } catch (err) {
       console.warn('[UserModel PG Warning] findByEmail failed:', err.message);
       return null;
@@ -109,8 +116,8 @@ export const userModel = {
    */
   async listAll() {
     try {
-      const res = await query(`SELECT id, staff_code, email, name, role, grade, department, extension_number, avatar_url FROM users ORDER BY name ASC`);
-      return res.rows;
+      const res = await query(`SELECT id, staff_code, email, name, role, grade, department, extension_number, avatar_url, subjects FROM users ORDER BY name ASC`);
+      return res.rows.map(withSubjects);
     } catch (err) {
       return Array.from(mockUsers.values());
     }
@@ -140,7 +147,8 @@ export const userModel = {
       role: userData.role || 'TEACHER',
       department: userData.department || null,
       extension_number: userData.extension_number || null,
-      avatar_url: userData.avatar_url || null
+      avatar_url: userData.avatar_url || null,
+      subjects: parseSubjectList(userData.subjects)
     };
 
     mockUsers.set(newUser.id, newUser);
@@ -150,9 +158,9 @@ export const userModel = {
       newUser.created_at = ts;
       newUser.updated_at = ts;
       await query(
-        `INSERT INTO users (id, staff_code, email, password_hash, name, role, department, extension_number, avatar_url, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [newUser.id, newUser.staff_code, newUser.email, newUser.password_hash, newUser.name, newUser.role, newUser.department, newUser.extension_number, newUser.avatar_url, ts, ts]
+        `INSERT INTO users (id, staff_code, email, password_hash, name, role, department, extension_number, avatar_url, subjects, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [newUser.id, newUser.staff_code, newUser.email, newUser.password_hash, newUser.name, newUser.role, newUser.department, newUser.extension_number, newUser.avatar_url, JSON.stringify(newUser.subjects), ts, ts]
       );
     } catch (err) {
       console.warn('[UserModel PG Warning] create user failed:', err.message);
@@ -175,12 +183,13 @@ export const userModel = {
       const department = profile.department !== undefined ? profile.department : user.department;
       const extension_number = profile.extension_number !== undefined ? profile.extension_number : user.extension_number;
       const avatar_url = profile.avatar_url !== undefined ? profile.avatar_url : (user.avatar_url || null);
+      const subjects = profile.subjects !== undefined ? parseSubjectList(profile.subjects) : parseSubjectList(user.subjects);
 
       await query(
-        `UPDATE users SET name = $1, email = $2, department = $3, extension_number = $4, avatar_url = $5, updated_at = $6 WHERE id = $7`,
-        [name, email, department, extension_number, avatar_url, nowIso(), userId]
+        `UPDATE users SET name = $1, email = $2, department = $3, extension_number = $4, avatar_url = $5, subjects = $6, updated_at = $7 WHERE id = $8`,
+        [name, email, department, extension_number, avatar_url, JSON.stringify(subjects), nowIso(), userId]
       );
-      return { ...user, name, email, department, extension_number, avatar_url };
+      return { ...user, name, email, department, extension_number, avatar_url, subjects };
     } catch (err) {
       console.warn('[UserModel PG Warning] updateProfile failed:', err.message);
       return null;

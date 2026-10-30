@@ -6,6 +6,7 @@
 
 import { query } from '../../config/database.js';
 import { parseJson } from '../utils/db.js';
+import { parseSubjectList } from './subject.model.js';
 
 const PHASE_KEYS = ['subject_phase', 'timetable_phase', 'room_phase', 'trip_phase', 'proctor_phase'];
 
@@ -950,7 +951,7 @@ export const examModel = {
 
   async fetchStaffPool() {
     const res = await query(
-      `SELECT id, name, staff_code, grade, role, is_parttime FROM users ORDER BY name ASC`
+      `SELECT id, name, staff_code, grade, role, is_parttime, subjects FROM users ORDER BY name ASC`
     );
     return res.rows.map((r) => ({
       id: r.id,
@@ -959,6 +960,7 @@ export const examModel = {
       grade: Number(r.grade) || 0,
       role: r.role,
       is_parttime: !!r.is_parttime,
+      subjects: parseSubjectList(r.subjects),
       is_kyomu: String(r.role).toUpperCase() === 'KYOMU' || String(r.role).toUpperCase() === 'ADMIN',
     }));
   },

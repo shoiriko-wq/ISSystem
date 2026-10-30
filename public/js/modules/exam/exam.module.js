@@ -5,6 +5,7 @@
 
 import { state } from '../../state.js';
 import { escapeHTML, refreshLucideIcons, showToast } from '../../ui-helpers.js';
+import { socketClient } from '../../socket.js';
 import { examStore, examApi, loadBoard, resolveActiveExamId, phaseBadge, isKyomuUser, syncRoleKyomu } from './exam.shared.js';
 import { renderMasterTab, bindMasterTab } from './exam.master.ui.js';
 import { renderSubjectTab, bindSubjectTab } from './exam.subject.ui.js';
@@ -170,6 +171,14 @@ export function initExamModule() {
   });
   document.getElementById('exam-header-bar')?.addEventListener('click', async (e) => {
     if (e.target.closest('#exam-refresh')) await reload();
+  });
+
+  // 教科マスタの改名/削除は考査計画の教科名へ cascade するため、変更時に板を再読み込みする
+  socketClient.on('subjects:changed', () => {
+    const view = document.getElementById('view-exam');
+    if (state.currentUser && view && !view.classList.contains('hidden')) {
+      reload();
+    }
   });
 
   renderHeader();

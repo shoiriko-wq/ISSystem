@@ -18,6 +18,7 @@ import { initScheduleModule, loadSchedules } from './modules/schedule.module.js'
 import { initApprovalModule, loadApprovals } from './modules/approval.module.js';
 import { initAbsenceModule, loadAbsenceSummary } from './modules/absence.module.js';
 import { initExamModule, loadExamData } from './modules/exam/exam.module.js';
+import { initSubjectsModule, loadSubjects, renderSubjectPicker, renderSubjectPickerAsync, readSubjectPicker, subjectChipsHtml, openSubjectAdmin, isKyomuUser, setUserSubjects } from './modules/subjects.module.js';
 
 
 /**
@@ -199,6 +200,8 @@ window.handleLoginClick = async function() {
 
     // トークンとユーザー情報の保存
     setUserSession(resData.user, resData.token);
+    // 担当教科ピッカー・表示チップ用の教科マスタを再読み込み (未ログイン時に空だったキャッシュを更新)
+    await loadSubjects(true);
     renderAuthScreen();
     
     // ログイン成功後にアクティブタブの実データをロード
@@ -675,6 +678,13 @@ function initEventsAndListeners() {
     document.getElementById('profile-department').value = user.department || '１学年';
     document.getElementById('profile-extension').value = user.extension_number || '';
     document.getElementById('profile-avatar-url').value = user.avatar_url || '';
+
+    // 担当教科の複数選択UI (教務部は教科マスタ管理ボタンも表示)
+    renderSubjectPicker('profile-subjects', user.subjects || []);
+    const subjectAdminBtn = document.getElementById('profile-subject-admin-btn');
+    if (subjectAdminBtn) {
+      subjectAdminBtn.classList.toggle('hidden', !isKyomuUser());
+    }
     
     editorTools?.classList.add('hidden');
     if (fileInput) fileInput.value = '';
@@ -713,10 +723,11 @@ function initEventsAndListeners() {
       const department = document.getElementById('profile-department').value.trim();
       const extension_number = document.getElementById('profile-extension').value.trim();
       const avatar_url = document.getElementById('profile-avatar-url').value.trim();
+      const subjects = readSubjectPicker('profile-subjects');
 
-      const res = await apiPut('/auth/profile', { name, email, department, extension_number, avatar_url });
+      const res = await apiPut('/auth/profile', { name, email, department, extension_number, avatar_url, subjects });
       if (res && res.success) {
-        const updatedUser = res.user || { ...state.currentUser, name, email, department, extension_number, avatar_url };
+        const updatedUser = res.user || { ...state.currentUser, name, email, department, extension_number, avatar_url, subjects };
         setUserSession(updatedUser, res.token || state.authToken);
         // パスワード欄はプロフィール保存とは無関係なので、保存後に空へ戻す（取り違い防止）
         ['profile-current-password', 'profile-new-password', 'profile-new-password-confirm'].forEach((id) => {
@@ -742,6 +753,11 @@ function initEventsAndListeners() {
   if (profileForm && profileSaveBtn && !('form' in HTMLButtonElement.prototype)) {
     profileSaveBtn.addEventListener('click', () => profileForm.requestSubmit());
   }
+
+  // 教科マスタ管理ボタン（教務部のみ・プロフィールモーダル内で表示）
+  document.getElementById('profile-subject-admin-btn')?.addEventListener('click', () => {
+    openSubjectAdmin();
+  });
 
   // パスワード変更（現在の / 新しい / 確認 → PUT /api/auth/change-password）
   const pwChangeBtn = document.getElementById('profile-password-change-btn');
@@ -816,6 +832,7 @@ function initEventsAndListeners() {
   document.getElementById('menu-users-manage-btn')?.addEventListener('click', () => {
     userDropdownMenu?.classList.add('hidden');
     openModal('users-manage-modal');
+    renderSubjectPicker('new-user-subjects', []);
     loadUsersList();
   });
 
@@ -827,8 +844,9 @@ function initEventsAndListeners() {
       const name = document.getElementById('new-user-name').value.trim();
       const password = document.getElementById('new-user-password').value.trim();
       const department = document.getElementById('new-user-dept').value.trim();
+      const subjects = readSubjectPicker('new-user-subjects');
 
-      const res = await apiPost('/users', { staff_code, name, password, department });
+      const res = await apiPost('/users', { staff_code, name, password, department, subjects });
       if (res && res.success) {
         showToast('新規教職員を追加しました', 'success');
         document.getElementById('add-user-form').reset();
@@ -843,14 +861,15 @@ function initEventsAndListeners() {
 async function loadUsersList() {
   const tbody = document.getElementById('users-manage-tbody');
   if (!tbody) return;
-  tbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-muted">読み込み中...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-muted">読み込み中...</td></tr>`;
   try {
     const data = await apiGet('/users');
     const users = data.users || [];
     if (users.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-muted">登録されている教職員はいません。</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-muted">登録されている教職員はいません。</td></tr>`;
       return;
     }
+    const kyomu = isKyomuUser();
     tbody.innerHTML = users.map(u => `
       <tr class="hover-surface transition-colors">
         <td class="p-3 font-bold text-main flex items-center gap-2">
@@ -863,6 +882,10 @@ async function loadUsersList() {
           </div>
         </td>
         <td class="p-3 text-soft">${escapeHTML(u.department || '未設定')}</td>
+        <td class="p-3 subject-cell" data-user-id="${u.id}">
+          <div class="subject-chips-area">${subjectChipsHtml(u.subjects || [])}</div>
+          ${kyomu ? `<button class="subject-edit-btn btn-secondary py-1 px-2 text-[11px] rounded border border-main bg-surface text-main inline-flex items-center gap-1 mt-1" data-user-id="${u.id}"><i data-lucide="book-open" class="w-3 h-3"></i> 担当教科編集</button>` : ''}
+        </td>
         <td class="p-3 text-muted font-mono">${escapeHTML(u.extension_number || '-')}</td>
         <td class="p-3 text-right whitespace-nowrap">
           <button class="btn-secondary py-1 px-2 text-[11px] rounded border border-main bg-surface text-main flex items-center gap-1 inline-flex invite-code-btn mr-2" data-staff-code="${escapeHTML(u.staff_code)}" data-user-label="${escapeHTML(u.name || u.staff_code)}">
@@ -909,8 +932,49 @@ async function loadUsersList() {
         }
       });
     });
+    // 教務部による担当教科の行内編集 (自分以外の変更は教務部のみ)
+    tbody.querySelectorAll('.subject-edit-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const userId = btn.getAttribute('data-user-id');
+        const targetUser = users.find((uu) => String(uu.id) === String(userId));
+        const cell = tbody.querySelector(`.subject-cell[data-user-id="${userId}"]`);
+        if (!cell || !targetUser) return;
+
+        const pickerId = `subject-edit-${userId}`;
+        if (cell.querySelector(`#${pickerId}`)) return; // 既に編集モード
+
+        cell.innerHTML = `
+          <div id="${pickerId}" class="flex flex-wrap gap-1.5 bg-surface rounded-lg border border-main p-2"></div>
+          <div class="flex items-center gap-1 mt-1.5">
+            <button class="subject-save-btn btn-primary py-1 px-2 text-[11px] rounded flex items-center gap-1" data-user-id="${userId}">
+              <i data-lucide="save" class="w-3 h-3"></i> 保存
+            </button>
+            <button class="subject-cancel-btn btn-secondary py-1 px-2 text-[11px] rounded border border-main bg-surface text-main">閉じる</button>
+          </div>`;
+        renderSubjectPicker(pickerId, targetUser.subjects || []);
+        refreshLucideIcons();
+      });
+    });
+
+    tbody.querySelectorAll('.subject-save-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const userId = btn.getAttribute('data-user-id');
+        const picked = readSubjectPicker(`subject-edit-${userId}`);
+        try {
+            await setUserSubjects(userId, picked);
+            showToast('担当教科を保存しました', 'success');
+            loadUsersList();
+        } catch (err) {
+          showToast('担当教科の保存に失敗しました: ' + err.message, 'error');
+        }
+      });
+    });
+
+    tbody.querySelectorAll('.subject-cancel-btn').forEach((btn) => {
+      btn.addEventListener('click', () => loadUsersList());
+    });
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-danger">教職員一覧の取得に失敗しました。</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-danger">教職員一覧の取得に失敗しました。</td></tr>`;
   }
 }
 
@@ -934,6 +998,8 @@ document.addEventListener('DOMContentLoaded', () => {
   initScheduleModule();
   initApprovalModule();
   initAbsenceModule();
+  // 教科マスタ・担当教科モジュール (DOM生成と教科マスタ読み込み)
+  initSubjectsModule();
   // 定期考査モジュールは renderAuthScreen (ログイン時のロール判定込み) で初期化される
 
 
