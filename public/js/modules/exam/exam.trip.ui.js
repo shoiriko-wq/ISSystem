@@ -127,7 +127,9 @@ export function renderTripTab(container) {
     ? sectionCard(
         'file-search',
         '出欠記録からの抽出プレビュー',
-        `試験期間（${board.master.start_date}〜${board.master.end_date}）の出欠を出張等候補として抽出します。`,
+        board.master.start_date && board.master.end_date
+          ? `試験期間（${board.master.start_date}〜${board.master.end_date}）の出欠を出張等候補として抽出します。`
+          : '③ の考査期間が未登録のため、出欠記録からの抽出は期間登録後に実行してください。',
         preview
           ? `<p class="text-[11px] text-soft">抽出候補 ${preview.derived_count} 件 / 登録済み ${preview.saved_count} 件</p>
              <ul class="text-[10px] text-muted max-h-40 overflow-y-auto mt-1">

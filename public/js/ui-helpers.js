@@ -272,9 +272,22 @@ export function closeModal(modalId) {
  * 画面上の全モーダルのイベントリスナー一括初期化 (背景クリック閉じる等)
  */
 export function initModalListeners() {
+  /* 背景スクリーンクリックで閉じる判定（全モーダル共通）
+     click は mousedown と mouseup の共通祖先に発生するため、
+     モーダル内で押下開始（テキスト選択のドラッグ等）→ 背景でマウスを離すと
+     click の target が背景になり、旧実装ではモーダルが閉じてしまっていた。
+     mousedown（capture）で押下開始要素を記録し、
+     「押下開始が背景」「click の target が背景」の両方を満たす場合のみ閉じる。 */
+  const isBackdrop = (el) => el && el.classList && el.classList.contains('modal-overlay');
+  let backdropPressed = null;
+
+  document.addEventListener('mousedown', (e) => {
+    backdropPressed = isBackdrop(e.target) ? e.target : null;
+  }, true);
+
   document.querySelectorAll('.modal-overlay').forEach(modal => {
     modal.addEventListener('click', (e) => {
-      if (e.target === modal) {
+      if (isBackdrop(e.target) && e.target === modal && backdropPressed === e.target) {
         modal.classList.add('hidden');
       }
     });
@@ -296,7 +309,7 @@ export function initModalListeners() {
       if (modal) modal.classList.add('hidden');
       return;
     }
-    if (e.target.classList && e.target.classList.contains('modal-overlay')) {
+    if (isBackdrop(e.target) && backdropPressed === e.target) {
       e.target.classList.add('hidden');
     }
   });

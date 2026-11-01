@@ -1,13 +1,17 @@
 /**
  * ISSystem 定期考査 モジュールシェル
  * サイドメニュー「定期考査」の画面骨格・サブタブ・考査ボード読み込み・権限表示
+ * メニュー順（教務）: 基本情報の登録 → 年間考査計画 → 実施科目の決定 →
+ * 時間割の作成 → 教室割の作成 → 出張等の登録 → 監督割の作成（+ 公表ビュー）
+ * 考査の登録は年間考査計画タブへ統合済み（独立タブを持たない）
  */
 
 import { state } from '../../state.js';
 import { escapeHTML, refreshLucideIcons, showToast } from '../../ui-helpers.js';
 import { socketClient } from '../../socket.js';
 import { examStore, examApi, loadBoard, resolveActiveExamId, phaseBadge, isKyomuUser, syncRoleKyomu } from './exam.shared.js';
-import { renderMasterTab, bindMasterTab } from './exam.master.ui.js';
+import { renderPlanTab, bindPlanTab } from './exam.plan.ui.js';
+import { renderBasicTab, bindBasicTab } from './exam.basic.ui.js';
 import { renderSubjectTab, bindSubjectTab } from './exam.subject.ui.js';
 import { renderTimetableTab, bindTimetableTab, resetTimetableState } from './exam.timetable.ui.js';
 import { renderRoomTab, bindRoomTab } from './exam.room.ui.js';
@@ -16,8 +20,9 @@ import { renderProctorTab, bindProctorTab } from './exam.proctor.ui.js';
 import { renderPublishedTab, bindPublishedTab } from './exam.view.ui.js';
 
 const SUB_TABS = [
-  { id: 'master', label: '考査の登録', icon: 'file-plus' },
-  { id: 'subject', label: '実施科目と出題者', icon: 'list-checks' },
+  { id: 'basic', label: '基本情報の登録', icon: 'library' },
+  { id: 'plan', label: '年間考査計画', icon: 'calendar-range' },
+  { id: 'subject', label: '実施科目調査', icon: 'list-checks', openToAll: true },
   { id: 'timetable', label: '時間割の作成', icon: 'grid-3x3' },
   { id: 'room', label: '教室割の作成', icon: 'layout-grid' },
   { id: 'trip', label: '出張等の登録', icon: 'plane' },
@@ -27,7 +32,7 @@ const SUB_TABS = [
 
 /**
  * 現在ロールで表示可能なサブタブ
- * 教務権限者: 6つの作成メニュー + 公表ビュー、一般教員: 公表ビューのみ
+ * 教務権限者: 7つの作成メニュー + 公表ビュー、一般教員: 公表ビューのみ
  */
 function visibleSubTabs() {
   const kyomu = isKyomuUser();
@@ -43,6 +48,7 @@ function ensureSubTab() {
 }
 
 const PHASE_KEYS = [
+  ['plan_phase', '計画'],
   ['subject_phase', '実施科目'],
   ['timetable_phase', '時間割'],
   ['room_phase', '教室割'],
@@ -51,7 +57,8 @@ const PHASE_KEYS = [
 ];
 
 const RENDERERS = {
-  master: { render: renderMasterTab, bind: bindMasterTab },
+  plan: { render: renderPlanTab, bind: bindPlanTab },
+  basic: { render: renderBasicTab, bind: bindBasicTab },
   subject: { render: renderSubjectTab, bind: bindSubjectTab },
   timetable: { render: renderTimetableTab, bind: bindTimetableTab },
   room: { render: renderRoomTab, bind: bindRoomTab },
@@ -102,7 +109,7 @@ function renderHeader() {
         <h2 class="text-lg font-bold text-main flex items-center gap-2">
           <i data-lucide="file-spreadsheet" class="w-5 h-5 text-warning"></i> 定期考査
         </h2>
-        <p class="text-[11px] text-muted">教務権限者は 6 つの作成メニュー、教員は公表ビューと自分の担当コマを確認できます。</p>
+        <p class="text-[11px] text-muted">教務権限者は 7 つの作成メニュー（考査の登録は年間考査計画に統合）、教員は公表ビューと自分の担当コマを確認できます。</p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <label class="text-[11px] text-muted">対象考査</label>
@@ -138,9 +145,9 @@ export function initExamModule() {
   const container = document.getElementById('view-exam');
   if (!container) return;
 
-  // ロールで教務権限を判定し、初期サブタブを選ぶ（教務=考査の登録、教員=公表ビュー）
+  // ロールで教務権限を判定し、初期サブタブを選ぶ（教務=基本情報の登録、教員=公表ビュー）
   syncRoleKyomu();
-  examStore.sub = isKyomuUser() ? 'master' : 'view';
+  examStore.sub = isKyomuUser() ? 'basic' : 'view';
 
   container.innerHTML = `
     <div id="exam-header-bar" class="bg-surface-strong p-4 rounded-xl border border-divider space-y-1"></div>
@@ -181,6 +188,14 @@ export function initExamModule() {
     }
   });
 
+  // 基本情報（コース・クラス・科目・教室）の変更も計画・板の表示へ cascade される
+  socketClient.on('basicinfo:changed', () => {
+    const view = document.getElementById('view-exam');
+    if (state.currentUser && view && !view.classList.contains('hidden')) {
+      reload();
+    }
+  });
+
   renderHeader();
   renderSubTabs();
 }
@@ -196,16 +211,21 @@ export async function loadExamData() {
       renderHeader();
       renderSubTabs();
       const noExamText = isKyomuUser()
-        ? 'active な考査がありません。「考査の登録」タブから作成してください。'
+        ? 'active な考査がありません。「年間考査計画」の ① で1年間に実施する考査名をすべて登録してください（期間・1日の時限数・標準試験時間は ③ で登録します）。'
         : '現在閲覧できる公開中の考査がありません。教務による公表を待ちください。';
-      // 教員は公表ビューのみ、教務は「考査の登録」から作成できる
-      const targetSub = isKyomuUser() ? 'master' : 'view';
+      // 教員は公表ビューのみ、教務は年間考査計画（考査の登録を含む）から作成できる
+      const targetSub = isKyomuUser() ? 'plan' : 'view';
       for (const t of SUB_TABS) panels[t.id]?.classList.toggle('hidden', t.id !== targetSub);
       examStore.sub = targetSub;
       const p = panels[targetSub];
       if (p) {
         p.classList.remove('hidden');
-        p.innerHTML = `<div class="card p-6 text-center text-xs text-muted">${noExamText}</div>`;
+        if (isKyomuUser()) {
+          renderPlanTab(p, noExamText);
+          bindPlanTab(p, reload);
+        } else {
+          p.innerHTML = `<div class="card p-6 text-center text-xs text-muted">${noExamText}</div>`;
+        }
       }
       renderSubTabs();
       refreshLucideIcons();

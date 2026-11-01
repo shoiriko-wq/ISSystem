@@ -45,6 +45,18 @@ async function startServer() {
     initializeCronJobs(io);
 
     // 6. HTTP & WebSocket サーバーのリスニング開始
+    server.on('error', (error) => {
+      if (error.code === 'EADDRINUSE') {
+        console.error(`❌ ポート ${PORT} は既に使用されています（EADDRINUSE）。`);
+        console.error('   既に ISSystem サーバーが稼働している可能性があります。');
+        console.error('   確認: ss -ltnp | grep :' + PORT);
+        console.error('   既存インスタンスの停止: pkill -f "node src/server.js" （nodemon 側も停止してください）');
+        process.exit(1);
+      }
+      console.error('❌ リスニング中にエラーが発生しました:', error);
+      process.exit(1);
+    });
+
     server.listen(PORT, () => {
       console.log('====================================================');
       console.log(`🚀 ISSystem サーバーが正常に起動しました！`);

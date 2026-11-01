@@ -18,6 +18,8 @@ import { loadSubjects } from './modules/subjects.module.js';
 
 let socket = null;
 let hasDisconnected = false;
+/** ソケット接続前に登録されたリスナー（connect 時に貼り付け） */
+const pendingListeners = [];
 
 export const socketClient = {
   socket: null,
@@ -64,6 +66,9 @@ export const socketClient = {
       console.log('[Socket] リアルタイム通信レイヤーに接続成功:', socket.id);
       const banner = document.getElementById('connection-status-banner');
       if (banner) banner.classList.add('hidden');
+
+      // 接続前に登録されたモジュール側リスナーを貼り付ける
+      for (const p of pendingListeners) socket.on(p.event, p.handler);
 
       if (hasDisconnected) {
         showToast('サーバーに再接続しました', 'success');
@@ -315,6 +320,23 @@ export const socketClient = {
       }
     });
 
+  },
+
+  /**
+   * モジュール側からのイベントリスナー登録（未接続時は connect 時に貼り付け）
+   */
+  on(event, handler) {
+    if (socket) {
+      socket.on(event, handler);
+      return true;
+    }
+    pendingListeners.push({ event, handler });
+    return false;
+  },
+
+  /** リスナー解除 */
+  off(event, handler) {
+    if (socket) socket.off(event, handler);
   },
 
   joinChannel(channelId) {

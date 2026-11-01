@@ -110,7 +110,11 @@ export function renderPublishedTab(container) {
   const overview = sectionCard(
     'eye',
     '公表状況サマリー',
-    `${escapeHTML(master.name)}（${escapeHTML(master.start_date)}〜${escapeHTML(master.end_date)} / ${master.days_count}日間・${master.daily_slots}限）`,
+    `${escapeHTML(master.name)}${
+      master.start_date && master.end_date
+        ? `（${escapeHTML(master.start_date)}〜${escapeHTML(master.end_date)} / ${master.days_count}日間・${master.daily_slots}限）`
+        : '（③ の期間登録待ち）'
+    }`,
     `<div class="flex flex-wrap items-center gap-2">
        ${PHASE_KEYS.map(([k, label]) => `<span class="text-xs text-soft">${label} ${phaseBadge(view.phases[k])}</span>`).join('')}
        <span class="text-[10px] text-muted ml-auto">

@@ -70,6 +70,32 @@ export const examController = {
     ok(res, await examService.endSubjectSurvey(req.params.id, req.user), '実施科目調査を終了しました。');
   }),
 
+  // ===== 年間考査計画（試験期間登録・教員調査・実施科目決定） =====
+  registerPlan: wrap(async (req, res) => {
+    ok(res, await examService.registerPlan(req.params.id, req.body, req.user), '試験期間を登録しました。');
+  }),
+
+  startPlanSurvey: wrap(async (req, res) => {
+    ok(res, await examService.startPlanSurvey(req.params.id, req.user), '教員調査を開始しました。');
+  }),
+
+  decideSubjects: wrap(async (req, res) => {
+    ok(res, await examService.decideSubjects(req.params.id, req.user), '実施科目を決定しました。');
+  }),
+
+  surveySummary: wrap(async (req, res) => {
+    ok(res, await examService.surveySummary(req.params.id, req.user));
+  }),
+
+  setSubjectDecision: wrap(async (req, res) => {
+    const status = req.body.status || req.body.decision_status;
+    ok(res, await examService.setSubjectDecision(req.params.id, req.params.rowId, status, req.user), '実施科目の決定状態を更新しました。');
+  }),
+
+  getBasicInfo: wrap(async (req, res) => {
+    ok(res, await examService.basicInfo(req.user));
+  }),
+
   getSubjects: wrap(async (req, res) => {
     ok(res, await examService.getSubjects(req.params.id, req.user));
   }),

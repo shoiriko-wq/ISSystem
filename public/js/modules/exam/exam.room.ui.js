@@ -18,7 +18,7 @@ import { dayDateLabel, examDayList, isBlockedFor, isGlobalBlocked } from './exam
 const ROOM_TYPES = ['CLASS', 'SP1', 'SP2', 'PREP1'];
 const ROOM_TYPE_LABEL = { CLASS: '普通教室', SP1: '別室1', SP2: '別室2', PREP1: '予備教室' };
 
-/** 教室割当編集状態 `${grade}|${day}|${slot}` → {room_name, unit_id, subject_name} */
+/** 教室割当編集状態 `${class_id}|${day}|${slot}` → {room_name, unit_id, subject_name, class_id, grade, duration_slots} */
 let roomPos = new Map();
 let lastSolve = null;
 let phase = 'DRAFT';
@@ -42,12 +42,33 @@ function syncWorking() {
 function syncRoomPos() {
   roomPos = new Map();
   for (const a of examStore.board?.room_assignments || []) {
-    roomPos.set(`${Number(a.grade)}|${Number(a.day_number)}|${Number(a.slot_number)}`, {
+    const grade = Number(a.grade);
+    const day = Number(a.day_number);
+    const slot = Number(a.slot_number);
+    const key = `${a.class_id}|${day}|${slot}`;
+    roomPos.set(key, {
       room_name: a.room_name,
       unit_id: a.unit_id || null,
       subject_name: a.subject_name || null,
+      class_id: a.class_id,
+      grade,
+      day_number: day,
+      slot_number: slot,
+      is_standard: !!a.is_standard,
+      duration_slots: spanFor(grade, day, slot),
     });
   }
+}
+
+/** exam_slots から (学年, 日, 時限) のスパン長（連続コマ数）を引く */
+function spanFor(grade, day, slot) {
+  for (const s of examStore.board?.slots || []) {
+    if (s.is_blocked) continue;
+    if (Number(s.grade) === grade && Number(s.day_number) === day && Number(s.slot_number) === slot) {
+      return Math.max(1, Number(s.slot_span) || Number(s.duration_slots) || 1);
+    }
+  }
+  return 1;
 }
 
 function roomTypeOptions(selected) {
@@ -196,18 +217,31 @@ function configHtml(config, rooms, kyomu, subjectNames) {
 
 
 /** 時間割スパンを各コマに展開（教室割グリッドの科目情報参照用） */
-function slotCellMap(slots) {
+function slotCellMap(slots, classes) {
+  const byGrade = new Map();
+  for (const c of classes || []) {
+    const g = Number(c.grade);
+    if (!byGrade.has(g)) byGrade.set(g, []);
+    byGrade.get(g).push(c);
+  }
   const map = new Map();
   for (const s of slots || []) {
+    if (s.is_blocked) continue;
     const span = Number(s.slot_span) || Number(s.duration_slots) || 1;
     const g = Number(s.grade);
     const d = Number(s.day_number);
-    for (let k = 0; k < span; k++) {
-      map.set(`${g}|${d}|${Number(s.slot_number) + k}`, {
-        unit_id: s.subject_id || null,
-        subject_name: s.subject_name,
-        isStart: k === 0,
-      });
+    const list = byGrade.get(g) || [];
+    const keys = list.length ? list.map((c) => c.id) : [`G${g}`];
+    for (const k0 of keys) {
+      for (let k = 0; k < span; k++) {
+        map.set(`${k0}|${d}|${Number(s.slot_number) + k}`, {
+          unit_id: s.subject_id || null,
+          subject_name: s.subject_name,
+          isStart: k === 0,
+          span,
+          grade: g,
+        });
+      }
     }
   }
   return map;
@@ -216,22 +250,26 @@ function slotCellMap(slots) {
 function roomGridHtml(master, slots, rooms, kyomu, editable, phase) {
   const slotN = Number(master.daily_slots) || 0;
   const dayList = examDayList(master);
-  const cellMap = slotCellMap(slots);
+  const classes = (examStore.board?.basic_info?.classes || [])
+    .slice()
+    .sort((a, b) => Number(a.grade) - Number(b.grade) || String(a.name).localeCompare(String(b.name), 'ja'));
+  const cellMap = slotCellMap(slots, classes);
   const roomOptions = (selected) =>
     `<option value="">（空）</option>` +
     rooms
       .map((r) => `<option value="${escapeHTML(r.name)}" ${r.name === selected ? 'selected' : ''}>${escapeHTML(r.name)}</option>`)
       .join('');
 
-  const tables = (master.grades || [])
-    .map((g) => {
-      const header =
-        `<th class="px-2 py-1.5 text-[10px] text-muted font-bold bg-inset">日</th>` +
-        Array.from({ length: slotN }, (_, i) => i + 1)
-          .map((s) => `<th class="px-2 py-1.5 text-[10px] text-muted font-bold bg-inset text-center">${s}限</th>`)
-          .join('');
-      const rows = dayList
-        .map((d) => {
+  const slotHeader = Array.from({ length: slotN }, (_, i) => i + 1)
+    .map((s) => `<th class="px-2 py-1.5 text-[10px] text-muted font-bold bg-inset text-center">${s}限</th>`)
+    .join('');
+
+  const tables = dayList
+    .map((d) => {
+      const header = `<th class="px-2 py-1.5 text-[10px] text-muted font-bold bg-inset">クラス・コース</th>${slotHeader}`;
+      const rows = classes
+        .map((cl) => {
+          const g = Number(cl.grade);
           const cells = Array.from({ length: slotN }, (_, si) => si + 1)
             .map((s) => {
               if (isBlockedFor(g, d, s)) {
@@ -240,7 +278,7 @@ function roomGridHtml(master, slots, rooms, kyomu, editable, phase) {
                     <span class="badge bg-surface text-muted text-[9px] px-1 block">${isGlobalBlocked(d, s) ? '共通' : `${g}年`}</span>
                   </td>`;
               }
-              const key = `${Number(g)}|${d}|${s}`;
+              const key = `${cl.id}|${d}|${s}`;
               const unit = cellMap.get(key);
               if (!unit) {
                 return `<td class="border border-divider p-1 align-top bg-inset"><span class="text-[10px] text-muted">実施なし</span></td>`;
@@ -249,23 +287,25 @@ function roomGridHtml(master, slots, rooms, kyomu, editable, phase) {
               const roomName = pos ? pos.room_name : '';
               const subject = `<span class="text-[10px] font-bold text-main block">${escapeHTML(unit.subject_name || '')}</span>`;
               const inner = editable
-                ? `${subject}<select data-cell-room="${key}" data-unit="${unit.unit_id || ''}" data-subject="${escapeHTML(unit.subject_name || '')}" class="input-field w-full py-1 text-[10px]">${roomOptions(roomName)}</select>`
+                ? `${subject}<select data-cell-room="${key}" data-class="${escapeHTML(String(cl.id))}" data-grade="${g}" data-unit="${unit.unit_id || ''}" data-subject="${escapeHTML(unit.subject_name || '')}" class="input-field w-full py-1 text-[10px]">${roomOptions(roomName)}</select>`
                 : `${subject}<span class="text-[11px] font-bold text-accent-strong">${escapeHTML(roomName || '未割当')}</span>`;
               return `<td class="border border-divider p-1 align-top">${inner}</td>`;
             })
             .join('');
-          const dateLabel = dayDateLabel(d);
-          return `<tr class="border-t border-divider"><th class="px-2 py-1.5 text-[10px] font-bold text-main bg-inset">${d}日目${dateLabel ? `<span class="text-[9px] font-normal text-muted block">${dateLabel}</span>` : ''}</th>${cells}</tr>`;
+          return `<tr class="border-t border-divider"><td class="px-2 py-1.5 text-[11px] font-bold text-main bg-surface whitespace-nowrap">${escapeHTML(cl.name)}<span class="text-muted text-[10px] block">${cl.grade}年</span></td>${cells}</tr>`;
         })
         .join('');
-      return `<div class="mt-2"><h4 class="text-xs font-bold text-main mb-1">${g}学年 の教室割</h4>
-        <div class="overflow-x-auto"><table class="w-full text-left border-collapse min-w-[640px]"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table></div></div>`;
+      const body =
+        rows || `<tr class="border-t border-divider"><td class="p-2 text-[10px] text-muted" colspan="${slotN + 1}">クラス・コースが登録されていません。</td></tr>`;
+      const dateLabel = dayDateLabel(d);
+      return `<div class="mt-2"><h4 class="text-xs font-bold text-main mb-1">${d}日目${dateLabel ? ` (${dateLabel})` : ''}</h4>
+        <div class="overflow-x-auto"><table class="w-full text-left border-collapse min-w-[640px]"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div></div>`;
     })
     .join('');
 
   return sectionCard(
     'layout-grid',
-    '教室割グリッド（日 × 時限 × 学年）',
+    '教室割グリッド（クラス・コース × 時限）',
     '自動作成は標準教室の最大化・予備教室順・特殊教室の予約順を考慮します。教務はセルの教室を手動で差し替えられます。',
     `<div>${tables}</div>
      <div class="flex flex-wrap items-center gap-2">
@@ -313,25 +353,31 @@ export function renderRoomTab(container) {
 const bound = new WeakSet();
 let rulesLoaded = false;
 
-/** グリッドの select 変更を roomPos に反映（同一スパンの継続セルも追随） */
+/** グリッドの select 変更を roomPos に反映（同一スパンの継続セルも同一教室へ追随） */
 function applyCellChange(sel) {
-  const [g, d, s] = sel.dataset.cellRoom.split('|').map(Number);
+  const [cid, d, s] = sel.dataset.cellRoom.split('|');
+  const day = Number(d);
+  const slot = Number(s);
+  const grade = Number(sel.dataset.grade);
   const roomName = sel.value;
   const room = (examStore.board.rooms || []).find((r) => r.name === roomName);
+  const span = Math.max(1, Number(spanFor(grade, day, slot)) || 1);
   roomPos.set(sel.dataset.cellRoom, {
     room_name: roomName,
     unit_id: sel.dataset.unit || null,
     subject_name: sel.dataset.subject || '',
     room_id: room ? room.id : null,
-    grade: g,
-    day_number: d,
-    slot_number: s,
+    class_id: cid,
+    grade,
+    day_number: day,
+    slot_number: slot,
     is_standard: false,
+    duration_slots: span,
   });
-  const span = Number(examStore.board.master.daily_slots) || 0;
-  if (roomName) {
-    for (let k = s + 1; k <= span; k++) {
-      const key = `${g}|${d}|${k}`;
+  // 同一スパンの継続コマ（data-cell-room を持つセル）を同一教室に追随させる
+  if (roomName && span > 1) {
+    for (let k = slot + 1; k < slot + span; k++) {
+      const key = `${cid}|${day}|${k}`;
       const cur = roomPos.get(key);
       if (cur && cur.unit_id === sel.dataset.unit && cur.subject_name === sel.dataset.subject) {
         roomPos.set(key, { ...cur, room_name: roomName, room_id: room ? room.id : null });
@@ -350,6 +396,7 @@ function buildAssignRows(container) {
         unit_id: pos.unit_id,
         subject_name: pos.subject_name,
         grade: pos.grade,
+        class_id: pos.class_id,
         day_number: pos.day_number,
         slot_number: pos.slot_number,
         room_id: pos.room_id,

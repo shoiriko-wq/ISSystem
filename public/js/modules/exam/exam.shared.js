@@ -40,7 +40,9 @@ export function syncRoleKyomu() {
 /** フェーズ表示メタ */
 export const PHASE_META = {
   DRAFT: { label: '作成中', cls: 'bg-surface text-muted border border-main' },
+  REGISTERED: { label: '期間登録済', cls: 'bg-accent-soft text-accent-strong border border-accent-soft' },
   SURVEY: { label: '調査中', cls: 'bg-warning-soft text-warning-strong border border-warning-soft' },
+  DECIDED: { label: '科目確定', cls: 'bg-success-soft text-success-strong border border-success-soft' },
   PUBLISHED: { label: '公表中', cls: 'bg-success-soft text-success-strong border border-success-soft' },
   ENDED: { label: '終了', cls: 'bg-danger-soft text-danger-strong border border-danger-soft' },
 };
@@ -78,7 +80,12 @@ export async function loadBoard(examId) {
   examStore.examId = id;
   examStore.board = board;
   examStore.isKyomu = !!board.is_kyomu;
-  if (!examStore.masters.length) examStore.masters = [board.master];
+  // ① の「年間の考査名登録」リストとヘッダの対象考査セレクトは年度の全考査を表示する
+  try {
+    examStore.masters = (await examApi.get('/exam/masters')) || [];
+  } catch (e) {
+    examStore.masters = board.master ? [board.master] : [];
+  }
   await loadScheduleCells(id);
   return board;
 }

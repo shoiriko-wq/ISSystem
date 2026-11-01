@@ -7,8 +7,9 @@
 import { query } from '../../config/database.js';
 import { parseJson } from '../utils/db.js';
 import { parseSubjectList } from './subject.model.js';
+import { basicinfoModel } from './basicinfo.model.js';
 
-const PHASE_KEYS = ['subject_phase', 'timetable_phase', 'room_phase', 'trip_phase', 'proctor_phase'];
+const PHASE_KEYS = ['plan_phase', 'subject_phase', 'timetable_phase', 'room_phase', 'trip_phase', 'proctor_phase'];
 
 function safeJson(value, fallback) {
   return parseJson(value, fallback);
@@ -80,20 +81,22 @@ export const examModel = {
   async createExamMaster(data) {
     const id = data.id || genId('exam');
     const res = await query(
-      `INSERT INTO exam_masters (id, title, start_date, end_date, days_count, daily_slots, is_active, grades, period_times, schedule_cells, notes, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, true, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `INSERT INTO exam_masters (id, title, start_date, end_date, days_count, daily_slots, is_active, grades, period_times, schedule_cells, notes, academic_year, default_duration, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, true, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
        RETURNING *`,
       [
         id,
         data.title,
-        data.start_date,
-        data.end_date,
-        Number(data.days_count) || 3,
-        Number(data.daily_slots) || 3,
+        data.start_date ?? null,
+        data.end_date ?? null,
+        Number(data.days_count) || 0,
+        Number(data.daily_slots) || 0,
         JSON.stringify(data.grades || [1, 2, 3]),
         JSON.stringify(data.period_times || []),
         JSON.stringify(data.schedule_cells || []),
         data.notes ?? null,
+        data.academic_year ? Number(data.academic_year) : null,
+        Number(data.default_duration) || 50,
         data.created_by || null,
       ]
     );
@@ -117,6 +120,8 @@ export const examModel = {
       days_count: 'days_count',
       daily_slots: 'daily_slots',
       is_active: 'is_active',
+      academic_year: 'academic_year',
+      default_duration: 'default_duration',
     };
     for (const [key, col] of Object.entries(map)) {
       if (data[key] !== undefined) {
@@ -167,9 +172,9 @@ export const examModel = {
   // ==========================================================
   async ensurePhaseRow(examMasterId, updatedBy = null) {
     await query(
-      `INSERT INTO exam_phases (exam_master_id, subject_phase, timetable_phase, room_phase, trip_phase, proctor_phase, updated_by, updated_at)
-       VALUES (?, 'DRAFT', 'DRAFT', 'DRAFT', 'DRAFT', 'DRAFT', ?, CURRENT_TIMESTAMP)
-       ON CONFLICT (exam_master_id) DO NOTHING`,
+      `INSERT INTO exam_phases (exam_master_id, plan_phase, subject_phase, timetable_phase, room_phase, trip_phase, proctor_phase, updated_by, updated_at)
+       VALUES (?, 'DRAFT', 'DRAFT', 'DRAFT', 'DRAFT', 'DRAFT', 'DRAFT', ?, CURRENT_TIMESTAMP)
+       ON CONFLICT (exam_master_id) DO UPDATE SET plan_phase = COALESCE(exam_phases.plan_phase, 'DRAFT')`,
       [examMasterId, updatedBy]
     );
   },
@@ -182,7 +187,7 @@ export const examModel = {
       for (const k of PHASE_KEYS) base[k] = 'DRAFT';
       return base;
     }
-    return row;
+    return { ...row, plan_phase: row.plan_phase || 'DRAFT' };
   },
 
   async setPhase(examMasterId, phaseKey, value, updatedBy) {
@@ -230,36 +235,58 @@ export const examModel = {
   // ==========================================================
   async listSubjectPlan(examMasterId) {
     const res = await query(
-      `SELECT sp.*, u1.name AS setter_teacher_name
+      `SELECT sp.*, u1.name AS setter_teacher_name, u2.name AS patrol_teacher_name
        FROM exam_subject_plan sp
        LEFT JOIN users u1 ON sp.setter_teacher_id = u1.id
+       LEFT JOIN users u2 ON sp.patrol_teacher_id = u2.id
        WHERE sp.exam_master_id = ?
        ORDER BY sp.grade ASC, sp.subject_name ASC`,
       [examMasterId]
     );
-    return res.rows;
+    return res.rows.map((r) => ({
+      ...r,
+      courses: safeJson(r.courses, []),
+      class_ids: safeJson(r.class_ids, []),
+      duration_minutes: Number(r.duration_minutes) || 50,
+      decision_status: r.decision_status || 'PENDING',
+    }));
   },
 
   async upsertSubjectPlanRow(row) {
     const id = row.id || genId('sp');
     const res = await query(
       `INSERT INTO exam_subject_plan
-        (id, exam_master_id, subject_name, subject_id, grade, stream, scope, setter_teacher_id,
-         duration_slots, fixed_slot, shared_slot, broadcast_slot, solo_subject, notes,
-         submit_status, student_count, updated_by, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        (id, exam_master_id, subject_name, subject_short, subject_id, grade, stream, scope, setter_teacher_id,
+         duration_slots, duration_minutes, fixed_slot, shared_slot, broadcast_slot, solo_subject,
+         patrol_teacher_id, courses, class_ids, room_id, room_name, request_note,
+         notes, submit_status, decision_status, surveyed_by, surveyed_at, confirmed_by, confirmed_at,
+         student_count, updated_by, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
        ON CONFLICT (exam_master_id, subject_name, grade) DO UPDATE SET
+         subject_short = EXCLUDED.subject_short,
          subject_id = EXCLUDED.subject_id,
          stream = EXCLUDED.stream,
          scope = EXCLUDED.scope,
          setter_teacher_id = EXCLUDED.setter_teacher_id,
          duration_slots = EXCLUDED.duration_slots,
+         duration_minutes = EXCLUDED.duration_minutes,
          fixed_slot = EXCLUDED.fixed_slot,
          shared_slot = EXCLUDED.shared_slot,
          broadcast_slot = EXCLUDED.broadcast_slot,
          solo_subject = EXCLUDED.solo_subject,
+         patrol_teacher_id = EXCLUDED.patrol_teacher_id,
+         courses = EXCLUDED.courses,
+         class_ids = EXCLUDED.class_ids,
+         room_id = EXCLUDED.room_id,
+         room_name = EXCLUDED.room_name,
+         request_note = EXCLUDED.request_note,
          notes = EXCLUDED.notes,
          submit_status = EXCLUDED.submit_status,
+         decision_status = EXCLUDED.decision_status,
+         surveyed_by = EXCLUDED.surveyed_by,
+         surveyed_at = EXCLUDED.surveyed_at,
+         confirmed_by = EXCLUDED.confirmed_by,
+         confirmed_at = EXCLUDED.confirmed_at,
          student_count = EXCLUDED.student_count,
          updated_by = EXCLUDED.updated_by,
          updated_at = CURRENT_TIMESTAMP
@@ -268,23 +295,37 @@ export const examModel = {
         id,
         row.exam_master_id,
         row.subject_name,
+        row.subject_short || row.subject_name,
         row.subject_id || null,
         Number(row.grade) || 0,
         row.stream || 'OTHER',
         row.scope || 'GRADE',
         row.setter_teacher_id || null,
         Number(row.duration_slots) || 1,
+        Number(row.duration_minutes) || 50,
         row.fixed_slot ? Number(row.fixed_slot) : null,
         !!row.shared_slot,
         !!row.broadcast_slot,
         !!row.solo_subject,
+        row.patrol_teacher_id || null,
+        JSON.stringify((row.courses || []).map(String)),
+        JSON.stringify((row.class_ids || []).map(String)),
+        row.room_id || null,
+        row.room_name || null,
+        row.request_note || null,
         row.notes || null,
         row.submit_status || 'PENDING',
+        row.decision_status || 'PENDING',
+        row.surveyed_by || null,
+        row.surveyed_at || null,
+        row.confirmed_by || null,
+        row.confirmed_at || null,
         row.student_count ? Number(row.student_count) : null,
         row.updated_by || null,
       ]
     );
-    return res.rows[0];
+    const savedRow = res.rows[0];
+    return { ...savedRow, courses: safeJson(savedRow.courses, []), class_ids: safeJson(savedRow.class_ids, []) };
   },
 
   async deleteSubjectPlan(id) {
@@ -299,6 +340,104 @@ export const examModel = {
       created.push(await examModel.upsertSubjectPlanRow({ ...r, exam_master_id: examMasterId, updated_by: updatedBy }));
     }
     return created;
+  },
+
+  /**
+   * 科目マスタ (curriculum_subjects) から調査用の実施科目プランをシードする。
+   * 開講クラス・コース（offerings）とクラス・コース別の標準教室・標準時間を引き継ぐ。
+   */
+  async seedSubjectPlanFromCatalog(examMasterId, master, updatedBy) {
+    const grades = (master.grades || []).map(Number);
+    const [catalog, rooms, classes] = await Promise.all([
+      basicinfoModel.listSubjects(),
+      basicinfoModel.listRooms(),
+      basicinfoModel.listClasses(),
+    ]);
+    const roomById = new Map(rooms.map((r) => [r.id, r]));
+    const classById = new Map(classes.map((c) => [String(c.id), c]));
+    const rows = [];
+    for (const g of grades) {
+      const gradeClasses = classes.filter((c) => c.is_active && Number(c.grade) === g);
+      for (const s of catalog) {
+        if (!s.is_active) continue;
+        if (s.grade !== 0 && Number(s.grade) !== g) continue;
+        const raw = (s.offerings || []);
+        const offersForGrade = raw.filter((o) => Number(o.grade) === g);
+        // 開講設定は class_course_id（基本情報のクラス・コース）で参照する（旧 course_id も許容）
+        const resolved = offersForGrade.filter((o) => classById.has(String(o?.class_course_id || o?.course_id)));
+        let classIds = [];
+        let roomId = s.default_room_id || null;
+        if (resolved.length > 0) {
+          classIds = resolved.map((o) => String(o.class_course_id || o.course_id));
+          roomId = (resolved.find((o) => o.room_id) || {}).room_id || s.default_room_id || null;
+        } else if (offersForGrade.length > 0 || raw.length === 0) {
+          // 開講設定がクラス・コースに紐づかない（または未登録）の科目は基本情報デフォルト＝その学年の全クラス・コースで実施する
+          classIds = gradeClasses.map((c) => String(c.id));
+        } else {
+          continue;
+        }
+        const room = roomId ? roomById.get(roomId) : null;
+        const minutes = Number(s.default_duration) || 50;
+        rows.push({
+          subject_name: s.name,
+          subject_short: s.short_name || s.name,
+          subject_id: s.subject_id || null,
+          grade: g,
+          scope: s.grade === 0 ? 'ALL' : 'GRADE',
+          stream: 'OTHER',
+          setter_teacher_id: null,
+          duration_slots: Math.max(1, Math.ceil(minutes / 50)),
+          duration_minutes: minutes,
+          courses: [],
+          class_ids: classIds,
+          room_id: room ? room.id : null,
+          room_name: room ? room.name : null,
+          submit_status: 'PENDING',
+          decision_status: 'PENDING',
+        });
+      }
+    }
+    return examModel.bulkInsertSubjectPlan(examMasterId, rows, updatedBy);
+  },
+
+  /** 実施科目調査のサマリ（教員別の提出・要望件数） */
+  async subjectSurveySummary(examMasterId) {
+    const plan = await examModel.listSubjectPlan(examMasterId);
+    const byTeacher = new Map();
+    let submitted = 0;
+    let requests = 0;
+    for (const p of plan) {
+      const key = p.setter_teacher_id || '__none__';
+      if (!byTeacher.has(key)) {
+        byTeacher.set(key, {
+          teacher_id: p.setter_teacher_id || null,
+          teacher_name: p.setter_teacher_name || null,
+          total: 0,
+          submitted: 0,
+          confirmed: 0,
+          requests: 0,
+        });
+      }
+      const entry = byTeacher.get(key);
+      entry.total += 1;
+      if (p.submit_status === 'SUBMITTED') {
+        entry.submitted += 1;
+        submitted += 1;
+      }
+      if (p.decision_status === 'CONFIRMED') entry.confirmed += 1;
+      if (p.request_note) {
+        entry.requests += 1;
+        requests += 1;
+      }
+    }
+    return {
+      total: plan.length,
+      submitted,
+      requests,
+      by_teacher: [...byTeacher.values()].sort((a, b) =>
+        String(a.teacher_name || '').localeCompare(String(b.teacher_name || ''))
+      ),
+    };
   },
 
   // ==========================================================
@@ -644,8 +783,11 @@ export const examModel = {
 
   async listRoomAssignments(examMasterId) {
     const res = await query(
-      `SELECT * FROM exam_room_assignments WHERE exam_master_id = ?
-       ORDER BY day_number ASC, slot_number ASC, grade ASC`,
+      `SELECT ra.*, c.name AS class_name
+       FROM exam_room_assignments ra
+       LEFT JOIN classes c ON c.id = ra.class_id
+       WHERE ra.exam_master_id = ?
+       ORDER BY ra.day_number ASC, ra.slot_number ASC, ra.grade ASC, c.name ASC`,
       [examMasterId]
     );
     return res.rows;
@@ -657,11 +799,12 @@ export const examModel = {
     for (const r of rows) {
       const res = await query(
         `INSERT INTO exam_room_assignments
-          (id, exam_master_id, unit_id, subject_name, grade, day_number, slot_number, room_id, room_name, is_standard, notes, updated_by, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-         ON CONFLICT (exam_master_id, grade, day_number, slot_number) DO UPDATE SET
+          (id, exam_master_id, unit_id, subject_name, grade, class_id, day_number, slot_number, room_id, room_name, is_standard, notes, updated_by, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT (exam_master_id, class_id, day_number, slot_number) DO UPDATE SET
            unit_id = EXCLUDED.unit_id,
            subject_name = EXCLUDED.subject_name,
+           grade = EXCLUDED.grade,
            room_id = EXCLUDED.room_id,
            room_name = EXCLUDED.room_name,
            is_standard = EXCLUDED.is_standard,
@@ -675,6 +818,7 @@ export const examModel = {
           r.unit_id || null,
           r.subject_name,
           Number(r.grade),
+          r.class_id || null,
           Number(r.day_number),
           Number(r.slot_number),
           r.room_id || null,

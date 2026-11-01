@@ -327,10 +327,10 @@ CREATE TABLE IF NOT EXISTS subjects (
 CREATE TABLE IF NOT EXISTS exam_masters (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
-  start_date TEXT NOT NULL,
-  end_date TEXT NOT NULL,
-  days_count INTEGER NOT NULL DEFAULT 3,
-  daily_slots INTEGER NOT NULL DEFAULT 3,
+  start_date TEXT,
+  end_date TEXT,
+  days_count INTEGER NOT NULL DEFAULT 0,
+  daily_slots INTEGER NOT NULL DEFAULT 0,
   is_active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -651,13 +651,15 @@ CREATE TABLE IF NOT EXISTS exam_room_config (
 );
 CREATE INDEX IF NOT EXISTS idx_room_config_master ON exam_room_config(exam_master_id);
 
--- 16o. 教室割当結果（日 × 時限 × 学年）
+-- 16o. 教室割当結果（日 × 時限 × クラス・コース）
+-- クラス・コース名（classes.name）で割当を登録する（同一学年の複数クラス・コースは別教室で実施できる）
 CREATE TABLE IF NOT EXISTS exam_room_assignments (
   id TEXT PRIMARY KEY,
   exam_master_id TEXT NOT NULL,
   unit_id TEXT,
   subject_name TEXT NOT NULL,
   grade INTEGER NOT NULL,
+  class_id TEXT,
   day_number INTEGER NOT NULL,
   slot_number INTEGER NOT NULL,
   room_id TEXT,
@@ -667,7 +669,7 @@ CREATE TABLE IF NOT EXISTS exam_room_assignments (
   updated_by TEXT,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (exam_master_id) REFERENCES exam_masters(id) ON DELETE CASCADE,
-  UNIQUE (exam_master_id, grade, day_number, slot_number)
+  UNIQUE (exam_master_id, class_id, day_number, slot_number)
 );
 
 -- -----------------------------------------------------------------------------
@@ -854,3 +856,151 @@ ON CONFLICT DO NOTHING;
 -- デモ教員の担当教科 (教務部が職員一覧から設定する想定の初期値)
 UPDATE users SET subjects = '["国語","社会"]' WHERE id = 't-tanaka' AND (subjects IS NULL OR subjects = '[]');
 UPDATE users SET subjects = '["数学","理科"]' WHERE id = 't-sato' AND (subjects IS NULL OR subjects = '[]');
+
+-- -------------------------------------------------------------
+-- 19. 定期考査 基本情報マスタ（クラス・コース・科目・教室）
+-- 登録・改名・削除は教務部 (KYOMU) のみ。クラス・コースは分離せず、学校固有の自由文字列名（「1-3理」「1-6保育」）で登録する。
+-- 改名は考査計画・時間割・教室割・監督割へ CASCADE し、使用中の行があるマスタは削除できない。
+-- -------------------------------------------------------------
+
+-- 19a. コースマスタ (運用廃止・旧データ互換のため表のみ残す。登録・参照は行わない)
+CREATE TABLE IF NOT EXISTS curriculum_courses (
+  id TEXT PRIMARY KEY,
+  grade INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  code TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  notes TEXT,
+  updated_by TEXT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_curriculum_courses_grade ON curriculum_courses(grade);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_curriculum_course_grade_name ON curriculum_courses (grade, lower(name));
+
+-- 19b. クラスマスタ拡張 (略称・運用状態。course_ids は旧コースマスタの名残りで '[]' を維持)
+ALTER TABLE classes ADD COLUMN IF NOT EXISTS short_name TEXT;
+ALTER TABLE classes ADD COLUMN IF NOT EXISTS course_ids TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE classes ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE classes ADD COLUMN IF NOT EXISTS updated_by TEXT;
+ALTER TABLE classes ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+CREATE INDEX IF NOT EXISTS idx_classes_grade_active ON classes(grade, is_active);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_class_grade_name ON classes (grade, lower(name));
+
+-- 19c. 科目マスタ (年間開講設定・標準試験時間50分・標準教室)
+-- offerings: JSON [{"grade":1,"course_id":"crs101"}] (学年・コース別の開講)
+-- 19c. 科目マスタ (curriculum_subjects)
+-- 科目名は「公共1年」「生物2年3単位」のように学年・単位数を含めた自由文字列（学年・表示順の項目は運用上使用しない）
+-- subject_id は教科マスタ (subjects) 参照。offerings は [{grade, class_course_id, room_id}]（クラス・コース別の標準教室）
+CREATE TABLE IF NOT EXISTS curriculum_subjects (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  short_name TEXT,
+  subject_id TEXT,
+  grade INTEGER NOT NULL DEFAULT 0,
+  offerings TEXT NOT NULL DEFAULT '[]',
+  default_room_id TEXT,
+  default_duration INTEGER NOT NULL DEFAULT 50,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  notes TEXT,
+  updated_by TEXT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_curriculum_subject_name ON curriculum_subjects (lower(name));
+CREATE INDEX IF NOT EXISTS idx_curriculum_subjects_grade ON curriculum_subjects(grade, is_active);
+CREATE INDEX IF NOT EXISTS idx_curriculum_subjects_subject ON curriculum_subjects(subject_id);
+
+-- 19d. 教室マスタ (定期考査で使用する全教室)
+-- 登録項目は 教室名・座席数・備考 のみ（room_type / grades は内部既定値 'CLASS' / '[]' を維持）
+CREATE TABLE IF NOT EXISTS basic_rooms (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  room_type TEXT NOT NULL DEFAULT 'CLASS',
+  seats INTEGER NOT NULL DEFAULT 40,
+  grades TEXT NOT NULL DEFAULT '[]',
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  notes TEXT,
+  updated_by TEXT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_basic_room_name ON basic_rooms (lower(name));
+
+-- 19e. 年間考査計画 (年度・既定試験時間50分・計画フェーズ)
+-- plan_phase: DRAFT(登録) | SURVEY(調査中) | REGISTERED(期間決定) | DECIDED(科目決定)
+-- ① 考査の登録では期間未設定で作成できる（開始日・終了日・1日のコマ数は ③ 考査期間の登録で設定）
+ALTER TABLE exam_masters ALTER COLUMN start_date DROP NOT NULL;
+ALTER TABLE exam_masters ALTER COLUMN end_date DROP NOT NULL;
+ALTER TABLE exam_masters ADD COLUMN IF NOT EXISTS academic_year INTEGER;
+ALTER TABLE exam_masters ADD COLUMN IF NOT EXISTS default_duration INTEGER NOT NULL DEFAULT 50;
+ALTER TABLE exam_phases ADD COLUMN IF NOT EXISTS plan_phase TEXT NOT NULL DEFAULT 'DRAFT';
+
+-- 19f. 実施科目プランの調査・決定情報 (50分単位・巡回者・コース・教室・要望)
+ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS subject_short TEXT;
+ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS duration_minutes INTEGER NOT NULL DEFAULT 50;
+ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS patrol_teacher_id TEXT;
+ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS courses TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS class_ids TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS room_id TEXT;
+ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS room_name TEXT;
+ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS request_note TEXT;
+ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS decision_status TEXT NOT NULL DEFAULT 'PENDING';
+ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS surveyed_by TEXT;
+ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS surveyed_at TIMESTAMP;
+ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS confirmed_by TEXT;
+ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMP;
+CREATE INDEX IF NOT EXISTS idx_subject_plan_decision ON exam_subject_plan(exam_master_id, decision_status);
+
+-- 19g. 教室割当・考査教室の基本教室ID参照
+ALTER TABLE exam_rooms ADD COLUMN IF NOT EXISTS room_id TEXT;
+ALTER TABLE exam_room_config ADD COLUMN IF NOT EXISTS room_id TEXT;
+ALTER TABLE exam_room_assignments ADD COLUMN IF NOT EXISTS base_room_id TEXT;
+-- クラス・コース別の教室割当（旧データを含む既存 DB へ class_id とクラス・コース単位のユニークキーを追加）
+ALTER TABLE exam_room_assignments ADD COLUMN IF NOT EXISTS class_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_room_assign_class ON exam_room_assignments (exam_master_id, class_id, day_number, slot_number);
+CREATE INDEX IF NOT EXISTS idx_room_assign_class ON exam_room_assignments(exam_master_id, class_id);
+
+-- 19h. 基本情報の初期データ (教務部が登録・改名・削除する)
+-- クラス・コースは分離せず学校固有の自由文字列名で登録する（「1-3理」「1-6看」「1-6保育」など）
+INSERT INTO classes (id, grade, class_num, name, short_name, course_ids, is_active)
+VALUES
+  ('1-1', 1, 1, '1-1', '1-1', '[]', true),
+  ('1-2', 1, 2, '1-2', '1-2', '[]', true),
+  ('1-3r', 1, 3, '1-3理', '1-3理', '[]', true),
+  ('1-4a', 1, 4, '1-4文', '1-4文', '[]', true),
+  ('1-5', 1, 5, '1-5', '1-5', '[]', true),
+  ('1-6k', 1, 6, '1-6看', '1-6看', '[]', true),
+  ('1-6h', 1, 7, '1-6保育', '1-6保育', '[]', true),
+  ('2-1', 2, 1, '2-1', '2-1', '[]', true),
+  ('2-2', 2, 2, '2-2', '2-2', '[]', true),
+  ('3-1r', 3, 1, '3-1理', '3-1理', '[]', true),
+  ('3-2a', 3, 2, '3-2文', '3-2文', '[]', true)
+ON CONFLICT (id) DO NOTHING;
+
+UPDATE classes SET short_name = COALESCE(short_name, name) WHERE short_name IS NULL;
+
+INSERT INTO basic_rooms (id, name, room_type, seats, grades, notes)
+VALUES
+  ('room101', '普通教室1年棟', 'CLASS', 40, '[]', '1年生全クラス'),
+  ('room102', '普通教室2年棟', 'CLASS', 40, '[]', '2年生全クラス'),
+  ('room103', '普通教室3年棟', 'CLASS', 40, '[]', '3年生全クラス'),
+  ('room201', '別室1', 'CLASS', 20, '[]', '少人数・別室考査'),
+  ('room202', '別室2', 'CLASS', 20, '[]', '少人数・別室考査'),
+  ('room203', '予備教室', 'CLASS', 30, '[]', '空コマ・予備試験用'),
+  ('room301', '音楽室', 'CLASS', 60, '[]', '特別教室')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO curriculum_subjects (id, name, short_name, subject_id, grade, offerings, default_room_id, default_duration, sort_order)
+VALUES
+  ('csub101', '国語1年', '国語1年', 'ko01', 0, '[{"grade":1,"class_course_id":"1-1","room_id":"room101"},{"grade":1,"class_course_id":"1-2","room_id":"room101"},{"grade":1,"class_course_id":"1-3r","room_id":"room101"},{"grade":1,"class_course_id":"1-4a","room_id":"room101"},{"grade":1,"class_course_id":"1-5","room_id":"room101"},{"grade":1,"class_course_id":"1-6k","room_id":"room101"},{"grade":1,"class_course_id":"1-6h","room_id":"room101"}]', 'room101', 50, 0),
+  ('csub102', '数学1年', '数学1年', 'ko02', 0, '[{"grade":1,"class_course_id":"1-1","room_id":"room101"},{"grade":1,"class_course_id":"1-2","room_id":"room101"},{"grade":1,"class_course_id":"1-3r","room_id":"room101"},{"grade":1,"class_course_id":"1-4a","room_id":"room101"},{"grade":1,"class_course_id":"1-5","room_id":"room101"},{"grade":1,"class_course_id":"1-6k","room_id":"room101"},{"grade":1,"class_course_id":"1-6h","room_id":"room101"}]', 'room101', 50, 0),
+  ('csub103', '英語1年', '英語1年', 'ko03', 0, '[{"grade":1,"class_course_id":"1-1","room_id":"room101"},{"grade":1,"class_course_id":"1-2","room_id":"room101"},{"grade":1,"class_course_id":"1-3r","room_id":"room101"},{"grade":1,"class_course_id":"1-4a","room_id":"room101"},{"grade":1,"class_course_id":"1-5","room_id":"room101"},{"grade":1,"class_course_id":"1-6k","room_id":"room101"},{"grade":1,"class_course_id":"1-6h","room_id":"room101"}]', 'room101', 50, 0),
+  ('csub201', '生物2年3単位', '生物2年3単位', 'ko05', 0, '[{"grade":2,"class_course_id":"2-1","room_id":"room102"},{"grade":2,"class_course_id":"2-2","room_id":"room102"}]', 'room102', 50, 0),
+  ('csub202', '生物2年2単位', '生物2年2単位', 'ko05', 0, '[{"grade":2,"class_course_id":"2-1","room_id":"room102"},{"grade":2,"class_course_id":"2-2","room_id":"room102"}]', 'room102', 100, 0),
+  ('csub301', '数学3年理系', '数学3年理系', 'ko02', 0, '[{"grade":3,"class_course_id":"3-1r","room_id":"room103"}]', 'room103', 50, 0),
+  ('csub302', '世界史探究3年文系', '世界史探究3年文系', 'ko04', 0, '[{"grade":3,"class_course_id":"3-2a","room_id":"room103"}]', 'room103', 50, 0),
+  ('csub303', '公共全学年', '公共全学年', NULL, 0, '[]', 'room201', 50, 0)
+ON CONFLICT (id) DO NOTHING;
+
+UPDATE curriculum_subjects SET short_name = COALESCE(short_name, name);
+
+

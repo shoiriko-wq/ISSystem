@@ -76,6 +76,41 @@ describe('Exam API Endpoints (/api/exam)', () => {
     expect(typeof examId).toBe('string');
   });
 
+  // 3b. ① 考査名だけ登録 → ② 調査開始 → ③ 期間登録 の作業順
+  it('① 考査名のみで登録でき、② 調査開始は期間未設定でも成功し、③ で期間を登録できること', async () => {
+    const stepTitle = '作業順テスト考査2099';
+    const created = await request(app)
+      .post('/api/exam')
+      .set('Authorization', `Bearer ${kyomuToken}`)
+      .send({ title: stepTitle, grades: [1, 2, 3] });
+
+    expect(created.statusCode).toBe(200);
+    const stepId = created.body.data.id;
+    expect(created.body.data.start_date).toBeNull();
+    expect(created.body.data.end_date).toBeNull();
+    expect(created.body.data.days_count).toBe(0);
+    expect(created.body.data.daily_slots).toBe(0);
+
+    // ② 期間未設定でも実施科目調査を開始できる
+    const survey = await request(app)
+      .post(`/api/exam/${stepId}/subject-survey/start`)
+      .set('Authorization', `Bearer ${kyomuToken}`);
+    expect(survey.statusCode).toBe(200);
+    expect(survey.body.data.subject_phase).toBe('SURVEY');
+
+    // ③ で期間・1日のコマ数を登録する
+    const registered = await request(app)
+      .post(`/api/exam/${stepId}/plan/register`)
+      .set('Authorization', `Bearer ${kyomuToken}`)
+      .send({ start_date: '2099-12-01', end_date: '2099-12-04', days_count: 4, daily_slots: 8, default_duration: 50 });
+    expect(registered.statusCode).toBe(200);
+    expect(registered.body.data.phases.plan_phase).toBe('REGISTERED');
+    expect(registered.body.data.master.daily_slots).toBe(8);
+
+    await query('DELETE FROM exam_masters WHERE id = ?', [stepId]);
+    await query('DELETE FROM audit_logs WHERE resource_id = ?', [stepId]);
+  });
+
   // 4. 権限表示（board.is_kyomu と編集可否フラグ）
   it('GET /api/exam/:id/board - 一般教員は is_kyomu=false で閲覧専用の編集フラグになること', async () => {
     const res = await boardOf(teacherToken);
@@ -318,7 +353,8 @@ describe('Exam API Endpoints (/api/exam)', () => {
 
     const plan = await request(app).get(`/api/exam/${examId}/subjects`).set('Authorization', `Bearer ${kyomuToken}`);
     const math = plan.body.data.plan.find((p) => p.grade === 1 && p.subject_name === '数学Ⅰ');
-    const science = plan.body.data.plan.find((p) => p.grade === 2 && p.subject_name === '理科');
+    // 基本情報カタログ（curriculum_subjects）の2年実施科目（標準100分＝2コマ）を使う
+    const science = plan.body.data.plan.find((p) => Number(p.grade) === 2);
 
     const okRes = await request(app)
       .post(`/api/exam/${examId}/timetable/slots`)
@@ -326,7 +362,7 @@ describe('Exam API Endpoints (/api/exam)', () => {
       .send([
         { grade: 1, day_number: 1, slot_number: 1, is_blocked: true },
         { grade: 1, day_number: 1, slot_number: 2, slot_span: 1, subject_id: math.subject_id, subject_name: '数学Ⅰ' },
-        { grade: 2, day_number: 2, slot_number: 3, slot_span: 2, subject_id: science.subject_id, subject_name: '理科' },
+        { grade: 2, day_number: 2, slot_number: 3, slot_span: 2, subject_id: science.subject_id, subject_name: science.subject_name },
       ]);
 
     expect(okRes.statusCode).toBe(200);

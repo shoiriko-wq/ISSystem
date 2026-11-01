@@ -54,14 +54,17 @@ export function buildProctorCells(input, ctx) {
   const cells = [];
   for (const t of input.timetable || []) {
     const u = ctx.unitById.get(t.unit_id) || {};
+    const cid = t.class_id ?? null;
     const duration = Math.min(Number(t.duration_slots) || u.duration || 1, ctx.slots - t.slot + 1);
-    const roomName = ctx.roomCell.get(`${t.grade}|${t.day}|${t.slot}`) ?? null;
+    const roomName = roomCellLookup(ctx, cid, t.grade, t.day, t.slot);
     for (let s = t.slot; s < t.slot + duration; s++) {
-      const rn = s === t.slot ? roomName : ctx.roomCell.get(`${t.grade}|${t.day}|${s}`) ?? roomName;
+      const rn = s === t.slot ? roomName : roomCellLookup(ctx, cid, t.grade, t.day, s) ?? roomName;
       cells.push({
-        key: `${t.unit_id}#${t.grade}#${t.day}#${s}`,
+        key: `${t.unit_id}#${cid ?? t.grade}#${t.day}#${s}`,
         unit_id: t.unit_id,
         grade: Number(t.grade),
+        class_id: cid,
+        class_name: t.class_name ?? null,
         subject_name: t.subject_name ?? u.subject_name ?? null,
         day: Number(t.day),
         slot: s,
@@ -75,6 +78,17 @@ export function buildProctorCells(input, ctx) {
     }
   }
   return cells;
+}
+
+/** 教室割当の参照（クラス・コースキー → 学年キーの順。旧データの学年キー/G{grade} にも対応） */
+function roomCellLookup(ctx, classId, grade, day, slot) {
+  if (classId) {
+    const hit = ctx.roomCell.get(`${classId}|${day}|${slot}`);
+    if (hit !== undefined) return hit;
+  }
+  const byGrade = ctx.roomCell.get(`${grade}|${day}|${slot}`);
+  if (byGrade !== undefined) return byGrade;
+  return ctx.roomCell.get(`G${grade}|${day}|${slot}`);
 }
 
 /** 教員プール（非常勤条件・個別制約・免除・出欠反映） */
@@ -341,9 +355,12 @@ function patternMatches(pattern, day) {
 export function proctorDiagnostics(ctx, assignments) {
   const out = [];
 
+  /** クラス・コースを含む場所表記 */
+  const where = (c) => `${c.day}日目${c.slot}限「${c.subject_name}」(${c.grade}年${c.class_name ? ` ${c.class_name}` : ''})`;
+
   for (const a of assignments) {
     if (!a.proctor_teacher_id) {
-      out.push({ code: 'PROCTOR_UNASSIGNED', level: 'HARD', grade: a.grade, day: a.day, slot: a.slot, subject_name: a.subject_name, msg: `${a.day}日目${a.slot}限「${a.subject_name}」(${a.grade}年) に監督教員を割り当てできませんでした。` });
+      out.push({ code: 'PROCTOR_UNASSIGNED', level: 'HARD', grade: a.grade, class_id: a.class_id ?? null, class_name: a.class_name ?? null, day: a.day, slot: a.slot, subject_name: a.subject_name, msg: `${where(a)} に監督教員を割り当てできませんでした。` });
     }
   }
 
@@ -396,7 +413,7 @@ export function proctorDiagnostics(ctx, assignments) {
       out.push({ code: 'SOLO_NOT_SELF', level: 'SOFT', subject_name: cell.subject_name, day: cell.day, slot: cell.slot, msg: `ソロ科目「${cell.subject_name}」(${cell.day}日目${cell.slot}限) の監督が出題者本人ではありません。` });
     }
     if (!cell.solo && ctx.rules.avoid_setter && ctx.assignment.get(cell.key) === cell.setter) {
-      out.push({ code: 'SETTER_CLASH', level: 'HARD', grade: cell.grade, day: cell.day, slot: cell.slot, subject_name: cell.subject_name, teacher_id: cell.setter, msg: `出題者「${ctx.teacherById.get(cell.setter)?.name ?? cell.setter}」本人が自科目「${cell.subject_name}」(${cell.grade}年 ${cell.day}日目${cell.slot}限) の監督に割当られています。` });
+      out.push({ code: 'SETTER_CLASH', level: 'HARD', grade: cell.grade, class_id: cell.class_id ?? null, class_name: cell.class_name ?? null, day: cell.day, slot: cell.slot, subject_name: cell.subject_name, teacher_id: cell.setter, msg: `出題者「${ctx.teacherById.get(cell.setter)?.name ?? cell.setter}」本人が自科目「${cell.subject_name}」${where(cell)} の監督に割当られています。` });
     }
   }
 
@@ -427,7 +444,16 @@ export function solveProctor(input) {
       solo: !!u.solo_subject,
     }])),
     specialByRoom: new Map((input.room_config?.special_rooms || []).map((s) => [s.room_name, String(s.type).toUpperCase()])),
-    roomCell: new Map((input.room_cells || []).map((c) => [`${c.grade}|${c.day}|${c.slot}`, c.room_name])),
+    roomCell: new Map(
+      (input.room_cells || []).flatMap((c) => {
+        const day = Number(c.day);
+        const slot = Number(c.slot);
+        const name = c.room_name;
+        const entries = [[`${Number(c.grade)}|${day}|${slot}`, name]];
+        if (c.class_id) entries.push([`${c.class_id}|${day}|${slot}`, name]);
+        return entries;
+      })
+    ),
     tripsSet: new Set((input.trips || []).map((t) => `${t.teacher_id}|${t.day_number}|${t.slot_number}`)),
     availabilitySet: new Set((input.parttime_availability || []).filter((a) => a.can_work !== false).map((a) => `${a.teacher_id}|${a.day_number}|${a.slot_number}`)),
     considerationMax: new Map(rules.considerations.filter((c) => c.max_slots_per_day).map((c) => [c.teacher_id, c.max_slots_per_day])),
@@ -525,12 +551,15 @@ export function solveProctor(input) {
       unit_id: c.unit_id,
       unit_key: c.key,
       grade: c.grade,
+      class_id: c.class_id,
+      class_name: c.class_name,
       subject_name: c.subject_name,
       day: c.day,
       slot: c.slot,
       kind: c.solo ? 'SOLO' : c.special_type ? 'SPECIAL' : 'REGULAR',
       proctor_teacher_id: tid,
       room_type: c.special_type,
+      room_name: c.room_name,
     };
   });
 
@@ -586,9 +615,12 @@ export function validateProctor(input, rows) {
   const soloSet = new Set((input.units || []).filter((u) => u.solo_subject).map((u) => `${Number(u.grade)}|${String(u.subject_name)}`));
 
   for (const r of rows || []) {
+    const cid = r.class_id ? String(r.class_id) : null;
     const cell = {
-      key: `${r.grade}#${r.day_number}#${r.slot_number}`,
+      key: `${cid ?? r.grade}#${r.day_number}#${r.slot_number}`,
       grade: Number(r.grade),
+      class_id: cid,
+      class_name: r.class_name ?? null,
       day: Number(r.day_number),
       slot: Number(r.slot_number),
       subject_name: r.subject_name,

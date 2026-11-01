@@ -224,59 +224,67 @@ tbody tr:hover {
 }
 
 /* --------------------------------------------------------------------------
-   8. Frames: thicker borders (not fixed to 1px) & stronger elevation
+   8. Frames: ページ共通の枠線ルール (loaded last => wins over components.css)
+
+      R1. セクションコンテナ (.card) は記事群を囲む 2px の実枠を描く。トップ3記事カード
+          (.card--framed) と同一の太さ・色で揃える（影で太さを擬装しない）。
+          .card-static と背景領域 bg-* は枠線を描かない「面」である。
+      R2. 枠線は、要素自身が border / border-x クラスを明示した箇所（リスト項目、チップ、
+          ボタン、入力欄）と区切り線 (border-b / border-t / border-l / 4px アクセントバー) にのみ描く。
+          セクション見出しの仕切り線は描かない（タイトルを囲む枠は不要）。
+      R3. モダル・チャット・座席表・アプリ骨格 (header / sidebar) と、4セクションの
+          記事カード (各リストの直下項目) の枠線は 2px で維持する。
+          セクション群全体を囲むグループ枠 (.dashboard-grid) は描かない。
    -------------------------------------------------------------------------- */
-.card,
-.card-static,
-.glass-card,
-.glass-panel,
+
+/* R1: 枠線を持たない面（外枠を撤去する領域）。
+   .card / .card--framed / ボタン系（base.css の @apply border）/ 明示的な border-* クラスは枠線を維持する */
+.card-static:not(.card--framed):not([class*="border"]),
+.glass-card:not([class*="border"]),
+.glass-panel:not([class*="border"]),
+.bg-surface:not([class*="btn-"]):not([class*="border"]),
+.bg-surface-strong:not([class*="btn-"]):not([class*="border"]),
+.bg-surface-soft:not([class*="btn-"]):not([class*="border"]),
+.bg-card:not([class*="btn-"]):not([class*="border"]),
+.bg-card-static:not([class*="btn-"]):not([class*="border"]),
+.bg-inset:not([class*="btn-"]):not([class*="border"]),
+.bg-accent-soft:not([class*="btn-"]):not([class*="border"]),
+.bg-accent-inset:not([class*="btn-"]):not([class*="border"]),
+.bg-accent-alt-soft:not([class*="btn-"]):not([class*="border"]),
+.bg-success-soft:not([class*="btn-"]):not([class*="border"]),
+.bg-success-inset:not([class*="btn-"]):not([class*="border"]),
+.bg-warning-soft:not([class*="btn-"]):not([class*="border"]),
+.bg-warning-inset:not([class*="btn-"]):not([class*="border"]),
+.bg-danger-soft:not([class*="btn-"]):not([class*="border"]),
+.bg-danger-inset:not([class*="btn-"]):not([class*="border"]),
+.bg-info-soft:not([class*="btn-"]):not([class*="border"]),
+.bg-info-inset:not([class*="btn-"]):not([class*="border"]),
+.bg-overlay:not([class*="btn-"]):not([class*="border"]) {
+  border-width: 0;
+  border-color: transparent;
+}
+
+/* R3: 骨格・モーダル・チャット・座席表・4セクションの記事カードは 2px の枠を維持
+   （記事カードはトップ3記事カードと同一の太さ・色で揃える） */
+#dash-pinned-bulletins > div.rounded-lg,
+#dash-news-summary > div.rounded-lg,
+#dash-today-facilities > div.rounded-lg,
+#dash-today-schedules > div.rounded-lg,
 .modal-card,
 .chat-layout,
 .chat-sidebar-channels,
 .seating-matrix-container,
 .theme-select-btn,
 .toast,
-.app-sidebar,
-.bg-surface,
-.bg-surface-strong,
-.bg-surface-soft,
-.bg-card,
-.bg-card-static,
-.bg-inset,
-.bg-accent-soft,
-.bg-accent-inset,
-.bg-success-soft,
-.bg-warning-soft,
-.bg-danger-soft,
-.bg-info-soft {
+.app-sidebar {
   border-width: var(--border-width) !important;
   border-style: solid;
-}
-
-.card,
-.card-static,
-.glass-card,
-.modal-card,
-.seating-matrix-container,
-.chat-layout,
-.chat-sidebar-channels {
   border-color: var(--border-main) !important;
 }
 
-/* Regions nested inside cards need a stronger line to stay readable */
-main .bg-surface,
-main .bg-surface-strong,
-main .bg-inset,
-main .bg-accent-soft,
-main .bg-accent-inset,
-main .bg-success-soft,
-main .bg-warning-soft,
-main .bg-danger-soft,
-main .bg-info-soft {
-  border-color: var(--border-strong) !important;
-}
-
-/* Section dividers get thicker lines as well */
+/* R2: 明示的な区切り線・枠線（面ルールより後に !important で復元する） */
+.border,
+.border-2,
 .border-b,
 .border-t,
 .border-l,
@@ -284,12 +292,144 @@ main .bg-info-soft {
 .border-y,
 .border-x,
 .border-b-2,
-.border-t-2 {
+.border-t-2,
+.border-l-2,
+.border-r-2 {
   border-width: var(--border-width) !important;
+  border-style: solid !important;
 }
 
-.border {
+.border-l-4 {
+  border-left-width: 4px !important;
+}
+
+.border-r-4 {
+  border-right-width: 4px !important;
+}
+
+/* R2-派生: 周全周の枠線色クラスは「枠線を持つ合図」として width を復元する（入力欄・チップ・ボタン等） */
+.border-main,
+.border-strong,
+.border-divider,
+.border-muted,
+.border-accent,
+.border-accent-soft,
+.border-accent-strong,
+.border-accent-alt,
+.border-success,
+.border-success-soft,
+.border-warning,
+.border-warning-soft,
+.border-danger,
+.border-danger-soft,
+.border-info,
+.border-info-soft {
   border-width: var(--border-width) !important;
+  border-style: solid !important;
+}
+
+/* 方向指定の枠線色クラス（左アクセントバー、上下の区切り線）はその面のみ復元 */
+.border-l-warning,
+.border-l-danger,
+.border-l-success {
+  border-left-width: var(--border-width) !important;
+  border-left-style: solid !important;
+}
+
+.border-b-accent,
+.border-b-warning {
+  border-bottom-width: var(--border-width) !important;
+  border-bottom-style: solid !important;
+}
+
+.border-t-accent {
+  border-top-width: var(--border-width) !important;
+  border-top-style: solid !important;
+}
+
+.border-dashed {
+  border-style: dashed !important;
+}
+
+/* R2: 明示的な枠線色（theme.css の border-* ユーティリティを復元） */
+.border,
+.border-main {
+  border-color: var(--border-main) !important;
+}
+
+.border-strong {
+  border-color: var(--border-strong) !important;
+}
+
+.border-divider {
+  border-color: var(--border-divider) !important;
+}
+
+.border-muted {
+  border-color: var(--border-muted) !important;
+}
+
+.border-accent {
+  border-color: var(--accent-border) !important;
+}
+
+.border-accent-soft {
+  border-color: var(--accent-border-soft) !important;
+}
+
+.border-accent-strong {
+  border-color: var(--accent-strong) !important;
+}
+
+.border-accent-alt {
+  border-color: var(--accent-border-alt) !important;
+}
+
+.border-accent-alt-soft {
+  border-color: var(--accent-border-alt) !important;
+}
+
+.border-success,
+.border-success-soft {
+  border-color: var(--success-border) !important;
+}
+
+.border-success-strong {
+  border-color: var(--success-border-strong) !important;
+}
+
+.border-warning,
+.border-warning-soft {
+  border-color: var(--warning-border) !important;
+}
+
+.border-warning-strong {
+  border-color: var(--warning-border-strong) !important;
+}
+
+.border-danger,
+.border-danger-soft {
+  border-color: var(--danger-border) !important;
+}
+
+.border-danger-strong {
+  border-color: var(--danger-border-strong) !important;
+}
+
+.border-info,
+.border-info-soft {
+  border-color: var(--info-border) !important;
+}
+
+/* R3-派生（色復元ルール後に配置）: 記事カード群の枠色を共通色 (--border-main) に揃える。
+   トップ3記事カード (.card--framed) と 4セクション (.card / リスト直下項目) は同一の枠。
+   border-accent-soft / border-divider 等の指定色はカード枠では使わない（ホバー時の色は第10節）。 */
+.card,
+.card--framed,
+#dash-pinned-bulletins > div.rounded-lg,
+#dash-news-summary > div.rounded-lg,
+#dash-today-facilities > div.rounded-lg,
+#dash-today-schedules > div.rounded-lg {
   border-color: var(--border-main) !important;
 }
 
@@ -301,9 +441,7 @@ button,
 [role="button"],
 .nav-item,
 .theme-select-btn,
-.card,
-.card-static,
-.glass-card,
+.card--framed,
 .dropdown-panel,
 .chat-layout .chat-sidebar-channels button {
   cursor: pointer;
@@ -322,17 +460,12 @@ button:hover,
   outline-offset: 2px;
 }
 
-/* Non-interactive info frames react to the cursor as well */
-.card:hover,
-.card-static:hover,
-.glass-card:hover,
-.seating-matrix-container:hover,
-.bg-surface:hover,
-.bg-surface-strong:hover,
-.bg-inset:hover {
+/* 面（カード・背景領域）はホバーリングで反応しない。枠線を持つ交互式カードだけがリングを描く。 */
+.card--framed:hover,
+.theme-select-btn:hover,
+.chat-layout .chat-sidebar-channels button:hover {
   outline: var(--ring-width) solid var(--hover-ring);
   outline-offset: 2px;
-  box-shadow: var(--card-glow);
 }
 
 /* Focus ring gets thicker and uses the accent color */
@@ -359,22 +492,27 @@ b,
   font-weight: 800;
 }
 
-/* Cards: thicker accent border, tinted background, lift & glow on hover */
-.card:hover,
-.card-static:hover,
-.glass-card:hover {
-  border-color: var(--accent-primary) !important;
-  background-color: var(--bg-card-hover) !important;
-  transform: translateY(var(--hover-lift)) !important;
-  box-shadow: var(--card-glow), 0 0 0 4px var(--accent-ring) !important;
-}
-
+/* クリックできるカード (card--framed) と座席・テーマボタンはホバーで枠・影が強調される。
+   面として扱うセクションカード (.card) はホバーで浮き上がり・リングを描かない。 */
+.card--framed:hover,
 .seat-card:hover,
 .theme-select-btn:hover {
   border-color: var(--accent-primary) !important;
   background-color: var(--bg-card-hover) !important;
   box-shadow: var(--card-glow), 0 0 0 4px var(--accent-ring) !important;
 }
+
+.card--framed:hover {
+  transform: translateY(var(--hover-lift)) !important;
+}
+
+/* ホバーリング (outline var(--ring-width) + outline-offset) と 3px のスライドが
+   サイドバーのスクロールコンテナの端で切れない余白を nav 内に確保する。
+   余白 = リング (3+2=5px) + スライド 3px ≥ padding。 */
+.app-sidebar nav {
+  padding: 0.5rem 0.6rem;
+}
+
 
 /* Sidebar rows: background, border, accent bar and a small slide */
 .nav-item:hover {

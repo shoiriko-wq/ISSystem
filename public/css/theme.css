@@ -62,6 +62,7 @@
 .border-muted { border-color: var(--border-muted); }
 .border-accent { border-color: var(--accent-border); }
 .border-accent-soft { border-color: var(--accent-border-soft); }
+.border-accent-strong { border-color: var(--accent-strong); }
 .border-accent-alt { border-color: var(--accent-border-alt); }
 .border-success { border-color: var(--success-border); }
 .border-success-soft { border-color: var(--success-border-soft); }

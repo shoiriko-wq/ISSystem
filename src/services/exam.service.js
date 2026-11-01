@@ -5,6 +5,8 @@
  */
 
 import { examModel } from '../models/exam.model.js';
+import { basicinfoModel } from '../models/basicinfo.model.js';
+import { basicinfoService } from './basicinfo.service.js';
 import { query } from '../../config/database.js';
 import { logAction } from '../models/audit.model.js';
 import { solveTimetable, validateTimetable, expandUnits, DEFAULT_TIMETABLE_RULES } from '../utils/exam-timetable-solver.js';
@@ -110,6 +112,76 @@ function slotsToTimetable(slots) {
       duration_slots: Number(s.slot_span) || 1,
       subject_name: s.subject_name,
     });
+  }
+  return out;
+}
+
+/** クラス・コース（基本情報マスタ）を学年別にまとめる */
+function groupClassesByGrade(classes) {
+  const byGrade = new Map();
+  for (const c of classes || []) {
+    const g = Number(c.grade) || 0;
+    if (!byGrade.has(g)) byGrade.set(g, []);
+    byGrade.get(g).push(c);
+  }
+  return byGrade;
+}
+
+/**
+ * 教室割当用：exam_slots を学年単位（学年の代表クラスID）へ正規化する。
+ * exam_room_assignments の一意キーは (exam_master_id, grade, day_number, slot_number)。
+ */
+function normalizeClassIds(rows, planById) {
+  const firstByGrade = new Map();
+  for (const r of rows) {
+    const cid = r.class_id ? String(r.class_id) : null;
+    const g = Number(r.grade);
+    if (cid && !firstByGrade.has(g)) firstByGrade.set(g, cid);
+  }
+  return rows.map((r) => {
+    const g = Number(r.grade);
+    const cid = r.class_id ? String(r.class_id) : firstByGrade.get(g) ?? null;
+    const planId = r.subject_id ? planById.get(String(r.subject_id))?.id ?? null : null;
+    return { ...r, class_id: cid, subject_id: planId };
+  });
+}
+
+/**
+ * 時間割（exam_slots）をクラス・コース単位の列へ正規化する。
+ * 実施科目プランが class_ids を持つ場合はそのクラスだけ、未指定（学年プラン）はその学年の全クラスへ展開する。
+ * 旧データの exam_slots が学年キー（G{grade} → 最初のクラス）で登録されている場合も学年全体へ展開する。
+ */
+function slotsToClassTimetable(slots, classesByGrade, classById, planById) {
+  const out = [];
+  const seen = new Set();
+  for (const s of slots || []) {
+    if (s.is_blocked) continue;
+    const grade = Number(s.grade) || 0;
+    const day = Number(s.day_number);
+    const slot = Number(s.slot_number);
+    const plan = planById.get(String(s.unit_id || s.subject_id)) || null;
+    const planIds = plan?.class_ids?.length ? plan.class_ids.map(String) : null;
+    const slotCid = s.class_id ? String(s.class_id) : null;
+    const gradeClasses = classesByGrade.get(grade) || [];
+    let targets = planIds ? gradeClasses.filter((c) => planIds.includes(String(c.id))) : gradeClasses;
+    if (planIds && slotCid) targets = targets.filter((c) => String(c.id) === slotCid);
+    if (!targets.length && slotCid && classById.has(slotCid)) targets = [classById.get(slotCid)];
+    if (!targets.length) targets = [{ id: slotCid, name: null, grade }];
+    for (const c of targets) {
+      const key = `${c.id ?? grade}#${day}#${slot}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        unit_id: s.unit_id || s.subject_id,
+        grade,
+        day,
+        slot,
+        duration_slots: Number(s.slot_span) || Number(s.duration_slots) || 1,
+        subject_name: s.subject_name,
+        class_id: c.id ?? null,
+        class_name: c.name ?? null,
+      });
+    }
   }
   return out;
 }
@@ -251,6 +323,17 @@ async function getRoomRulesNormalized(examMasterId) {
   return normalizeRoomRules(raw);
 }
 
+/** 50分単位の試験時間 → 必要コマ数へ正規化（duration_slots = ceil(分 / 50)） */
+function normalizeDuration(row, master) {
+  const slotMinutes = Number(master?.default_duration) || 50;
+  const minutes = Number(row.duration_minutes) || slotMinutes;
+  return {
+    ...row,
+    duration_minutes: minutes,
+    duration_slots: Number(row.duration_slots) || Math.max(1, Math.ceil(minutes / slotMinutes)),
+  };
+}
+
 export const examService = {
   // ==========================================================
   // 考査登録・マスタ
@@ -272,13 +355,19 @@ export const examService = {
       err.statusCode = 400;
       throw err;
     }
+    // ①（年間の考査名登録）では考査名のみ受け取る。
+    // 対象学年は実施科目調査（②）の実施教科から導出され、開始日・終了日・1日の時限数・標準試験時間は ③ で登録する。
+    const hasDates = !!payload.start_date && !!payload.end_date;
     const created = await examModel.createExamMaster({
       ...payload,
-      days_count: payload.days_count || dateRange(payload.start_date, payload.end_date).length,
+      start_date: payload.start_date || null,
+      end_date: payload.end_date || null,
+      days_count: Number(payload.days_count) || (hasDates ? dateRange(payload.start_date, payload.end_date).length : 0),
+      daily_slots: Number(payload.daily_slots) || 0,
       grades: payload.grades && payload.grades.length ? payload.grades : [1, 2, 3],
       created_by: user.id,
     });
-    await audit('CREATE_EXAM', user, 'exam_master', created.id, `定期考査「${created.title}」を登録`);
+    await audit('CREATE_EXAM', user, 'exam_master', created.id, `定期考査「${created.title}」を登録（② 実施科目調査 → ③ 考査期間の登録）`);
     return created;
   },
 
@@ -297,6 +386,149 @@ export const examService = {
   },
 
   // ==========================================================
+  // 年間考査計画（試験期間の登録・期間決定・計画調査）
+  // ==========================================================
+
+  /** 試験期間（開始日・終了日・1日の時限数・標準試験時間）を登録し plan_phase を REGISTERED に進める
+   *  年度（academic_year）は開始日の西暦、試験日数（days_count）は開始日〜終了日から自動算出する（ユーザー入力は不要） */
+  async registerPlan(examMasterId, payload, user) {
+    ensureKyomu(user);
+    const master = await ensureMaster(examMasterId);
+    const start = payload.start_date || master.start_date;
+    const end = payload.end_date || master.end_date;
+    if (!start || !end) {
+      const err = new Error('試験期間の開始日・終了日を入力してください。');
+      err.statusCode = 400;
+      throw err;
+    }
+    const days = dateRange(start, end);
+    if (days.length === 0) {
+      const err = new Error('試験期間の日程が不正です（開始日 ≥ 終了日）。');
+      err.statusCode = 400;
+      throw err;
+    }
+    const startYear = Number(String(start).slice(0, 4)) || 0;
+    const updated = await examModel.updateExamMaster(examMasterId, {
+      academic_year: Number(startYear) || Number(payload.academic_year) || master.academic_year,
+      start_date: start,
+      end_date: end,
+      days_count: days.length,
+      daily_slots: Number(payload.daily_slots) || master.daily_slots,
+      default_duration: Number(payload.default_duration) || Number(master.default_duration) || 50,
+      updated_by: user.id,
+    });
+    const before = await examModel.getPhases(examMasterId);
+    const phases = await examModel.setPhase(examMasterId, 'plan_phase', 'REGISTERED', user.id);
+    await logPhase(examMasterId, 'plan_phase', before.plan_phase, 'REGISTERED', user.id);
+    await audit('EXAM_PLAN_REGISTER', user, 'exam_master', examMasterId, `試験期間 ${start}〜${end}（${days.length}日）を登録`);
+    return { master: updated, phases };
+  },
+
+  /** 教員調査を開始する（科目マスタから実施予定科目をシード） */
+  async startPlanSurvey(examMasterId, user) {
+    ensureKyomu(user);
+    const master = await ensureMaster(examMasterId);
+    if (!master.start_date || !master.end_date) {
+      const err = new Error('先に ③ 考査期間の登録（開始日・終了日・1日のコマ数）を行ってください。');
+      err.statusCode = 400;
+      throw err;
+    }
+    const plan = await examModel.listSubjectPlan(examMasterId);
+    if (plan.length === 0) {
+      await examModel.seedSubjectPlanFromCatalog(examMasterId, master, user.id);
+    }
+    const before = await examModel.getPhases(examMasterId);
+    await examModel.setPhase(examMasterId, 'plan_phase', 'SURVEY', user.id);
+    await examModel.setPhase(examMasterId, 'subject_phase', 'SURVEY', user.id);
+    await logPhase(examMasterId, 'plan_phase', before.plan_phase, 'SURVEY', user.id);
+    await audit('EXAM_PLAN_SURVEY_START', user, 'exam_master', examMasterId, `考査「${master.title}」の教員調査を開始`);
+    return examModel.getPhases(examMasterId);
+  },
+
+  /** 実施科目の決定（教務の決定権限） */
+  async decideSubjects(examMasterId, user) {
+    ensureKyomu(user);
+    const master = await ensureMaster(examMasterId);
+    const plan = await examModel.listSubjectPlan(examMasterId);
+    if (plan.length === 0) {
+      const err = new Error('実施科目が登録されていません。');
+      err.statusCode = 400;
+      throw err;
+    }
+    const pending = plan.filter((p) => p.submit_status !== 'SUBMITTED' && p.decision_status !== 'CONFIRMED');
+    if (pending.length > 0) {
+      const err = new Error(`未提出の実施科目が ${pending.length} 件あります。`);
+      err.statusCode = 400;
+      throw err;
+    }
+    const now = new Date().toISOString();
+    for (const p of plan) {
+      await examModel.upsertSubjectPlanRow({
+        ...p,
+        exam_master_id: examMasterId,
+        decision_status: 'CONFIRMED',
+        confirmed_by: user.id,
+        confirmed_at: now,
+        updated_by: user.id,
+      });
+    }
+    const before = await examModel.getPhases(examMasterId);
+    await examModel.setPhase(examMasterId, 'plan_phase', 'DECIDED', user.id);
+    await examModel.setPhase(examMasterId, 'subject_phase', 'PUBLISHED', user.id);
+    await logPhase(examMasterId, 'plan_phase', before.plan_phase, 'DECIDED', user.id);
+    await audit('EXAM_SUBJECTS_DECIDED', user, 'exam_master', examMasterId, `考査「${master.title}」の実施科目を決定`);
+    return examModel.getPhases(examMasterId);
+  },
+
+  /** 教員調査サマリ（提出・要望件数 + 学年別実施教科数と期間キャパティ） */
+  async surveySummary(examMasterId, user) {
+    if (!user) {
+      const err = new Error('認証が必要です。');
+      err.statusCode = 401;
+      throw err;
+    }
+    const summary = await examModel.subjectSurveySummary(examMasterId);
+    const master = await ensureMaster(examMasterId);
+    const plan = await examModel.listSubjectPlan(examMasterId);
+    const slotMinutes = Number(master.default_duration) || 50;
+    const neededOf = (p) => Number(p.duration_slots) || Math.max(1, Math.ceil((Number(p.duration_minutes) || slotMinutes) / slotMinutes));
+    const capacitySlots = (Number(master.days_count) || 0) * (Number(master.daily_slots) || 0);
+    const grades = (master.grades || []).map(Number);
+    const sharedRows = plan.filter((p) => Number(p.grade) === 0);
+    const perGrade = grades.map((g) => {
+      const rows = plan.filter((p) => Number(p.grade) === g).concat(sharedRows);
+      const needed = rows.reduce((s, r) => s + neededOf(r), 0);
+      return {
+        grade: g,
+        subjects: rows.length,
+        submitted: rows.filter((r) => r.submit_status === 'SUBMITTED').length,
+        requests: rows.filter((r) => r.request_note).length,
+        needed_slots: needed,
+        capacity_slots: capacitySlots,
+        feasible: needed <= capacitySlots,
+      };
+    });
+    return {
+      ...summary,
+      default_duration: slotMinutes,
+      capacity_slots: capacitySlots,
+      per_grade: perGrade,
+      total_subjects: plan.length,
+      total_needed_slots: plan.reduce((s, r) => s + neededOf(r), 0),
+    };
+  },
+
+  /** 基本情報マスタ（クラス・コース・教科・科目・教室） */
+  async basicInfo(user) {
+    if (!user) {
+      const err = new Error('認証が必要です。');
+      err.statusCode = 401;
+      throw err;
+    }
+    return basicinfoService.getBasicInfo(null, user);
+  },
+
+  // ==========================================================
   // 考査ボード（全データ一括取得）
   // ==========================================================
   async getBoard(examMasterId, user) {
@@ -304,7 +536,7 @@ export const examService = {
     const phases = await examModel.getPhases(examMasterId);
     const kyomu = isKyomu(user);
 
-    const [plan, slots, rooms, roomConfig, roomAssignments, trips, staff, availability, proctors, constraints, exemptions] =
+    const [plan, slots, rooms, roomConfig, roomAssignments, trips, staff, availability, proctors, constraints, exemptions, subjectGroups, subjects, roomCatalog, classes, surveySummary] =
       await Promise.all([
         examModel.listSubjectPlan(examMasterId),
         examModel.listSlots(examMasterId),
@@ -317,6 +549,11 @@ export const examService = {
         examModel.listProctorAssignments(examMasterId),
         examModel.listTeacherConstraints(examMasterId),
         examModel.listExemptions(examMasterId),
+        basicinfoModel.listSubjectGroups(),
+        basicinfoModel.listSubjects(),
+        basicinfoModel.listRooms(),
+        basicinfoModel.listClasses(),
+        examModel.subjectSurveySummary(examMasterId),
       ]);
 
     const rulesTable = await examModel.getRulesTable('exam_timetable_rules', examMasterId, DEFAULT_TIMETABLE_RULES);
@@ -326,6 +563,7 @@ export const examService = {
     const unassigned = computeUnassigned(plan, master, ctx);
 
     const editable = {
+      plan: kyomu,
       subject: kyomu || phases.subject_phase === PHASE.SURVEY,
       subject_kyomu: kyomu,
       timetable: kyomu && phases.timetable_phase !== PHASE.ENDED,
@@ -341,6 +579,13 @@ export const examService = {
         ...p,
         can_edit: kyomu || (phases.subject_phase === PHASE.SURVEY && p.setter_teacher_id === user.id),
       })),
+      basic_info: {
+        subject_groups: subjectGroups,
+        classes,
+        subjects,
+        rooms: roomCatalog,
+      },
+      survey_summary: surveySummary,
       slots,
       day_slots: ctx.daySlots,
       grade_blocks: ctx.gradeBlocks,
@@ -375,14 +620,18 @@ export const examService = {
 
     const plan = await examModel.listSubjectPlan(examMasterId);
     if (plan.length === 0) {
-      const subjects = (await query('SELECT id, name FROM subjects ORDER BY name ASC')).rows;
-      const rows = [];
-      for (const g of master.grades) {
-        for (const s of subjects) {
-          rows.push({ subject_name: s.name, subject_id: s.id, grade: g, scope: 'GRADE', stream: 'OTHER', setter_teacher_id: null });
+      // 科目マスタ（curriculum_subjects）から実施予定科目をシード（無ければ旧 subjects テーブル）
+      const seeded = await examModel.seedSubjectPlanFromCatalog(examMasterId, master, user.id);
+      if (seeded.length === 0) {
+        const subjects = (await query('SELECT id, name FROM subjects ORDER BY name ASC')).rows;
+        const rows = [];
+        for (const g of master.grades) {
+          for (const s of subjects) {
+            rows.push({ subject_name: s.name, subject_id: s.id, grade: g, scope: 'GRADE', stream: 'OTHER', setter_teacher_id: null });
+          }
         }
+        await examModel.bulkInsertSubjectPlan(examMasterId, rows, user.id);
       }
-      await examModel.bulkInsertSubjectPlan(examMasterId, rows, user.id);
     }
     await audit('EXAM_SURVEY_START', user, 'exam_master', examMasterId, `考査「${master.title}」の実施科目調査を開始`);
     return examModel.getPhases(examMasterId);
@@ -403,10 +652,26 @@ export const examService = {
         throw err;
       }
     }
+    const master = await ensureMaster(examMasterId);
+    const normalized = normalizeDuration(row, master);
+    // 実施時間（標準試験時間＝デフォルト50分）は教務のみ変更可能。教員の編集は保存値を維持する。
+    if (!kyomu) {
+      const stored = row.id
+        ? (await examModel.listSubjectPlan(examMasterId)).find((r) => String(r.id) === String(row.id))
+        : null;
+      const slotMinutes = Number(master.default_duration) || 50;
+      const storedMinutes = Number(stored?.duration_minutes) || slotMinutes;
+      normalized.duration_minutes = storedMinutes;
+      normalized.duration_slots = Number(stored?.duration_slots) || Math.max(1, Math.ceil(storedMinutes / slotMinutes));
+    }
+    const surveyedBy = kyomu ? (row.surveyed_by || null) : user.id;
+    const surveyedAt = row.submit_status === 'SUBMITTED' ? (row.surveyed_at || new Date().toISOString()) : (row.surveyed_at || null);
     const saved = await examModel.upsertSubjectPlanRow({
-      ...row,
+      ...normalized,
       exam_master_id: examMasterId,
       grade: Number(row.grade) || 0,
+      surveyed_by: surveyedBy,
+      surveyed_at: surveyedAt,
       updated_by: user.id,
     });
     await audit('EXAM_SUBJECT_SAVE', user, 'exam_subject_plan', saved.id, `実施科目「${saved.subject_name}」(${saved.grade}年) を登録`);
@@ -426,7 +691,41 @@ export const examService = {
       err.statusCode = 403;
       throw err;
     }
-    return examModel.upsertSubjectPlanRow({ ...row, submit_status: 'SUBMITTED', updated_by: user.id });
+    return examModel.upsertSubjectPlanRow({
+      ...row,
+      exam_master_id: examMasterId,
+      submit_status: 'SUBMITTED',
+      surveyed_by: isKyomu(user) ? row.surveyed_by || user.id : user.id,
+      surveyed_at: new Date().toISOString(),
+      updated_by: user.id,
+    });
+  },
+
+  /** 教務による実施科目の確定／再調査戻し（決定モード） */
+  async setSubjectDecision(examMasterId, id, status, user) {
+    ensureKyomu(user);
+    const row = (await examModel.listSubjectPlan(examMasterId)).find((r) => r.id === id);
+    if (!row) {
+      const err = new Error('プラン行が見つかりません。');
+      err.statusCode = 404;
+      throw err;
+    }
+    const allowed = ['PENDING', 'CONFIRMED'];
+    if (!allowed.includes(String(status).toUpperCase())) {
+      const err = new Error('不正な決定状態です。');
+      err.statusCode = 400;
+      throw err;
+    }
+    const updated = await examModel.upsertSubjectPlanRow({
+      ...row,
+      exam_master_id: examMasterId,
+      decision_status: String(status).toUpperCase(),
+      confirmed_by: status === 'CONFIRMED' ? user.id : null,
+      confirmed_at: status === 'CONFIRMED' ? new Date().toISOString() : null,
+      updated_by: user.id,
+    });
+    await audit('EXAM_SUBJECT_DECIDE', user, 'exam_subject_plan', updated.id, `実施科目「${updated.subject_name}」(${updated.grade}年) を ${status === 'CONFIRMED' ? '確定' : '未確定'}`);
+    return updated;
   },
 
   async deleteSubjectRow(examMasterId, id, user) {
@@ -1187,17 +1486,9 @@ export const examService = {
 
     const gradeStudents = await examModel.getGradeStudents(master.grades.map((g) => Number(g)));
 
-    const assignments = slotsToTimetable(ctx.examSlots).map((t) => {
-      const u = unitsById.get(t.unit_id) || {};
-      return {
-        unit_id: t.unit_id,
-        grade: t.grade,
-        subject_name: t.subject_name,
-        day: t.day,
-        slot: t.slot,
-        duration_slots: u.duration_slots ?? t.duration_slots,
-      };
-    });
+    const classes = await basicinfoModel.listClasses();
+    const classById = new Map(classes.map((c) => [String(c.id), c]));
+    const planById = new Map(plan.map((p) => [String(p.id), p]));
 
     const roomRows = rooms.map((r) => ({
       id: r.id,
@@ -1207,17 +1498,58 @@ export const examService = {
       grades: Array.isArray(r.grades) ? r.grades.map(Number) : [],
     }));
 
+    // 教室割当は学年単位（exam_room_assignments の一意キーは grade+day+slot）
+    const normalizedSlots = normalizeClassIds(ctx.examSlots, planById);
+    const assignments = normalizedSlots.map((t) => ({
+      unit_id: t.unit_id ?? t.subject_id ?? null,
+      class_id: t.class_id,
+      class_name: classById.get(String(t.class_id))?.name ?? null,
+      grade: Number(t.grade),
+      subject_name: t.subject_name,
+      day: Number(t.day ?? t.day_number) || 0,
+      slot: Number(t.slot ?? t.slot_number) || 0,
+      duration_slots: unitsById.get(t.unit_id ?? t.subject_id)?.duration_slots ?? Number(t.slot_span) ?? Number(t.duration_slots) ?? 1,
+    }));
+
+    const studentsByClass = {};
+    for (const c of classes) studentsByClass[c.id] = gradeStudents[Number(c.grade)] ?? null;
+
+    // 科目 × クラス・コースの標準教室を基本情報マスタの開講設定から導出
+    const roomNameById = new Map(roomRows.map((r) => [r.id, r.name]));
+    const classRoomConfig = [];
+    for (const s of await basicinfoModel.listSubjects()) {
+      for (const o of s.offerings || []) {
+        const cid = String(o?.class_course_id ?? '');
+        const rn = o?.room_id ? roomNameById.get(String(o.room_id)) : null;
+        if (!cid || !rn) continue;
+        classRoomConfig.push({
+          subject_name: s.name,
+          grade: Number(o.grade) || Number(s.grade) || 0,
+          class_id: cid,
+          standard_room: rn,
+          alt_rooms: [],
+        });
+      }
+    }
+
     const result = solveRooms({
       days: ctx.daySlots.length,
       slots: master.daily_slots,
       grades: master.grades.map((g) => Number(g)),
       rooms: roomRows,
-      room_config: roomConfig,
+      room_config: [...roomConfig, ...classRoomConfig],
       assignments,
       broadcast_subjects: plan.filter((p) => p.broadcast_slot).map((p) => p.subject_name),
-      students: gradeStudents,
+      students: studentsByClass,
       rules,
     });
+    if (process.env.EXAM_DEBUG_ROOM) {
+      console.log('ROOM INPUT days=', ctx.daySlots.length, 'slots=', master.daily_slots);
+      console.log('ROOM INPUT rooms=', JSON.stringify(roomRows).slice(0, 1200));
+      console.log('ROOM INPUT rules=', JSON.stringify(rules));
+      console.log('ROOM INPUT config=', JSON.stringify([...roomConfig, ...classRoomConfig]).slice(0, 1200));
+      console.log('ROOM INPUT assign=', JSON.stringify(assignments).slice(0, 1600));
+    }
 
     const roomIdByName = new Map(roomRows.map((r) => [r.name, r.id]));
 
@@ -1229,6 +1561,7 @@ export const examService = {
         if (s > master.daily_slots) break;
         rows.push({
           grade: a.grade,
+          class_id: a.class_id,
           day_number: a.day,
           slot_number: s,
           unit_id: a.unit_id,
@@ -1257,6 +1590,7 @@ export const examService = {
     }
     const normalized = rows.map((r) => ({
       grade: Number(r.grade),
+      class_id: r.class_id || null,
       day_number: Number(r.day_number),
       slot_number: Number(r.slot_number),
       unit_id: r.unit_id || r.subject_id || null,
@@ -1634,22 +1968,38 @@ export const examService = {
     const rules = await examModel.getRulesTable('exam_proctor_rules', examMasterId, DEFAULT_PROCTOR_RULES);
 
     const roomAssignRows = await examModel.listRoomAssignments(examMasterId);
-    const roomAssignMap = new Map(roomAssignRows.map((r) => [`${r.grade}|${r.day_number}|${r.slot_number}`, r.room_name]));
+    // 教室割当参照テーブル：クラス・コースキーを優先し、旧データの学年キー/G{grade} はフォールバック
+    const roomAssignMap = new Map();
+    for (const r of roomAssignRows) {
+      const day = Number(r.day_number);
+      const slot = Number(r.slot_number);
+      if (r.class_id) roomAssignMap.set(`${r.class_id}|${day}|${slot}`, r.room_name);
+      roomAssignMap.set(`G${Number(r.grade)}|${day}|${slot}`, r.room_name);
+    }
     const roomCells = roomAssignRows.map((r) => ({
       grade: Number(r.grade),
+      class_id: r.class_id ?? null,
       day: Number(r.day_number),
       slot: Number(r.slot_number),
       room_name: r.room_name,
       unit_id: r.unit_id ?? null,
     }));
 
-    const timetable = slotsToTimetable(slots).map((t) => ({
+    // クラス・コース（基本情報マスタ）で監督対象を展開する
+    const classes = await basicinfoModel.listClasses();
+    const classesByGrade = groupClassesByGrade(classes);
+    const classById = new Map(classes.map((c) => [String(c.id), c]));
+    const planById = new Map(plan.map((p) => [String(p.id), p]));
+
+    const timetable = slotsToClassTimetable(slots, classesByGrade, classById, planById).map((t) => ({
       unit_id: t.unit_id,
       grade: t.grade,
       day: t.day,
       slot: t.slot,
       duration_slots: unitsById.get(t.unit_id)?.duration_slots ?? t.duration_slots,
       subject_name: t.subject_name,
+      class_id: t.class_id,
+      class_name: t.class_name,
     }));
 
     const proctorRows = await examModel.listProctorAssignments(examMasterId);
@@ -1660,6 +2010,8 @@ export const examService = {
       grade_blocks: ctx.gradeBlocks,
       unitsById,
       roomAssignMap,
+      roomLookup: (classId, grade, day, slot) =>
+        (classId ? roomAssignMap.get(`${classId}|${day}|${slot}`) : null) ?? roomAssignMap.get(`G${grade}|${day}|${slot}`) ?? null,
       roomTypeByName,
       roomConfig,
       proctorRows,
@@ -1712,7 +2064,7 @@ export const examService = {
     }
 
     const unitsById = built.unitsById;
-    const roomAssignMap = built.roomAssignMap;
+    const roomLookup = built.roomLookup;
     const roomConfig = built.roomConfig;
     const roomNameByType = new Map(roomConfig.special_rooms.map((s) => [s.type, s.room_name]));
 
@@ -1721,16 +2073,17 @@ export const examService = {
     const rows = result.assignments.map((a) => {
       const unit = unitsById.get(a.unit_id) || {};
       const isSpecial = a.kind === 'SPECIAL';
+      const classKey = a.class_id ?? `G${a.grade}`;
       return {
         grade: a.grade,
-        class_id: isSpecial ? roomNameByType.get(a.room_type) || a.room_type : `G${a.grade}`,
+        class_id: isSpecial ? roomNameByType.get(a.room_type) || a.room_type : classKey,
         day_number: a.day,
         slot_number: a.slot,
         subject_name: a.subject_name,
         proctor_teacher_id: a.proctor_teacher_id,
         setter_teacher_id: unit.setter_teacher_id || null,
         setter_teacher_name: unit.setter_teacher_name || null,
-        room_name: isSpecial ? roomNameByType.get(a.room_type) || a.room_type : roomAssignMap.get(`${a.grade}|${a.day}|${a.slot}`) || null,
+        room_name: isSpecial ? roomNameByType.get(a.room_type) || a.room_type : roomLookup(a.class_id, a.grade, a.day, a.slot),
         notes: a.proctor_teacher_id ? null : '未割当',
       };
     });
@@ -1746,21 +2099,27 @@ export const examService = {
   async getProctorBoard(examMasterId, user) {
     const built = await this.buildProctorInput(examMasterId, user);
     const phases = await examModel.getPhases(examMasterId);
-    const rows = built.proctorRows.map((r) => ({
-      id: r.id,
-      grade: Number(r.grade),
-      day_number: Number(r.day_number),
-      slot_number: Number(r.slot_number),
-      subject_name: r.subject_name,
-      room_name: r.room_name,
-      room_type: built.roomTypeByName.get(r.room_name) ?? null,
-      proctor_teacher_id: r.proctor_teacher_id,
-      proctor_name: r.proctor_name,
-      setter_teacher_id: r.setter_teacher_id,
-      setter_teacher_name: r.setter_teacher_name,
-      is_mine: String(r.proctor_teacher_id) === String(user.id),
-      notes: r.notes,
-    }));
+    const classesById = new Map((await basicinfoModel.listClasses()).map((c) => [String(c.id), c]));
+    const rows = built.proctorRows.map((r) => {
+      const cid = r.class_id ? String(r.class_id) : null;
+      return {
+        id: r.id,
+        grade: Number(r.grade),
+        class_id: cid,
+        class_name: classesById.get(cid)?.name ?? null,
+        day_number: Number(r.day_number),
+        slot_number: Number(r.slot_number),
+        subject_name: r.subject_name,
+        room_name: r.room_name,
+        room_type: built.roomTypeByName.get(r.room_name) ?? null,
+        proctor_teacher_id: r.proctor_teacher_id,
+        proctor_name: r.proctor_name,
+        setter_teacher_id: r.setter_teacher_id,
+        setter_teacher_name: r.setter_teacher_name,
+        is_mine: String(r.proctor_teacher_id) === String(user.id),
+        notes: r.notes,
+      };
+    });
 
     const diagnostics = validateProctor(built.input, rows);
     const hard = diagnostics.filter((d) => d.level === 'HARD');
@@ -1824,7 +2183,7 @@ export const examService = {
     const filtered = isTeacher
       ? plan.filter((p) => (grade === 0 || Number(p.grade) === grade) && String(p.setter_teacher_id) === String(user.id))
       : plan;
-    return { subjects: filtered, is_kyomu: isKyomu(user) };
+    return { subjects: filtered, plan: filtered, is_kyomu: isKyomu(user) };
   },
 
   /** 試験時間割スロット（教員は担当学年のみ） */

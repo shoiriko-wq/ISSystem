@@ -562,7 +562,7 @@ function cardHtml(b) {
   `;
 
   return `
-    <div class="card p-0 overflow-hidden transition-all ${isUrgent ? 'border-l-4 border-l-warning' : ''}"
+    <div class="card card--framed p-0 overflow-hidden transition-all ${isUrgent ? 'border-l-4 border-l-warning' : ''}"
          data-bulletin-id="${b.id}">
       <button type="button" class="w-full text-left p-3.5 hover-surface-soft transition-colors flex items-start gap-2"
               data-bulletin-toggle="${b.id}" aria-expanded="${expanded}" aria-controls="${bodyId}">

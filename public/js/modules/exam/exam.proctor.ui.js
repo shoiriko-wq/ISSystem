@@ -372,16 +372,75 @@ function nameOf(id) {
   return s ? s.name : String(id);
 }
 
+function proctorCellMap() {
+  const map = new Map();
+  for (const c of cells || []) {
+    const cid = c.class_id ? String(c.class_id) : '';
+    if (!cid) continue;
+    map.set(`${cid}|${Number(c.day_number)}|${Number(c.slot_number)}`, c);
+  }
+  return map;
+}
+
+/** クラス・コースに対応する監督セル（学年キー G{grade} をフォールバックに使用） */
+function findProctorCell(map, cid, grade, day, slot) {
+  return map.get(`${cid}|${day}|${slot}`) || map.get(`G${grade}|${day}|${slot}`) || null;
+}
+
+function gradeOfClass(cid) {
+  const cl = (board.basic_info?.classes || []).find((c) => String(c.id) === String(cid));
+  return cl ? Number(cl.grade) : null;
+}
+
+/** 時間割スパン情報（開始コマか継続コマかを判別） */
+function spanInfo(grade, day, slot) {
+  for (const s of board.slots || []) {
+    if (s.is_blocked) continue;
+    if (Number(s.grade) !== grade || Number(s.day_number) !== day) continue;
+    const span = Math.max(1, Number(s.slot_span) || Number(s.duration_slots) || 1);
+    const sn = Number(s.slot_number);
+    if (sn === slot) return { span, isStart: true, start: slot };
+    if (slot > sn && slot < sn + span) return { span, isStart: false, start: sn };
+  }
+  return { span: 1, isStart: true, start: slot };
+}
+
+function applyProctorChange(key, teacherId) {
+  const [cid, d, s] = String(key).split('|');
+  const day = Number(d);
+  const slot = Number(s);
+  const g = gradeOfClass(cid);
+  const info = spanInfo(g, day, slot);
+  const map = proctorCellMap();
+  const slotsToVisit = new Set([slot]);
+  for (let k = info.start; k < info.start + info.span; k++) slotsToVisit.add(k);
+  const done = new Set();
+  for (const k of slotsToVisit) {
+    const c = findProctorCell(map, cid, g, day, k);
+    if (!c || done.has(c)) continue;
+    done.add(c);
+    c.proctor_teacher_id = teacherId || null;
+    c.proctor_name = teacherId ? nameOf(teacherId) : null;
+    c.is_mine = String(teacherId) === String(state.currentUser.id);
+  }
+}
+
 function proctorGridHtml(kyomu, editable) {
-  const grades = [...new Set([...(board.master.grades || []).map(Number), ...cells.map((c) => Number(c.grade))])].filter((g) => Number.isFinite(g));
+  const classes = (board.basic_info?.classes || [])
+    .slice()
+    .sort((a, b) => Number(a.grade) - Number(b.grade) || String(a.name).localeCompare(String(b.name), 'ja'));
   const ss = slots();
-  const tables = grades
-    .map((g) => {
-      const header =
-        `<th class="px-2 py-1.5 text-[10px] text-muted font-bold bg-inset">日</th>` +
-        ss.map((s) => `<th class="px-2 py-1.5 text-[10px] text-muted font-bold bg-inset text-center">${s}限</th>`).join('');
-      const rows = days()
-        .map((d) => {
+  const cellMap = proctorCellMap();
+  const slotHeader = ss
+    .map((s) => `<th class="px-2 py-1.5 text-[10px] text-muted font-bold bg-inset text-center">${s}限</th>`)
+    .join('');
+
+  const tables = days()
+    .map((d) => {
+      const header = `<th class="px-2 py-1.5 text-[10px] text-muted font-bold bg-inset">クラス・コース</th>${slotHeader}`;
+      const body = classes
+        .map((cl) => {
+          const g = Number(cl.grade);
           const tds = ss
             .map((s) => {
               if (isBlockedFor(g, d, s)) {
@@ -390,22 +449,30 @@ function proctorGridHtml(kyomu, editable) {
                     <span class="badge bg-surface text-muted text-[9px] px-1 block">${isGlobalBlocked(d, s) ? '共通' : `${g}年`}</span>
                   </td>`;
               }
-              const c = cellAt(g, d, s);
+              const key = `${cl.id}|${d}|${s}`;
+              const c = findProctorCell(cellMap, cl.id, g, d, s);
               if (!c) return `<td class="border border-divider p-1 align-top bg-inset"><span class="text-[10px] text-muted">実施なし</span></td>`;
+              const info = spanInfo(g, d, s);
+              const spanLabel =
+                info.span > 1
+                  ? `<span class="text-[9px] text-muted block">${info.isStart ? `${s}限${info.span}コマ続き` : `${info.start}限の続き`}</span>`
+                  : '';
               const room = c.room_type ? `<span class="text-[10px] text-info ml-1">${c.room_type}</span>` : '';
               const subj = `<span class="text-[10px] font-bold text-main block">${escapeHTML(c.subject_name || '')}${room}</span>`;
               const inner = editable
-                ? `${subj}<select data-cell="proctor" data-grade="${g}" data-day="${d}" data-slot="${s}" class="input-field w-full py-1 text-[10px]">${staffOptions(c.proctor_teacher_id, true)}</select>`
-                : `${subj}<span class="text-[11px] font-bold ${c.is_mine ? 'text-accent-strong' : 'text-soft'}">${escapeHTML(c.proctor_name || '未割当')}</span>`;
+                ? `${subj}${spanLabel}<select data-cell="proctor" data-key="${key}" class="input-field w-full py-1 text-[10px]">${staffOptions(c.proctor_teacher_id, true)}</select>`
+                : `${subj}${spanLabel}<span class="text-[11px] font-bold ${c.is_mine ? 'text-accent-strong' : 'text-soft'}">${escapeHTML(c.proctor_name || '未割当')}</span>`;
               return `<td class="border border-divider p-1 align-top">${inner}</td>`;
             })
             .join('');
-          const dateLabel = dayDateLabel(d);
-          return `<tr class="border-t border-divider"><th class="px-2 py-1.5 text-[10px] font-bold text-main bg-inset">${d}日目${dateLabel ? `<span class="text-[9px] font-normal text-muted block">${dateLabel}</span>` : ''}</th>${tds}</tr>`;
+          return `<tr class="border-t border-divider"><td class="px-2 py-1.5 text-[11px] font-bold text-main bg-surface whitespace-nowrap">${escapeHTML(cl.name)}<span class="text-muted text-[10px] block">${cl.grade}年</span></td>${tds}</tr>`;
         })
         .join('');
-      return `<div class="mt-2"><h4 class="text-xs font-bold text-main mb-1">${g}学年 の監督割</h4>
-        <div class="overflow-x-auto"><table class="w-full text-left border-collapse min-w-[640px]"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table></div></div>`;
+      const rowsBody =
+        body || `<tr class="border-t border-divider"><td class="p-2 text-[10px] text-muted" colspan="${ss.length + 1}">クラス・コースが登録されていません。</td></tr>`;
+      const dateLabel = dayDateLabel(d);
+      return `<div class="mt-2"><h4 class="text-xs font-bold text-main mb-1">${d}日目${dateLabel ? ` (${dateLabel})` : ''}</h4>
+        <div class="overflow-x-auto"><table class="w-full text-left border-collapse min-w-[640px]"><thead><tr>${header}</tr></thead><tbody>${rowsBody}</tbody></table></div></div>`;
     })
     .join('');
 
@@ -415,7 +482,7 @@ function proctorGridHtml(kyomu, editable) {
 
   return sectionCard(
     'layout-grid',
-    '監督割グリッド（日 × 時限 × 学年）',
+    '監督割グリッド（クラス・コース × 時限）',
     '自動作成後、教務は監督教員を差し替えられます（保存後に検証を推奨）。教員は自分の担当が強調表示されます。',
     `<div>${tables}</div>
      <div class="flex flex-wrap items-center gap-1 pt-2">${loadChips || '<span class="text-[10px] text-muted">監督負荷：割当なし</span>'}</div>`
@@ -489,12 +556,7 @@ function bindProctorChange(e) {
     return;
   }
   if (t.dataset.cell === 'proctor') {
-    const c = cellAt(Number(t.dataset.grade), Number(t.dataset.day), Number(t.dataset.slot));
-    if (c) {
-      c.proctor_teacher_id = t.value || null;
-      c.proctor_name = t.value ? nameOf(t.value) : null;
-      c.is_mine = String(t.value) === String(state.currentUser.id);
-    }
+    applyProctorChange(t.dataset.key, t.value);
     return;
   }
 

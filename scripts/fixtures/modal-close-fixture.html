@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>モーダル背景クリック回帰テスト用ページ</title>
+  <link rel="stylesheet" href="/public/css/components.css">
+</head>
+<body>
+  <div id="modal-container">
+    <!-- 静的モーダル（initModalListeners 時点で存在） -->
+    <div id="test-modal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 class="modal-title">テストモーダル</h3>
+          <button type="button" class="modal-close modal-close-x" aria-label="閉じる"><i data-lucide="x"></i></button>
+        </div>
+        <div class="modal-body">
+          <textarea id="ta" rows="6">abc def ghi jkl mno pqr stu vwx yz abc def ghi jkl</textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modal-close" id="footer-close">閉じる</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initModalListeners, openModal, closeModal } from '/public/js/ui-helpers.js';
+
+    initModalListeners();
+
+    // テスト駆動用 API
+    window.TestApi = {
+      open: (id) => openModal(id),
+      close: (id) => closeModal(id),
+      isOpen: (id) => !document.getElementById(id).classList.contains('hidden'),
+      // 初期化後に注入されるモーダル（チャット・施設・スケジュール等の動的生成を模擬）
+      addDynamic: () => {
+        const d = document.createElement('div');
+        d.id = 'dyn-modal';
+        d.className = 'modal-overlay';
+        d.innerHTML = '<div class="modal-card">'
+          + '<div class="modal-header"><h3 class="modal-title">動的モーダル</h3>'
+          + '<button type="button" class="modal-close modal-close-x" aria-label="閉じる"><i data-lucide="x"></i></button></div>'
+          + '<div class="modal-body"><input id="dyn-input" value="drag-me drag-me drag-me drag-me"></div>'
+          + '</div>';
+        document.getElementById('modal-container').appendChild(d);
+      }
+    };
+  </script>
+</body>
+</html>

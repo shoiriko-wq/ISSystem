@@ -16,3 +16,5 @@ node_modules/
 # ログファイル
 *.log
 logs/
+# UI検証スクリーンショット出力 (Gitに含めない)
+scripts/output/

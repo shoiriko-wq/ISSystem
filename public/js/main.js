@@ -147,7 +147,7 @@ function renderAuthScreen() {
       refreshLucideIcons();
     }
 
-    // 定期考査メニューはログイン時のみ表示（6つの作成メニューはモジュール内で教務権限判定）
+    // 定期考査メニューはログイン時のみ表示（7つの作成メニューはモジュール内で教務権限判定、考査の登録は年間考査計画に統合）
     const examNav = document.getElementById('nav-exam-item');
     if (examNav) examNav.classList.remove('hidden');
     setExamNavBadge(state.currentUser);

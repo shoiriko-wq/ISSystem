@@ -124,7 +124,7 @@ function renderNewsList() {
   }
 
   container.innerHTML = filtered.map(item => `
-    <div class="card p-5 hover-border-accent transition-all flex flex-col justify-between space-y-3">
+    <div class="card card--framed p-5 hover-border-accent transition-all flex flex-col justify-between space-y-3">
       <div>
         <div class="flex items-center justify-between text-[11px] mb-2">
           <span class="badge bg-accent-soft text-accent-strong border-accent-soft">${getCategoryLabel(item.category)}</span>

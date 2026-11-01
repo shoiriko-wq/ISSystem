@@ -12,6 +12,11 @@
     "db:seed": "node scripts/seed.js",
     "db:create": "node scripts/create-db.js",
     "api:check": "node scripts/api-smoke-test.js",
+    "test:ui:modal": "node scripts/test-modal-close.mjs",
+    "test:ui:frames": "node scripts/test-frame-rules.mjs",
+    "test:ui:scan": "node scripts/scan-frames.mjs",
+    "test:ui:audit": "node scripts/test-ui-audit.mjs",
+    "test:ui:all": "npm run test:ui:modal && npm run test:ui:frames && npm run test:ui:audit && npm run test:ui:scan",
     "db:tables": "node scripts/list-tables.js"
   },
   "keywords": [
@@ -34,6 +39,7 @@
   "devDependencies": {
     "jest": "^30.5.2",
     "nodemon": "^3.1.14",
+    "puppeteer-core": "^25.16.0",
     "supertest": "^7.3.1"
   },
   "dependencies": {

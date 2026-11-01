@@ -31,6 +31,7 @@ import examController from '../controllers/exam.controller.js';
 import newsController from '../controllers/news.controller.js';
 import absenceController from '../controllers/absence.controller.js';
 import subjectController from '../controllers/subject.controller.js';
+import basicinfoController from '../controllers/basicinfo.controller.js';
 import auditService from '../services/audit.service.js';
 
 const router = Router();
@@ -70,6 +71,13 @@ router.delete('/subjects/:id', authenticateToken, requireKyomuRole, safe(subject
 
 // 教員の担当教科設定 (自分自身は全教職員、他教員の変更は教務部のみ service 側で検証)
 router.put('/users/:id/subjects', authenticateToken, safe(subjectController?.setUserSubjects));
+
+// 定期考査 基本情報マスタ API (一覧・使用件数は全教職員 / 登録・改名・削除は教務部 KYOMU のみ)
+router.get('/basic-info', authenticateToken, safe(basicinfoController?.listBasicInfo));
+router.get('/basic-info/usage/:kind/:id', authenticateToken, safe(basicinfoController?.getUsage));
+router.post('/basic-info/:kind', authenticateToken, requireKyomuRole, safe(basicinfoController?.createItem));
+router.put('/basic-info/:kind/:id', authenticateToken, requireKyomuRole, safe(basicinfoController?.updateItem));
+router.delete('/basic-info/:kind/:id', authenticateToken, requireKyomuRole, safe(basicinfoController?.deleteItem));
 
 // エイリアス
 router.post('/auth/register', safe(authController?.registerWithInvitation));
@@ -189,6 +197,13 @@ router.post('/exam/:id/subject-row', authenticateToken, safe(examController?.sav
 router.post('/exam/:id/subject-row/:rowId/submit', authenticateToken, safe(examController?.submitSubjectRow));
 router.delete('/exam/:id/subject-row/:rowId', authenticateToken, safe(examController?.deleteSubjectRow));
 router.post('/exam/:id/subject-survey/end', authenticateToken, safe(examController?.endSubjectSurvey));
+router.post('/exam/:id/subject-row/:rowId/decide', authenticateToken, safe(examController?.setSubjectDecision));
+
+// 年間考査計画（試験期間登録・教員調査開始・実施科目決定）
+router.post('/exam/:id/plan/register', authenticateToken, safe(examController?.registerPlan));
+router.post('/exam/:id/plan/survey-start', authenticateToken, safe(examController?.startPlanSurvey));
+router.post('/exam/:id/plan/decide', authenticateToken, safe(examController?.decideSubjects));
+router.get('/exam/:id/survey-summary', authenticateToken, safe(examController?.surveySummary));
 
 // 試験時間割
 router.get('/exam/:id/slots', authenticateToken, safe(examController?.getSlots));

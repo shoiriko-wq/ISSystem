@@ -2,26 +2,34 @@
    ISSystem Common UI Component Styles
    ========================================================================== */
 
-/* 1. Cards & Containers */
+/* 1. Cards & Containers
+   ルール（ページ共通・readability.css の Frames 節で最終確定）:
+   - .card / .card--framed は共通の 2px 実枠 (var(--border-color)) で揃える。
+     影で枠の太さを擬装しない（影はホバー時の強調のみ）。
+   - .card-static は枠線を描かない「面」である。領域は背景色・角丸・影だけで示す。
+   - クリックできるカードには .card--framed を併用し、ホバーフィードバックを与える。 */
 .card {
   background-color: var(--bg-card);
-  border: 1px solid var(--border-color);
+  border: var(--border-width) solid var(--border-color);
   border-radius: 0.75rem;
-  box-shadow: 0 4px 6px -1px var(--shadow-color), 0 2px 4px -2px var(--shadow-color);
+  box-shadow: none;
   transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.card:hover {
-  background-color: var(--bg-card-hover);
-  border-color: var(--border-focus);
 }
 
 .card-static {
   background-color: var(--bg-card);
-  border: 1px solid var(--border-color);
+  border: none;
   border-radius: 0.75rem;
   box-shadow: 0 4px 6px -1px var(--shadow-color);
 }
+
+/* クリックできるカード（ダッシュボード上段のサマリーカード、リスト行など） */
+.card--framed {
+  border-color: var(--border-color);
+  box-shadow: none;
+  cursor: pointer;
+}
+
 
 /* 2. Buttons & Clickables */
 .btn-primary {
@@ -194,6 +202,8 @@
    - 横幅は標準 42rem、広い内容用 .modal-card--wide (56rem)、狭い内容用 .modal-card--compact (34rem)
    - 縦が画面を超える場合は .modal-body だけがスクロールし、ヘッダー(タイトル)とフッター(ボタン)は固定
    - 閉じ方: 右上の X と、フッターの「閉じる」ボタン、背景クリック、ESC キーの 4 種類（全モーダル共通）
+   - 背景クリックは「背景でマウスを押し始めた」場合のみ閉じる。モーダル内で押し始めたドラッグ
+     （テキスト選択など）が背景で抜けて離された場合は閉じない（ui-helpers.js の mousedown 記録で判定）
 */
 .modal-overlay {
   position: fixed;

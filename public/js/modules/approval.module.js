@@ -164,7 +164,7 @@ function renderApprovalList() {
       : '承認決裁待ち';
 
     return `
-      <div class="card p-4 hover-border-warning transition-colors">
+      <div class="card card--framed p-4 hover-border-warning transition-colors">
         <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-2">
           <div class="flex items-center gap-2">
             <span class="badge ${statusInfo.class} flex items-center gap-1">

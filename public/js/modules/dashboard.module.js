@@ -40,7 +40,7 @@ export function initDashboardModule() {
 
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
 
-      <div class="card p-5 bg-gradient-to-br from-accent-soft via-surface-soft to-surface-strong border-accent-soft md:col-span-2 flex flex-col justify-between">
+      <div class="card card--framed p-5 bg-gradient-to-br from-accent-soft via-surface-soft to-surface-strong border-accent-soft md:col-span-2 flex flex-col justify-between">
 
         <div>
 
@@ -62,7 +62,7 @@ export function initDashboardModule() {
 
         </div>
 
-        <div class="flex items-center gap-2 mt-4 pt-3 border-t border-main text-xs">
+        <div class="flex items-center gap-2 mt-4 text-xs">
 
           <button id="dash-btn-bulletin" class="btn-primary py-1.5 px-3 text-xs flex items-center gap-1.5">
 
@@ -84,7 +84,7 @@ export function initDashboardModule() {
 
       <!-- 本日の 年休等・出張 (人数サマリー、クリックで登録モーダル) -->
 
-      <div class="card p-4 flex flex-col justify-between">
+      <div class="card card--framed p-4 flex flex-col justify-between">
 
         <div class="flex items-center justify-between text-xs text-muted mb-2">
 
@@ -128,7 +128,7 @@ export function initDashboardModule() {
 
       <!-- 未処理タスク・承認サマリー -->
 
-      <div class="card p-4 flex flex-col justify-between">
+      <div class="card card--framed p-4 flex flex-col justify-between">
 
         <div class="flex items-center justify-between text-xs text-muted mb-2">
 
@@ -184,7 +184,7 @@ export function initDashboardModule() {
 
         <div class="card p-5">
 
-          <div class="flex items-center justify-between mb-4 pb-2 border-b border-main">
+          <div class="flex items-center justify-between mb-4">
 
             <h3 class="font-bold text-sm text-main flex items-center gap-2">
 
@@ -210,7 +210,7 @@ export function initDashboardModule() {
 
         <div class="card p-5">
 
-          <div class="flex items-center justify-between mb-4 pb-2 border-b border-main">
+          <div class="flex items-center justify-between mb-4">
 
             <h3 class="font-bold text-sm text-main flex items-center gap-2">
 
@@ -242,7 +242,7 @@ export function initDashboardModule() {
 
         <div class="card p-5">
 
-          <div class="flex items-center justify-between mb-3 pb-2 border-b border-main">
+          <div class="flex items-center justify-between mb-3">
 
             <h3 class="font-bold text-sm text-main flex items-center gap-2">
 
@@ -268,7 +268,7 @@ export function initDashboardModule() {
 
         <div class="card p-5">
 
-          <div class="flex items-center justify-between mb-3 pb-2 border-b border-main">
+          <div class="flex items-center justify-between mb-3">
 
             <h3 class="font-bold text-sm text-main flex items-center gap-2">
 

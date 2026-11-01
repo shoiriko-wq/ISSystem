@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ja" class="theme-light-standard" data-theme-mode="light" data-chrome="light">
+<head>
+  <meta charset="utf-8">
+  <title>枠線ルール回帰テスト用ページ</title>
+
+  <!-- 実画面と同じ CDN（Tailwind のレイアウトユーティリティと Lucide） -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- 実画面と同一の CSS ロード順 -->
+  <link rel="stylesheet" href="/public/css/variables.css">
+  <link rel="stylesheet" href="/public/css/base.css">
+  <link rel="stylesheet" href="/public/css/theme.css">
+  <link rel="stylesheet" href="/public/css/components.css">
+  <link rel="stylesheet" href="/public/css/animations.css">
+  <link rel="stylesheet" href="/public/css/layouts.css">
+  <link rel="stylesheet" href="/public/css/readability.css">
+</head>
+<body class="bg-main text-main font-sans antialiased h-screen overflow-hidden flex flex-col">
+
+  <!-- アプリ骨格（index.html と同じ構造）: サイドバー＋メインビュー -->
+  <div id="app-body" class="flex-1 flex overflow-hidden min-h-0">
+    <aside class="app-sidebar w-56 border-r border-divider flex flex-col justify-between p-3 select-none shrink-0 overflow-hidden bg-surface-strong">
+      <nav class="space-y-1 flex-1 min-h-0 overflow-y-auto">
+        <a href="#" data-tab="dashboard" title="ダッシュボード" class="nav-item active flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-soft hover-surface transition-all">
+          <div class="flex items-center gap-2.5">
+            <i data-lucide="layout-dashboard" class="w-4 h-4 text-accent"></i>
+            <span class="nav-label">ダッシュボード</span>
+          </div>
+        </a>
+        <a href="#" data-tab="bulletin" title="職員連絡・掲示板" class="nav-item flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-soft hover-surface transition-all">
+          <div class="flex items-center gap-2.5">
+            <i data-lucide="megaphone" class="w-4 h-4 text-warning"></i>
+            <span class="nav-label">職員掲示板</span>
+          </div>
+        </a>
+        <a href="#" data-tab="exam" title="定期考査管理" class="nav-item flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-soft hover-surface transition-all">
+          <div class="flex items-center gap-2.5">
+            <i data-lucide="file-check-2" class="w-4 h-4 text-success"></i>
+            <span class="nav-label">定期考査</span>
+          </div>
+        </a>
+      </nav>
+      <div class="sidebar-version shrink-0 text-[10px] text-muted text-center font-mono py-2 border-t border-divider">ISSystem v5.0</div>
+    </aside>
+
+    <main class="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 bg-main">
+      <!-- ダッシュボード（main.js 相当の初期化でスケルトンが描画される） -->
+      <div id="view-dashboard" class="tab-view active space-y-4"></div>
+
+      <!-- 簡易承認のリスト行（決済者表示を含む） -->
+      <section id="view-approval" class="tab-view space-y-4 mt-6">
+        <div class="card card--framed p-4 hover-border-warning transition-colors">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="badge bg-success-soft text-success-strong border-success-soft">承認済み</span>
+            <span class="badge bg-surface text-soft border-main">物品・備品購入</span>
+            <span class="text-xs font-mono font-bold text-success">¥12,000</span>
+          </div>
+          <h3 class="font-bold text-sm text-main mb-1">会議室プロジェクターの借用</h3>
+          <p class="text-xs text-soft leading-relaxed mb-3">5時間目の授業で使用するため、前日までに準備をお願いします。</p>
+          <div class="flex items-center justify-between pt-3 border-t border-divider text-xs bg-surface">
+            <span class="text-muted font-mono">決裁者: 教務主任 (2026-11-01 11:06)</span>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module">
+    import { initDashboardModule } from '/public/js/modules/dashboard.module.js';
+    import { refreshLucideIcons, userAvatarHtml } from '/public/js/ui-helpers.js';
+
+    initDashboardModule();
+    // main.js の DOMContentLoaded 初期化（スケルトン再描画）後にサンプルを注入する
+    // loadDashboardData が実データから生成する HTML と同一のクラス構成の静的サンプル
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('dash-pinned-bulletins').innerHTML = [
+        `<div class="p-3 rounded-lg bg-surface-strong border border-divider hover-border-accent transition-colors cursor-pointer">
+          <div class="flex items-center justify-between text-[11px] mb-1">
+            <span class="badge badge-warning">指示・依頼</span>
+            <div class="flex items-center gap-1.5 text-muted font-mono">
+              ${userAvatarHtml({ name: '田中 先生', avatarUrl: null, size: 'xs' })}
+              <span>08:30 (田中 先生)</span>
+            </div>
+          </div>
+          <h4 class="font-bold text-xs text-main mb-1">中間考査問題の提出期限について</h4>
+          <p class="text-[11px] text-muted line-clamp-2">本日17時までに教務システムへアップロードしてください。</p>
+        </div>`,
+        `<div class="p-3 rounded-lg bg-surface-strong border border-divider hover-border-accent transition-colors cursor-pointer">
+          <div class="flex items-center justify-between text-[11px] mb-1">
+            <span class="badge">連絡</span>
+            <div class="flex items-center gap-1.5 text-muted font-mono">
+              ${userAvatarHtml({ name: '佐藤 先生', avatarUrl: null, size: 'xs' })}
+              <span>09:10 (佐藤 先生)</span>
+            </div>
+          </div>
+          <h4 class="font-bold text-xs text-main mb-1">体育館の明日の予約状況</h4>
+          <p class="text-[11px] text-muted line-clamp-2">5限目のクラス使用枠に空きがあります。</p>
+        </div>`
+      ].join('');
+
+      document.getElementById('dash-today-facilities').innerHTML = [
+        `<div class="p-2.5 rounded-lg bg-surface-strong border border-divider flex items-center justify-between">
+          <div class="overflow-hidden pr-2">
+            <div class="flex items-center gap-1.5 mb-0.5">
+              <span class="px-1.5 py-0.5 text-[9px] font-bold rounded bg-success-inset text-success border border-success-soft">体育館</span>
+              <span class="font-bold text-main text-xs truncate">3年A組 体育</span>
+            </div>
+            <div class="text-[10px] text-muted font-mono">10:00 - 11:00</div>
+          </div>
+          <div class="flex items-center gap-1.5 flex-shrink-0">
+            ${userAvatarHtml({ name: '高橋 先生', avatarUrl: null, size: 'xs' })}
+            <span class="text-[10px] text-soft font-bold">高橋 先生</span>
+          </div>
+        </div>`,
+        `<div class="p-2.5 rounded-lg bg-surface-strong border border-divider flex items-center justify-between">
+          <div class="overflow-hidden pr-2">
+            <div class="flex items-center gap-1.5 mb-0.5">
+              <span class="px-1.5 py-0.5 text-[9px] font-bold rounded bg-info-soft text-info border border-info-soft">音楽室</span>
+              <span class="font-bold text-main text-xs truncate">合唱練習</span>
+            </div>
+            <div class="text-[10px] text-muted font-mono">13:00 - 14:30</div>
+          </div>
+          <div class="flex items-center gap-1.5 flex-shrink-0">
+            ${userAvatarHtml({ name: '鈴木 先生', avatarUrl: null, size: 'xs' })}
+            <span class="text-[10px] text-soft font-bold">鈴木 先生</span>
+          </div>
+        </div>`
+      ].join('');
+      document.getElementById('dash-news-summary').innerHTML = [
+        `<div class="p-3 rounded-lg bg-surface-strong border border-divider">
+          <span class="badge badge-info mb-1">MEXT</span>
+          <h4 class="font-bold text-xs text-main">学習指導要領の実施状況に関する調査結果</h4>
+          <p class="text-[11px] text-muted">全国調査の速報が公開されました。</p>
+        </div>`,
+        `<div class="p-3 rounded-lg bg-surface-strong border border-divider">
+          <span class="badge badge-info mb-1">研究</span>
+          <h4 class="font-bold text-xs text-main">ICT 機器の活用事例（公開授業）</h4>
+          <p class="text-[11px] text-muted">市内小中学校の公開授業が動画で公開中。</p>
+        </div>`
+      ].join('');
+
+      document.getElementById('dash-today-schedules').innerHTML = [
+        `<div class="flex items-center gap-2 p-2 rounded-lg bg-accent-soft border border-accent-soft">
+          <span class="font-mono text-[10px] text-accent font-bold">10:00</span>
+          <span class="text-soft font-bold">校内研究授業（3年A組）</span>
+        </div>`,
+        `<div class="flex items-center gap-2 p-2 rounded-lg bg-surface-strong border border-divider">
+          <span class="font-mono text-[10px] text-accent font-bold">15:30</span>
+          <span class="text-soft">職員会議（会議室A）</span>
+        </div>`
+      ].join('');
+
+      refreshLucideIcons();
+      window.TestApi.ready = true;
+    });
+
+
+    // テスト駆動用 API
+    window.TestApi = {
+      ready: false,
+      cards: () => [...document.querySelectorAll('#view-dashboard .card')],
+      sectionCards: () => [...document.querySelectorAll('#view-dashboard .card:not(.card--framed)')],
+      framedCards: () => [...document.querySelectorAll('.card--framed')],
+      // 承認リスト項目はモジュールがデータ取得後に描画するため、fixture では同一クラスを静的に注入する
+      injectApprovalCard: () => {
+        const view = document.getElementById('view-approval');
+        if (!view) return 0;
+        view.insertAdjacentHTML('beforeend', `<div class="card card--framed p-4 hover-border-warning transition-colors">
+          <div class="flex items-center justify-between pt-3 border-t border-divider text-xs bg-surface">
+            <span class="text-muted font-mono">決裁者: 教務主任 (2026-11-01 11:06)</span>
+          </div>
+        </div>`);
+        return view.querySelectorAll('.card--framed').length;
+      },
+      navItems: () => [...document.querySelectorAll('.app-sidebar .nav-item')]
+    };
+
+  </script>
+</body>
+</html>

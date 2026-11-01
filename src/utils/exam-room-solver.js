@@ -61,7 +61,8 @@ export function buildRoomConfigMaps(config) {
   for (const c of config || []) {
     const subject = String(c.subject_name || '').trim();
     const grade = Number(c.grade) || 0;
-    const key = `${subject}#${grade}`;
+    const cid = c.class_id ? String(c.class_id) : null;
+    const key = cid ? `${subject}#${cid}` : `${subject}#${grade}`;
     const alts = Array.isArray(c.alt_rooms)
       ? c.alt_rooms.map((a) => String(a).trim())
       : typeof c.alt_rooms === 'string'
@@ -71,17 +72,17 @@ export function buildRoomConfigMaps(config) {
     if (c.standard_room) {
       standard.set(key, String(c.standard_room).trim());
       // grade=0 の設定は全学年共通の標準教室として扱う
-      if (grade === 0) standard.set(subject, String(c.standard_room).trim());
+      if (grade === 0 && !cid) standard.set(subject, String(c.standard_room).trim());
     }
     if (alts.length) {
       alternates.set(key, alts);
-      if (grade === 0) alternates.set(subject, alts);
+      if (grade === 0 && !cid) alternates.set(subject, alts);
     }
   }
   return { standard, alternates };
 }
 
-/** 時間割から教室割当ユニット（科目 × 学年 × 日 × 時限）を生成 */
+/** 教室割当ユニット（科目 × クラス・コース × 日 × 時限）を時間割から生成 */
 export function buildRoomUnits(assignments, days, slots) {
   const units = [];
   for (const a of assignments || []) {
@@ -89,9 +90,12 @@ export function buildRoomUnits(assignments, days, slots) {
     const slot = Number(a.slot);
     const duration = Math.max(1, Number(a.duration_slots) || 1);
     if (day < 1 || day > days || slot < 1 || slot > slots) continue;
+    const cid = a.class_id ?? null;
     units.push({
-      key: `${a.unit_id ?? a.subject_name}#${a.grade}#${day}#${slot}`,
+      key: `${a.unit_id ?? a.subject_name}#${cid ?? a.grade}#${day}#${slot}`,
       unit_id: a.unit_id ?? null,
+      class_id: cid,
+      class_name: a.class_name ?? null,
       grade: Number(a.grade),
       subject_name: String(a.subject_name || '').trim(),
       day,
@@ -99,9 +103,14 @@ export function buildRoomUnits(assignments, days, slots) {
       duration_slots: Math.min(duration, slots - slot + 1),
     });
   }
-  // 決定順序: 特殊教室指定(予備指定が狭い) → 日 → 時限 → 科目名
+  // 決定順序: 特殊教室指定(予備指定が狭い) → 日 → 時限 → 科目名 → クラス・コース名
   units.sort(
-    (a, b) => a.day - b.day || a.slot - b.slot || String(a.subject_name).localeCompare(String(b.subject_name)) || a.grade - b.grade
+    (a, b) =>
+      a.day - b.day ||
+      a.slot - b.slot ||
+      String(a.subject_name).localeCompare(String(b.subject_name)) ||
+      a.grade - b.grade ||
+      String(a.class_name || '').localeCompare(String(b.class_name || ''))
   );
   return units;
 }
@@ -130,8 +139,9 @@ export function roomScore(unit, room, ctx) {
   let score = 0;
   const keyG = `${unit.subject_name}#${unit.grade}`;
   const keyS = unit.subject_name;
+  const keyC = unit.class_id ? `${unit.subject_name}#${unit.class_id}` : null;
 
-  const std = ctx.standard.get(keyG) ?? ctx.standard.get(keyS);
+  const std = (keyC && ctx.standard.get(keyC)) ?? ctx.standard.get(keyG) ?? ctx.standard.get(keyS);
   const req = requiredRoomType(unit, ctx);
   if (req) {
     if (room.name === std) score -= 1000;
@@ -145,7 +155,7 @@ export function roomScore(unit, room, ctx) {
     score += w.no_standard;
   }
 
-  const alts = ctx.alternates.get(keyG) ?? ctx.alternates.get(keyS) ?? [];
+  const alts = (keyC && ctx.alternates.get(keyC)) ?? ctx.alternates.get(keyG) ?? ctx.alternates.get(keyS) ?? [];
   const idx = alts.indexOf(room.name);
   if (idx >= 0) score += idx;
   else score += 20;
@@ -183,6 +193,10 @@ export function greedyRooms(units, ctx) {
       .filter((r) => roomCompatible(r, u) && roomAllowedFor(u, r, ctx) && roomFree(occupancy, r, u))
       .map((r) => ({ r, score: roomScore(u, r, ctx) }))
       .sort((a, b) => a.score - b.score || String(a.r.name).localeCompare(String(b.r.name)));
+
+    if (process.env.EXAM_DEBUG_ROOM && !candidates.length) {
+      console.log('GREEDY NO_ROOM', JSON.stringify(u), 'compatible=', ctx.rooms.filter((r) => roomCompatible(r, u)).length, 'allowed=', ctx.rooms.filter((r) => roomCompatible(r, u) && roomAllowedFor(u, r, ctx)).length, 'occKeys=', [...occupancy.keys()].filter((k) => k.endsWith(`|${u.day}|${u.slot}`)).slice(0, 10));
+    }
 
     if (candidates.length === 0) {
       assigned.set(u.key, null);
@@ -289,7 +303,8 @@ export function roomDiagnostics(assigned, units, ctx) {
   // 2. ユニットごとのチェック
   for (const u of units) {
     const name = assigned.get(u.key) ?? null;
-    const std = ctx.standard.get(`${u.subject_name}#${u.grade}`) ?? ctx.standard.get(u.subject_name) ?? null;
+    const keyC = u.class_id ? `${u.subject_name}#${u.class_id}` : null;
+    const std = (keyC && ctx.standard.get(keyC)) ?? ctx.standard.get(`${u.subject_name}#${u.grade}`) ?? ctx.standard.get(u.subject_name) ?? null;
 
     if (!name) {
       out.push({ code: 'NO_ROOM', level: 'HARD', subject_name: u.subject_name, grade: u.grade, day: u.day, slot: u.slot, msg: `「${u.subject_name}」(${u.grade}年) ${u.day}日目${u.slot}限 に利用可能な教室がありません。` });
@@ -344,7 +359,7 @@ export function solveRooms(input) {
   const units = buildRoomUnits(input.assignments, days, slots).map((u) => ({
     ...u,
     broadcast_slot: broadcastSet.has(u.subject_name),
-    students: input.students ? (input.students[u.grade] ?? null) : null,
+    students: input.students ? (input.students[u.class_id] ?? input.students[u.grade] ?? null) : null,
   }));
 
   const ctx = {
@@ -366,10 +381,13 @@ export function solveRooms(input) {
   const assignments = units.map((u) => {
     const name = assigned.get(u.key) ?? null;
     const room = name ? ctx.roomsByName.get(name) : null;
-    const std = ctx.standard.get(`${u.subject_name}#${u.grade}`) ?? ctx.standard.get(u.subject_name) ?? null;
+    const keyC = u.class_id ? `${u.subject_name}#${u.class_id}` : null;
+    const std = (keyC && ctx.standard.get(keyC)) ?? ctx.standard.get(`${u.subject_name}#${u.grade}`) ?? ctx.standard.get(u.subject_name) ?? null;
     return {
       key: u.key,
       unit_id: u.unit_id,
+      class_id: u.class_id,
+      class_name: u.class_name,
       subject_name: u.subject_name,
       grade: u.grade,
       day: u.day,

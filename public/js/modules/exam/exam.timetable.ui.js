@@ -216,8 +216,12 @@ function toolbarHtml(master, editable, phase) {
   const kyomu = isKyomuUser();
   return `<div class="card p-4 space-y-2">
     <div class="flex flex-wrap items-center gap-3 text-[11px] text-muted">
-      <span class="font-bold text-main">期間 ${escapeHTML(master.start_date)} 〜 ${escapeHTML(master.end_date)}</span>
-      <span>${days}日間 × ${slots}時限 / ${grades}</span>
+      ${
+        master.start_date && master.end_date
+          ? `<span class="font-bold text-main">期間 ${escapeHTML(master.start_date)} 〜 ${escapeHTML(master.end_date)}</span>
+             <span>${days}日間 × ${slots}時限 / ${grades}</span>`
+          : `<span class="font-bold text-warning-strong">③ の考査期間が未登録です</span><span>${grades}</span>`
+      }
       ${phaseBadgeSmall(phase)}
     </div>
     <div class="flex flex-wrap items-center gap-2">
