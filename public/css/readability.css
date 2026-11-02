@@ -435,6 +435,8 @@ tbody tr:hover {
 
 /* --------------------------------------------------------------------------
    9. Cursor feedback: hovering a frame must be obvious
+   ダッシュボード 4セクションの記事カード（各リスト直下の項目）もトップ3記事カード
+   (.card--framed) と同一のホバーアニメーション（リング・浮き上がり・枠/影強調）を持つ。
    -------------------------------------------------------------------------- */
 a,
 button,
@@ -443,6 +445,10 @@ button,
 .theme-select-btn,
 .card--framed,
 .dropdown-panel,
+#dash-pinned-bulletins > div.rounded-lg,
+#dash-news-summary > div.rounded-lg,
+#dash-today-facilities > div.rounded-lg,
+#dash-today-schedules > div.rounded-lg,
 .chat-layout .chat-sidebar-channels button {
   cursor: pointer;
   transition: background-color var(--duration-fast) var(--ease-spring),
@@ -460,9 +466,14 @@ button:hover,
   outline-offset: 2px;
 }
 
-/* 面（カード・背景領域）はホバーリングで反応しない。枠線を持つ交互式カードだけがリングを描く。 */
+/* 面（セクション・背景領域）はホバーリングで反応しない。枠線を持つ交互式カードだけがリングを描く。
+   ダッシュボード 4セクションの記事カードは「記事」なので交互式カードとして扱う。 */
 .card--framed:hover,
 .theme-select-btn:hover,
+#dash-pinned-bulletins > div.rounded-lg:hover,
+#dash-news-summary > div.rounded-lg:hover,
+#dash-today-facilities > div.rounded-lg:hover,
+#dash-today-schedules > div.rounded-lg:hover,
 .chat-layout .chat-sidebar-channels button:hover {
   outline: var(--ring-width) solid var(--hover-ring);
   outline-offset: 2px;
@@ -492,17 +503,26 @@ b,
   font-weight: 800;
 }
 
-/* クリックできるカード (card--framed) と座席・テーマボタンはホバーで枠・影が強調される。
+/* クリックできるカード (card--framed) と座席・テーマボタン、ダッシュボード 4セクションの
+   記事カードはホバーで枠・影が強調される。
    面として扱うセクションカード (.card) はホバーで浮き上がり・リングを描かない。 */
 .card--framed:hover,
 .seat-card:hover,
-.theme-select-btn:hover {
+.theme-select-btn:hover,
+#dash-pinned-bulletins > div.rounded-lg:hover,
+#dash-news-summary > div.rounded-lg:hover,
+#dash-today-facilities > div.rounded-lg:hover,
+#dash-today-schedules > div.rounded-lg:hover {
   border-color: var(--accent-primary) !important;
   background-color: var(--bg-card-hover) !important;
   box-shadow: var(--card-glow), 0 0 0 4px var(--accent-ring) !important;
 }
 
-.card--framed:hover {
+.card--framed:hover,
+#dash-pinned-bulletins > div.rounded-lg:hover,
+#dash-news-summary > div.rounded-lg:hover,
+#dash-today-facilities > div.rounded-lg:hover,
+#dash-today-schedules > div.rounded-lg:hover {
   transform: translateY(var(--hover-lift)) !important;
 }
 

@@ -12,6 +12,7 @@
 
 import { examStore, examApi, resolveActiveExamId, sectionCard, phaseBadge, isKyomuUser } from './exam.shared.js';
 import { examFormHtml, bindMasterSection } from './exam.master.ui.js';
+import { renderSurveySection, bindSurveySection } from './exam.subject.ui.js';
 import { escapeHTML, refreshLucideIcons, showToast } from '../../ui-helpers.js';
 
 const PLAN_PHASES = {
@@ -104,21 +105,50 @@ function actButton(act, label, icon, enabled, btnCls) {
   </button>`;
 }
 
-/** ② の調査開始／終了ボタン（① の登録が完了するまで調査開始は押せない） */
+/** ② の調査開始／終了ボタン（① の登録が完了するまで調査開始は押せない、入力は下部のグリッドで行う） */
 function surveyButtonsHtml(kyomu, board) {
   const subject = board?.phases?.subject_phase || 'DRAFT';
   const registered = !!board?.master;
   const startable = kyomu && registered && subject !== 'SURVEY';
   const endable = kyomu && subject === 'SURVEY';
   return `<div class="flex flex-wrap items-center gap-2">
-    ${actButton('survey-start', '調査開始', 'play', startable, 'btn-primary')}
-    ${actButton('survey-end', '調査終了', 'stop-circle', endable, 'btn-danger')}
-    <button data-goto-sub="subject" class="btn-secondary py-1.5 px-3 text-[11px] flex items-center gap-1">
-      <i data-lucide="list-checks" class="w-3.5 h-3.5"></i> 実施科目調査を開く
-    </button>
-    <span class="text-[10px] text-muted">調査開始で項目が全教員に表示され編集可能、調査終了後は教務のみ編集可</span>
+    ${actButton('survey-start', '② 調査開始', 'play', startable, 'btn-primary')}
+    ${actButton('survey-end', '② 調査終了', 'stop-circle', endable, 'btn-danger')}
+    <span class="text-[10px] text-muted">調査開始で下の調査グリッドが全教員に編集可能になります（調査終了後は教務のみ編集可）。入力は下のグリッドで行い、決定は「実施科目の決定」タブで行います。</span>
   </div>
   ${registered ? '' : '<p class="text-[11px] text-warning-strong font-semibold">① で考査名が登録されるまで調査開始は押せません。</p>'}`;
+}
+
+/** 考査名ごとの ② 調査状況と決定状況の一覧（考査名ごとに ② の調査を入力するため一覧化する） */
+function examStatusHtml(board) {
+  const list = board?.exam_survey_status || [];
+  const activeId = String(board?.master?.id ?? '');
+  if (!list.length) return '<p class="text-[11px] text-muted">① で考査名が登録されると考査名ごとの調査状況が一覧表示されます。</p>';
+  const rows = list.map((s) => {
+    const active = String(s.id) === activeId;
+    const period = `${String(s.start_date ?? '').slice(0, 10)}〜${String(s.end_date ?? '').slice(0, 10)}`;
+    return `<tr class="border-t border-main/10 ${active ? 'bg-accent-soft' : ''}">
+      <td class="px-1 py-1 font-semibold text-main">${escapeHTML(String(s.title ?? ''))}${active ? ' <span class="badge bg-accent-soft text-accent-strong text-[9px] px-1 rounded font-bold">対象考査</span>' : ''}</td>
+      <td class="px-1 py-1 text-soft">${escapeHTML(period)}</td>
+      <td class="px-1 py-1">${s.plan_rows} コマ</td>
+      <td class="px-1 py-1 ${s.plan_rows > 0 && s.submitted >= s.plan_rows ? 'text-success-strong' : 'text-warning-strong'}">${s.submitted}/${s.plan_rows}</td>
+      <td class="px-1 py-1 ${s.requests ? 'text-warning-strong' : 'text-muted'}">${s.requests} 件</td>
+      <td class="px-1 py-1">${s.decision_rows} コマ</td>
+      <td class="px-1 py-1 ${s.decision_rows > 0 && s.decided >= s.decision_rows ? 'text-success-strong' : 'text-muted'}">${s.decided}</td>
+    </tr>`;
+  });
+  return `<div class="overflow-x-auto"><table class="w-full text-[11px]">
+    <thead><tr class="text-muted text-[10px]">
+      <th class="px-1 pb-1 font-semibold text-left">考査名</th>
+      <th class="px-1 pb-1 font-semibold text-left">期間</th>
+      <th class="px-1 pb-1 font-semibold text-left">② の計画値（調査入力）</th>
+      <th class="px-1 pb-1 font-semibold text-left">提出</th>
+      <th class="px-1 pb-1 font-semibold text-left">要望</th>
+      <th class="px-1 pb-1 font-semibold text-left">決定行数</th>
+      <th class="px-1 pb-1 font-semibold text-left">確定</th>
+    </tr></thead>
+    <tbody>${rows.join('')}</tbody>
+  </table></div>`;
 }
 
 /** ③ 考査期間の登録（② の実施教科数を見て期間・試験日数・1日のコマ数を決定する） */
@@ -260,10 +290,11 @@ function surveyCard(kyomu) {
   return sectionCard(
     'list-checks',
     '② 実施科目調査（調査開始／調査終了）',
-    `調査開始で下の項目が全教員に表示され編集可能になります。調査終了後は教務権限者のみ編集できます。実施科目フェーズ: ${phaseBadge(subjectPhase)}`,
+    `調査開始で下の調査グリッドが全教員に編集可能になります。調査終了後は教務権限者のみ編集できます。実施科目フェーズ: ${phaseBadge(subjectPhase)}`,
     `<div class="space-y-2">
       ${surveyButtonsHtml(kyomu, board)}
       ${itemsHtml}
+      ${examStatusHtml(board)}
       ${body}
     </div>`,
   );
@@ -292,9 +323,11 @@ export function renderPlanTab(container, notice = '') {
       ${stepperHtml(board)}
       ${examFormHtml(masters, kyomu)}
       ${surveyCard(kyomu)}
+      <div id="exam-survey-grid"></div>
       ${periodCard(kyomu)}
     </div>
   `;
+  renderSurveySection(container.querySelector('#exam-survey-grid'));
   refreshLucideIcons();
 }
 
@@ -305,6 +338,10 @@ export function bindPlanTab(container, reload) {
   bindMasterSection(panel, reload);
   if (panel.dataset.boundPlan) return;
   panel.dataset.boundPlan = 'plan';
+
+  // ② の調査グリッドをこのタブに埋め込む（入力はここで行い、決定は「実施科目の決定」タブで行う）
+  const surveyGrid = panel.querySelector('#exam-survey-grid');
+  if (surveyGrid) bindSurveySection(surveyGrid, reload, renderSurveySection);
 
   // ③ の入力は開始日・終了日・1日の時限数・標準試験時間のみ（年度・試験日数は自動算出）
   const readPlan = () => ({

@@ -9,10 +9,67 @@ import { parseJson } from '../utils/db.js';
 import { parseSubjectList } from './subject.model.js';
 import { basicinfoModel } from './basicinfo.model.js';
 
-const PHASE_KEYS = ['plan_phase', 'subject_phase', 'timetable_phase', 'room_phase', 'trip_phase', 'proctor_phase'];
+const PHASE_KEYS = ['plan_phase', 'subject_phase', 'timetable_phase', 'room_phase', 'trip_phase', 'proctor_phase', 'decision_phase'];
 
 function safeJson(value, fallback) {
   return parseJson(value, fallback);
+}
+
+/**
+ * 実施科目の決定で比較する項目（デフォルト値との差分表示に使う）
+ * subject_name / grade は UNIQUE キーなので変更対象から除外する。
+ */
+const DECISION_FIELDS = [
+  'subject_short',
+  'subject_id',
+  'stream',
+  'scope',
+  'setter_teacher_id',
+  'patrol_teacher_id',
+  'duration_slots',
+  'duration_minutes',
+  'fixed_slot',
+  'shared_slot',
+  'broadcast_slot',
+  'solo_subject',
+  'class_ids',
+  'room_id',
+  'room_name',
+  'request_note',
+];
+
+/** 比較用の正規化（数値・真偽・配列を canonical な形へ） */
+function canonicalValue(field, value) {
+  if (field === 'class_ids') return [...(value || [])].map(String).sort().join(',');
+  if (['shared_slot', 'broadcast_slot', 'solo_subject'].includes(field)) return String(!!value);
+  if (['duration_slots', 'duration_minutes', 'fixed_slot'].includes(field)) {
+    return value == null || value === '' ? '' : String(Number(value) || 0);
+  }
+  return value == null ? '' : String(value);
+}
+
+/** 決定行からデフォルト値スナップショットを作る */
+function decisionSnapshot(row) {
+  const snap = {};
+  for (const f of DECISION_FIELDS) snap[f] = row[f];
+  snap.subject_name = String(row.subject_name || '').trim();
+  snap.grade = Number(row.grade) || 0;
+  return snap;
+}
+
+/** スナップショットの JSON（default_json） */
+function snapshotJson(row) {
+  return JSON.stringify(decisionSnapshot(row));
+}
+
+/** 決定行とデフォルト値の差分項目を列挙する */
+function changedFieldsOf(row, defaults) {
+  const base = defaults || {};
+  const out = [];
+  for (const f of DECISION_FIELDS) {
+    if (canonicalValue(f, row[f]) !== canonicalValue(f, base[f])) out.push(f);
+  }
+  return out;
 }
 
 function genId(prefix) {
@@ -172,8 +229,8 @@ export const examModel = {
   // ==========================================================
   async ensurePhaseRow(examMasterId, updatedBy = null) {
     await query(
-      `INSERT INTO exam_phases (exam_master_id, plan_phase, subject_phase, timetable_phase, room_phase, trip_phase, proctor_phase, updated_by, updated_at)
-       VALUES (?, 'DRAFT', 'DRAFT', 'DRAFT', 'DRAFT', 'DRAFT', 'DRAFT', ?, CURRENT_TIMESTAMP)
+      `INSERT INTO exam_phases (exam_master_id, plan_phase, subject_phase, decision_phase, timetable_phase, room_phase, trip_phase, proctor_phase, updated_by, updated_at)
+       VALUES (?, 'DRAFT', 'DRAFT', 'DRAFT', 'DRAFT', 'DRAFT', 'DRAFT', 'DRAFT', ?, CURRENT_TIMESTAMP)
        ON CONFLICT (exam_master_id) DO UPDATE SET plan_phase = COALESCE(exam_phases.plan_phase, 'DRAFT')`,
       [examMasterId, updatedBy]
     );
@@ -187,7 +244,8 @@ export const examModel = {
       for (const k of PHASE_KEYS) base[k] = 'DRAFT';
       return base;
     }
-    return { ...row, plan_phase: row.plan_phase || 'DRAFT' };
+    for (const k of PHASE_KEYS) row[k] = row[k] || 'DRAFT';
+    return row;
   },
 
   async setPhase(examMasterId, phaseKey, value, updatedBy) {
@@ -341,6 +399,286 @@ export const examModel = {
     }
     return created;
   },
+
+  // ==========================================================
+  // 実施科目の決定 (exam_subject_decisions) ※ 実施科目調査（計画）とは完全に別データ
+  // 調査行をデフォルト値として複製し、default_json に調査時の値を保存する。
+  // 決定行を編集した後も default_json から「デフォルト値（計画値）」を表示できる。
+  // 時間割・教室割・監督割・公表ビューは conductSubjects() の行を正式データとして使う。
+  // ==========================================================
+
+  /** 決定行を UI 用の形へ装飾する（defaults と changed を付与） */
+  decorateDecisionRow(r) {
+    const courses = safeJson(r.courses, []);
+    const classIds = safeJson(r.class_ids, []);
+    const defaults = safeJson(r.default_json, {});
+    const merged = { ...r, courses, class_ids: classIds };
+    return {
+      ...merged,
+      defaults,
+      changed_fields: safeJson(r.changed_fields, []),
+      changed: changedFieldsOf(merged, defaults),
+      duration_minutes: Number(r.duration_minutes) || 50,
+      duration_slots: Number(r.duration_slots) || 1,
+      submit_status: r.submit_status || 'PENDING',
+      decision_status: r.decision_status || 'PENDING',
+    };
+  },
+
+  async findSubjectDecisionById(id) {
+    const res = await query(`SELECT * FROM exam_subject_decisions WHERE id = ?`, [id]);
+    const row = res.rows[0];
+    return row ? examModel.decorateDecisionRow(row) : null;
+  },
+
+  async listSubjectDecisions(examMasterId) {
+    const res = await query(
+      `SELECT d.*, u1.name AS setter_teacher_name, u2.name AS patrol_teacher_name,
+              sp.subject_name AS plan_subject_name, sp.duration_minutes AS plan_duration_minutes
+       FROM exam_subject_decisions d
+       LEFT JOIN users u1 ON d.setter_teacher_id = u1.id
+       LEFT JOIN users u2 ON d.patrol_teacher_id = u2.id
+       LEFT JOIN exam_subject_plan sp ON d.source_plan_id = sp.id
+       WHERE d.exam_master_id = ?
+       ORDER BY d.grade ASC, d.subject_name ASC`,
+      [examMasterId]
+    );
+    return res.rows.map((r) => examModel.decorateDecisionRow(r));
+  },
+
+  async upsertSubjectDecisionRow(row) {
+    const id = row.id || genId('dec');
+    // デフォルト値（調査データのスナップショット default_json）は引き継ぎ、編集値との差分 changed_fields を自動算出する
+    // ※ 決定行を編集した後も default_json から「計画値（デフォルト値）」を表示できる
+    const prevDecision = row.changed_fields ? null : await examModel.findSubjectDecisionById(id);
+    // デフォルト値が未設定の新しい決定行（教務が追加した行など）は自分自身の値をデフォルト値として保存する
+    const defaultsJson =
+      row.default_json || (prevDecision ? prevDecision.default_json : null) || snapshotJson({ ...row, class_ids: (row.class_ids || []).map(String) });
+    const defaults = safeJson(defaultsJson, {});
+    const changedJson = JSON.stringify(changedFieldsOf({ ...row, class_ids: (row.class_ids || []).map(String) }, defaults));
+    const params = [
+      id,
+      row.exam_master_id,
+      row.source_plan_id || null,
+      String(row.subject_name || '').trim(),
+      row.subject_short || row.subject_name,
+      row.subject_id || null,
+      Number(row.grade) || 0,
+      row.stream || 'OTHER',
+      row.scope || 'GRADE',
+      row.setter_teacher_id || null,
+      row.patrol_teacher_id || null,
+      Number(row.duration_slots) || 1,
+      Number(row.duration_minutes) || 50,
+      row.fixed_slot ? Number(row.fixed_slot) : null,
+      !!row.shared_slot,
+      !!row.broadcast_slot,
+      !!row.solo_subject,
+      JSON.stringify((row.courses || []).map(String)),
+      JSON.stringify((row.class_ids || []).map(String)),
+      row.room_id || null,
+      row.room_name || null,
+      row.request_note || null,
+      row.notes || null,
+      row.student_count ? Number(row.student_count) : null,
+      row.submit_status || 'PENDING',
+      row.decision_status || 'PENDING',
+      defaultsJson,
+      changedJson,
+      row.surveyed_by || null,
+      row.surveyed_at || null,
+      row.confirmed_by || null,
+      row.confirmed_at || null,
+      row.updated_by || null,
+    ];
+    const existing = await examModel.findSubjectDecisionById(id);
+    const res = existing
+      ? await query(
+          `UPDATE exam_subject_decisions SET
+             exam_master_id = ?, source_plan_id = COALESCE(?, source_plan_id),
+             subject_name = ?, subject_short = ?, subject_id = ?, grade = ?, stream = ?, scope = ?,
+             setter_teacher_id = ?, patrol_teacher_id = ?, duration_slots = ?, duration_minutes = ?,
+             fixed_slot = ?, shared_slot = ?, broadcast_slot = ?, solo_subject = ?,
+             courses = ?, class_ids = ?, room_id = ?, room_name = ?, request_note = ?, notes = ?,
+             student_count = ?, submit_status = ?, decision_status = ?,
+             default_json = COALESCE(?, default_json), changed_fields = ?,
+             surveyed_by = ?, surveyed_at = ?, confirmed_by = ?, confirmed_at = ?,
+             updated_by = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ? RETURNING *`,
+          [...params.slice(1), id]
+        )
+      : await query(
+          `INSERT INTO exam_subject_decisions
+            (id, exam_master_id, source_plan_id, subject_name, subject_short, subject_id, grade, stream, scope,
+             setter_teacher_id, patrol_teacher_id, duration_slots, duration_minutes, fixed_slot,
+             shared_slot, broadcast_slot, solo_subject, courses, class_ids, room_id, room_name, request_note,
+             notes, student_count, submit_status, decision_status, default_json, changed_fields,
+             surveyed_by, surveyed_at, confirmed_by, confirmed_at, updated_by, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+           ON CONFLICT (exam_master_id, subject_name, grade) DO UPDATE SET
+             subject_short = EXCLUDED.subject_short,
+             subject_id = EXCLUDED.subject_id,
+             stream = EXCLUDED.stream,
+             scope = EXCLUDED.scope,
+             setter_teacher_id = EXCLUDED.setter_teacher_id,
+             patrol_teacher_id = EXCLUDED.patrol_teacher_id,
+             duration_slots = EXCLUDED.duration_slots,
+             duration_minutes = EXCLUDED.duration_minutes,
+             fixed_slot = EXCLUDED.fixed_slot,
+             shared_slot = EXCLUDED.shared_slot,
+             broadcast_slot = EXCLUDED.broadcast_slot,
+             solo_subject = EXCLUDED.solo_subject,
+             courses = EXCLUDED.courses,
+             class_ids = EXCLUDED.class_ids,
+             room_id = EXCLUDED.room_id,
+             room_name = EXCLUDED.room_name,
+             request_note = EXCLUDED.request_note,
+             notes = EXCLUDED.notes,
+             student_count = EXCLUDED.student_count,
+             submit_status = EXCLUDED.submit_status,
+             decision_status = EXCLUDED.decision_status,
+             default_json = COALESCE(EXCLUDED.default_json, exam_subject_decisions.default_json),
+             changed_fields = EXCLUDED.changed_fields,
+             surveyed_by = EXCLUDED.surveyed_by,
+             surveyed_at = EXCLUDED.surveyed_at,
+             confirmed_by = EXCLUDED.confirmed_by,
+             confirmed_at = EXCLUDED.confirmed_at,
+             updated_by = EXCLUDED.updated_by,
+             updated_at = CURRENT_TIMESTAMP
+           RETURNING *`,
+          params
+        );
+    const saved = res.rows[0];
+    return saved ? examModel.decorateDecisionRow(saved) : null;
+  },
+
+  async deleteSubjectDecision(id) {
+    await query(`DELETE FROM exam_subject_decisions WHERE id = ?`, [id]);
+    return true;
+  },
+
+  /**
+   * 実施科目調査（exam_subject_plan）のデータを決定へ取り込む。
+   * デフォルト値（default_json）は調査の最新値で更新し、決定行の編集値は維持する。
+   * 決定行の ID は調査行の ID を共有する（時間割スロットの unit_id 参照を保つ）。
+   */
+  async seedSubjectDecisionsFromPlan(examMasterId, updatedBy) {
+    const plan = await examModel.listSubjectPlan(examMasterId);
+    const existing = await examModel.listSubjectDecisions(examMasterId);
+    const bySource = new Map(existing.map((r) => [String(r.source_plan_id), r]));
+    const byKey = new Map(
+      existing.map((r) => [`${String(r.subject_name).toLowerCase()}#${Number(r.grade)}`, r])
+    );
+    let added = 0;
+    let refreshed = 0;
+    for (const p of plan) {
+      const snap = decisionSnapshot(p);
+      const json = JSON.stringify(snap);
+      const key = `${String(p.subject_name).toLowerCase()}#${Number(p.grade)}`;
+      const prev = bySource.get(String(p.id)) || byKey.get(key) || null;
+      const base = prev ? { ...prev } : { ...p };
+      const row = {
+        ...base,
+        id: prev ? prev.id : p.id,
+        exam_master_id: examMasterId,
+        source_plan_id: p.id,
+        subject_name: prev ? prev.subject_name : p.subject_name,
+        grade: prev ? Number(prev.grade) || 0 : Number(p.grade) || 0,
+        default_json: json,
+        changed_fields: changedFieldsOf({ ...base, class_ids: safeJson(base.class_ids, []) }, snap),
+        updated_by: updatedBy,
+      };
+      await examModel.upsertSubjectDecisionRow(row);
+      if (prev) refreshed += 1;
+      else added += 1;
+    }
+    return { total: plan.length, added, refreshed };
+  },
+
+  /** 決定行をデフォルト値（調査データ）へ戻す */
+  async resetSubjectDecisionToDefault(id, updatedBy) {
+    const row = await examModel.findSubjectDecisionById(id);
+    if (!row) return null;
+    const defaults = row.defaults || {};
+    const merged = {
+      ...row,
+      ...defaults,
+      courses: defaults.courses || row.courses,
+      class_ids: defaults.class_ids || row.class_ids,
+    };
+    return examModel.upsertSubjectDecisionRow({
+      ...merged,
+      default_json: JSON.stringify(decisionSnapshot(merged)),
+      changed_fields: [],
+      updated_by: updatedBy,
+    });
+  },
+
+  /** 考査実施に使う実施科目データ（決定があれば決定、無ければ調査プラン） */
+  async conductSubjects(examMasterId) {
+    const decisions = await examModel.listSubjectDecisions(examMasterId);
+    if (decisions.length > 0) return decisions;
+    return examModel.listSubjectPlan(examMasterId);
+  },
+
+  /** 実施科目の決定サマリ（変更件数・提出・確定・学年別） */
+  async subjectDecisionSummary(examMasterId, master) {
+    const decisions = await examModel.listSubjectDecisions(examMasterId);
+    const plan = await examModel.listSubjectPlan(examMasterId);
+    const grades = (master?.grades || []).map(Number);
+    const shared = decisions.filter((d) => Number(d.grade) === 0);
+    const perGrade = grades.map((g) => {
+      const rows = decisions.filter((d) => Number(d.grade) === g).concat(shared);
+      return {
+        grade: g,
+        subjects: rows.length,
+        changed: rows.filter((d) => (d.changed || []).length > 0).length,
+        submitted: rows.filter((d) => d.submit_status === 'SUBMITTED').length,
+        requests: rows.filter((d) => d.request_note).length,
+      };
+    });
+    return {
+      total: decisions.length,
+      plan_total: plan.length,
+      changed: decisions.filter((d) => (d.changed || []).length > 0).length,
+      submitted: decisions.filter((d) => d.submit_status === 'SUBMITTED').length,
+      confirmed: decisions.filter((d) => d.decision_status === 'CONFIRMED').length,
+      requests: decisions.filter((d) => d.request_note).length,
+      per_grade: perGrade,
+    };
+  },
+
+  /** 年度中の全考査名の調査入力状況（② 実施科目調査は考査名ごとに記入するため一覧化する） */
+  async listExamSurveyStatus() {
+    const res = await query(
+      `SELECT m.id, m.title, m.start_date, m.end_date, m.academic_year, m.grades,
+              COUNT(sp.id) AS plan_rows,
+              COUNT(sp.id) FILTER (WHERE sp.submit_status = 'SUBMITTED') AS submitted,
+              COUNT(sp.id) FILTER (WHERE sp.request_note IS NOT NULL AND sp.request_note <> '') AS requests,
+              COUNT(d.id) AS decision_rows,
+              COUNT(d.id) FILTER (WHERE d.decision_status = 'CONFIRMED') AS decided
+       FROM exam_masters m
+       LEFT JOIN exam_subject_plan sp ON sp.exam_master_id = m.id
+       LEFT JOIN exam_subject_decisions d ON d.exam_master_id = m.id
+       WHERE m.is_active = true
+       GROUP BY m.id, m.title, m.start_date, m.end_date, m.academic_year, m.grades
+       ORDER BY m.start_date DESC, m.title ASC`
+    );
+    return res.rows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      start_date: r.start_date,
+      end_date: r.end_date,
+      academic_year: r.academic_year,
+      grades: safeJson(r.grades, []),
+      plan_rows: Number(r.plan_rows) || 0,
+      submitted: Number(r.submitted) || 0,
+      requests: Number(r.requests) || 0,
+      decision_rows: Number(r.decision_rows) || 0,
+      decided: Number(r.decided) || 0,
+    }));
+  },
+
 
   /**
    * 科目マスタ (curriculum_subjects) から調査用の実施科目プランをシードする。

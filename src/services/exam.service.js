@@ -95,6 +95,21 @@ function planToUnits(plan) {
   }));
 }
 
+/**
+ * 考査実施に使う実施科目行を返す。
+ * 「実施科目の決定」行があれば決定を優先し、決定が無ければ ② 実施科目調査のプランへフォールバックする。
+ * unit_id の整合のため、決定行の id は source_plan_id（② のプラン行ID）があればそれを使う。
+ * @param {number} examMasterId 考査マスタID
+ * @returns {Promise<Array<object>>} planToUnits 互換の実施科目行
+ */
+async function conductSubjects(examMasterId) {
+  const decisions = await examModel.listSubjectDecisions(examMasterId);
+  if (decisions.length > 0) {
+    return decisions.map((d) => ({ ...d, id: d.source_plan_id || d.id }));
+  }
+  return examModel.listSubjectPlan(examMasterId);
+}
+
 /** 時間割スロット → ソルバー入力 timetable [{unit_id, grade, day, slot, duration_slots}]（×行は除外） */
 function slotsToTimetable(slots) {
   const seen = new Set();
@@ -445,26 +460,26 @@ export const examService = {
     return examModel.getPhases(examMasterId);
   },
 
-  /** 実施科目の決定（教務の決定権限） */
+  /** 実施科目の決定（教務の決定権限・決定行を確定して考査実施の正式データにする） */
   async decideSubjects(examMasterId, user) {
     ensureKyomu(user);
     const master = await ensureMaster(examMasterId);
-    const plan = await examModel.listSubjectPlan(examMasterId);
-    if (plan.length === 0) {
-      const err = new Error('実施科目が登録されていません。');
+    const decisions = await examModel.listSubjectDecisions(examMasterId);
+    if (decisions.length === 0) {
+      const err = new Error('実施科目の決定が作成されていません。「実施科目の決定」タブで「計画から決定を作成／更新」してください。');
       err.statusCode = 400;
       throw err;
     }
-    const pending = plan.filter((p) => p.submit_status !== 'SUBMITTED' && p.decision_status !== 'CONFIRMED');
+    const pending = decisions.filter((d) => d.submit_status !== 'SUBMITTED' && d.decision_status !== 'CONFIRMED');
     if (pending.length > 0) {
-      const err = new Error(`未提出の実施科目が ${pending.length} 件あります。`);
+      const err = new Error(`未提出の決定行が ${pending.length} 件あります。`);
       err.statusCode = 400;
       throw err;
     }
     const now = new Date().toISOString();
-    for (const p of plan) {
-      await examModel.upsertSubjectPlanRow({
-        ...p,
+    for (const d of decisions) {
+      await examModel.upsertSubjectDecisionRow({
+        ...d,
         exam_master_id: examMasterId,
         decision_status: 'CONFIRMED',
         confirmed_by: user.id,
@@ -473,11 +488,35 @@ export const examService = {
       });
     }
     const before = await examModel.getPhases(examMasterId);
+    await examModel.setPhase(examMasterId, 'decision_phase', 'DECIDED', user.id);
     await examModel.setPhase(examMasterId, 'plan_phase', 'DECIDED', user.id);
     await examModel.setPhase(examMasterId, 'subject_phase', 'PUBLISHED', user.id);
+    await logPhase(examMasterId, 'decision_phase', before.decision_phase, 'DECIDED', user.id);
     await logPhase(examMasterId, 'plan_phase', before.plan_phase, 'DECIDED', user.id);
-    await audit('EXAM_SUBJECTS_DECIDED', user, 'exam_master', examMasterId, `考査「${master.title}」の実施科目を決定`);
+    await audit('EXAM_SUBJECTS_DECIDED', user, 'exam_master', examMasterId, `考査「${master.title}」の実施科目の決定を確定（${decisions.length}行）`);
     return examModel.getPhases(examMasterId);
+  },
+
+  /** 考査一覧ごとの ② 実施科目調査と ③ 実施科目の決定の進捗（教員は担当学年のみ） */
+  async getExamSurveyStatus(user) {
+    if (!user) {
+      const err = new Error('認証が必要です。');
+      err.statusCode = 401;
+      throw err;
+    }
+    // listExamSurveyStatus() は考査名ごとの集計行（plan_rows / submitted / requests / decision_rows / decided）を返す
+    const status = await examModel.listExamSurveyStatus();
+    const kyomu = isKyomu(user);
+    const grade = Number(user.grade) || 0;
+    const visible = kyomu || grade === 0 ? status : status.filter((m) => (m.grades || []).map(Number).includes(grade));
+    return visible.map((m) => ({
+      ...m,
+      is_kyomu: kyomu,
+      survey_total: Number(m.plan_rows) || 0,
+      survey_submitted: Number(m.submitted) || 0,
+      decision_total: Number(m.decision_rows) || 0,
+      decision_submitted: Number(m.decided) || 0,
+    }));
   },
 
   /** 教員調査サマリ（提出・要望件数 + 学年別実施教科数と期間キャパティ） */
@@ -536,9 +575,12 @@ export const examService = {
     const phases = await examModel.getPhases(examMasterId);
     const kyomu = isKyomu(user);
 
-    const [plan, slots, rooms, roomConfig, roomAssignments, trips, staff, availability, proctors, constraints, exemptions, subjectGroups, subjects, roomCatalog, classes, surveySummary] =
+    const [plan, decisions, decisionSummary, examSurveyStatus, slots, rooms, roomConfig, roomAssignments, trips, staff, availability, proctors, constraints, exemptions, subjectGroups, subjects, roomCatalog, classes, surveySummary] =
       await Promise.all([
         examModel.listSubjectPlan(examMasterId),
+        examModel.listSubjectDecisions(examMasterId),
+        examModel.subjectDecisionSummary(examMasterId, master),
+        examModel.listExamSurveyStatus(),
         examModel.listSlots(examMasterId),
         examModel.listRooms(examMasterId),
         examModel.listRoomConfig(examMasterId),
@@ -560,12 +602,16 @@ export const examService = {
     const proctorRules = await examModel.getRulesTable('exam_proctor_rules', examMasterId, DEFAULT_PROCTOR_RULES);
 
     const ctx = scheduleContext(master, slots);
-    const unassigned = computeUnassigned(plan, master, ctx);
+    // 考査実施に使う実施科目は「実施科目の決定」（決定が無ければ ② の調査プラン）
+    const conduct = decisions.length > 0 ? decisions : plan;
+    const unassigned = computeUnassigned(conduct, master, ctx);
 
     const editable = {
       plan: kyomu,
       subject: kyomu || phases.subject_phase === PHASE.SURVEY,
       subject_kyomu: kyomu,
+      decision: kyomu && phases.decision_phase !== PHASE.ENDED,
+      decision_teacher: kyomu || phases.decision_phase === PHASE.SURVEY,
       timetable: kyomu && phases.timetable_phase !== PHASE.ENDED,
       room: kyomu && phases.room_phase !== PHASE.ENDED,
       trip: kyomu || phases.trip_phase === PHASE.SURVEY,
@@ -579,13 +625,19 @@ export const examService = {
         ...p,
         can_edit: kyomu || (phases.subject_phase === PHASE.SURVEY && p.setter_teacher_id === user.id),
       })),
+      decisions: decisions.map((d) => ({
+        ...d,
+        can_edit: kyomu || (phases.decision_phase === PHASE.SURVEY && String(d.setter_teacher_id) === String(user.id)),
+      })),
+      survey_summary: surveySummary,
+      decision_summary: decisionSummary,
+      exam_survey_status: examSurveyStatus,
       basic_info: {
         subject_groups: subjectGroups,
         classes,
         subjects,
         rooms: roomCatalog,
       },
-      survey_summary: surveySummary,
       slots,
       day_slots: ctx.daySlots,
       grade_blocks: ctx.gradeBlocks,
@@ -742,6 +794,214 @@ export const examService = {
     return phases;
   },
 
+  // ── 実施科目の決定（② の調査データがデフォルト値、教務が 1 考査分を決定して編集する） ──
+
+  /** ② の調査プランから決定行を作成・更新する（default_json = 調査データ） */
+  async seedSubjectDecisions(examMasterId, user) {
+    ensureKyomu(user);
+    const master = await ensureMaster(examMasterId);
+    const plan = await examModel.listSubjectPlan(examMasterId);
+    if (plan.length === 0) {
+      const err = new Error('② 実施科目調査のデータがありません。先に調査プランを登録・提出してください。');
+      err.statusCode = 400;
+      throw err;
+    }
+    const created = await examModel.seedSubjectDecisionsFromPlan(examMasterId, user.id);
+    const summary = await examModel.subjectDecisionSummary(examMasterId, master);
+    await audit(
+      'EXAM_DECISION_SEED',
+      user,
+      'exam_master',
+      examMasterId,
+      `実施科目の決定：調査プラン ${created.total} 件（新規 ${created.added} / 更新 ${created.refreshed}）の計画値をデフォルト値として保存`
+    );
+    return { ...summary, seed: created };
+  },
+
+  /** 実施科目の決定一覧 */
+  async listSubjectDecisions(examMasterId, user) {
+    const master = await ensureMaster(examMasterId);
+    const rows = await examModel.listSubjectDecisions(examMasterId);
+    const summary = await examModel.subjectDecisionSummary(examMasterId, master);
+    const phases = await examModel.getPhases(examMasterId);
+    return { decisions: rows, summary, phases };
+  },
+
+  /** 決定調査開始（教務）→ 教員は担当考査の決定行を編集できる */
+  async startDecisionSurvey(examMasterId, user) {
+    ensureKyomu(user);
+    const master = await ensureMaster(examMasterId);
+    const rows = await examModel.listSubjectDecisions(examMasterId);
+    if (rows.length === 0) {
+      const err = new Error('決定行が作成されていません。先に「計画から決定を作成／更新」してください。');
+      err.statusCode = 400;
+      throw err;
+    }
+    const before = await examModel.getPhases(examMasterId);
+    await examModel.setPhase(examMasterId, 'decision_phase', PHASE.SURVEY, user.id);
+    await logPhase(examMasterId, 'decision_phase', before.decision_phase, PHASE.SURVEY, user.id);
+    await audit('EXAM_DECISION_SURVEY_START', user, 'exam_master', examMasterId, `考査「${master.title}」の実施科目の決定調査を開始`);
+    return examModel.getPhases(examMasterId);
+  },
+
+  /** 決定調査終了（教務） */
+  async endDecisionSurvey(examMasterId, user) {
+    ensureKyomu(user);
+    const master = await ensureMaster(examMasterId);
+    const before = await examModel.getPhases(examMasterId);
+    await examModel.setPhase(examMasterId, 'decision_phase', PHASE.ENDED, user.id);
+    await logPhase(examMasterId, 'decision_phase', before.decision_phase, PHASE.ENDED, user.id);
+    await audit('EXAM_DECISION_SURVEY_END', user, 'exam_master', examMasterId, `考査「${master.title}」の実施科目の決定調査を終了`);
+    return examModel.getPhases(examMasterId);
+  },
+
+  /** 決定行を保存（教務、または決定調査中の出題者本人）。差分 changed_fields は model で自動算出 */
+  async saveDecisionRow(row, user) {
+    const examMasterId = row.exam_master_id;
+    const master = await ensureMaster(examMasterId);
+    const phases = await examModel.getPhases(examMasterId);
+    const kyomu = isKyomu(user);
+    if (!kyomu && phases.decision_phase !== PHASE.SURVEY) {
+      const err = new Error('決定調査終了中は決定行を編集できません。');
+      err.statusCode = 403;
+      throw err;
+    }
+    const existing = row.id ? await examModel.findSubjectDecisionById(row.id) : null;
+    if (!kyomu) {
+      if (!existing || String(existing.setter_teacher_id) !== String(user.id)) {
+        const err = new Error('出題者本人のみ決定行を編集できます。');
+        err.statusCode = 403;
+        throw err;
+      }
+    }
+    const payload = { ...row, exam_master_id: examMasterId, updated_by: user.id };
+    // 教務が編集した行はそのまま確定扱い（決定権限は教務のみ）
+    if (kyomu) payload.decision_status = 'CONFIRMED';
+    await examModel.upsertSubjectDecisionRow(payload);
+    const summary = await examModel.subjectDecisionSummary(examMasterId, master);
+    const changed = row.changed_fields ? String(row.changed_fields) : '';
+    await audit('EXAM_DECISION_ROW', user, 'exam_subject_decision', row.id, `実施科目の決定「${row.subject_name} ${row.grade}年」を保存（${changed ? '変更: ' + changed : '計画値（デフォルト値）と同值'}）`);
+    return summary;
+  },
+
+  /** 決定行を教員が提出（担当教員・決定調査中） */
+  async submitDecisionRow(decisionId, user) {
+    const row = await examModel.findSubjectDecisionById(decisionId);
+    if (!row) {
+      const err = new Error('決定行が見つかりません。');
+      err.statusCode = 404;
+      throw err;
+    }
+    const phases = await examModel.getPhases(row.exam_master_id);
+    const kyomu = isKyomu(user);
+    if (!kyomu && String(row.setter_teacher_id) !== String(user.id)) {
+      const err = new Error('担当教員のみ決定行を提出できます。');
+      err.statusCode = 403;
+      throw err;
+    }
+    if (!kyomu && phases.decision_phase !== PHASE.SURVEY) {
+      const err = new Error('決定調査終了中は提出できません。');
+      err.statusCode = 403;
+      throw err;
+    }
+    const master = await ensureMaster(row.exam_master_id);
+    await examModel.upsertSubjectDecisionRow({
+      ...row,
+      exam_master_id: row.exam_master_id,
+      id: decisionId,
+      submit_status: 'SUBMITTED',
+      surveyed_by: user.id,
+      surveyed_at: new Date().toISOString(),
+      updated_by: user.id,
+    });
+    await audit('EXAM_DECISION_ROW_SUBMIT', user, 'exam_subject_decision', decisionId, `実施科目の決定「${row.subject_name} ${row.grade}年」を提出`);
+    return examModel.subjectDecisionSummary(row.exam_master_id, master);
+  },
+
+  /** 決定行の追加（教務・決定調査中） */
+  async addDecisionRow(input, user) {
+    ensureKyomu(user);
+    const examMasterId = input.exam_master_id;
+    const master = await ensureMaster(examMasterId);
+    const phases = await examModel.getPhases(examMasterId);
+    if (phases.decision_phase === PHASE.ENDED) {
+      const err = new Error('決定調査終了中は追加できません。');
+      err.statusCode = 403;
+      throw err;
+    }
+    const normalized = {
+      ...input,
+      exam_master_id: examMasterId,
+      subject_name: String(input.subject_name || '').trim(),
+      grade: Number(input.grade) || 0,
+      submit_status: 'SUBMITTED',
+      decision_status: 'CONFIRMED',
+      updated_by: user.id,
+    };
+    if (!normalized.subject_name || normalized.grade < 0) {
+      const err = new Error('科目名と学年が必要です。');
+      err.statusCode = 400;
+      throw err;
+    }
+    const row = await examModel.upsertSubjectDecisionRow(normalized);
+    const summary = await examModel.subjectDecisionSummary(examMasterId, master);
+    await audit('EXAM_DECISION_ADD', user, 'exam_subject_decision', row.id, `実施科目の決定「${normalized.subject_name} ${normalized.grade}年」を追加`);
+    return summary;
+  },
+
+  /** 決定行の削除（教務・決定調査中） */
+  async deleteDecisionRow(decisionId, user) {
+    ensureKyomu(user);
+    const row = await examModel.findSubjectDecisionById(decisionId);
+    if (!row) {
+      const err = new Error('決定行が見つかりません。');
+      err.statusCode = 404;
+      throw err;
+    }
+    const master = await ensureMaster(row.exam_master_id);
+    const phases = await examModel.getPhases(row.exam_master_id);
+    if (phases.decision_phase === PHASE.ENDED) {
+      const err = new Error('決定調査終了中は削除できません。');
+      err.statusCode = 403;
+      throw err;
+    }
+    await examModel.deleteSubjectDecision(decisionId);
+    await audit('EXAM_DECISION_DELETE', user, 'exam_subject_decision', decisionId, `実施科目の決定「${row.subject_name} ${row.grade}年」を削除`);
+    return examModel.subjectDecisionSummary(row.exam_master_id, master);
+  },
+
+  /** 決定行をデフォルト値（② の調査値＝計画値）へ戻す（教務・決定調査中） */
+  async resetDecisionToDefault(decisionId, user) {
+    ensureKyomu(user);
+    const row = await examModel.findSubjectDecisionById(decisionId);
+    if (!row) {
+      const err = new Error('決定行が見つかりません。');
+      err.statusCode = 404;
+      throw err;
+    }
+    const master = await ensureMaster(row.exam_master_id);
+    const phases = await examModel.getPhases(row.exam_master_id);
+    if (phases.decision_phase === PHASE.ENDED) {
+      const err = new Error('決定調査終了中はリセットできません。');
+      err.statusCode = 403;
+      throw err;
+    }
+    const defaults = row.defaults || {};
+    const payload = {
+      ...row,
+      ...defaults,
+      exam_master_id: row.exam_master_id,
+      id: decisionId,
+      default_json: row.default_json,
+      changed_fields: [],
+      updated_by: user.id,
+    };
+    await examModel.upsertSubjectDecisionRow(payload);
+    const summary = await examModel.subjectDecisionSummary(row.exam_master_id, master);
+    await audit('EXAM_DECISION_RESET_DEFAULT', user, 'exam_subject_decision', decisionId, `実施科目の決定「${row.subject_name} ${row.grade}年」を計画値（デフォルト値）へ戻す`);
+    return summary;
+  },
+
   // ==========================================================
   // 試験時間割（自動作成・公表）
   // ==========================================================
@@ -759,9 +1019,10 @@ export const examService = {
       throw err;
     }
 
-    const plan = await examModel.listSubjectPlan(examMasterId);
+    // 実施科目の決定があれば決定を優先し、無ければ ② 実施科目調査のプランへフォールバックする
+    const plan = await conductSubjects(examMasterId);
     if (plan.length === 0) {
-      const err = new Error('実施科目が登録されていません。');
+      const err = new Error('実施科目（② の調査・実施科目の決定）が登録されていません。');
       err.statusCode = 400;
       throw err;
     }
@@ -926,7 +1187,7 @@ export const examService = {
       throw err;
     }
 
-    const plan = await examModel.listSubjectPlan(examMasterId);
+    const plan = await conductSubjects(examMasterId);
     const existing = await examModel.listSlots(examMasterId);
     const grades = master.grades.map((g) => Number(g));
     const ctx = scheduleContext(master, existing);
@@ -1078,7 +1339,7 @@ export const examService = {
   async validateTimetableRows(examMasterId, rows, user) {
     const master = await ensureMaster(examMasterId);
     const existing = await examModel.listSlots(examMasterId);
-    const plan = await examModel.listSubjectPlan(examMasterId);
+    const plan = await conductSubjects(examMasterId);
     const ctx = scheduleContext(master, existing);
     const grades = master.grades.map((g) => Number(g));
 
@@ -1190,7 +1451,7 @@ export const examService = {
   async getScheduleCells(examMasterId, user) {
     const master = await ensureMaster(examMasterId);
     const slots = await examModel.listSlots(examMasterId);
-    const plan = await examModel.listSubjectPlan(examMasterId);
+    const plan = await conductSubjects(examMasterId);
     const ctx = scheduleContext(master, slots);
 
     const dates = examDateRange(master.start_date, master.end_date);
@@ -1269,7 +1530,7 @@ export const examService = {
     ensureKyomu(user);
     const master = await ensureMaster(examMasterId);
     const slots = await examModel.listSlots(examMasterId);
-    const plan = await examModel.listSubjectPlan(examMasterId);
+    const plan = await conductSubjects(examMasterId);
     const ctx = scheduleContext(master, slots);
     const grades = master.grades.map((g) => Number(g));
 
@@ -1481,7 +1742,7 @@ export const examService = {
         roomRulesRaw.reserve_prep_before_broadcast !== false,
     };
 
-    const plan = await examModel.listSubjectPlan(examMasterId);
+    const plan = await conductSubjects(examMasterId);
     const unitsById = new Map(planToUnits(plan).map((u) => [u.id, u]));
 
     const gradeStudents = await examModel.getGradeStudents(master.grades.map((g) => Number(g)));
@@ -1908,7 +2169,7 @@ export const examService = {
     const allSlots = await examModel.listSlots(examMasterId);
     const ctx = scheduleContext(master, allSlots);
     const slots = ctx.examSlots;
-    const plan = await examModel.listSubjectPlan(examMasterId);
+    const plan = await conductSubjects(examMasterId);
     const units = planToUnits(plan);
     const unitsById = new Map(units.map((u) => [u.id, u]));
 
@@ -2318,7 +2579,7 @@ export const examService = {
   // ==========================================================
   async setPhase(examMasterId, phaseKey, phaseValue, user) {
     ensureKyomu(user);
-    const keys = ['subject_phase', 'timetable_phase', 'room_phase', 'proctor_phase', 'trip_phase'];
+    const keys = ['subject_phase', 'decision_phase', 'timetable_phase', 'room_phase', 'proctor_phase', 'trip_phase'];
     if (!keys.includes(phaseKey)) {
       const err = new Error('不明なフェーズです。');
       err.statusCode = 400;

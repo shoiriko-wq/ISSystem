@@ -290,6 +290,48 @@ export const examController = {
   getPublishedTrips: wrap(async (req, res) => {
     ok(res, await examService.getPublishedTrips(req.params.id, req.user));
   }),
+
+  // ── 実施科目の決定（② の調査値がデフォルト値、教務が 1 考査分を決定して編集する） ──
+
+  listSubjectDecisions: wrap(async (req, res) => {
+    ok(res, await examService.listSubjectDecisions(req.params.id, req.user));
+  }),
+
+  seedSubjectDecisions: wrap(async (req, res) => {
+    ok(res, await examService.seedSubjectDecisions(req.params.id, req.user), '計画（② の調査データ）から実施科目の決定を作成しました。');
+  }),
+
+  addDecisionRow: wrap(async (req, res) => {
+    ok(res, await examService.addDecisionRow(req.body, req.user), '実施科目の決定行を追加しました。');
+  }),
+
+  saveDecisionRow: wrap(async (req, res) => {
+    ok(res, await examService.saveDecisionRow(req.body, req.user), '実施科目の決定を保存しました。');
+  }),
+
+  submitDecisionRow: wrap(async (req, res) => {
+    ok(res, await examService.submitDecisionRow(req.params.id, req.user), '決定行の提出を完了しました。');
+  }),
+
+  resetDecisionToDefault: wrap(async (req, res) => {
+    ok(res, await examService.resetDecisionToDefault(req.params.id, req.user), '計画値（デフォルト値）へ戻しました。');
+  }),
+
+  deleteDecisionRow: wrap(async (req, res) => {
+    ok(res, await examService.deleteDecisionRow(req.params.id, req.user), '実施科目の決定行を削除しました。');
+  }),
+
+  startDecisionSurvey: wrap(async (req, res) => {
+    ok(res, await examService.startDecisionSurvey(req.params.id, req.user), '実施科目の決定調査を開始しました。');
+  }),
+
+  endDecisionSurvey: wrap(async (req, res) => {
+    ok(res, await examService.endDecisionSurvey(req.params.id, req.user), '実施科目の決定調査を終了しました。');
+  }),
+
+  examSurveyStatus: wrap(async (req, res) => {
+    ok(res, await examService.getExamSurveyStatus(req.user));
+  }),
 };
 
 export default examController;

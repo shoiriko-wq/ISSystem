@@ -48,6 +48,27 @@ await page.evaluate(() => window.handleLoginClick());
 await page.waitForSelector('#app-container:not(.hidden)', { timeout: 10000 });
 await sleep(1200);
 
+// ダッシュボード 4セクションの記事カード: ホバーでリング + 浮き上がり（実アプリ）
+const dashArticleSections = ['#dash-pinned-bulletins', '#dash-news-summary', '#dash-today-facilities', '#dash-today-schedules'];
+const liveArticleHovers = [];
+for (const sel of dashArticleSections) {
+  const el = await page.$(`${sel} > div.rounded-lg`);
+  if (!el) { liveArticleHovers.push({ sel, skip: 'no article items' }); continue; }
+  await page.mouse.move(5, 5);
+  await el.hover();
+  await sleep(400);
+  liveArticleHovers.push(await page.evaluate((node, selName) => {
+    const cs = getComputedStyle(node);
+    return {
+      sel: selName, outline: cs.outlineStyle, transform: cs.transform,
+      cursor: cs.cursor, top: parseFloat(cs.borderTopWidth),
+      borderColor: cs.borderTopColor, shadow: cs.boxShadow.slice(0, 28)
+    };
+  }, el, sel));
+  await page.screenshot({ path: path.join(OUT_DIR, `audit-dashboard-hover-${sel.replace('#', '')}.png`) });
+}
+console.log(`  dashboard article hover (live): ${JSON.stringify(liveArticleHovers)}`);
+
 const mainEl = await page.$('main');
 for (const tab of TABS) {
   const nav = await page.$(`a[data-tab="${tab}"]`);

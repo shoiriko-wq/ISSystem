@@ -173,9 +173,9 @@ function subjectRow(sub, d, kyomu) {
   const picked = (sub.offerings || []).map((o) => o.class_course_id);
   const implemented = (sub.offerings || []).length;
   return `<tr data-kind="subject" data-id="${escapeHTML(String(sub.id ?? ''))}">
+    <td>${sel('subject_id', groupOpts, sub.subject_id ?? '', 'w-24')}</td>
     <td>${inp('name', sub.name, 'w-28', 'placeholder="生物2年3単位"')}</td>
     <td>${inp('short_name', sub.short_name ?? sub.name, 'w-16')}</td>
-    <td>${sel('subject_id', groupOpts, sub.subject_id ?? '', 'w-24')}</td>
     <td>${classCoursePicker(d, picked)}</td>
     <td class="text-[10px] text-muted text-center">${implemented} クラス・コース</td>
     ${kyomu ? `<td>${actionCell(sub.id)}</td>` : '<td class="text-[10px] text-muted">（閲覧のみ）</td>'}
@@ -263,7 +263,7 @@ export function renderBasicTab(container) {
     <div id="exam-basic-panel" class="space-y-4">
       ${tableHtml('class', '1. クラス・コース', ['学年', 'クラス・コース名', '開講科目数', ''], d.classes, (cl) => classRow(cl, d, kyomu), kyomu, d, '「1-1」「1-3理」「1-6看」「1-6保育」のように学校固有の名称を直接入力します（クラスとコースは分離しません）。')}
       ${tableHtml('group', '2. 教科', ['教科名', '使用科目数', ''], d.groups, (g) => groupRow(g, d, kyomu), kyomu, d, '科目で参照する教科を先に登録します。改名は教員の担当教科へ cascade されます。')}
-      ${tableHtml('subject', '3. 科目（教科・科目名・略称）× 実施クラス・コース', ['科目名', '略称', '教科', '実施クラス・コース（クリック / 長押しドラッグで選択）', '実施数', ''], d.subjects, (s) => subjectRow(s, d, kyomu), kyomu, d, '科目名は「公共1年」「生物2年3単位」のように学年・単位数を含め、教科順に並べます。実施しているクラス・コースを選択します（標準試験時間・標準教室の設定はありません）。')}
+      ${tableHtml('subject', '3. 科目（教科・科目名・略称）× 実施クラス・コース', ['教科', '科目名', '略称', '実施クラス・コース（クリック / 長押しドラッグで選択）', '実施数', ''], d.subjects, (s) => subjectRow(s, d, kyomu), kyomu, d, '科目名は「公共1年」「生物2年3単位」のように学年・単位数を含め、教科順に並べます。実施しているクラス・コースを選択します（標準試験時間・標準教室の設定はありません）。')}
       ${tableHtml('room', '4. 教室・座席数', ['教室名', '座席数', '備考', ''], d.rooms, (r) => roomRow(r, kyomu), kyomu, d, '教室名と座席数のみ登録します（種別・使用学年はありません）。')}
     </div>
   `;

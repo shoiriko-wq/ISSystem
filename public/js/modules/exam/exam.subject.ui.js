@@ -1,8 +1,10 @@
 /**
- * ISSystem 定期考査 実施科目の決定タブ（出題者・試験時間・教室）
+ * ISSystem 定期考査 実施科目調査（出題者・試験時間・教室）の行部品とグリッド
  * 調査開始 → 実施科目・出題者の表が全員に表示され編集可能（教員は自分の出題コマのみ）
  * 調査終了 → 教務権限者のみ以後も編集可能
  * 表示絞り込み（教科・学年）で表示件数を減らして編集できる
+ * ※ グリッド（renderSurveySection / bindSurveySection）は年間考査計画タブの ② に埋め込む
+ * ※ 行部品 subjectRowHtml と payloadFromRow は「実施科目の決定」タブでも使う
  */
 
 import {
@@ -20,11 +22,17 @@ import { state } from '../../state.js';
 /** 教職員プール（出題者セレクト用・bind 時にキャッシュ） */
 let staffPool = null;
 
-async function ensureStaffPool() {
+export async function ensureStaffPool() {
   if (staffPool && staffPool.length) return staffPool;
   const res = await examApi.get('/staff/pool');
   staffPool = res.staff || [];
   return staffPool;
+}
+
+/** 教職員名（決定タブでデフォルト値との差分表示に使う、取得後はキャッシュから引く） */
+export function staffNameOf(id) {
+  const s = (staffPool || []).find((x) => String(x.id) === String(id));
+  return s ? String(s.name) : null;
 }
 
 const FLAG_ITEMS = [
@@ -183,7 +191,7 @@ function subjectSelectHtml(p, can) {
 }
 
 /** 科目・学年の選択時に基本情報の開講設定を反映する（実施クラス・教室・試験時間） */
-function applySubjectDefaults(p) {
+export function applySubjectDefaults(p) {
   const s = subjectIndex().get(String(p.subject_name));
   if (!s) return;
   p.subject_id = s.subject_id || s.id || null;
@@ -201,7 +209,7 @@ function applySubjectDefaults(p) {
   p.duration_slots = Math.max(1, Math.ceil(Number(p.duration_minutes) / 50));
 }
 
-function subjectRowHtml(p, kyomu) {
+export function subjectRowHtml(p, kyomu) {
   const can = rowEditable(p, kyomu);
   const dis = can ? '' : 'disabled';
   const flags = FLAG_ITEMS.map(
@@ -294,7 +302,45 @@ function surveyHeadHtml(master, phases, kyomu) {
   );
 }
 
-export function renderSubjectTab(container) {
+/** 行からペイロードを収集する（baseRows: 基準行配列、調査プランにも決定行にも使う） */
+export function payloadFromRow(tr, baseRows) {
+  const orig = (baseRows || []).find((r) => String(r.id) === String(tr.dataset.rowId)) || {};
+  const out = { ...orig };
+  tr.querySelectorAll('[data-f]').forEach((el) => {
+    const key = el.dataset.f;
+    out[key] = el.type === 'checkbox' ? el.checked : el.value;
+  });
+  // 実施クラス・コースはチップ選択から収集する
+  out.class_ids = [...tr.querySelectorAll('[data-cc]')].filter((el) => el.dataset.ccOn === '1').map((el) => String(el.dataset.cc));
+  out.subject_name = String(out.subject_name || '').trim();
+  out.subject_id = out.subject_id || null;
+  // 基本情報カタログの科目情報（subject_id・略称）を補う
+  const cat = subjectIndex().get(String(out.subject_name));
+  if (cat) {
+    out.subject_id = out.subject_id || cat.subject_id || cat.id || null;
+    out.subject_short = cat.short_name || out.subject_short;
+  }
+  out.grade = Number(out.grade) || 0;
+  out.duration_minutes = Number(out.duration_minutes) || 50;
+  out.duration_slots = Number(out.duration_slots) || Math.max(1, Math.ceil(out.duration_minutes / (Number(examStore.board?.master?.default_duration) || 50)));
+  out.fixed_slot = out.fixed_slot ? Number(out.fixed_slot) : null;
+  out.student_count = out.student_count ? Number(out.student_count) : null;
+  out.setter_teacher_id = out.setter_teacher_id || null;
+  out.patrol_teacher_id = out.patrol_teacher_id || null;
+  out.request_note = String(out.request_note || '').trim() || null;
+  out.room_id = out.room_id || null;
+  out.room_name = out.room_id ? (examStore.board?.rooms || []).concat(examStore.board?.basic_info?.rooms || []).find((r) => String(r.id) === String(out.room_id))?.name || out.room_name || null : null;
+  out.courses = out.courses || [];
+  out.class_ids = out.class_ids.length ? out.class_ids : (orig.class_ids || []);
+  out.stream = out.stream || 'OTHER';
+  out.scope = out.scope || 'GRADE';
+  out.submit_status = out.submit_status || 'PENDING';
+  if (tr.dataset.rowId) out.id = tr.dataset.rowId;
+  return out;
+}
+
+/** 実施科目調査グリッド（② のカード下に埋め込む。調査開始／終了ボタンは ② カード側にある） */
+export function renderSurveySection(container) {
   const board = examStore.board;
   const kyomu = isKyomuUser();
   if (!board) {
@@ -306,9 +352,14 @@ export function renderSubjectTab(container) {
     .sort((a, b) => Number(a.grade) - Number(b.grade) || String(a.subject_name).localeCompare(String(b.subject_name)));
   const rows = plan.map((p) => subjectRowHtml(p, kyomu)).join('');
   container.innerHTML = `
-    ${surveyHeadHtml(board.master, board.phases, kyomu)}
     <div class="card p-4 space-y-2">
       ${filterBarHtml(plan)}
+      <div class="flex flex-wrap items-center gap-2 text-[10px] text-muted">
+        <button id="exam-sub-add" class="btn-secondary py-1 px-2 text-[10px] flex items-center gap-1" ${kyomu ? '' : 'disabled'}>
+          <i data-lucide="plus" class="w-3.5 h-3.5"></i> 行を追加
+        </button>
+        <span>行追加後は「保存」→「提出」で登録します（教務は常時編集可、教員は調査期間中の自分の出題コマのみ編集可）</span>
+      </div>
       <div class="overflow-x-auto">
         <table class="w-full text-left border-collapse min-w-[1200px]">
           <thead><tr>
@@ -333,51 +384,32 @@ export function renderSubjectTab(container) {
   refreshLucideIcons();
 }
 
+/** 実施科目調査タブ（②）: ヘッダカード + グリッド（グリッドは年間考査計画タブの ② にも埋め込む） */
+export function renderSubjectTab(container) {
+  const board = examStore.board;
+  const kyomu = isKyomuUser();
+  if (!board) {
+    container.innerHTML = `<div class="card p-6 text-center text-xs text-muted">考査データを読み込み中…</div>`;
+    return;
+  }
+  container.innerHTML = `${surveyHeadHtml(board.master, board.phases, kyomu)}<div id="exam-survey-grid"></div>`;
+  renderSurveySection(container.querySelector('#exam-survey-grid'));
+}
 
-export function bindSubjectTab(container, reload) {
-  if (container.dataset.bound === 'subject') return;
-  container.dataset.bound = 'subject';
+
+
+/** グリッドのバインド（renderFn はグリッド描画関数、plan タブ埋め込み時は renderSurveySection） */
+export function bindSurveySection(container, reload, renderFn = renderSubjectTab) {
+  if (!container) return;
+  if (container.dataset.bound === 'survey') return;
+  container.dataset.bound = 'survey';
 
   // 教員プールを取得して出題者セレクトを反映（イベント委譲のため再描画安全）
   ensureStaffPool()
-    .then(() => renderSubjectTab(container))
+    .then(() => renderFn(container))
     .catch(() => {});
 
-  const payloadFromRow = (tr) => {
-    const orig = (examStore.board.subject_plan || []).find((r) => String(r.id) === String(tr.dataset.rowId)) || {};
-    const out = { ...orig };
-    tr.querySelectorAll('[data-f]').forEach((el) => {
-      const key = el.dataset.f;
-      out[key] = el.type === 'checkbox' ? el.checked : el.value;
-    });
-    // 実施クラス・コースはチップ選択から収集する
-    out.class_ids = [...tr.querySelectorAll('[data-cc]')].filter((el) => el.dataset.ccOn === '1').map((el) => String(el.dataset.cc));
-    out.subject_name = String(out.subject_name || '').trim();
-    out.subject_id = out.subject_id || null;
-    // 基本情報カタログの科目情報（subject_id・略称）を補う
-    const cat = subjectIndex().get(String(out.subject_name));
-    if (cat) {
-      out.subject_id = out.subject_id || cat.subject_id || cat.id || null;
-      out.subject_short = cat.short_name || out.subject_short;
-    }
-    out.grade = Number(out.grade) || 0;
-    out.duration_minutes = Number(out.duration_minutes) || 50;
-    out.duration_slots = Number(out.duration_slots) || Math.max(1, Math.ceil(out.duration_minutes / (Number(examStore.board?.master?.default_duration) || 50)));
-    out.fixed_slot = out.fixed_slot ? Number(out.fixed_slot) : null;
-    out.student_count = out.student_count ? Number(out.student_count) : null;
-    out.setter_teacher_id = out.setter_teacher_id || null;
-    out.patrol_teacher_id = out.patrol_teacher_id || null;
-    out.request_note = String(out.request_note || '').trim() || null;
-    out.room_id = out.room_id || null;
-    out.room_name = out.room_id ? (examStore.board?.rooms || []).concat(examStore.board?.basic_info?.rooms || []).find((r) => String(r.id) === String(out.room_id))?.name || out.room_name || null : null;
-    out.courses = out.courses || [];
-    out.class_ids = out.class_ids.length ? out.class_ids : (orig.class_ids || []);
-    out.stream = out.stream || 'OTHER';
-    out.scope = out.scope || 'GRADE';
-    out.submit_status = out.submit_status || 'PENDING';
-    if (tr.dataset.rowId) out.id = tr.dataset.rowId;
-    return out;
-  };
+  const readRow = (tr) => payloadFromRow(tr, examStore.board.subject_plan || []);
 
   container.addEventListener('click', async (e) => {
     // 表示絞り込みの解除（全件表示）
@@ -475,7 +507,7 @@ export function bindSubjectTab(container, reload) {
       return;
     }
 
-    const payload = payloadFromRow(tr);
+    const payload = readRow(tr);
     if (!payload.subject_name) {
       showToast('実施科目名を入力してください。', 'warning');
       return;
@@ -520,11 +552,25 @@ export function bindSubjectTab(container, reload) {
     const tr = el.closest('tr[data-row-id]');
     if (!tr) return;
     const orig = (examStore.board.subject_plan || []).find((r) => String(r.id) === String(tr.dataset.rowId)) || {};
-    const draft = { ...orig, ...payloadFromRow(tr) };
+    const draft = { ...orig, ...readRow(tr) };
     applySubjectDefaults(draft);
     tr.innerHTML = subjectRowHtml(draft, isKyomuUser()).replace(/^<tr[^>]*>/, '');
   });
 }
 
-export default { renderSubjectTab, bindSubjectTab };
+/** 実施科目調査タブのバインド（タブシェル用、グリッドバインドの薄い wrapper） */
+export function bindSubjectTab(container, reload) {
+  bindSurveySection(container, reload, renderSubjectTab);
+}
+
+export default {
+  renderSubjectTab,
+  bindSubjectTab,
+  renderSurveySection,
+  bindSurveySection,
+  subjectRowHtml,
+  payloadFromRow,
+  ensureStaffPool,
+  staffNameOf,
+};
 

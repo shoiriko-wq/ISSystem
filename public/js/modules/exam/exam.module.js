@@ -12,7 +12,7 @@ import { socketClient } from '../../socket.js';
 import { examStore, examApi, loadBoard, resolveActiveExamId, phaseBadge, isKyomuUser, syncRoleKyomu } from './exam.shared.js';
 import { renderPlanTab, bindPlanTab } from './exam.plan.ui.js';
 import { renderBasicTab, bindBasicTab } from './exam.basic.ui.js';
-import { renderSubjectTab, bindSubjectTab } from './exam.subject.ui.js';
+import { renderDecisionTab, bindDecisionTab } from './exam.decision.ui.js';
 import { renderTimetableTab, bindTimetableTab, resetTimetableState } from './exam.timetable.ui.js';
 import { renderRoomTab, bindRoomTab } from './exam.room.ui.js';
 import { renderTripTab, bindTripTab } from './exam.trip.ui.js';
@@ -22,7 +22,7 @@ import { renderPublishedTab, bindPublishedTab } from './exam.view.ui.js';
 const SUB_TABS = [
   { id: 'basic', label: '基本情報の登録', icon: 'library' },
   { id: 'plan', label: '年間考査計画', icon: 'calendar-range' },
-  { id: 'subject', label: '実施科目調査', icon: 'list-checks', openToAll: true },
+  { id: 'decision', label: '実施科目の決定', icon: 'stamp', openToAll: true },
   { id: 'timetable', label: '時間割の作成', icon: 'grid-3x3' },
   { id: 'room', label: '教室割の作成', icon: 'layout-grid' },
   { id: 'trip', label: '出張等の登録', icon: 'plane' },
@@ -50,6 +50,7 @@ function ensureSubTab() {
 const PHASE_KEYS = [
   ['plan_phase', '計画'],
   ['subject_phase', '実施科目'],
+  ['decision_phase', '決定'],
   ['timetable_phase', '時間割'],
   ['room_phase', '教室割'],
   ['trip_phase', '出張等'],
@@ -59,7 +60,7 @@ const PHASE_KEYS = [
 const RENDERERS = {
   plan: { render: renderPlanTab, bind: bindPlanTab },
   basic: { render: renderBasicTab, bind: bindBasicTab },
-  subject: { render: renderSubjectTab, bind: bindSubjectTab },
+  decision: { render: renderDecisionTab, bind: bindDecisionTab },
   timetable: { render: renderTimetableTab, bind: bindTimetableTab },
   room: { render: renderRoomTab, bind: bindRoomTab },
   trip: { render: renderTripTab, bind: bindTripTab },

@@ -138,6 +138,12 @@
                 box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
+  /* 正方形タイルとホバーリングの余白を確保するためサイドバー内側の左右余白を縮める
+     （#app-body 付きで readability.css の padding !important に勝つ） */
+  #app-body .app-sidebar {
+    padding: 0.5rem 0.25rem !important;
+  }
+
   /* ホバリングでメニューがスライドしてせり出し、文字も表示 */
   .app-sidebar:hover,
   .app-sidebar:focus-within {
@@ -147,10 +153,32 @@
 
   /* せり出し前はアイコンのみ：ラベルをレイアウトから外してアイコンを中央に置く
      （ラベルは opacity:0 で幅を残すと内容が幅を奪いアイコンが見切れるため） */
-  .app-sidebar .nav-item {
-    padding: 0.55rem 0.5rem !important;
+  /* 選択を意味する背景（アクティブの塗り）は画面下バーと同じ正方形タイル。
+     横幅 3.6rem では項目が約28pxまで縮むため、固定 2.2rem 正方形（余白0・中央配置）で
+     正方形を保つ。せり出し時は全幅の行に戻す。
+     readability.css の .app-sidebar nav / .nav-item padding !important に勝つよう
+     #app-body と nav を含む。 */
+  #app-body .app-sidebar nav {
+    padding: 0.5rem 0.35rem !important;
+  }
+
+  #app-body .app-sidebar nav .nav-item {
+    width: min(2.2rem, 100%);
+    height: auto !important;
+    aspect-ratio: 1;
+    padding: 0 !important;
+    margin-inline: auto;
+    align-items: center !important;
     justify-content: center !important;
     white-space: nowrap;
+    transition: width 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+                height 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+                padding 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+                background-color var(--duration-fast) var(--ease-spring),
+                border-color var(--duration-fast) var(--ease-spring),
+                box-shadow var(--duration-fast) var(--ease-spring),
+                transform var(--duration-fast) var(--ease-spring),
+                color var(--duration-fast) var(--ease-spring);
   }
 
   .app-sidebar .nav-item > div {
@@ -162,8 +190,18 @@
   }
 
   /* ホバリング/フォーカスでせり出し：アイコン左寄せ + ラベルをレイアウトに戻す */
-  .app-sidebar:hover .nav-item,
-  .app-sidebar:focus-within .nav-item {
+  #app-body .app-sidebar:hover nav,
+  #app-body .app-sidebar:focus-within nav {
+    padding: 0.55rem 0.75rem !important;
+  }
+
+  #app-body .app-sidebar:hover nav .nav-item,
+  #app-body .app-sidebar:focus-within nav .nav-item {
+    width: 100% !important;
+    height: auto !important;
+    aspect-ratio: auto !important;
+    margin-inline: 0 !important;
+    padding: 0.55rem 0.5rem !important;
     justify-content: flex-start !important;
   }
 
@@ -219,12 +257,19 @@
     gap: 0.15rem;
   }
 
-  .app-sidebar .nav-item {
+  /* 選択背景が横長/縦長になりすぎないよう正方形タイルにする
+     （幅は枠の11.5%が最大、最大 2.8rem。狭い画面では幅と高さ両方が縮む）
+     #app-body 付きで readability.css の padding !important に勝つ */
+  #app-body .app-sidebar .nav-item {
     flex-direction: column;
     justify-content: center !important;
-    padding: 0.35rem 0.35rem !important;
+    align-items: center;
+    padding: 0 !important;
     gap: 0.15rem;
     white-space: nowrap;
+    width: min(2.8rem, 11.5%);
+    height: auto !important;
+    aspect-ratio: 1;
   }
 
   /* 文字は隠す。ホバリングでも表示しない */

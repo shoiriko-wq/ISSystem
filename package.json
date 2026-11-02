@@ -16,7 +16,8 @@
     "test:ui:frames": "node scripts/test-frame-rules.mjs",
     "test:ui:scan": "node scripts/scan-frames.mjs",
     "test:ui:audit": "node scripts/test-ui-audit.mjs",
-    "test:ui:all": "npm run test:ui:modal && npm run test:ui:frames && npm run test:ui:audit && npm run test:ui:scan",
+    "test:ui:nav": "node scripts/check-nav-shapes.mjs",
+    "test:ui:all": "npm run test:ui:modal && npm run test:ui:frames && npm run test:ui:audit && npm run test:ui:scan && npm run test:ui:nav",
     "db:tables": "node scripts/list-tables.js"
   },
   "keywords": [

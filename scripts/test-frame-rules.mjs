@@ -11,6 +11,8 @@
  *      (各リスト直下の項目) の枠線は 2px で維持する。セクション群を囲むグループ枠
  *      (.dashboard-grid) は描かない。
  *  R4. クリックできるカード (.card--framed) は枠線＋ホバーリングを維持する。
+ *      ダッシュボード 4セクションの記事カード (各リスト直下の項目) も同一の
+ *      ホバーリング＋浮き上がりを持つ（セクションカード自体は面なので反応しない）。
  *  R5. サイドバーのホバーリング（outline + offset + スライド）がスクロールコンテナの端で
  *      見切れない余白がある。
  *  R6. 狭幅モード（アイコンのみ）でアイコンがサイドバー箱から見切れない。
@@ -208,6 +210,32 @@ check('interactive card keeps frame + hover ring feedback',
   px(framedHover.top) > 0 && framedHover.outline === 'solid',
   `border=${framedHover.top} outline=${framedHover.outline} cursor=${framedHover.cursor}`);
 
+// ---- R4: ダッシュボード 4セクションの記事カードもトップ3記事カードと同じホバーアニメーション ----
+const dashArticleSelectors = ['#dash-pinned-bulletins', '#dash-news-summary', '#dash-today-facilities', '#dash-today-schedules'];
+const dashArticleHovers = [];
+for (const sel of dashArticleSelectors) {
+  const el = await page.$(`${sel} > div.rounded-lg`);
+  if (!el) { dashArticleHovers.push({ sel, missing: true }); continue; }
+  await page.mouse.move(5, 5);
+  await el.hover();
+  await new Promise((r) => setTimeout(r, 400));
+  dashArticleHovers.push(await page.evaluate((node, selName) => {
+    const cs = getComputedStyle(node);
+    return {
+      sel: selName, outline: cs.outlineStyle, transform: cs.transform,
+      cursor: cs.cursor, top: parseFloat(cs.borderTopWidth),
+      borderColor: cs.borderTopColor
+    };
+  }, el, sel));
+}
+const liftedTransform = (t) => /^matrix\(1, 0, 0, 1, 0, -\d+(\.\d+)?\)$/.test(t);
+check('article cards in the 4 dashboard sections lift + draw a hover ring like the top article cards',
+  dashArticleHovers.length === 4 && dashArticleHovers.every((r) => !r.missing
+    && r.outline === 'solid' && liftedTransform(r.transform) && r.cursor === 'pointer' && r.top === FRAME_W),
+  dashArticleHovers.map((r) => `${r.sel} outline=${r.outline} transform=${r.transform} cursor=${r.cursor} border=${r.top}`).join(' | '));
+
+await page.mouse.move(5, 5);
+
 // ---- R5: サイドバーのホバーリングがスクロールコンテナの端で見切れない ----
 const sidebar = await page.evaluate(() => {
   const nav = document.querySelector('.app-sidebar nav');
@@ -267,6 +295,29 @@ check('collapsed sidebar icons stay fully inside the sidebar box (no clipping)',
   iconFit.length >= 3 && iconFit.every((c) => c.clipLeft <= 0 && c.clipRight <= 0 && !c.labelShown),
   iconFit.map((c) => `${c.title}=${c.left}-${c.right} clipL=${c.clipLeft} clipR=${c.clipRight}`).join(' '));
 
+// ---- R6b: アイコンのみモードの選択背景（アクティブの塗り）は正方形タイル ----
+const squareTiles = await narrow.evaluate(() => {
+  const sb = document.querySelector('.app-sidebar');
+  const cs = getComputedStyle(sb);
+  const sr = sb.getBoundingClientRect();
+  const contentLeft = sr.left + parseFloat(cs.borderLeftWidth);
+  const contentRight = sr.right - parseFloat(cs.borderRightWidth);
+  return [...document.querySelectorAll('.app-sidebar .nav-item')].map((n) => {
+    const r = n.getBoundingClientRect();
+    const icon = n.querySelector('svg.lucide, i[data-lucide], i');
+    const ir = icon.getBoundingClientRect();
+    return {
+      title: (n.getAttribute('title') || '').slice(0, 6),
+      w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10,
+      offset: Math.round(((ir.left + ir.right) / 2 - (r.left + r.right) / 2) * 10) / 10,
+      inside: r.left >= contentLeft - 1 && r.right <= contentRight + 1
+    };
+  });
+});
+check('icon-only sidebar selection tiles are square and centered (not elongated)',
+  squareTiles.length >= 3 && squareTiles.every((t) => Math.abs(t.w - t.h) <= 1.5 && Math.abs(t.offset) <= 1.5 && t.inside),
+  squareTiles.map((t) => `${t.title}=${t.w}x${t.h} offset=${t.offset} inside=${t.inside}`).join(' '));
+
 await narrow.hover('.app-sidebar');
 await new Promise((r) => setTimeout(r, 400));
 const expanded = await narrow.evaluate(() => {
@@ -294,6 +345,30 @@ check('expanded sidebar reveals labels with icons and labels kept inside the box
 fs.mkdirSync(OUT_DIR, { recursive: true });
 await narrow.screenshot({ path: path.join(OUT_DIR, 'frame-rules-narrow-sidebar.png'), clip: { x: 0, y: 0, width: 220, height: 430 } });
 await narrow.screenshot({ path: path.join(OUT_DIR, 'frame-rules-narrow-sidebar-hover.png'), clip: { x: 0, y: 0, width: 220, height: 430 } });
+
+// ---- R6c: 狭幅（画面下バー）の選択背景も正方形タイル ----
+const mobile = await browser.newPage();
+await mobile.setViewport({ width: 390, height: 800 });
+await mobile.goto(`http://127.0.0.1:${port}/scripts/fixtures/dashboard-frames-fixture.html`, { waitUntil: 'networkidle0' });
+await mobile.waitForFunction(() => window.TestApi && window.TestApi.ready, { timeout: 15000 });
+const mobileTiles = await mobile.evaluate(() => {
+  return [...document.querySelectorAll('.app-sidebar .nav-item')].map((n) => {
+    const r = n.getBoundingClientRect();
+    const icon = n.querySelector('svg.lucide, i[data-lucide], i');
+    const ir = icon.getBoundingClientRect();
+    return {
+      title: (n.getAttribute('title') || '').slice(0, 6),
+      w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10,
+      iconInside: ir.left >= r.left - 1 && ir.right <= r.right + 1,
+      labelShown: getComputedStyle(n.querySelector('.nav-label')).display !== 'none'
+    };
+  });
+});
+check('bottom bar selection tiles stay square with labels hidden on narrow screens',
+  mobileTiles.length >= 3 && mobileTiles.every((t) => Math.abs(t.w - t.h) <= 1.5 && t.iconInside && !t.labelShown),
+  mobileTiles.map((t) => `${t.title}=${t.w}x${t.h} iconInside=${t.iconInside}`).join(' '));
+await mobile.screenshot({ path: path.join(OUT_DIR, 'frame-rules-bottom-bar.png'), clip: { x: 0, y: 730, width: 390, height: 70 } });
+await mobile.close();
 
 // ---- R3: モダルの枠線は維持 ----
 check('modal-card keeps its frame', modal > 0, `width=${modal}`);

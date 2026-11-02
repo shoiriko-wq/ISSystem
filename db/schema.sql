@@ -1003,4 +1003,57 @@ ON CONFLICT (id) DO NOTHING;
 
 UPDATE curriculum_subjects SET short_name = COALESCE(short_name, name);
 
+-- -------------------------------------------------------------
+-- 20. 実施科目の決定 (exam_subject_decisions)
+-- 実施科目調査 (exam_subject_plan) とは完全に別データとして保持する。
+-- 決定行は調査行を「デフォルト値」として複製し、default_json に調査時の値を保存する。
+-- 決定行を編集した後も default_json から「デフォルト値（計画値）」を表示できる。
+-- 時間割・教室割・監督割・公表ビューは決定データを正式データとして使用する
+-- （決定が存在しない場合は調査プランへフォールバックする）。
+-- id / source_plan_id は調査行の ID を共有する（時間割スロットの unit_id 参照を維持する）。
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS exam_subject_decisions (
+  id TEXT PRIMARY KEY,
+  exam_master_id TEXT NOT NULL,
+  source_plan_id TEXT,
+  subject_name TEXT NOT NULL,
+  subject_short TEXT,
+  subject_id TEXT,
+  grade INTEGER NOT NULL,
+  stream TEXT NOT NULL DEFAULT 'OTHER',
+  scope TEXT NOT NULL DEFAULT 'GRADE',
+  setter_teacher_id TEXT,
+  patrol_teacher_id TEXT,
+  duration_slots INTEGER NOT NULL DEFAULT 1,
+  duration_minutes INTEGER NOT NULL DEFAULT 50,
+  fixed_slot INTEGER,
+  shared_slot BOOLEAN NOT NULL DEFAULT false,
+  broadcast_slot BOOLEAN NOT NULL DEFAULT false,
+  solo_subject BOOLEAN NOT NULL DEFAULT false,
+  courses TEXT NOT NULL DEFAULT '[]',
+  class_ids TEXT NOT NULL DEFAULT '[]',
+  room_id TEXT,
+  room_name TEXT,
+  request_note TEXT,
+  student_count INTEGER,
+  notes TEXT,
+  submit_status TEXT NOT NULL DEFAULT 'PENDING',
+  decision_status TEXT NOT NULL DEFAULT 'PENDING',
+  default_json TEXT NOT NULL DEFAULT '{}',
+  changed_fields TEXT NOT NULL DEFAULT '[]',
+  surveyed_by TEXT,
+  surveyed_at TIMESTAMP,
+  confirmed_by TEXT,
+  confirmed_at TIMESTAMP,
+  updated_by TEXT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (exam_master_id) REFERENCES exam_masters(id) ON DELETE CASCADE,
+  UNIQUE (exam_master_id, subject_name, grade)
+);
+CREATE INDEX IF NOT EXISTS idx_subject_decisions_master ON exam_subject_decisions(exam_master_id);
+CREATE INDEX IF NOT EXISTS idx_subject_decisions_source ON exam_subject_decisions(source_plan_id);
+
+-- 実施科目の決定フェーズ（DRAFT → SURVEY(教員入力) → DECIDED(教務が確定) → ENDED）
+ALTER TABLE exam_phases ADD COLUMN IF NOT EXISTS decision_phase TEXT NOT NULL DEFAULT 'DRAFT';
+
 

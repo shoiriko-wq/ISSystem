@@ -192,6 +192,18 @@ router.post('/exam/:id/phase', authenticateToken, safe(examController?.setPhase)
 
 // 実施科目・出題者登録／調査
 router.get('/exam/:id/subjects', authenticateToken, safe(examController?.getSubjects));
+// 実施科目の決定（② の調査値がデフォルト値、教務が 1 考査分を決定して編集する）
+router.get('/exam/:id/decisions', authenticateToken, safe(examController?.listSubjectDecisions));
+router.post('/exam/:id/decisions/seed', authenticateToken, requireKyomuRole, safe(examController?.seedSubjectDecisions));
+router.post('/exam/:id/decisions', authenticateToken, requireKyomuRole, safe(examController?.addDecisionRow));
+router.post('/exam/:id/decision-rows', authenticateToken, safe(examController?.saveDecisionRow));
+router.post('/exam/:id/decisions/survey/start', authenticateToken, requireKyomuRole, safe(examController?.startDecisionSurvey));
+router.post('/exam/:id/decisions/survey/end', authenticateToken, requireKyomuRole, safe(examController?.endDecisionSurvey));
+router.post('/exam/:id/decisions/decide', authenticateToken, requireKyomuRole, safe(examController?.decideSubjects));
+router.post('/exam/decision/:id/submit', authenticateToken, safe(examController?.submitDecisionRow));
+router.post('/exam/decision/:id/reset-default', authenticateToken, requireKyomuRole, safe(examController?.resetDecisionToDefault));
+router.delete('/exam/decision/:id', authenticateToken, requireKyomuRole, safe(examController?.deleteDecisionRow));
+router.get('/exam-survey-status', authenticateToken, safe(examController?.examSurveyStatus));
 router.post('/exam/:id/subject-survey/start', authenticateToken, safe(examController?.startSubjectSurvey));
 router.post('/exam/:id/subject-row', authenticateToken, safe(examController?.saveSubjectRow));
 router.post('/exam/:id/subject-row/:rowId/submit', authenticateToken, safe(examController?.submitSubjectRow));
