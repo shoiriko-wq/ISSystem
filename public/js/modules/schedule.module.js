@@ -236,12 +236,7 @@ function renderScheduleView() {
   container.innerHTML = `
     <div class="card p-3 space-y-3">
       <div class="flex flex-wrap items-center gap-2">
-        <div class="flex items-center gap-1">
-          <button type="button" id="sched-prev-month" class="btn-secondary w-8 h-8 rounded-lg flex items-center justify-center" aria-label="前月"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
-          <div id="sched-month-label" class="text-sm font-bold text-main min-w-[88px] text-center"></div>
-          <button type="button" id="sched-next-month" class="btn-secondary w-8 h-8 rounded-lg flex items-center justify-center" aria-label="次月"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
-          <button type="button" id="sched-goto-today" class="btn-secondary px-2 py-1.5 text-xs rounded-lg">今月</button>
-        </div>
+        <button type="button" id="sched-goto-today" class="btn-secondary px-2.5 py-1.5 text-xs rounded-lg" title="現在月に戻る">今月</button>
         <div class="flex-1"></div>
         <div class="flex rounded-lg border border-main overflow-hidden bg-surface" role="group" aria-label="表示モード">
           <button type="button" id="sched-mode-calendar" data-mode="calendar" class="sched-mode-btn px-2.5 py-1.5 text-xs font-semibold flex items-center gap-1">
@@ -262,7 +257,6 @@ function renderScheduleView() {
     </div>
   `;
 
-  document.getElementById('sched-month-label').textContent = `${y}年${m + 1}月`;
   renderFilterChips();
 
   if (viewMode === 'calendar') renderCalendarView(y, m, list);
@@ -347,6 +341,18 @@ function renderFilterChips() {
   }
 }
 
+/** 月ナビ行（‹ [年月] ›）。カレンダー / 1日一覧の最上段に置く。
+ *  ‹ › は同じ 32px ボタンなので、flex-1 text-center の年月は日のグリッドの中心と中心が揃う
+ *  （年月はグリッドの中央直上にあるべき、というユーザビリティ上の指摘に対応）。
+ *  見出し + aria-live で月替えをスクリーンリーダーが読み上げる。 */
+function monthNavHtml(y, m) {
+  return `<div class="flex items-center gap-2 mb-2">
+    <button type="button" id="sched-prev-month" class="btn-secondary w-8 h-8 rounded-lg flex items-center justify-center" aria-label="前月"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
+    <h3 id="sched-month-label" class="flex-1 text-center text-sm font-bold text-main" aria-live="polite">${y}年${m + 1}月</h3>
+    <button type="button" id="sched-next-month" class="btn-secondary w-8 h-8 rounded-lg flex items-center justify-center" aria-label="次月"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
+  </div>`;
+}
+
 /** カレンダー形式（月グリッド・枠内に行事名チップ） */
 function renderCalendarView(y, m, list) {
   const area = document.getElementById('sched-view-area');
@@ -373,6 +379,7 @@ function renderCalendarView(y, m, list) {
   }
 
   area.innerHTML = `
+    ${monthNavHtml(y, m)}
     <div class="grid grid-cols-7 gap-1 mb-1 text-center text-[10px] font-bold">
       ${WEEKDAYS.map((w, i) => `<div class="${i >= 5 ? 'text-danger-strong' : 'text-muted'}">${w}</div>`).join('')}
     </div>
@@ -432,12 +439,12 @@ function renderListView(y, m, list) {
     `);
   }
 
-  area.innerHTML = rows.length
+  area.innerHTML = `${monthNavHtml(y, m)}${rows.length
     ? `<div id="sched-list-container" class="space-y-1.5">${rows.join('')}</div>`
     : `<div class="p-6 text-center text-xs text-muted">
          <i data-lucide="calendar-off" class="w-8 h-8 mx-auto mb-2 opacity-60"></i>
          <div>この月に表示できる行事がありません。カテゴリ選択を見直してください。</div>
-       </div>`;
+       </div>`}`;
   bindViewEvents(area);
 }
 
