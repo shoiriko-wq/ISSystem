@@ -6,7 +6,7 @@ import { WS_BASE_URL, APP_CONFIG } from './config.js';
 import { state, setUserSession } from './state.js';
 import { showToast, openModal } from './ui-helpers.js';
 import { switchTab } from './main.js';
-import { loadReservations } from './modules/facility.module.js';
+import { loadReservations, loadFacilities, refreshFacilityMasterUI } from './modules/facility.module.js';
 import { loadSchedules } from './modules/schedule.module.js';
 import { loadMessages } from './modules/chat.module.js';
 import { loadSeatingData } from './modules/seating.module.js';
@@ -231,7 +231,7 @@ export const socketClient = {
     });
 
     // 6. 施設・備品予約のリアルタイム変更通知
-    socket.on('facility:reservation_changed', (data) => {
+    socket.on('facility:reservation_changed', async (data) => {
       const currentUserId = state.currentUser?.id || state.currentUser?._id;
       const isSelf = currentUserId && data.userId && String(currentUserId) === String(data.userId);
       const name = data.userName || '教員';
@@ -250,8 +250,38 @@ export const socketClient = {
       }
 
       if (state.currentTab === 'facility' && typeof loadReservations === 'function') {
-        loadReservations();
+        await loadReservations();
+        // 予約の作成・キャンセルでマスタ一覧の有効予約件数も更新
+        if (typeof refreshFacilityMasterUI === 'function') refreshFacilityMasterUI();
       }
+    });
+
+    // 6.1 施設・備品マスタの追加・改名・削除通知 (教務部の操作を全クライアントへ反映)
+    socket.on('facility:master_changed', async (data) => {
+      const currentUserId = state.currentUser?.id || state.currentUser?._id;
+      const isSelf = currentUserId && data.userId && String(currentUserId) === String(data.userId);
+      const name = data.userName || '教務部';
+
+      const actionText = data.action === 'create' ? '施設を新規追加'
+        : data.action === 'update' ? '施設名・カテゴリを変更'
+        : '施設を削除';
+
+      if (!isSelf) {
+        showToast(`🏢 ${name} が${actionText}しました`, 'info', () => {
+          switchTab('facility');
+        });
+      }
+
+      try {
+        if (state.currentTab === 'facility' && typeof loadReservations === 'function') {
+          await loadReservations();
+        } else if (typeof loadFacilities === 'function') {
+          await loadFacilities(true);
+        }
+      } catch (err) {
+        console.warn('[Socket] 施設マスタ更新の再読込に失敗:', err.message);
+      }
+      if (typeof refreshFacilityMasterUI === 'function') refreshFacilityMasterUI();
     });
 
     // 7. 掲示板投稿・コメントのリアルタイム通知

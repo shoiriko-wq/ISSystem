@@ -193,9 +193,6 @@ export async function initChatModule() {
             <button id="chat-btn-members" class="btn-secondary py-1 px-2.5 text-[11px] flex items-center gap-1 text-main border-main bg-surface hover-surface-strong">
               <i data-lucide="users" class="w-3.5 h-3.5 text-accent"></i> メンバー (<span id="chat-member-count">0</span>名)
             </button>
-            <button id="chat-btn-renotify-all" class="btn-secondary py-1 px-2.5 text-[11px] flex items-center gap-1 text-warning border-warning-soft">
-              <i data-lucide="bell-ring" class="w-3.5 h-3.5"></i> 未読者へ再通知
-            </button>
           </div>
         </div>
 
@@ -307,7 +304,6 @@ function bindEvents() {
     });
   }
 
-  document.getElementById('chat-btn-renotify-all')?.addEventListener('click', handleRenotifyAll);
   document.getElementById('chat-btn-create-group')?.addEventListener('click', openCreateGroupModal);
   document.getElementById('chat-btn-members')?.addEventListener('click', () => {
     openModal('chat-members-modal');
@@ -744,16 +740,12 @@ export async function loadMessages(channelId = currentChannelId) {
       <button id="chat-btn-mark-read" class="btn-secondary py-1 px-2.5 text-[11px] flex items-center gap-1 text-success border-success-soft">
         <i data-lucide="check-check" class="w-3.5 h-3.5"></i> 既読にする
       </button>
-      <button id="chat-btn-renotify-all" class="btn-secondary py-1 px-2.5 text-[11px] flex items-center gap-1 text-warning border-warning-soft">
-        <i data-lucide="bell-ring" class="w-3.5 h-3.5"></i> 未読者へ再通知
-      </button>
     `;
 
     document.getElementById('chat-btn-members')?.addEventListener('click', () => {
       openModal('chat-members-modal');
       loadChannelMembers(currentChannelId);
     });
-    document.getElementById('chat-btn-renotify-all')?.addEventListener('click', handleRenotifyAll);
     document.getElementById('chat-btn-mark-read')?.addEventListener('click', () => {
       const msgs = messagesCache[channelId] || [];
       // 既読位置は最新メッセージまで（先頭では既読が-progress しない）
@@ -1110,7 +1102,11 @@ async function sendMessage() {
   }
 }
 
-function showUnreadersModal(msgId) {
+/**
+ * メッセージの未読者一覧を表示する（未読者への再通知機能は廃止済み＝一覧表示のみ）
+ * @param {string|number} msgId
+ */
+function showUnreadersList(msgId) {
   const msgs = messagesCache[currentChannelId] || [];
   const msg = msgs.find(m => String(m.id) === String(msgId));
   if (!msg) return;
@@ -1124,36 +1120,9 @@ function showUnreadersModal(msgId) {
     return;
   }
 
-  const listStr = displayList.join(', ');
-  const confirmRenotify = confirm(`【未読者リスト】\n${listStr}\n\n対象教員にリアルタイム再通知を送信しますか？`);
-
-  if (confirmRenotify) {
-    // 対象はユーザーID名簿で特定する（表示名と実体の不一致を防ぐ）
-    const targetUserIds = ids.length > 0 ? ids : displayList;
-    apiPost('/chat/renotify', { messageId: msgId, targetUsers: targetUserIds })
-      .then(() => showToast(`${displayList.length}名の未読教員へ再通知を送信しました`, 'success'))
-      .catch(() => showToast(`未読教員へ再通知を送信しました`, 'info'));
-  }
-}
-
-async function handleRenotifyAll() {
-  const list = messagesCache[currentChannelId] || [];
-  const ids = new Set();
-  list.forEach((m) => {
-    (m.unreadIds || []).forEach((id) => ids.add(String(id)));
-  });
-
-  if (ids.size === 0) {
-    showToast('未読者はいません（全員既読です）', 'success');
-    return;
-  }
-
-  try {
-    await apiPost('/chat/renotify', { channelId: currentChannelId, targetUsers: Array.from(ids) });
-    showToast(`${ids.size}名の未読教員へ再通知を送信しました`, 'success');
-  } catch (e) {
-    showToast(`${ids.size}名の未読教員へ再通知を送信しました`, 'info');
-  }
+  const shown = displayList.slice(0, 10).join(', ');
+  const rest = displayList.length > 10 ? ` 他${displayList.length - 10}名` : '';
+  showToast(`未読者（${displayList.length}名）: ${shown}${rest}`, 'info');
 }
 
 /**
@@ -1193,7 +1162,7 @@ function bindMessageAreaEvents(container) {
     } else if (btn.classList.contains('chat-cancel-btn')) {
       handleCancelMessage(msgId);
     } else if (btn.classList.contains('btn-show-unreaders')) {
-      showUnreadersModal(msgId);
+      showUnreadersList(msgId);
     }
   });
 }

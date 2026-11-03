@@ -332,19 +332,20 @@
                 <label class="block text-xs font-semibold text-soft mb-1">タイトル</label>
                 <input type="text" id="bulletin-title" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" placeholder="例: 【教務部】採点票提出の件" required>
               </div>
+              <div>
+                <label class="block text-xs font-semibold text-soft mb-1">対象日</label>
+                <input type="date" id="bulletin-target-date" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" required>
+              </div>
               <div class="grid grid-cols-2 gap-3">
                 <div>
-                  <label class="block text-xs font-semibold text-soft mb-1">区分</label>
-                  <select id="bulletin-category" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main">
-                    <option value="GENERAL">全般</option>
-                    <option value="INSTRUCTION">指示・依頼</option>
-                    <option value="URGENT">緊急連絡</option>
-                  </select>
+                  <label class="block text-xs font-semibold text-soft mb-1">掲示開始日 <span class="text-muted font-normal">(任意)</span></label>
+                  <input type="date" id="bulletin-display-start" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main">
                 </div>
                 <div>
-                  <label class="block text-xs font-semibold text-soft mb-1">対象日</label>
-                  <input type="date" id="bulletin-target-date" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" required>
+                  <label class="block text-xs font-semibold text-soft mb-1">掲示終了日 <span class="text-muted font-normal">(任意)</span></label>
+                  <input type="date" id="bulletin-display-end" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main">
                 </div>
+                <p class="col-span-2 text-[10px] text-muted">未設定の場合は投稿日が掲示開始日になります。掲示終了日は掲示開始日以降で指定してください（未設定＝期間限定の掲示ではありません）。</p>
               </div>
               <div>
                 <label class="block text-xs font-semibold text-soft mb-1">内容</label>
@@ -357,10 +358,6 @@
                        class="w-full text-[11px] text-soft border border-dashed border-main rounded-lg bg-surface-strong p-3 file-btn hover-border-accent">
                 <p class="mt-1 text-[10px] text-muted">対応形式: PDF・画像(png/jpg/gif/webp)・テキスト(txt/md/csv)・圧縮(zip)・KAGOSHIMA EDU(.kgs/.kgme)</p>
                 <ul id="bulletin-files-list" class="mt-2 space-y-1 text-[11px] text-soft"></ul>
-              </div>
-              <div class="flex items-center gap-2">
-                <input type="checkbox" id="bulletin-pinned" class="rounded bg-surface border-main">
-                <label for="bulletin-pinned" class="text-xs text-soft">上部に固定表示する</label>
               </div>
             </div>
           </div>

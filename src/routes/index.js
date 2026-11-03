@@ -116,9 +116,7 @@ router.put('/chat/channels/:channelId/hide', authenticateToken, safe(chatControl
 router.delete('/chat/channels/:channelId', authenticateToken, safe(chatController?.deleteChannel));
 // コメント（メッセージ）の取り消し
 router.delete('/chat/messages/:messageId', authenticateToken, safe(chatController?.cancelMessage));
-router.post('/chat/renotify', authenticateToken, (req, res) => {
-  return res.status(200).json({ success: true, message: '未読者へ再通知を送信しました。' });
-});
+// 未読者への再通知（/chat/renotify）は廃止済み。未読者一覧の表示のみ残す
 
 // ==========================================
 // 4. 施設 & 備品予約 API (/api/facilities)
@@ -128,6 +126,12 @@ router.get('/facilities/daily-overview', authenticateToken, safe(facilityControl
 router.get('/facilities/:facilityId/reservations', authenticateToken, safe(facilityController?.getReservations));
 router.post('/facilities/reservations', authenticateToken, safe(facilityController?.createReservation));
 router.delete('/facilities/reservations/:reservationId', authenticateToken, safe(facilityController?.cancelReservation));
+
+// 施設・備品マスタの追加・改名・削除（教務部 KYOMU / ADMIN のみ・削除は有効予約が残ると 409）
+// ※ /facilities/reservations/... を先に登録しているため ':facilityId' より後ろに置く
+router.post('/facilities', authenticateToken, requireKyomuRole, safe(facilityController?.createFacility));
+router.put('/facilities/:facilityId', authenticateToken, requireKyomuRole, safe(facilityController?.updateFacility));
+router.delete('/facilities/:facilityId', authenticateToken, requireKyomuRole, safe(facilityController?.deleteFacility));
 
 // ==========================================
 // 5. 校内行事 & スケジュール API (/api/schedules)
@@ -229,6 +233,26 @@ router.post('/exam/:id/timetable/validate', authenticateToken, safe(examControll
 router.get('/exam/:id/schedule-cells', authenticateToken, safe(examController?.getScheduleCells));
 router.put('/exam/:id/schedule-cells', authenticateToken, safe(examController?.saveScheduleCells));
 router.put('/exam/:id/timetable/blocked', authenticateToken, safe(examController?.saveGradeBlocked));
+
+// コマ組み（block）ベース時間割
+router.get('/exam/:id/commands', authenticateToken, safe(examController?.listBlockCommands));
+router.post('/exam/:id/commands/generate', authenticateToken, requireKyomuRole, safe(examController?.generateCommands));
+router.post('/exam/:id/command', authenticateToken, requireKyomuRole, safe(examController?.saveBlockCommand));
+router.delete('/exam/:id/command/:commandId', authenticateToken, requireKyomuRole, safe(examController?.deleteBlockCommand));
+router.get('/exam/:id/block-shapes', authenticateToken, safe(examController?.listBlockShapes));
+router.post('/exam/:id/block-shapes/generate', authenticateToken, requireKyomuRole, safe(examController?.generateBlockShapes));
+router.post('/exam/:id/block-shape', authenticateToken, requireKyomuRole, safe(examController?.saveBlockShape));
+router.delete('/exam/:id/block-shape/:shapeId', authenticateToken, requireKyomuRole, safe(examController?.deleteBlockShape));
+router.get('/exam/:id/block-groups', authenticateToken, safe(examController?.listBlockGroups));
+router.post('/exam/:id/block-groups/seed', authenticateToken, requireKyomuRole, safe(examController?.seedBlockGroups));
+router.post('/exam/:id/block-group', authenticateToken, requireKyomuRole, safe(examController?.saveBlockGroup));
+router.delete('/exam/:id/block-group/:groupId', authenticateToken, requireKyomuRole, safe(examController?.deleteBlockGroup));
+router.get('/exam/:id/block-conditions', authenticateToken, safe(examController?.listBlockConditions));
+router.put('/exam/:id/block-conditions/:shapeId', authenticateToken, requireKyomuRole, safe(examController?.saveBlockConditions));
+router.put('/exam/:id/block-shapes/:shapeId/placements', authenticateToken, requireKyomuRole, safe(examController?.placeBlockShape));
+router.post('/exam/:id/timetable/solve', authenticateToken, requireKyomuRole, safe(examController?.solveBlockTimetable));
+router.post('/exam/:id/timetable/validate-block', authenticateToken, safe(examController?.validateBlockTimetable));
+
 
 // 試験教室
 router.get('/exam/:id/rooms', authenticateToken, safe(examController?.getRooms));

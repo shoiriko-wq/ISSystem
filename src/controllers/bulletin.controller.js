@@ -37,23 +37,23 @@ export const bulletinController = {
    */
   async getBulletins(req, res, next) {
     try {
-      const { type, category, targetGrade, targetDepartment, searchKey, isUrgent, limit, pinned, post_type } = req.query;
+      const { targetGrade, targetDepartment, searchKey, limit } = req.query;
       const userId = req.user ? req.user.id : 'kyomu01';
 
       const filterParams = {
-        type: type || post_type,
-        category,
         targetGrade,
         targetDepartment,
         searchKey: searchKey || req.query.search || req.query.q,
-        isUrgent: isUrgent === 'true' || pinned === 'true',
         limit: limit ? parseInt(limit, 10) : null,
-        pinned: pinned === 'true',
         // 投稿日（日ごと表示切替）— 'today' などの別名は JST の日付キーへ変換
         postedDay: normalizePostedDay(req.query.postedDay || req.query.posted_date || req.query.day),
-        // 期間絞り込み (WEEK 表示モードなど)
+        // 投稿日の期間絞り込み（週間ウィンドウなど）
         startDate: req.query.startDate || req.query.start_date || req.query.start,
-        endDate: req.query.endDate || req.query.end_date || req.query.end
+        endDate: req.query.endDate || req.query.end_date || req.query.end,
+        // 掲示期間絞り込み (掲示期間が指定範囲と重なる / 指定日を含む)
+        displayStart: req.query.displayStart || req.query.display_start,
+        displayEnd: req.query.displayEnd || req.query.display_end,
+        displayOnDate: normalizePostedDay(req.query.displayOnDate || req.query.display_on_date)
       };
 
       let bulletins = [];

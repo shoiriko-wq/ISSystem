@@ -410,7 +410,7 @@ function calendarCellHtml(y, m, day, byDate, isCurrentMonth) {
   </div>`;
 }
 
-/** 1日一覧表示（縦に1日ごとに区切り、枠内に横へ行事名を並べる） */
+/** 1日一覧表示（1ヶ月分の日をすべて行に、予定は予定列の中へ横並びで表示） */
 function renderListView(y, m, list) {
   const area = document.getElementById('sched-view-area');
   const byDate = new Map();
@@ -420,32 +420,52 @@ function renderListView(y, m, list) {
   }
 
   const dim = daysInMonth(currentMonth);
+  const canAdd = canEditEvent(null);
   const rows = [];
   for (let day = 1; day <= dim; day++) {
     const dateStr = dateStrOf(y, m, day);
-    const events = byDate.get(dateStr) || [];
-    if (events.length === 0) continue;
-    const wd = WEEKDAYS[weekdayIndex(dateStr)];
-    const isToday = dateStr === jstTodayStr();
-    const chips = events.map((ev) => eventChipHtml(ev, 'w-auto max-w-[168px] shrink-0')).join('');
-    rows.push(`
-      <div class="flex items-start gap-2 rounded-lg border border-divider p-2 bg-surface-soft ${isToday ? 'border-2 border-accent' : ''}">
-        <div class="w-11 shrink-0 text-center">
-          <div class="text-sm font-bold ${isToday ? 'text-accent-strong' : 'text-main'}">${day}</div>
-          <div class="text-[10px] ${weekdayIndex(dateStr) >= 5 ? 'text-danger-strong' : 'text-muted'}">${wd}</div>
-        </div>
-        <div class="flex flex-wrap gap-1 flex-1 min-w-0">${chips}</div>
-      </div>
-    `);
+    rows.push(listRowHtml(dateStr, day, byDate.get(dateStr) || [], canAdd));
   }
 
-  area.innerHTML = `${monthNavHtml(y, m)}${rows.length
-    ? `<div id="sched-list-container" class="space-y-1.5">${rows.join('')}</div>`
-    : `<div class="p-6 text-center text-xs text-muted">
-         <i data-lucide="calendar-off" class="w-8 h-8 mx-auto mb-2 opacity-60"></i>
-         <div>この月に表示できる行事がありません。カテゴリ選択を見直してください。</div>
-       </div>`}`;
+  const headerHtml = `
+    <div class="grid grid-cols-[44px_1fr] gap-2 px-2 mb-1 text-[10px] font-bold text-muted">
+      <div class="text-center">日付</div>
+      <div>予定（同一日の複数予定は横に並べて表示）</div>
+    </div>`;
+
+  area.innerHTML = `${monthNavHtml(y, m)}${headerHtml}
+    <div id="sched-list-container" class="space-y-1">${rows.join('')}</div>`;
+
   bindViewEvents(area);
+}
+
+/** 1日分の行（左=日付・曜日列、右=予定列。予定は flex-wrap で横に並ぶ） */
+function listRowHtml(dateStr, day, events, canAdd) {
+  const wd = WEEKDAYS[weekdayIndex(dateStr)];
+  const isWeekend = weekdayIndex(dateStr) >= 5;
+  const isToday = dateStr === jstTodayStr();
+
+  const chips = events.map((ev) => eventChipHtml(ev, 'w-auto max-w-[168px] shrink-0')).join('');
+  const emptyMark = events.length === 0
+    ? '<span class="text-[10px] text-muted opacity-60">予定なし</span>'
+    : '';
+  const addBtn = canAdd
+    ? `<button type="button" data-add-date="${dateStr}" class="sched-add-day w-6 h-6 shrink-0 ml-auto rounded-md flex items-center justify-center border border-dashed border-main text-muted hover-surface-strong" aria-label="${dateStr} の予定を追加" title="${dateStr} の予定を追加"><i data-lucide="plus" class="w-3.5 h-3.5"></i></button>`
+    : '';
+
+  const rowBg = isToday ? 'bg-accent-soft' : events.length > 0 ? 'bg-surface-soft' : 'bg-surface';
+
+  return `<div class="sched-list-row grid grid-cols-[44px_1fr] gap-2 items-center rounded-lg border ${isToday ? 'border-2 border-accent' : 'border-divider'} px-2 py-1.5 ${rowBg}" data-list-date="${dateStr}">
+    <div class="w-11 text-center">
+      <div class="text-sm font-bold leading-tight ${isToday ? 'text-accent-strong' : isWeekend ? 'text-danger-strong' : 'text-main'}">${day}</div>
+      <div class="text-[10px] ${isWeekend ? 'text-danger-strong' : 'text-muted'}">${wd}</div>
+    </div>
+    <div class="flex flex-wrap items-center gap-1 min-w-0">
+      ${chips}
+      ${emptyMark}
+      ${addBtn}
+    </div>
+  </div>`;
 }
 
 /** 表示モード切替（カレンダー / 1日一覧） */
@@ -455,7 +475,7 @@ function setMode(mode) {
   renderScheduleView();
 }
 
-/** ヘッダ操作（月ナビ・表示モード・行事追加・カテゴリ管理） */
+/** ヘッダ操作（月ナビ・表示モード・行事追加・カテゴリ管理）。各行の + は bindViewEvents 側 */
 function bindHeaderEvents() {
   const prev = document.getElementById('sched-prev-month');
   const next = document.getElementById('sched-next-month');
@@ -476,11 +496,14 @@ function bindHeaderEvents() {
   paintModeButtons();
 }
 
-/** ビュー内クリック（行事名クリックで詳細モーダル、+nでその日を1日一覧表示） */
+/** ビュー内クリック（行事名クリックで詳細モーダル、+nでその日を1日一覧表示、行の + でその日の予定を追加） */
 function bindViewEvents(area) {
   if (!area) return;
   area.querySelectorAll('[data-event-id]').forEach((btn) => {
     btn.addEventListener('click', () => openScheduleDetail(btn.dataset.eventId));
+  });
+  area.querySelectorAll('[data-add-date]').forEach((btn) => {
+    btn.addEventListener('click', () => openScheduleForm(null, btn.dataset.addDate));
   });
   area.querySelectorAll('[data-more-date]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -712,7 +735,8 @@ async function deleteScheduleEvent(ev) {
 /** 行事追加・編集フォーム */
 let editingEventId = null;
 
-function openScheduleForm(ev) {
+/** 行事追加・編集フォーム。presetDate は 1日一覧の行 + からその日付をプリセットする */
+function openScheduleForm(ev, presetDate = null) {
   if (!canEditEvent(ev)) {
     showToast('行事の登録・編集は教務委員会・システム管理者、および登録者本人のみです。', 'error');
     return;
@@ -725,8 +749,9 @@ function openScheduleForm(ev) {
     : `<i data-lucide="plus-circle" class="w-5 h-5 text-accent"></i> 行事の登録`;
 
   const todayStr = jstTodayStr();
+  const preset = presetDate && /^\d{4}-\d{2}-\d{2}$/.test(String(presetDate)) ? String(presetDate) : todayStr;
   document.getElementById('sched-title-input').value = ev ? ev.title : '';
-  document.getElementById('sched-date-input').value = ev ? ev.date : todayStr;
+  document.getElementById('sched-date-input').value = ev ? ev.date : preset;
   document.getElementById('sched-start-input').value = ev && ev.startTime ? ev.startTime : '';
   document.getElementById('sched-end-input').value = ev && ev.endTime ? ev.endTime : '';
   document.getElementById('sched-grade-input').value = ev ? (ev.gradeValue || '') : '';

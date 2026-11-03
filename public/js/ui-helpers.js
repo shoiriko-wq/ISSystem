@@ -246,13 +246,25 @@ export function initNotificationCenter() {
 }
 
 /**
+ * モーダルの表示/非表示を .hidden と aria-hidden で同期する
+ * （支援技術に閉じたモーダルの内容を渡さない。aria-hidden のみの変更は支援技術の操作を奪うため不可）
+ * @param {Element} modal
+ * @param {boolean} hidden 閉じるなら true
+ */
+function setModalHidden(modal, hidden) {
+  modal.classList.toggle('hidden', hidden);
+  modal.setAttribute('aria-hidden', String(hidden));
+}
+
+
+/**
  * モーダルを開く
  * @param {string} modalId 
  */
 export function openModal(modalId) {
   const modal = document.getElementById(modalId);
   if (modal) {
-    modal.classList.remove('hidden');
+    setModalHidden(modal, false);   // 表示中は aria-hidden=false（支援技術にも見える）
     refreshLucideIcons();
   }
 }
@@ -264,7 +276,7 @@ export function openModal(modalId) {
 export function closeModal(modalId) {
   const modal = document.getElementById(modalId);
   if (modal) {
-    modal.classList.add('hidden');
+    setModalHidden(modal, true);
   }
 }
 
@@ -288,13 +300,13 @@ export function initModalListeners() {
   document.querySelectorAll('.modal-overlay').forEach(modal => {
     modal.addEventListener('click', (e) => {
       if (isBackdrop(e.target) && e.target === modal && backdropPressed === e.target) {
-        modal.classList.add('hidden');
+        setModalHidden(modal, true);
       }
     });
 
     modal.querySelectorAll('.modal-close').forEach(btn => {
       btn.addEventListener('click', () => {
-        modal.classList.add('hidden');
+        setModalHidden(modal, true);
       });
     });
   });
@@ -306,11 +318,11 @@ export function initModalListeners() {
     const btn = e.target.closest && e.target.closest('.modal-close');
     if (btn) {
       const modal = btn.closest('.modal-overlay');
-      if (modal) modal.classList.add('hidden');
+      if (modal) setModalHidden(modal, true);
       return;
     }
     if (isBackdrop(e.target) && backdropPressed === e.target) {
-      e.target.classList.add('hidden');
+      setModalHidden(e.target, true);
     }
   });
 
@@ -320,7 +332,7 @@ export function initModalListeners() {
     const openModals = Array.from(document.querySelectorAll('.modal-overlay'))
       .filter(m => !m.classList.contains('hidden'));
     if (openModals.length === 0) return;
-    openModals[openModals.length - 1].classList.add('hidden');
+    setModalHidden(openModals[openModals.length - 1], true);
   });
 }
 

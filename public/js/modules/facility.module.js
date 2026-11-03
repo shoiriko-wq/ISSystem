@@ -3,7 +3,7 @@
  * 施設予約タイムライン・一括予約フォームコントローラー (RAWレスポンス深層展開 & 10分単位完全描画版)
  */
 
-import { apiGet, apiPost, apiDelete } from '../api.js';
+import { apiGet, apiPost, apiPut, apiDelete } from '../api.js';
 import { formatDate, escapeHTML, refreshLucideIcons, openModal, closeModal, showToast, userAvatarHtml } from '../ui-helpers.js';
 import { state } from '../state.js';
 
@@ -16,14 +16,60 @@ function todayJst() {
 
 let selectedDate = todayJst();
 
-// 施設マスター初期定義
-let facilities = [
-  { id: '1', name: '第一会議室', type: 'MEETING' },
-  { id: '2', name: '第二会議室', type: 'MEETING' },
-  { id: '3', name: '体育館', type: 'GYM' },
-  { id: '4', name: 'プロジェクターA', type: 'SPECIAL' },
-  { id: '5', name: '校外研修用マイクロバス', type: 'SPECIAL' }
-];
+// 施設マスター（API の resources テーブルをキャッシュ。マスタ管理UIとタイムラインで共用）
+let facilities = [];
+
+/** カテゴリキー → 表示名（server の FACILITY_CATEGORY_LABELS と対応させる） */
+const CATEGORY_LABELS = {
+  ROOM: '教室・会議室',
+  GYM: '体育施設 (体育館・武道場)',
+  OUTDOOR: '屋外施設 (運動場・体育広場)',
+  EQUIPMENT: '備品・設備 (プロジェクター等)',
+  VEHICLE: '車両 (マイクロバス等)',
+  SPECIAL: '特別教室 (PC教室・理科室等)',
+};
+const CATEGORY_KEYS = Object.keys(CATEGORY_LABELS);
+const FACILITY_NAME_MAX = 30;
+
+/** 教務部権限 (is_kyomu / KYOMU / ADMIN)。施設マスタの追加・改名・削除は教務部のみ */
+function isKyomuUser() {
+  const u = state.currentUser;
+  if (!u) return false;
+  const role = String(u.role || '').toUpperCase();
+  return u.is_kyomu === true || u.is_kyomu === 1 || role === 'KYOMU' || role === 'ADMIN';
+}
+
+/**
+ * 施設マスターの取得（使用予約件数を含む）
+ * @param {boolean} force 強制再取得
+ */
+export async function loadFacilities(force = false) {
+  if (facilities.length > 0 && !force) return facilities;
+  try {
+    const facRes = await apiGet('/facilities');
+    const facList = (facRes && (facRes.facilities || facRes.data)) || (Array.isArray(facRes) ? facRes : []);
+    facilities = (facList || []).map((f) => ({
+      id: String(f.id),
+      name: f.name || '施設',
+      category: String(f.category || 'ROOM').toUpperCase(),
+      reservation_count: Number(f.reservation_count) || 0,
+      reservation_total: Number(f.reservation_total) || 0,
+    }));
+  } catch (err) {
+    console.warn('[Facility] 施設マスター取得失敗:', err.message);
+  }
+  renderFacilitySelect();
+  return facilities;
+}
+
+/** 予約フォームの施設セレクトをキャッシュから再描画する（選択値は維持） */
+function renderFacilitySelect() {
+  const selectFac = document.getElementById('facility-select');
+  if (!selectFac) return;
+  const current = selectFac.value;
+  selectFac.innerHTML = facilities.map((f) => `<option value="${f.id}">${escapeHTML(f.name)}</option>`).join('');
+  if (current && facilities.some((f) => f.id === current)) selectFac.value = current;
+}
 
 // ★ 時限（period）概念を廃止し、8:00〜18:00 の連続時間帯として扱う
 const TIME_START_MIN = 8 * 60;   // 08:00
@@ -61,12 +107,26 @@ function timeToPercent(minutes) {
   return ((clamped - TIME_START_MIN) / TIME_SPAN) * 100;
 }
 
-// 時間スケールヘッダーセル (1時間単位)
+// 時間スケール（8時〜18時）: 本文グリッド線と同一の百分率位置で描画する
 const TIME_START_H = Math.floor(TIME_START_MIN / 60);
 const TIME_END_H = Math.floor(TIME_END_MIN / 60);
-const timeScaleCells = Array.from({ length: TIME_END_H - TIME_START_H }, (_, i) => {
+
+/**
+ * 1時間刻みの垂直グリッド線 (8:00〜18:00 の 11本 = 0%〜100%)
+ * ヘッダーと本文行で同一の位置に描画するため共用する（.grid-line-v は左辺 2px のみ）
+ */
+function gridLinesHtml() {
+  return Array.from({ length: TIME_END_H - TIME_START_H + 1 }, (_, i) => {
+    const pos = timeToPercent(TIME_START_MIN + i * 60);
+    return `<div class="grid-line-v absolute top-0 bottom-0 pointer-events-none" style="left:${pos}%"></div>`;
+  }).join('');
+}
+
+// 時間ラベル（08:00〜17:00 を本文グリッド線と同一の % 位置に配置。18:00 は右端境界線のみ）
+const timeScaleLabels = Array.from({ length: TIME_END_H - TIME_START_H }, (_, i) => {
   const hour = TIME_START_H + i;
-  return `<div class="flex-1 border-l border-divider px-1 py-2 text-left">${String(hour).padStart(2, '0')}:00</div>`;
+  const pos = timeToPercent(hour * 60);
+  return `<div class="absolute top-0 bottom-0 flex items-center pl-1.5" style="left:${pos}%">${String(hour).padStart(2, '0')}:00</div>`;
 }).join('');
 
 let reservationsCache = [];
@@ -103,6 +163,10 @@ export function initFacilityModule() {
         <button id="facility-btn-create" class="btn-primary py-1.5 px-3 text-xs font-bold flex items-center gap-1.5">
           <i data-lucide="plus" class="w-4 h-4"></i> 新規予約
         </button>
+        ${isKyomuUser() ? `
+        <button id="facility-btn-manage" class="btn-secondary py-1.5 px-3 text-xs font-bold flex items-center gap-1.5" title="施設・備品の追加・改名・削除 (教務部のみ)">
+          <i data-lucide="building-2" class="w-4 h-4"></i> 施設管理
+        </button>` : ''}
       </div>
     </div>
 
@@ -114,11 +178,12 @@ export function initFacilityModule() {
       </div>
       <div class="timeline-scroll-container overflow-x-auto">
         <div class="min-w-[880px]">
-          <!-- 時間スケールヘッダー -->
-          <div class="flex border-b border-divider bg-surface-strong text-[10px] text-muted font-mono">
-            <div class="w-40 shrink-0 p-2 font-bold text-soft font-sans">施設名称</div>
-            <div class="flex-1 flex">
-              ${timeScaleCells}
+          <!-- 時間スケールヘッダー（グリッド線は本文行と共用し、ラベルは同一 % 位置に配置） -->
+          <div id="facility-time-header" class="flex h-10 items-stretch bg-surface-strong text-[10px] text-muted font-mono">
+            <div class="w-40 shrink-0 border-r border-divider p-2 flex items-center font-bold text-soft font-sans">施設名称</div>
+            <div class="flex-1 relative">
+              ${gridLinesHtml()}
+              ${timeScaleLabels}
             </div>
           </div>
           <div id="facility-matrix-body" class="divide-y divide-divider">
@@ -193,6 +258,9 @@ export function initFacilityModule() {
   `;
 
   bindEvents();
+  // マスタ管理モーダル (教務部) を初期生成し追加フォームを紐付ける
+  ensureFacilityMasterDom();
+  document.getElementById('facility-master-add-form')?.addEventListener('submit', submitFacilityMasterAdd);
   refreshLucideIcons();
   if (state.currentUser && state.authToken) {
     loadReservations();
@@ -220,6 +288,9 @@ function bindEvents() {
     if (dateInput) dateInput.value = selectedDate;
     openModal('facility-modal');
   });
+
+  // 施設マスタ管理 (教務部 KYOMU のみヘッダーに出る)
+  document.getElementById('facility-btn-manage')?.addEventListener('click', openFacilityMasterAdmin);
 
   // 終了時刻プリセット (開始時刻からの経過分数)
   document.querySelectorAll('.btn-duration').forEach(btn => {
@@ -277,26 +348,8 @@ export async function loadReservations() {
   if (!state.currentUser || !state.authToken) return;
   console.log(`[Facility] 日付: ${selectedDate} のロード開始`);
 
-  // 1. 施設マスター取得
-  try {
-    const facRes = await apiGet('/facilities');
-    const facList = (facRes && (facRes.facilities || facRes.data)) || (Array.isArray(facRes) ? facRes : []);
-    
-    if (facList && facList.length > 0) {
-      facilities = facList.map(f => ({
-        id: String(f.id),
-        name: f.name || '施設',
-        type: f.category === 'ROOM' ? 'MEETING' : 'SPECIAL'
-      }));
-    }
-  } catch (err) {
-    console.warn('[Facility] 施設マスター取得失敗:', err.message);
-  }
-
-  const selectFac = document.getElementById('facility-select');
-  if (selectFac) {
-    selectFac.innerHTML = facilities.map(f => `<option value="${f.id}">${escapeHTML(f.name)}</option>`).join('');
-  }
+  // 1. 施設マスター取得（使用予約件数込み。マスタ管理UIと同一キャッシュ）
+  await loadFacilities(true);
 
   // 2. 予約サマリー取得＆深層データ抽出
   try {
@@ -381,11 +434,7 @@ function renderMatrix() {
   const tbody = document.getElementById('facility-matrix-body');
   if (!tbody) return;
 
-  // 1時間ごとのグリッド線 (8:00〜18:00)
-  const gridLines = Array.from({ length: TIME_END_H - TIME_START_H + 1 }, (_, i) => {
-    const pos = timeToPercent(TIME_START_MIN + i * 60);
-    return `<div class="absolute top-0 bottom-0 border-l border-divider pointer-events-none" style="left:${pos}%"></div>`;
-  }).join('');
+  // グリッド線はヘッダーと共用 (timeToPercent と同一 % 位置、.grid-line-v は左辺 2px のみ)
 
   tbody.innerHTML = facilities.map(fac => {
     const facRes = reservationsCache.filter(r => {
@@ -418,11 +467,11 @@ function renderMatrix() {
     return `
       <div class="flex hover-surface-soft transition-colors" data-facility-row="${fac.id}">
         <div class="w-40 shrink-0 p-3 font-bold text-main bg-surface-strong border-r border-divider flex items-center gap-2">
-          <i data-lucide="${getFacilityIcon(fac.type)}" class="w-4 h-4 text-success"></i>
+          <i data-lucide="${getFacilityIcon(fac.category)}" class="w-4 h-4 text-success"></i>
           <span class="truncate">${escapeHTML(fac.name)}</span>
         </div>
         <div class="flex-1 relative h-16 btn-quick-reserve-area cursor-crosshair" data-facility-id="${fac.id}">
-          ${gridLines}
+          ${gridLinesHtml()}
           ${bands}
         </div>
       </div>
@@ -542,12 +591,194 @@ async function handleCreateReservation(e) {
   }
 }
 
-function getFacilityIcon(type) {
-  switch (type) {
+/** タイムライン行のアイコン (resources.category キーに対応) */
+function getFacilityIcon(category) {
+  switch (String(category || '').toUpperCase()) {
     case 'GYM': return 'activity';
     case 'OUTDOOR': return 'sun';
+    case 'EQUIPMENT': return 'monitor';
     case 'SPECIAL': return 'monitor';
-    case 'MEETING': return 'users';
+    case 'VEHICLE': return 'bus';
+    case 'ROOM': return 'users';
     default: return 'building';
+  }
+}
+
+/* ==========================================================================
+ * 施設・備品マスタ管理 (教務部 KYOMU のみ・追加・改名・削除)
+ * 改名は既存予約の表示へ即反映 (予約は施設ID参照)。削除は有効な予約が残ると 409 で拒否される。
+ * ======================================================================== */
+
+/** カテゴリ select の options HTML */
+function categoryOptionsHtml(selected = 'ROOM') {
+  return CATEGORY_KEYS.map((key) => `<option value="${key}"${key === selected ? ' selected' : ''}>${CATEGORY_LABELS[key]}</option>`).join('');
+}
+
+/** マスタ管理モーダル DOM (初回のみ生成) */
+function ensureFacilityMasterDom() {
+  if (document.getElementById('facility-master-modal')) return;
+  const container = document.getElementById('modal-container') || document.body;
+
+  container.insertAdjacentHTML('beforeend', `
+    <div id="facility-master-modal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 class="modal-title"><i data-lucide="building-2" class="w-5 h-5 text-accent"></i> 施設・備品マスタ管理</h3>
+          <button type="button" class="modal-close modal-close-x" aria-label="閉じる" title="閉じる">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="p-2 rounded-lg bg-info-soft border border-info-soft text-[11px] text-info-strong mb-3">
+            施設・備品マスタは<b>教務部 (KYOMU)</b> のみ追加・改名・削除できます。改名は既存予約の表示へ即座に反映されます。
+            <b>有効な予約が残る施設は削除できません</b>（先に予約をキャンセルしてください）。削除するとキャンセル済みの予約履歴も除去されます。
+          </div>
+          <form id="facility-master-add-form" class="flex flex-wrap items-end gap-2 mb-3">
+            <div class="flex-1 min-w-[170px]">
+              <label class="block text-xs font-bold text-soft mb-1">施設・備品名（${FACILITY_NAME_MAX}文字以内） <span class="text-danger">*</span></label>
+              <input id="facility-master-add-name" maxlength="${FACILITY_NAME_MAX}" required class="w-full bg-surface border border-main rounded-lg p-2 text-xs focus:outline-none focus-border-accent text-main" placeholder="例: 第三会議室、PC教室B">
+            </div>
+            <div class="w-48">
+              <label class="block text-xs font-bold text-soft mb-1">カテゴリ</label>
+              <select id="facility-master-add-category" class="w-full bg-surface border border-main rounded-lg p-2 text-xs focus:outline-none focus-border-accent text-main">${categoryOptionsHtml('ROOM')}</select>
+            </div>
+            <button type="submit" class="btn-primary py-2 px-3 text-xs font-bold flex items-center gap-1">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i> 追加
+            </button>
+          </form>
+          <div id="facility-master-list" class="space-y-2"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modal-close btn-primary py-2 px-4 text-xs font-bold">閉じる</button>
+        </div>
+      </div>
+    </div>
+  `);
+}
+
+/** マスタ一覧（教務部用の編集行＋予約使用件数バッジ）を描画する */
+function renderFacilityMasterList() {
+  const holder = document.getElementById('facility-master-list');
+  if (!holder) return;
+
+  if (facilities.length === 0) {
+    holder.innerHTML = '<div class="p-3 text-xs text-muted text-center">施設・備品がありません。上のフォームから追加してください。</div>';
+    refreshLucideIcons();
+    return;
+  }
+
+  holder.innerHTML = facilities.map((f) => `
+    <div class="facility-master-row flex flex-wrap items-center gap-2 p-2 rounded-lg border border-divider bg-surface-soft" data-facility-master-id="${f.id}">
+      <input type="text" data-field="name" value="${escapeHTML(f.name)}" maxlength="${FACILITY_NAME_MAX}" class="w-44 bg-surface border border-main rounded p-1.5 text-xs focus:outline-none focus-border-accent text-main" required>
+      <select data-field="category" class="w-48 bg-surface border border-main rounded p-1.5 text-xs focus:outline-none focus-border-accent text-main">${categoryOptionsHtml(f.category)}</select>
+      <span class="text-[10px] text-muted shrink-0" title="有効予約 ${f.reservation_count || 0} 件 / キャンセル履歴含む ${f.reservation_total || 0} 件">
+        <i data-lucide="calendar-check" class="w-3 h-3 inline"></i> 有効予約 ${f.reservation_count || 0} 件
+      </span>
+      <button type="button" data-action="save" class="btn-secondary py-1 px-2.5 text-[11px] rounded flex items-center gap-1">
+        <i data-lucide="save" class="w-3 h-3"></i> 保存
+      </button>
+      <button type="button" data-action="delete" class="btn-secondary py-1 px-2.5 text-[11px] rounded flex items-center gap-1 text-danger-strong">
+        <i data-lucide="trash-2" class="w-3 h-3"></i> 削除
+      </button>
+    </div>
+  `).join('');
+
+  bindFacilityMasterRows(holder);
+  refreshLucideIcons();
+}
+
+/** 各行の「保存」「削除」ボタンを紐付ける */
+function bindFacilityMasterRows(holder) {
+  holder.querySelectorAll('.facility-master-row').forEach((row) => {
+    const id = String(row.dataset.facilityMasterId);
+
+    row.querySelector('[data-action=save]').addEventListener('click', async () => {
+      const name = row.querySelector('[data-field=name]').value.trim();
+      const category = row.querySelector('[data-field=category]').value;
+      if (!name) { showToast('施設・備品名を入力してください。', 'error'); return; }
+
+      try {
+        await apiPut(`/facilities/${id}`, { name, category });
+        showToast(`施設「${name}」を変更しました。`, 'success');
+        await loadFacilities(true);
+        renderFacilityMasterList();
+        renderMatrix();
+      } catch (e) {
+        showToast(`変更に失敗しました: ${e.message}`, 'error');
+      }
+    });
+
+    row.querySelector('[data-action=delete]').addEventListener('click', async () => {
+      const target = facilities.find((f) => String(f.id) === id);
+      const active = target ? Number(target.reservation_count) || 0 : 0;
+      const history = target ? Number(target.reservation_total) || 0 : 0;
+
+      if (active > 0) {
+        showToast(`「${target ? target.name : ''}」は有効な予約が ${active} 件残っているため削除できません。先に予約をキャンセルしてください。`, 'error');
+        return;
+      }
+
+      const message = history > 0
+        ? `「${target ? target.name : 'この施設'}」はキャンセル済みの予約履歴が ${history} 件あります。削除すると履歴も除去されます。削除しますか？`
+        : `「${target ? target.name : 'この施設'}」を削除しますか？`;
+      if (!window.confirm(message)) return;
+
+      try {
+        await apiDelete(`/facilities/${id}`);
+        showToast(`施設「${target ? target.name : ''}」を削除しました。`, 'success');
+        await loadFacilities(true);
+        renderFacilityMasterList();
+        renderMatrix();
+      } catch (e) {
+        showToast(`削除に失敗しました: ${e.message}`, 'error');
+      }
+    });
+  });
+}
+
+/** 施設追加フォーム (教務部 KYOMU) */
+async function submitFacilityMasterAdd(event) {
+  event.preventDefault();
+  if (!isKyomuUser()) {
+    showToast('施設マスタの追加は教務部 (KYOMU) のみです。', 'error');
+    return;
+  }
+
+  const nameInput = document.getElementById('facility-master-add-name');
+  const categoryInput = document.getElementById('facility-master-add-category');
+  const name = nameInput ? nameInput.value.trim() : '';
+  const category = categoryInput ? categoryInput.value : 'ROOM';
+
+  if (!name) { showToast('施設・備品名を入力してください。', 'error'); return; }
+
+  try {
+    const res = await apiPost('/facilities', { name, category });
+    showToast(res.message || `施設「${name}」を追加しました。`, 'success');
+    if (nameInput) nameInput.value = '';
+    await loadFacilities(true);
+    renderFacilityMasterList();
+    renderMatrix();
+  } catch (e) {
+    showToast(`追加に失敗しました: ${e.message}`, 'error');
+  }
+}
+
+/** 施設マスタ管理モーダルを開く (教務部のみ) */
+export function openFacilityMasterAdmin() {
+  if (!isKyomuUser()) {
+    showToast('施設マスタの追加・改名・削除は教務部 (KYOMU) のみです。', 'error');
+    return;
+  }
+  ensureFacilityMasterDom();
+  renderFacilityMasterList();
+  openModal('facility-master-modal');
+  refreshLucideIcons();
+}
+
+/** マスタ管理モーダルが開いている場合に一覧を再描画する (socket 通知用) */
+export function refreshFacilityMasterUI() {
+  const modal = document.getElementById('facility-master-modal');
+  if (modal && !modal.classList.contains('hidden')) {
+    renderFacilityMasterList();
   }
 }

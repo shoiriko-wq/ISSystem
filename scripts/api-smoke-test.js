@@ -151,10 +151,8 @@ for (const path of sweep) {
 
 // --- 掲示板作成 / コメント / 既読 / 承認 ---
 const bulletin = await post('/bulletins', {
-  title: 'API確認回覧',
+  title: 'API確認掲示',
   content: 'スモークテストによる自動生成投稿',
-  post_type: 'NOTICE',
-  priority: 'NORMAL',
   author_id: 'kyomu01',
 });
 const bulletinId =

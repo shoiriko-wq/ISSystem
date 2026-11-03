@@ -203,6 +203,9 @@ window.handleLoginClick = async function() {
     // 担当教科ピッカー・表示チップ用の教科マスタを再読み込み (未ログイン時に空だったキャッシュを更新)
     await loadSubjects(true);
     renderAuthScreen();
+    // 権限依存のヘッダー (教務部の施設マスタ管理ボタン等) をログイン後のユーザーで再描画
+    initFacilityModule();
+    refreshLucideIcons();
     
     // ログイン成功後にアクティブタブの実データをロード
     switchTab(state.currentTab || 'dashboard');
@@ -225,6 +228,8 @@ window.handleLoginClick = async function() {
 function handleLogout() {
   setUserSession(null, null);
   renderAuthScreen();
+  // 権限依存のヘッダー (教務部の施設マスタ管理ボタン) を撤去
+  initFacilityModule();
   showToast('ログアウトしました', 'info');
 }
 

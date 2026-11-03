@@ -11,6 +11,22 @@ import { mapAttachment, parseMultipart, extractFormParts, saveFileEntries, remov
 import { ApiError } from '../middlewares/error.middleware.js';
 
 /**
+ * 掲示期間の日付値 ('YYYY-MM-DD' / 'YYYY-MM-DDTHH:MM' / Date) を 'YYYY-MM-DD' に正規化する
+ * 空・不正日付は null を返す
+ * @param {string|Date} raw
+ * @returns {string|null}
+ */
+function safeDisplayDate(raw) {
+  if (!raw) return null;
+  if (raw instanceof Date) {
+    if (Number.isNaN(raw.getTime())) return null;
+    return raw.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+  }
+  const match = String(raw).trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? match[0] : null;
+}
+
+/**
  * targetScope JSON 文字列の安全パース
  * @param {string} raw
  */
@@ -92,7 +108,7 @@ async function attachAttachments(items, model = bulletinModel) {
 export const bulletinService = {
   /**
    * 掲示・回覧板の一覧取得（閲覧教員の承認済みステータス付与）
-   * @param {Object} filters - { type, category, targetGrade, targetDepartment, searchKey, isUrgent }
+   * @param {Object} filters - { targetGrade, targetDepartment, searchKey, postedDay, displayStart, displayEnd }
    * @param {string} userId - 閲覧教員のID
    */
   async getBulletins(filters = {}, userId = 'kyomu01') {
@@ -113,8 +129,6 @@ export const bulletinService = {
 
     // フロントエンド描画に必要な両命名規則 (Camel / Snake) の同時展開
     const normalized = list.map(item => {
-      const pType = item.postType || item.post_type || item.type || 'NOTICE';
-      const pPriority = item.priority || (item.is_urgent ? 'URGENT' : 'NORMAL');
       const pAuthorName = item.authorName || item.author_name || item.author || '教務 主任';
       const pCreatedAt = item.createdAt || item.created_at || new Date().toISOString();
 
@@ -123,9 +137,6 @@ export const bulletinService = {
         id: item.id,
         title: item.title || '（無題）',
         content: item.content || '',
-        postType: pType,
-        post_type: pType,
-        priority: pPriority,
         authorId: item.authorId || item.author_id || 'kyomu01',
         author_id: item.authorId || item.author_id || 'kyomu01',
         authorName: pAuthorName,
@@ -202,7 +213,6 @@ export const bulletinService = {
       comments = [];
     }
 
-    const pType = bulletin.postType || bulletin.post_type || 'NOTICE';
     const pAuthorName = bulletin.authorName || bulletin.author_name || '教務 主任';
 
     // 添付ファイル実体メタデータ (テーブルから取得)
@@ -227,8 +237,6 @@ export const bulletinService = {
 
     return {
       ...base,
-      postType: pType,
-      post_type: pType,
       authorName: pAuthorName,
       author_name: pAuthorName,
       is_acknowledged: ackUserIds.has(userId),
@@ -251,6 +259,14 @@ export const bulletinService = {
       throw new ApiError(400, '件名および本文は必須項目です。');
     }
 
+    // 掲示期間 (掲示開始日・掲示終了日とも任意。掲示開始日未指定時はモデルが投稿日を既定化)。終了日は開始日以降でなければならない
+    const displayStart = safeDisplayDate(postData.displayStart || postData.display_start || postData.display_start_date);
+    const displayEnd = safeDisplayDate(postData.displayEnd || postData.display_end || postData.display_end_date);
+
+    if (displayStart && displayEnd && displayEnd < displayStart) {
+      throw new ApiError(400, '掲示終了日は掲示開始日以降の日付で指定してください。');
+    }
+
     const userId = authorUser.id || postData.authorId || postData.author_id || 'kyomu01';
     const userName = authorUser.name || postData.authorName || postData.author_name || '教務 主任';
 
@@ -258,13 +274,15 @@ export const bulletinService = {
       ...postData,
       title: postData.title,
       content: postData.content,
-      postType: postData.postType || postData.post_type || postData.type || 'NOTICE',
-      post_type: postData.postType || postData.post_type || postData.type || 'NOTICE',
-      priority: postData.priority || (postData.is_urgent || postData.isUrgent ? 'URGENT' : 'NORMAL'),
       authorId: userId,
       author_id: userId,
       authorName: userName,
       author_name: userName,
+      // 掲示期間 (camel / snake 両形式で展開)
+      displayStart,
+      displayEnd,
+      display_start_date: displayStart,
+      display_end_date: displayEnd,
       // 投稿日時（編集日時とは別）と添付ファイル ID 群
       postedAt: postData.postedAt || postData.posted_at || postData.postedAtInput || null,
       posted_at: postData.postedAt || postData.posted_at || postData.postedAtInput || null,
@@ -284,7 +302,7 @@ export const bulletinService = {
           action: 'CREATE_BULLETIN',
           targetEntity: 'BULLETIN',
           targetId: created.id || 'new_id',
-          changesJson: JSON.stringify({ title: created.title, type: created.post_type || created.postType }),
+          changesJson: JSON.stringify({ title: created.title }),
         });
       }
     } catch (auditErr) {
@@ -314,6 +332,11 @@ export const bulletinService = {
       posted_at: postedAt,
       postedDay: String(postedAt).substring(0, 10),
       posted_day: String(postedAt).substring(0, 10),
+      // 掲示期間 (モデル既定値を camel / snake 両形式で返却)
+      displayStart: created.displayStart || displayStart || null,
+      displayEnd: created.displayEnd || displayEnd || null,
+      display_start_date: created.displayStart || displayStart || null,
+      display_end_date: created.displayEnd || displayEnd || null,
       attachments: attachmentMeta
     };
   },
@@ -480,9 +503,9 @@ export const bulletinService = {
     const postData = {
       title: fields.title || fields.subject || '',
       content: fields.content || fields.body || '',
-      postType: fields.postType || fields.post_type || fields.type || fields.category,
-      priority: fields.priority,
       postedAt: fields.postedAt || fields.posted_at || fields.postedAtInput,
+      displayStart: fields.displayStart || fields.display_start || fields.display_start_date,
+      displayEnd: fields.displayEnd || fields.display_end || fields.display_end_date,
       targetScope: fields.targetScope ? safeParseScope(fields.targetScope) : undefined,
       attachments: [],
     };

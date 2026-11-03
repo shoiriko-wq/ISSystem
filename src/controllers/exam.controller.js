@@ -139,6 +139,78 @@ export const examController = {
     ok(res, await examService.validateTimetableRows(req.params.id, req.body, req.user));
   }),
 
+  // ===== コマ組み（block） =====
+  listBlockCommands: wrap(async (req, res) => {
+    ok(res, await examService.listBlockCommands(req.params.id));
+  }),
+
+  saveBlockCommand: wrap(async (req, res) => {
+    ok(res, await examService.saveBlockCommand(req.params.id, req.body, req.user), 'コマを保存しました。');
+  }),
+
+  deleteBlockCommand: wrap(async (req, res) => {
+    ok(res, await examService.deleteBlockCommand(req.params.id, req.params.commandId, req.user), 'コマを削除しました。');
+  }),
+
+  generateCommands: wrap(async (req, res) => {
+    ok(res, await examService.generateCommands(req.params.id, req.user), '実施科目からコマを自動生成しました。');
+  }),
+
+  listBlockShapes: wrap(async (req, res) => {
+    ok(res, await examService.listBlockShapes(req.params.id));
+  }),
+
+  saveBlockShape: wrap(async (req, res) => {
+    ok(res, await examService.saveBlockShape(req.params.id, req.body, req.user), 'コマ組みを保存しました。');
+  }),
+
+  deleteBlockShape: wrap(async (req, res) => {
+    ok(res, await examService.deleteBlockShape(req.params.id, req.params.shapeId, req.user), 'コマ組みを削除しました。');
+  }),
+
+  generateBlockShapes: wrap(async (req, res) => {
+    ok(res, await examService.generateBlockShapes(req.params.id, req.user), 'コマ組み形状を自動生成しました。');
+  }),
+
+  listBlockGroups: wrap(async (req, res) => {
+    ok(res, await examService.listBlockGroups(req.params.id));
+  }),
+
+  saveBlockGroup: wrap(async (req, res) => {
+    ok(res, await examService.saveBlockGroup(req.params.id, req.body, req.user), 'グループを保存しました。');
+  }),
+
+  deleteBlockGroup: wrap(async (req, res) => {
+    ok(res, await examService.deleteBlockGroup(req.params.id, req.params.groupId, req.user), 'グループを削除しました。');
+  }),
+
+  seedBlockGroups: wrap(async (req, res) => {
+    ok(res, await examService.seedBlockGroups(req.params.id, req.user), '既定グループを作成しました。');
+  }),
+
+  listBlockConditions: wrap(async (req, res) => {
+    ok(res, await examService.listBlockConditions(req.params.id));
+  }),
+
+  saveBlockConditions: wrap(async (req, res) => {
+    ok(res, await examService.saveBlockConditions(req.params.id, req.params.shapeId, req.body.conditions || req.body, req.user), '入れ条件を保存しました。');
+  }),
+
+  solveBlockTimetable: wrap(async (req, res) => {
+    const save = req.body?.save !== false;
+    ok(res, await examService.solveBlockTimetable(req.params.id, req.user, { save, rules: req.body?.rules || {} }), 'コマ組みベースの時間割を作成しました。');
+  }),
+
+  validateBlockTimetable: wrap(async (req, res) => {
+    ok(res, await examService.validateBlockTimetable(req.params.id, req.body?.placements || null, req.user));
+  }),
+
+  placeBlockShape: wrap(async (req, res) => {
+    const r = await examService.placeBlockShape(req.params.id, req.params.shapeId, req.body || {}, req.user);
+    ok(res, r, r.ok ? '手動配置を保存しました。' : 'ルール違反のため配置できません。');
+  }),
+
+
   // ===== 試験教室 =====
   getRooms: wrap(async (req, res) => {
     ok(res, await examService.getRooms(req.params.id, req.user));

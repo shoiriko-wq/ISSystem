@@ -873,8 +873,8 @@ export const examModel = {
     for (const r of normalizedRows) {
       const blocked = !!r.is_blocked;
       const res = await query(
-        `INSERT INTO exam_slots (exam_master_id, unit_id, day_number, slot_number, class_id, grade, subject_id, subject_name, subject_teacher_id, setter_teacher_name, slot_span, duration_slots, room_type, is_blocked, notes, updated_by, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        `INSERT INTO exam_slots (exam_master_id, unit_id, day_number, slot_number, class_id, grade, subject_id, subject_name, subject_teacher_id, setter_teacher_name, slot_span, duration_slots, room_type, is_blocked, notes, updated_by, command_id, block_shape_id, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
          ON CONFLICT (exam_master_id, day_number, slot_number, class_id, is_blocked) DO UPDATE SET
            unit_id = EXCLUDED.unit_id,
            grade = EXCLUDED.grade,
@@ -886,6 +886,8 @@ export const examModel = {
            duration_slots = EXCLUDED.duration_slots,
            room_type = EXCLUDED.room_type,
            notes = EXCLUDED.notes,
+           command_id = EXCLUDED.command_id,
+           block_shape_id = EXCLUDED.block_shape_id,
            updated_by = EXCLUDED.updated_by,
            updated_at = CURRENT_TIMESTAMP
          RETURNING *`,
@@ -900,12 +902,14 @@ export const examModel = {
           blocked ? null : r.subject_name || null,
           blocked ? null : r.subject_teacher_id || null,
           blocked ? null : r.setter_teacher_name || null,
-          1,
-          1,
+          Number(r.slot_span) || 1,
+          Number(r.duration_slots) || Number(r.slot_span) || 1,
           r.room_type || 'CLASS',
           blocked,
           blocked ? r.notes || '×（使用不能コマ）' : r.notes ?? null,
           updatedBy,
+          blocked ? null : r.command_id || null,
+          blocked ? null : r.block_shape_id || null,
         ]
       );
       saved.push(res.rows[0]);
@@ -1455,6 +1459,288 @@ export const examModel = {
       [grades]
     );
     return res.rows;
+  },
+  // ==========================================================
+  // 時間割コマ (exam_commands)
+  // ==========================================================
+  async listCommands(examMasterId) {
+    const res = await query(
+      `SELECT * FROM exam_commands WHERE exam_master_id = ? ORDER BY kind ASC, name ASC`,
+      [examMasterId]
+    );
+    return res.rows.map((r) => ({
+      id: String(r.id),
+      exam_master_id: String(r.exam_master_id),
+      name: r.name,
+      kind: r.kind || 'AUTO',
+      members: safeJson(r.members, []).map((m) => ({
+        decision_id: m?.decision_id ? String(m.decision_id) : null,
+        plan_id: m?.plan_id ? String(m.plan_id) : null,
+        subject_name: m?.subject_name || null,
+        grade: Number(m?.grade) || 0,
+      })),
+      courses: safeJson(r.courses, []).map((c) => ({
+        grade: Number(c?.grade) || 0,
+        class_course_id: c?.class_course_id ? String(c.class_course_id) : null,
+      })),
+      duration_slots: Number(r.duration_slots) || 1,
+      duration_minutes: Number(r.duration_minutes) || 50,
+      stream: r.stream || 'OTHER',
+      auto_created: !!r.auto_created,
+      notes: r.notes || null,
+      created_by: r.created_by || null,
+      updated_by: r.updated_by || null,
+    }));
+  },
+
+  async upsertCommand(row) {
+    const id = row.id ? String(row.id) : genId('cmd');
+    const res = await query(
+      `INSERT INTO exam_commands (id, exam_master_id, name, kind, members, courses, duration_slots, duration_minutes, stream, auto_created, notes, created_by, updated_by, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT (id) DO UPDATE SET
+         name = EXCLUDED.name,
+         kind = EXCLUDED.kind,
+         members = EXCLUDED.members,
+         courses = EXCLUDED.courses,
+         duration_slots = EXCLUDED.duration_slots,
+         duration_minutes = EXCLUDED.duration_minutes,
+         stream = EXCLUDED.stream,
+         auto_created = EXCLUDED.auto_created,
+         notes = EXCLUDED.notes,
+         updated_by = EXCLUDED.updated_by,
+         updated_at = CURRENT_TIMESTAMP
+       RETURNING *`,
+      [
+        id,
+        String(row.exam_master_id),
+        String(row.name).trim(),
+        row.kind || 'AUTO',
+        JSON.stringify(row.members || []),
+        JSON.stringify(row.courses || []),
+        Number(row.duration_slots) || 1,
+        Number(row.duration_minutes) || 50,
+        row.stream || 'OTHER',
+        row.auto_created !== false,
+        row.notes ?? null,
+        row.created_by ?? null,
+        row.updated_by ?? null,
+      ]
+    );
+    return res.rows[0];
+  },
+
+  async findCommandByName(examMasterId, name) {
+    const res = await query(
+      `SELECT * FROM exam_commands WHERE exam_master_id = ? AND lower(name) = lower(?)`,
+      [examMasterId, String(name).trim()]
+    );
+    return res.rows[0] ? String(res.rows[0].id) : null;
+  },
+
+  async deleteCommand(id) {
+    await query(`DELETE FROM exam_commands WHERE id = ?`, [String(id)]);
+    return true;
+  },
+  /** コマ削除時にコマ組み cells・グループ members からの参照を除去する */
+  async cascadeCommandRemoval(commandId, examMasterId, updatedBy = null) {
+    const target = String(commandId);
+    const shapes = (await query(`SELECT id, cells FROM exam_block_shapes WHERE exam_master_id = ?`, [examMasterId])).rows;
+    for (const s of shapes) {
+      const kept = safeJson(s.cells, []).filter((c) => String(c?.command_id) !== target);
+      await query(`UPDATE exam_block_shapes SET cells = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [
+        JSON.stringify(kept),
+        updatedBy,
+        s.id,
+      ]);
+    }
+    const groups = (await query(`SELECT id, members FROM exam_block_groups WHERE exam_master_id = ?`, [examMasterId])).rows;
+    for (const g of groups) {
+      const kept = safeJson(g.members, []).map(String).filter((m) => m !== target);
+      await query(`UPDATE exam_block_groups SET members = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [
+        JSON.stringify(kept),
+        updatedBy,
+        g.id,
+      ]);
+    }
+  },
+
+  // ==========================================================
+  // コマ組み (exam_block_shapes)
+  // ==========================================================
+  async listBlockShapes(examMasterId) {
+    const res = await query(
+      `SELECT * FROM exam_block_shapes WHERE exam_master_id = ? ORDER BY auto_created DESC, name ASC`,
+      [examMasterId]
+    );
+    return res.rows.map((r) => ({
+      id: String(r.id),
+      exam_master_id: String(r.exam_master_id),
+      name: r.name,
+      cells: safeJson(r.cells, []).map((c) => ({
+        class_course_id: c?.class_course_id ? String(c.class_course_id) : null,
+        offset: Number(c?.offset) || 0,
+        command_id: c?.command_id ? String(c.command_id) : null,
+      })),
+      rows: safeJson(r.rows, []).map((row) => ({
+        grade: Number(row?.grade) || 0,
+        class_course_id: row?.class_course_id ? String(row.class_course_id) : null,
+      })),
+      span: Number(r.span) || 1,
+      constraints: safeJson(r.constraints, {}),
+      auto_created: !!r.auto_created,
+      notes: r.notes || null,
+      created_by: r.created_by || null,
+      updated_by: r.updated_by || null,
+    }));
+  },
+
+  async upsertBlockShape(row) {
+    const id = row.id ? String(row.id) : genId('blk');
+    const res = await query(
+      `INSERT INTO exam_block_shapes (id, exam_master_id, name, cells, rows, span, constraints, auto_created, notes, created_by, updated_by, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT (id) DO UPDATE SET
+         name = EXCLUDED.name,
+         cells = EXCLUDED.cells,
+         rows = EXCLUDED.rows,
+         span = EXCLUDED.span,
+         constraints = EXCLUDED.constraints,
+         auto_created = EXCLUDED.auto_created,
+         notes = EXCLUDED.notes,
+         updated_by = EXCLUDED.updated_by,
+         updated_at = CURRENT_TIMESTAMP
+       RETURNING *`,
+      [
+        id,
+        String(row.exam_master_id),
+        String(row.name).trim(),
+        JSON.stringify(row.cells || []),
+        JSON.stringify(row.rows || []),
+        Number(row.span) || 1,
+        JSON.stringify(row.constraints || {}),
+        row.auto_created !== false,
+        row.notes ?? null,
+        row.created_by ?? null,
+        row.updated_by ?? null,
+      ]
+    );
+    return res.rows[0];
+  },
+
+  async deleteBlockShape(id, examMasterId) {
+    const target = String(id);
+    await query(`DELETE FROM exam_block_conditions WHERE block_shape_id = ?`, [target]);
+    const groups = (await query(`SELECT id, members FROM exam_block_groups WHERE exam_master_id = ?`, [examMasterId])).rows;
+    for (const g of groups) {
+      const kept = safeJson(g.members, []).map(String).filter((m) => m !== target);
+      await query(`UPDATE exam_block_groups SET members = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [JSON.stringify(kept), g.id]);
+    }
+    await query(`DELETE FROM exam_block_shapes WHERE id = ?`, [target]);
+    return true;
+  },
+  // ==========================================================
+  // コマ組みグループ (exam_block_groups)
+  // ==========================================================
+  async listBlockGroups(examMasterId) {
+    const res = await query(
+      `SELECT * FROM exam_block_groups WHERE exam_master_id = ? ORDER BY name ASC`,
+      [examMasterId]
+    );
+    return res.rows.map((r) => ({
+      id: String(r.id),
+      exam_master_id: String(r.exam_master_id),
+      name: r.name,
+      kind: r.kind || 'CUSTOM',
+      members: safeJson(r.members, []).map(String),
+      constraints: safeJson(r.constraints, {}),
+      notes: r.notes || null,
+      created_by: r.created_by || null,
+      updated_by: r.updated_by || null,
+    }));
+  },
+
+  async upsertBlockGroup(row) {
+    const id = row.id ? String(row.id) : genId('grp');
+    const res = await query(
+      `INSERT INTO exam_block_groups (id, exam_master_id, name, kind, members, constraints, notes, created_by, updated_by, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT (id) DO UPDATE SET
+         name = EXCLUDED.name,
+         kind = EXCLUDED.kind,
+         members = EXCLUDED.members,
+         constraints = EXCLUDED.constraints,
+         notes = EXCLUDED.notes,
+         updated_by = EXCLUDED.updated_by,
+         updated_at = CURRENT_TIMESTAMP
+       RETURNING *`,
+      [
+        id,
+        String(row.exam_master_id),
+        String(row.name).trim(),
+        row.kind || 'CUSTOM',
+        JSON.stringify((row.members || []).map(String)),
+        JSON.stringify(row.constraints || {}),
+        row.notes ?? null,
+        row.created_by ?? null,
+        row.updated_by ?? null,
+      ]
+    );
+    return res.rows[0];
+  },
+
+  async deleteBlockGroup(id) {
+    await query(`DELETE FROM exam_block_groups WHERE id = ?`, [String(id)]);
+    return true;
+  },
+
+  // ==========================================================
+  // コマ組み入れ条件 (exam_block_conditions)
+  // ==========================================================
+  async listBlockConditions(examMasterId) {
+    const res = await query(
+      `SELECT * FROM exam_block_conditions WHERE exam_master_id = ? ORDER BY block_shape_id ASC, day_number ASC, slot_number ASC`,
+      [examMasterId]
+    );
+    return res.rows.map((r) => ({
+      id: String(r.id),
+      block_shape_id: String(r.block_shape_id),
+      class_course_id: r.class_course_id ? String(r.class_course_id) : null,
+      day_number: Number(r.day_number),
+      slot_number: Number(r.slot_number),
+      allowed: !!r.allowed,
+    }));
+  },
+
+  /** 対象コマ組みの入れ条件を置き換える（allowed=false の行が配置不可能マス） */
+  async saveBlockConditions(examMasterId, blockShapeId, rows, updatedBy) {
+    const target = String(blockShapeId);
+    await query(`DELETE FROM exam_block_conditions WHERE exam_master_id = ? AND block_shape_id = ?`, [examMasterId, target]);
+    const saved = [];
+    for (const r of rows || []) {
+      const res = await query(
+        `INSERT INTO exam_block_conditions (id, exam_master_id, block_shape_id, class_course_id, day_number, slot_number, allowed, created_by, updated_by, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT (exam_master_id, block_shape_id, day_number, slot_number, class_course_id) DO UPDATE SET
+           allowed = EXCLUDED.allowed,
+           updated_by = EXCLUDED.updated_by,
+           updated_at = CURRENT_TIMESTAMP
+         RETURNING *`,
+        [
+          genId('bcond'),
+          examMasterId,
+          target,
+          r.class_course_id ? String(r.class_course_id) : null,
+          Number(r.day_number),
+          Number(r.slot_number),
+          r.allowed !== false,
+          updatedBy,
+          updatedBy,
+        ]
+      );
+      saved.push(res.rows[0]);
+    }
+    return saved;
   },
 };
 

@@ -564,11 +564,12 @@ b,
   box-shadow: 0 6px 18px var(--glow-danger), 0 0 0 4px var(--danger-ring) !important;
 }
 
+/* ‹ › などのアイコンボタンは hover で動かさない（連打時に的がズレるため、色・枠・影だけ変化させる） */
 .icon-btn:hover {
-  transform: translateY(-2px) scale(1.1) !important;
   background-color: var(--bg-surface-strong) !important;
   border-color: var(--border-strong) !important;
   color: var(--text-main) !important;
+  box-shadow: 0 4px 12px var(--shadow-color) !important;
 }
 
 /* Inputs: visible focus ring and a stronger resting border */

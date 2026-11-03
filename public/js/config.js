@@ -28,7 +28,6 @@ export const ENDPOINTS = {
   CHAT: {
     CHANNELS: '/chat/channels',
     MESSAGES: (channelId) => `/chat/channels/${channelId}/messages`,
-    UNREAD_RENOTIFY: '/chat/renotify',
   },
   FACILITY: {
     LIST: '/facilities',

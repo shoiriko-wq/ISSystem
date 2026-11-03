@@ -216,6 +216,12 @@
   animation-duration: 0.34s;
 }
 
+/* 右ペイン（全文）も入口スタガースライド。選択切替の方向スライドは WAAPI（animateShift）側 */
+#bulletin-detail-pane > * {
+  animation: cardEnter 0.42s var(--ease-spring) both;
+  --stagger-index: 0;
+}
+
 /* Badges & counts pop when they appear (unread counts, status chips) */
 .badge,
 .badge-count {

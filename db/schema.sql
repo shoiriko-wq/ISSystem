@@ -51,25 +51,31 @@ CREATE TABLE IF NOT EXISTS posts (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   content TEXT NOT NULL,
-  post_type TEXT NOT NULL DEFAULT 'NOTICE',
-  priority TEXT NOT NULL DEFAULT 'NORMAL',
   author_id TEXT NOT NULL,
   target_scope TEXT DEFAULT '{"grade":"ALL","department":"ALL"}',
   attachments TEXT DEFAULT '[]',
+  display_start_date DATE,
+  display_end_date DATE,
   is_deleted INTEGER DEFAULT 0,
   posted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE CASCADE
 );
--- 既存データベースに対するマイグレーション (投稿日時・添付ファイル)
+-- 既存データベースに対するマイグレーション (投稿日時・添付ファイル・掲示期間)
 ALTER TABLE posts ADD COLUMN IF NOT EXISTS posted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+-- 掲示期間（掲示開始日・掲示終了日とも任意。未設定時は投稿日が掲示開始日、終了日未設定は「期間限定の掲示ではない」）
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS display_start_date DATE;
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS display_end_date DATE;
+-- 区分・優先度は撤廃（カテゴリフィルタの廃止に伴いカラムを削除）
+ALTER TABLE posts DROP COLUMN IF EXISTS post_type;
+ALTER TABLE posts DROP COLUMN IF EXISTS priority;
 
-CREATE INDEX IF NOT EXISTS idx_posts_type ON posts(post_type);
-CREATE INDEX IF NOT EXISTS idx_posts_priority ON posts(priority);
 CREATE INDEX IF NOT EXISTS idx_posts_author ON posts(author_id);
 CREATE INDEX IF NOT EXISTS idx_posts_deleted ON posts(is_deleted);
 CREATE INDEX IF NOT EXISTS idx_posts_posted_at ON posts(posted_at);
+CREATE INDEX IF NOT EXISTS idx_posts_display_start ON posts(display_start_date);
+CREATE INDEX IF NOT EXISTS idx_posts_display_end ON posts(display_end_date);
 
 -- 3b. 掲示板添付ファイル (bulletin_attachments)
 CREATE TABLE IF NOT EXISTS bulletin_attachments (
@@ -350,6 +356,8 @@ CREATE TABLE IF NOT EXISTS exam_slots (
   UNIQUE (exam_master_id, day_number, slot_number, class_id)
 );
 CREATE INDEX IF NOT EXISTS idx_exam_slots_master ON exam_slots(exam_master_id, day_number, slot_number);
+-- 既存 DB へマイグレーション (1クラス1スロット1科目の一意制約。seed の ON CONFLICT に必須)
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_exam_slot ON exam_slots(exam_master_id, day_number, slot_number, class_id);
 
 -- 14d. 試験監督割当
 CREATE TABLE IF NOT EXISTS exam_proctor_assignments (
@@ -425,10 +433,10 @@ VALUES
   ('kyomu', 'kyomu01', 0)
 ON CONFLICT DO NOTHING;
 
-INSERT INTO posts (id, title, content, post_type, priority, author_id, target_scope)
+INSERT INTO posts (id, title, content, author_id, target_scope, display_start_date)
 VALUES
-  ('post_1', '【教務部】中間考査採点票の提出期限について', '中間考査の全科目採点票の最終締め切りは明後日17時です。未提出の教科はお早めにご提出ください。', 'CIRCULAR', 'URGENT', 'kyomu01', '{"grade":"ALL","department":"ALL"}'),
-  ('post_2', '避難訓練の実施要項および各クラスの避難経路確認', '来週火曜日の6限に全校避難訓練を実施します。各担任の先生は事前に生徒へ非常口の周知を行ってください。', 'NOTICE', 'NORMAL', 't-tanaka', '{"grade":"ALL","department":"生徒指導部"}')
+  ('post_1', '【教務部】中間考査採点票の提出期限について', '中間考査の全科目採点票の最終締め切りは明後日17時です。未提出の教科はお早めにご提出ください。', 'kyomu01', '{"grade":"ALL","department":"ALL"}', CURRENT_DATE),
+  ('post_2', '避難訓練の実施要項および各クラスの避難経路確認', '来週火曜日の6限に全校避難訓練を実施します。各担任の先生は事前に生徒へ非常口の周知を行ってください。', 't-tanaka', '{"grade":"ALL","department":"生徒指導部"}', CURRENT_DATE)
 ON CONFLICT DO NOTHING;
 
 INSERT INTO resources (id, name, category)
@@ -1055,5 +1063,98 @@ CREATE INDEX IF NOT EXISTS idx_subject_decisions_source ON exam_subject_decision
 
 -- 実施科目の決定フェーズ（DRAFT → SURVEY(教員入力) → DECIDED(教務が確定) → ENDED）
 ALTER TABLE exam_phases ADD COLUMN IF NOT EXISTS decision_phase TEXT NOT NULL DEFAULT 'DRAFT';
+
+-- -------------------------------------------------------------
+-- 21. 時間割コマ・コマ組み・コマ組みグループ・入れ条件
+-- コマ (exam_commands)：時間割セルに入れる表記の単位。実施科目の決定の略称から自動生成し、
+--   統合（「家庭情報」）や分割（「数学Ⅲ前」「数学Ⅲ後」）は CUSTOM で作成する。
+-- コマ組み (exam_block_shapes)：行=クラス・コース、列=時限の表におけるコマの「形」。
+--   cells は [クラス・コース, offset(開始コマからの位置), コマID] の組で、span は連続コマ幅。
+-- コマ組みグループ (exam_block_groups)：理系／文系／全員受験／放送 等のグループとグループ制約。
+-- 入れ条件 (exam_block_conditions)：コマ組みごとに配置不可能なマスを登録する。
+-- -------------------------------------------------------------
+
+-- 21a. 時間割コマ
+CREATE TABLE IF NOT EXISTS exam_commands (
+  id TEXT PRIMARY KEY,
+  exam_master_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'AUTO',
+  members TEXT NOT NULL DEFAULT '[]',
+  courses TEXT NOT NULL DEFAULT '[]',
+  duration_slots INTEGER NOT NULL DEFAULT 1,
+  duration_minutes INTEGER NOT NULL DEFAULT 50,
+  stream TEXT NOT NULL DEFAULT 'OTHER',
+  auto_created BOOLEAN NOT NULL DEFAULT true,
+  notes TEXT,
+  created_by TEXT,
+  updated_by TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (exam_master_id) REFERENCES exam_masters(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_exam_commands_master ON exam_commands(exam_master_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_exam_command_name ON exam_commands (exam_master_id, lower(name));
+
+-- 21b. コマ組み（コマの形）
+CREATE TABLE IF NOT EXISTS exam_block_shapes (
+  id TEXT PRIMARY KEY,
+  exam_master_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  cells TEXT NOT NULL DEFAULT '[]',
+  rows TEXT NOT NULL DEFAULT '[]',
+  span INTEGER NOT NULL DEFAULT 1,
+  constraints TEXT NOT NULL DEFAULT '{}',
+  auto_created BOOLEAN NOT NULL DEFAULT true,
+  notes TEXT,
+  created_by TEXT,
+  updated_by TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (exam_master_id) REFERENCES exam_masters(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_exam_block_shapes_master ON exam_block_shapes(exam_master_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_exam_block_shape_name ON exam_block_shapes (exam_master_id, lower(name));
+
+-- 21c. コマ組みグループ
+CREATE TABLE IF NOT EXISTS exam_block_groups (
+  id TEXT PRIMARY KEY,
+  exam_master_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'CUSTOM',
+  members TEXT NOT NULL DEFAULT '[]',
+  constraints TEXT NOT NULL DEFAULT '{}',
+  notes TEXT,
+  created_by TEXT,
+  updated_by TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (exam_master_id) REFERENCES exam_masters(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_exam_block_groups_master ON exam_block_groups(exam_master_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_exam_block_group_name ON exam_block_groups (exam_master_id, lower(name));
+
+-- 21d. コマ組み入れ条件（配置不可能マス）
+CREATE TABLE IF NOT EXISTS exam_block_conditions (
+  id TEXT PRIMARY KEY,
+  exam_master_id TEXT NOT NULL,
+  block_shape_id TEXT NOT NULL,
+  class_course_id TEXT,
+  day_number INTEGER NOT NULL,
+  slot_number INTEGER NOT NULL,
+  allowed BOOLEAN NOT NULL DEFAULT false,
+  created_by TEXT,
+  updated_by TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (exam_master_id) REFERENCES exam_masters(id) ON DELETE CASCADE,
+  UNIQUE (exam_master_id, block_shape_id, day_number, slot_number, class_course_id)
+);
+CREATE INDEX IF NOT EXISTS idx_exam_block_conditions_master ON exam_block_conditions(exam_master_id, block_shape_id);
+
+-- 21e. 時間割スロットへのコマ・コマ組み参照
+ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS command_id TEXT;
+ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS block_shape_id TEXT;
+
 
 

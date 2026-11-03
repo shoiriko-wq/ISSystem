@@ -108,4 +108,115 @@ describe('Facility Reservation API (/api/facilities)', () => {
     const reId = pickId(res.body);
     await request(app).delete(`/api/facilities/reservations/${reId}`).set('Authorization', bearer(token));
   });
+
+  describe('施設・備品マスタ CRUD (教務部 KYOMU)', () => {
+    const FACILITY_NAME = 'Jest検証部屋';
+
+    it('POST /api/facilities - 施設を追加できる（教務部）', async () => {
+      const res = await request(app)
+        .post('/api/facilities')
+        .set('Authorization', bearer(token))
+        .send({ name: FACILITY_NAME, category: 'ROOM' });
+      expect(res.statusCode).toBe(201);
+      expect(res.body.success).toBe(true);
+      expect(res.body.facility.name).toBe(FACILITY_NAME);
+      expect(res.body.facility.id).toBeTruthy();
+    });
+
+    it('POST /api/facilities - 同名の追加は 409', async () => {
+      const res = await request(app)
+        .post('/api/facilities')
+        .set('Authorization', bearer(token))
+        .send({ name: FACILITY_NAME, category: 'ROOM' });
+      expect(res.statusCode).toBe(409);
+      expect(res.body.success).toBe(false);
+    });
+
+    it('POST /api/facilities - 教務部以外 (TEACHER) は 403', async () => {
+      const teacherToken = await loginToken(app, { staff_code: 'T2026002', password: 'password123' });
+      const res = await request(app)
+        .post('/api/facilities')
+        .set('Authorization', bearer(teacherToken))
+        .send({ name: 'Jest権限確認部屋', category: 'ROOM' });
+      expect(res.statusCode).toBe(403);
+      expect(res.body.message).toContain('教務');
+    });
+
+    it('POST /api/facilities - 空名・未定義カテゴリは 400', async () => {
+      const empty = await request(app)
+        .post('/api/facilities')
+        .set('Authorization', bearer(token))
+        .send({ name: '   ', category: 'ROOM' });
+      expect(empty.statusCode).toBe(400);
+
+      const badCat = await request(app)
+        .post('/api/facilities')
+        .set('Authorization', bearer(token))
+        .send({ name: 'Jestカテゴリ確認', category: 'NOT_A_CATEGORY' });
+      expect(badCat.statusCode).toBe(400);
+    });
+
+    it('PUT /api/facilities/:id - 改名が予約表示へ反映される', async () => {
+      const list = await request(app).get('/api/facilities').set('Authorization', bearer(token));
+      const created = list.body.facilities.find((f) => f.name === FACILITY_NAME);
+      expect(created).toBeTruthy();
+
+      const renames = await request(app)
+        .put(`/api/facilities/${created.id}`)
+        .set('Authorization', bearer(token))
+        .send({ name: 'Jest検証会議室', category: 'SPECIAL' });
+      expect(renames.statusCode).toBe(200);
+      expect(renames.body.facility.name).toBe('Jest検証会議室');
+      expect(renames.body.facility.category).toBe('SPECIAL');
+
+      const after = await request(app).get('/api/facilities').set('Authorization', bearer(token));
+      expect(after.body.facilities.some((f) => f.name === 'Jest検証会議室')).toBe(true);
+      expect(after.body.facilities.some((f) => f.name === FACILITY_NAME)).toBe(false);
+    });
+
+    it('DELETE /api/facilities/:id - 有効予約が残ると 409、キャンセル後は削除できる', async () => {
+      const list = await request(app).get('/api/facilities').set('Authorization', bearer(token));
+      const target = list.body.facilities.find((f) => f.name === 'Jest検証会議室');
+      expect(target).toBeTruthy();
+
+      const book = await request(app)
+        .post('/api/facilities/reservations')
+        .set('Authorization', bearer(token))
+        .send({
+          facility_id: target.id,
+          title: 'Jestマスタ削除確認',
+          target_date: '2027-02-20',
+          start_time: '13:00',
+          end_time: '14:00',
+        });
+      expect(book.statusCode).toBe(201);
+
+      const blocked = await request(app)
+        .delete(`/api/facilities/${target.id}`)
+        .set('Authorization', bearer(token));
+      expect(blocked.statusCode).toBe(409);
+      expect(blocked.body.success).toBe(false);
+
+      const bookId = pickId(book.body);
+      await request(app)
+        .delete(`/api/facilities/reservations/${bookId}`)
+        .set('Authorization', bearer(token));
+
+      const removed = await request(app)
+        .delete(`/api/facilities/${target.id}`)
+        .set('Authorization', bearer(token));
+      expect(removed.statusCode).toBe(200);
+      expect(removed.body.success).toBe(true);
+
+      const after = await request(app).get('/api/facilities').set('Authorization', bearer(token));
+      expect(after.body.facilities.some((f) => f.id === target.id)).toBe(false);
+    });
+
+    it('DELETE /api/facilities/:id - 存在しない施設は 404', async () => {
+      const res = await request(app)
+        .delete('/api/facilities/does-not-exist')
+        .set('Authorization', bearer(token));
+      expect(res.statusCode).toBe(404);
+    });
+  });
 });

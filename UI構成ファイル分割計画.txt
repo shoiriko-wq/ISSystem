@@ -19,7 +19,7 @@ public/
     └── modules/                    # 【機能別UIコントローラー】
         ├── dashboard.module.js     # ダッシュボード描画・天気・統合サマリー (~250行)
         ├── bulletin.module.js      # 掲示板一覧・詳細閲覧モーダル・カレンダー連携 (~250行)
-        ├── chat.module.js          # 職員チャット・未読者リスト・再通知・専用承認ボタン (~300行)
+        ├── chat.module.js          # 職員チャット・未読者リスト表示・専用承認ボタン (~300行)
         ├── facility.module.js      # 施設予約タイムライン・一括予約フォーム (~250行)
         ├── schedule.module.js      # スケジュールカレンダー・カテゴリフィルタ (~200行)
         ├── approval.module.js      # 簡易承認・請求依頼一覧・ステータス更新 (~200行)

@@ -26,6 +26,12 @@ import {
   countBlocked,
 } from '../utils/exam-schedule.js';
 import { solveRooms, DEFAULT_ROOM_RULES } from '../utils/exam-room-solver.js';
+import {
+  solveBlockTimetable as solveBlockTimetableInput,
+  validateBlockPlacements as validateBlockPlacementsInput,
+  DEFAULT_TIMETABLE_RULES_BLOCK,
+} from '../utils/exam-block-solver.js';
+
 import { solveProctor, validateProctor, DEFAULT_PROCTOR_RULES } from '../utils/exam-proctor-solver.js';
 
 const PHASE = { DRAFT: 'DRAFT', SURVEY: 'SURVEY', PUBLISHED: 'PUBLISHED', ENDED: 'ENDED' };
@@ -347,6 +353,170 @@ function normalizeDuration(row, master) {
     duration_minutes: minutes,
     duration_slots: Number(row.duration_slots) || Math.max(1, Math.ceil(minutes / slotMinutes)),
   };
+}
+
+// ============================================================
+// コマ組み（block）ソルバー用データ構築
+// ============================================================
+
+/** 既定のグループ種別（③の条件をマスタで表現するためのテンプレート） */
+export const DEFAULT_BLOCK_GROUPS = [
+  { kind: 'ALL_STUDENTS', name: '全員受験', constraints: { first_slot_required: true, last_day_required: true } },
+  { kind: 'SCIENCE', name: '理系', constraints: { day_purity_forbid: true } },
+  { kind: 'ARTS', name: '文系', constraints: { day_purity_forbid: true } },
+  { kind: 'BROADCAST', name: '放送', constraints: { slot_exclusive: true } },
+];
+
+/** 実施科目（決定/プラン）の class_ids からソルバー用クラス行（rows）を作る */
+function blockRowsFromConduct(conduct, classes) {
+  const byId = new Map((classes || []).map((c) => [String(c.id), c]));
+  const map = new Map();
+  for (const s of conduct) {
+    for (const cid of (s.class_ids || []).map(String)) {
+      if (!cid || map.has(cid)) continue;
+      const c = byId.get(cid);
+      map.set(cid, {
+        id: cid,
+        grade: Number(c?.grade ?? s.grade) || 0,
+        name: c?.name ?? c?.short_name ?? cid,
+        grade_class_label: c ? `${Number(c.grade) || 0}年${Number(c.class_num) || 0}組` : null,
+      });
+    }
+  }
+  return [...map.values()];
+}
+
+/** exam_slots の ×（is_blocked）を クラス行|実施日|時限 の排除集合へ展開する */
+async function expandBlockBlockedCells(examMasterId, rows) {
+  const set = new Set();
+  const rowsByGrade = new Map();
+  for (const r of rows) {
+    if (!rowsByGrade.has(r.grade)) rowsByGrade.set(r.grade, []);
+    rowsByGrade.get(r.grade).push(r.id);
+  }
+  const saved = await examModel.listSlots(examMasterId);
+  for (const s of saved) {
+    if (!s.is_blocked) continue;
+    const grade = Number(s.grade) || 0;
+    const day = Number(s.day_number) || 0;
+    const slot = Number(s.slot_number) || 0;
+    const explicit = s.class_id ? String(s.class_id) : null;
+    const targetRows = explicit ? [explicit] : rowsByGrade.get(grade) || [];
+    for (const rid of targetRows) set.add(`${rid}|${day}|${slot}`);
+  }
+  return set;
+}
+
+/** 入れ条件（allowed=false）をソルバーの forbidden マップへ展開する */
+/** 入れ条件 × をソルバー用 forbidden マップ（blockId → Set(`row|day|slot`)）に展開する */
+function expandBlockConditions(conditions, rows) {
+  const forbidden = new Map();
+  const rowIds = new Set(rows.map((r) => String(r.id)));
+  const allowedKeys = new Set();
+  for (const c of conditions || []) {
+    const shapeId = String(c.block_shape_id);
+    const day = Number(c.day_number);
+    const slot = Number(c.slot_number);
+    if (!Number.isFinite(day) || !Number.isFinite(slot)) continue;
+    const scope = c.class_course_id ? [String(c.class_course_id)] : [...rowIds];
+    for (const rid of scope) {
+      if (!rowIds.has(rid)) continue;
+      const key = `${rid}|${day}|${slot}`;
+      if (c.allowed) {
+        allowedKeys.add(`${shapeId}|${key}`);
+        continue;
+      }
+      if (!forbidden.has(shapeId)) forbidden.set(shapeId, new Set());
+      forbidden.get(shapeId).add(key);
+    }
+  }
+  for (const [shapeId, set] of forbidden.entries()) {
+    for (const k of [...set]) {
+      if (allowedKeys.has(`${shapeId}|${k}`)) set.delete(k);
+    }
+  }
+  return forbidden;
+}
+
+/** グループ members（コマID）を コマ組みID へ変換する */
+function normalizeGroupMembers(groups, blocks) {
+  const cmdToBlock = new Map();
+  for (const b of blocks) {
+    for (const c of b.cells || []) {
+      if (c.command_id && !cmdToBlock.has(String(c.command_id))) cmdToBlock.set(String(c.command_id), String(b.id));
+    }
+  }
+  return groups.map((g) => ({
+    ...g,
+    members: [...new Set((g.members || []).map((m) => cmdToBlock.get(String(m)) || String(m)))],
+  }));
+}
+
+/** 前回試験の配置（ソルバーの history）を読み出す */
+async function loadBlockHistory(examMasterId) {
+  const masters = await examModel.listExamMasters();
+  const prev = masters.filter((m) => String(m.id) !== String(examMasterId)).sort((a, b) => String(b.start_date).localeCompare(String(a.start_date)))[0];
+  if (!prev) return [];
+  const slots = await examModel.listSlots(prev.id);
+  return slots
+    .filter((s) => s.subject_name && !s.is_blocked)
+    .map((s) => ({
+      command_id: s.command_id || null,
+      subject_name: s.subject_name,
+      day_number: Number(s.day_number) || 0,
+      slot_number: Number(s.slot_number) || 0,
+    }));
+}
+
+/** exam_slots（保存済み配置）をコマ組み単位の配置へまとめる */
+function placementsFromSlots(slots, blocks) {
+  const byBlock = new Map();
+  const blockByCommand = new Map();
+  for (const b of blocks) {
+    for (const c of b.cells || []) {
+      if (c.command_id && !blockByCommand.has(String(c.command_id))) blockByCommand.set(String(c.command_id), b);
+    }
+  }
+  for (const s of slots) {
+    if (s.is_blocked || !s.subject_name) continue;
+    const block = blocks.find((b) => String(b.id) === String(s.block_shape_id || '')) || blockByCommand.get(String(s.command_id || ''));
+    if (!block) continue;
+    const key = String(block.id);
+    if (!byBlock.has(key)) {
+      byBlock.set(key, { id: key, day: Number(s.day_number) || 0, slot: Number(s.slot_number) || 0, span: block.span, cells: [] });
+    }
+    const p = byBlock.get(key);
+    p.slot = Math.min(p.slot, Number(s.slot_number) || p.slot);
+    p.cells.push({ class_course_id: String(s.class_id || ''), offset: Number(s.slot_number) - p.slot, command_id: s.command_id || null });
+  }
+  return [...byBlock.values()];
+}
+
+
+
+/** 実施科目を科目名単位にまとめる（複数学年で時限数が同じなら1コマ組み、異なるなら学年別コマ組み） */
+function groupConductBySubject(conduct) {
+  const byName = new Map();
+  for (const s of conduct) {
+    const name = String(s.subject_name || '').trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (!byName.has(key)) byName.set(key, []);
+    byName.get(key).push({ name, span: Math.max(1, Number(s.duration_slots) || 1), row: s });
+  }
+  const groups = [];
+  for (const items of byName.values()) {
+    const spans = new Set(items.map((i) => i.span));
+    const grades = new Set(items.map((i) => Number(i.row.grade) || 0));
+    if (spans.size === 1 && grades.size === items.length) {
+      groups.push({ name: items[0].name, span: items[0].span, items });
+    } else {
+      for (const i of items) {
+        groups.push({ name: `${i.name}(${Number(i.row.grade) || 0}年)`, span: i.span, items: [i] });
+      }
+    }
+  }
+  return groups;
 }
 
 export const examService = {
@@ -2653,6 +2823,401 @@ export const examService = {
       is_kyomu: isKyomu(user),
     };
   },
+  // ==========================================================
+  // ③-b コマ（exam_commands）・コマ組み（exam_block_shapes）
+  // ==========================================================
+
+  /** 実施科目（決定）からコマ（exam_commands）を自動生成する */
+  generateCommands: async (examMasterId, user) => {
+    const examMaster = await examModel.findExamMasterById(examMasterId);
+    if (!examMaster) throw new Error('考査が見つかりません。');
+    const conduct = await conductSubjects(examMasterId);
+    const groups = groupConductBySubject(conduct);
+    const commands = [];
+    for (const g of groups) {
+      const id = `cmd:${g.name}`;
+      const members = g.items.map(({ row }) => ({
+        decision_id: row.id,
+        plan_id: row.source_plan_id || null,
+        subject_name: g.name,
+        grade: Number(row.grade) || 0,
+      }));
+      const courses = g.items.flatMap(({ row }) =>
+        (row.class_ids || []).map((cid) => ({ grade: Number(row.grade) || 0, class_course_id: String(cid) }))
+      );
+      await examModel.upsertCommand({
+        id,
+        exam_master_id: examMasterId,
+        name: g.name,
+        kind: 'AUTO',
+        members,
+        courses,
+        duration_slots: g.span,
+        duration_minutes: Math.max(...g.items.map(({ row }) => Number(row.duration_minutes) || 50)),
+        stream: g.items[0].row.stream || 'OTHER',
+        auto_created: true,
+        updated_by: user?.id ?? null,
+      });
+      commands.push({
+        id,
+        name: g.name,
+        span: g.span,
+        grades: g.items.map(({ row }) => Number(row.grade) || 0),
+        courses,
+      });
+    }
+    await audit('exam_commands_generate', user, 'exam_master', examMasterId, { count: commands.length });
+    return { inserted: commands.length, commands };
+  },
+
+  /** 実施科目のクラス行＋コマの長さからコマ組み（exam_block_shapes）を自動生成する */
+  generateBlockShapes: async (examMasterId, user) => {
+    const conduct = await conductSubjects(examMasterId);
+    const groups = groupConductBySubject(conduct);
+    const commands = await examModel.listCommands(examMasterId);
+    const cmdByName = new Map(commands.map((c) => [String(c.name).toLowerCase(), c]));
+    const shapes = [];
+    for (const g of groups) {
+      const cmd = cmdByName.get(g.name.toLowerCase());
+      if (!cmd) continue;
+      const cells = [];
+      for (const { row } of g.items) {
+        for (const cid of (row.class_ids || []).map(String)) {
+          for (let i = 0; i < g.span; i += 1) cells.push({ class_course_id: cid, offset: i, command_id: cmd.id });
+        }
+      }
+      if (cells.length === 0) continue;
+      const row = {
+        id: `blk:${g.name}`,
+        exam_master_id: examMasterId,
+        name: g.name,
+        cells,
+        rows: [...new Set(cells.map((c) => c.class_course_id))].map((class_course_id) => ({ class_course_id })),
+        span: g.span,
+        constraints: {},
+        auto_created: true,
+        updated_by: user?.id ?? null,
+      };
+      await examModel.upsertBlockShape(row);
+      shapes.push({
+        id: row.id,
+        name: row.name,
+        span: row.span,
+        grades: g.items.map(({ row: r }) => Number(r.grade) || 0),
+        cells: row.cells,
+        constraints: {},
+      });
+    }
+    await audit('exam_block_shapes_generate', user, 'exam_master', examMasterId, { count: shapes.length });
+    return { inserted: shapes.length, shapes };
+  },
+
+  /** 既定のグループ（全員受験・理系・文系・放送）が無ければ作成する */
+  seedBlockGroups: async (examMasterId, user) => {
+    const existing = await examModel.listBlockGroups(examMasterId);
+    const missing = DEFAULT_BLOCK_GROUPS.filter((g) => !existing.some((e) => e.kind === g.kind));
+    for (const g of missing) {
+      await examModel.upsertBlockGroup({
+        id: `grp:${g.kind.toLowerCase()}`,
+        exam_master_id: examMasterId,
+        name: g.name,
+        kind: g.kind,
+        members: [],
+        constraints: g.constraints,
+        updated_by: user?.id ?? null,
+      });
+    }
+    await audit('exam_block_groups_seed', user, 'exam_master', examMasterId, { created: missing.length });
+    return { created: missing.length, groups: await examModel.listBlockGroups(examMasterId) };
+  },
+  // ===== コマ組み CRUD（③-b） =====
+  listBlockCommands: async (examMasterId) => {
+    await ensureMaster(examMasterId);
+    return examModel.listCommands(examMasterId);
+  },
+
+  saveBlockCommand: async (examMasterId, row, user) => {
+    ensureKyomu(user);
+    await ensureMaster(examMasterId);
+    const saved = await examModel.upsertCommand({ ...row, exam_master_id: examMasterId, updated_by: user.id });
+    await audit('exam_block_command_save', user, 'exam_master', examMasterId, { command_id: saved.id });
+    return saved;
+  },
+
+  deleteBlockCommand: async (examMasterId, commandId, user) => {
+    ensureKyomu(user);
+    await ensureMaster(examMasterId);
+    await examModel.cascadeCommandRemoval(commandId, examMasterId, user.id);
+    await examModel.deleteCommand(commandId);
+    await audit('exam_block_command_delete', user, 'exam_master', examMasterId, { command_id: commandId });
+    return { deleted: true };
+  },
+
+  listBlockShapes: async (examMasterId) => {
+    await ensureMaster(examMasterId);
+    return examModel.listBlockShapes(examMasterId);
+  },
+
+  saveBlockShape: async (examMasterId, row, user) => {
+    ensureKyomu(user);
+    await ensureMaster(examMasterId);
+    const saved = await examModel.upsertBlockShape({ ...row, exam_master_id: examMasterId, updated_by: user.id });
+    await audit('exam_block_shape_save', user, 'exam_master', examMasterId, { block_shape_id: saved.id });
+    return saved;
+  },
+
+  deleteBlockShape: async (examMasterId, shapeId, user) => {
+    ensureKyomu(user);
+    await ensureMaster(examMasterId);
+    const removed = await examModel.deleteBlockShape(shapeId, examMasterId, user.id);
+    await audit('exam_block_shape_delete', user, 'exam_master', examMasterId, { block_shape_id: shapeId, removed });
+    return { removed };
+  },
+
+  listBlockGroups: async (examMasterId) => {
+    await ensureMaster(examMasterId);
+    return examModel.listBlockGroups(examMasterId);
+  },
+
+  saveBlockGroup: async (examMasterId, row, user) => {
+    ensureKyomu(user);
+    await ensureMaster(examMasterId);
+    const saved = await examModel.upsertBlockGroup({ ...row, exam_master_id: examMasterId, updated_by: user.id });
+    await audit('exam_block_group_save', user, 'exam_master', examMasterId, { group_id: saved.id });
+    return saved;
+  },
+
+  deleteBlockGroup: async (examMasterId, groupId, user) => {
+    ensureKyomu(user);
+    await ensureMaster(examMasterId);
+    const removed = await examModel.deleteBlockGroup(groupId, user.id);
+    await audit('exam_block_group_delete', user, 'exam_master', examMasterId, { group_id: groupId, removed });
+    return { removed };
+  },
+
+  listBlockConditions: async (examMasterId) => {
+    await ensureMaster(examMasterId);
+    return examModel.listBlockConditions(examMasterId);
+  },
+
+  saveBlockConditions: async (examMasterId, shapeId, rows, user) => {
+    ensureKyomu(user);
+    await ensureMaster(examMasterId);
+    const saved = await examModel.saveBlockConditions(examMasterId, shapeId, rows, user.id);
+    await audit('exam_block_conditions_save', user, 'exam_master', examMasterId, { block_shape_id: shapeId, saved });
+    return { saved };
+  },
+
+
+
+
+  // ==========================================================
+  // ③-b コマ組み時間割の自動作成・検証
+  // ==========================================================
+
+  /** コマ組みベースのソルバー入力を構築する（rows/commands/blocks/groups/conditions/×/履歴） */
+  buildBlockSolverInput: async (examMasterId) => {
+    const examMaster = await examModel.findExamMasterById(examMasterId);
+    if (!examMaster) throw new Error('考査が見つかりません。');
+    const slots = Number(examMaster.daily_slots) || 0;
+    const daySlots = buildDaySlots(examMaster);
+    const conduct = await conductSubjects(examMasterId);
+    const classes = await examModel.fetchClasses(examMasterId);
+    const rows = blockRowsFromConduct(conduct, classes);
+    const commands = await examModel.listCommands(examMasterId);
+    const blocks = await examModel.listBlockShapes(examMasterId);
+    const groups = normalizeGroupMembers(await examModel.listBlockGroups(examMasterId), blocks);
+    const conditions = await examModel.listBlockConditions(examMasterId);
+    return {
+      examMaster,
+      slots,
+      daySlots,
+      conduct,
+      rows,
+      commands,
+      blocks,
+      groups,
+      conditions,
+      forbidden: expandBlockConditions(conditions, rows),
+      commandNames: new Map(commands.map((c) => [c.id, c.name])),
+      blockedRowCells: await expandBlockBlockedCells(examMasterId, rows),
+      history: await loadBlockHistory(examMasterId),
+    };
+  },
+
+  /** コマ組みベースの時間割を自動作成し、必要なら exam_slots へ保存する */
+  solveBlockTimetable: async (examMasterId, user, { save = true, rules = {} } = {}) => {
+    const ctx = await examService.buildBlockSolverInput(examMasterId);
+    const result = solveBlockTimetableInput({
+      daySlots: ctx.daySlots,
+      slots: ctx.slots,
+      rows: ctx.rows,
+      commands: ctx.commands,
+      blocks: ctx.blocks,
+      groups: ctx.groups,
+      conditions: ctx.conditions,
+      rules: { ...DEFAULT_TIMETABLE_RULES_BLOCK, ...rules },
+      history: ctx.history,
+      blockedRowCells: ctx.blockedRowCells,
+      commandNames: ctx.commandNames,
+    });
+
+    if (save && result.feasible) {
+      const setterBySubject = new Map(ctx.conduct.map((s) => [`${Number(s.grade) || 0}:${String(s.subject_name || '').trim()}`, s]));
+      const gradeByRow = new Map(ctx.rows.map((r) => [String(r.id), Number(r.grade) || 0]));
+      const savedSlots = await examModel.listSlots(examMasterId);
+      const slotRows = savedSlots.filter((r) => r.is_blocked).map((r) => ({ ...r }));
+      for (const p of result.placements) {
+        for (const cell of p.cells) {
+          const subjectName = ctx.commandNames.get(cell.command_id) || p.name;
+          const grade = gradeByRow.get(String(cell.class_course_id)) ?? 0;
+          const plan = setterBySubject.get(`${grade}:${subjectName}`) || {};
+          slotRows.push({
+            day_number: p.day,
+            slot_number: p.slot + cell.offset,
+            class_id: cell.class_course_id,
+            grade: grade || (Number(plan.grade) || 0),
+            subject_id: plan.subject_id || plan.source_plan_id || null,
+            subject_name: subjectName,
+            subject_teacher_id: plan.setter_teacher_id ?? null,
+            setter_teacher_name: plan.setter_teacher_name ?? null,
+            slot_span: 1,
+            duration_slots: 1,
+            room_type: plan.room_type || 'CLASS',
+            is_blocked: false,
+            command_id: cell.command_id,
+            block_shape_id: p.block_id,
+            notes: null,
+          });
+        }
+      }
+      const saved = await examModel.saveSlots(examMasterId, slotRows, user?.id ?? null);
+      result.saved = saved.length;
+      await audit('exam_block_timetable_solve', user, 'exam_master', examMasterId, { saved, penalty: result.penalty });
+    }
+    return result;
+  },
+
+  /** 配置（手動配置・保存済み配置を含む）を自動作成と同じ検証ロジックで検証する */
+  validateBlockTimetable: async (examMasterId, placements = null, user = null) => {
+    const ctx = await examService.buildBlockSolverInput(examMasterId);
+    const rowsToUse = placements || placementsFromSlots(await examModel.listSlots(examMasterId), ctx.blocks);
+    return validateBlockPlacementsInput({
+      daySlots: ctx.daySlots,
+      slots: ctx.slots,
+      rows: ctx.rows,
+      commands: ctx.commands,
+      blocks: ctx.blocks,
+      groups: ctx.groups,
+      conditions: ctx.conditions,
+      rules: DEFAULT_TIMETABLE_RULES_BLOCK,
+      history: ctx.history,
+      blockedRowCells: ctx.blockedRowCells,
+      commandNames: ctx.commandNames,
+      placements: rowsToUse,
+    });
+  },
+
+  /** 手動配置（drag & drop）：配置案を自動作成と同じ検証ロジックで検証し、HARD 違反がなければ exam_slots に保存する */
+  placeBlockShape: async (examMasterId, shapeId, payload, user) => {
+    ensureKyomu(user);
+    const ctx = await examService.buildBlockSolverInput(examMasterId);
+    const shape = (ctx.blocks || []).find((b) => String(b.block_id ?? b.id) === String(shapeId));
+    if (!shape) {
+      const err = new Error(`コマ組み ${shapeId} が見つかりません。`);
+      err.statusCode = 400;
+      throw err;
+    }
+    const shapeCommandId = (shape.cells || []).map((c) => c.command_id).find((id) => id) || null;
+    const newRows = (payload?.rows || [])
+      .map((r) => ({
+        class_course_id: String(r.class_course_id ?? r.row ?? r.class_id ?? ''),
+        day_number: Number(r.day_number ?? r.day) || 0,
+        slot_number: Number(r.slot_number ?? r.slot) || 0,
+      }))
+      .filter((r) => r.class_course_id && r.day_number > 0 && r.slot_number > 0);
+    if (newRows.length === 0) {
+      const err = new Error('配置するクラス行・日時限が指定されていません。');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    // 検証は「他コマ組みの現配置＋このコマ組みの配置案」で行う（配置案は day/slot/cells 形式にまとめる）
+    const slots = await examModel.listSlots(examMasterId);
+    const others = slots.filter((s) => String(s.block_shape_id || '') !== String(shapeId));
+    const byDay = new Map();
+    for (const r of newRows) {
+      if (!byDay.has(r.day_number)) byDay.set(r.day_number, []);
+      byDay.get(r.day_number).push(r);
+    }
+    const newPlacements = [...byDay.entries()].map(([d, list]) => {
+      const minSlot = Math.min(...list.map((r) => r.slot_number));
+      return {
+        id: String(shapeId),
+        day: d,
+        slot: minSlot,
+        span: Number(shape.span) || 1,
+        cells: list.map((r) => ({
+          class_course_id: r.class_course_id,
+          offset: r.slot_number - minSlot,
+          command_id: shapeCommandId,
+        })),
+      };
+    });
+
+    const result = validateBlockPlacementsInput({
+      daySlots: ctx.daySlots,
+      slots: ctx.slots,
+      rows: ctx.rows,
+      commands: ctx.commands,
+      blocks: ctx.blocks,
+      groups: ctx.groups,
+      conditions: ctx.conditions,
+      rules: DEFAULT_TIMETABLE_RULES_BLOCK,
+      history: ctx.history,
+      blockedRowCells: ctx.blockedRowCells,
+      commandNames: ctx.commandNames,
+      placements: [...placementsFromSlots(others, ctx.blocks), ...newPlacements],
+    });
+
+    const hard = (result.hard || []).map((d) => ({ level: 'HARD', code: d.code || d.type, ...d }));
+    if (hard.length) return { ok: false, hard, saved: 0, diagnostics: [...hard, ...(result.soft || []).map((d) => ({ level: 'SOFT', code: d.code || d.type, ...d }))] };
+
+    // 対象コマ組みの旧配置を落とし、新しい配置を exam_slots に書き込む
+    const setterBySubject = new Map(
+      ctx.conduct.map((s) => [`${Number(s.grade) || 0}:${String(s.subject_name || '').trim()}`, s])
+    );
+    const gradeByRow = new Map(ctx.rows.map((r) => [String(r.id), Number(r.grade) || 0]));
+    const subjectName = ctx.commandNames.get(shapeCommandId) || shape.name;
+    const keptSlots = slots.filter((r) => r.is_blocked || String(r.block_shape_id || '') !== String(shapeId));
+    const slotRows = keptSlots.map((r) => ({ ...r }));
+    for (const r of newRows) {
+      const grade = gradeByRow.get(r.class_course_id) ?? 0;
+      const plan = setterBySubject.get(`${grade}:${subjectName}`) || {};
+      slotRows.push({
+        day_number: r.day_number,
+        slot_number: r.slot_number,
+        class_id: r.class_course_id,
+        grade: grade || (Number(plan.grade) || 0),
+        subject_id: plan.subject_id || plan.source_plan_id || null,
+        subject_name: subjectName,
+        subject_teacher_id: plan.setter_teacher_id ?? null,
+        setter_teacher_name: plan.setter_teacher_name ?? null,
+        slot_span: 1,
+        duration_slots: 1,
+        room_type: plan.room_type || 'CLASS',
+        is_blocked: false,
+        command_id: shapeCommandId,
+        block_shape_id: String(shapeId),
+        notes: null,
+      });
+    }
+    const saved = await examModel.saveSlots(examMasterId, slotRows, user?.id ?? null);
+    await audit('exam_block_shape_place', user, 'exam_master', examMasterId, { shapeId, moved: newRows.length, saved: saved.length });
+    return { ok: true, hard, saved: newRows.length, totalSaved: saved.length, diagnostics: result.diagnostics };
+  },
+
+
 };
 
 export default examService;

@@ -15,15 +15,53 @@ function mapPost(row) {
   if (!row) return null;
   const postedAt = row.postedAt || row.posted_at || row.createdAt;
   const updatedAt = row.updatedAt || row.updated_at || postedAt;
+  const displayStart = normalizeDateOnly(row.displayStart || row.display_start_date);
+  const displayEnd = normalizeDateOnly(row.displayEnd || row.display_end_date);
   return {
     ...row,
     postedAt,
     posted_at: postedAt,
     updatedAt,
     updated_at: updatedAt,
+    // 掲示期間 (両方任意。開始日が未指定のレコードは投稿日へ補完、終了日 null は「期間限定の掲示ではない」)
+    displayStart,
+    displayEnd,
+    display_start_date: displayStart,
+    display_end_date: displayEnd,
     targetScope: parseJson(row.target_scope, { grade: 'ALL', department: 'ALL' }),
     attachments: parseJson(row.attachments, []),
   };
+}
+
+/**
+ * 日付値 (PostgreSQL DATE 由来の Date / 'YYYY-MM-DD' 文字列) を 'YYYY-MM-DD' に正規化する
+ * ※ PostgreSQL の DATE は UTC 基準の Date オブジェクトとして返るため JST の暦日へ変換する
+ * 不正日付 (例: 2月30日) と空値は null を返す
+ * @param {string|Date} value
+ * @returns {string|null}
+ */
+function normalizeDateOnly(value) {
+  if (!value) return null;
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    return value.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+  }
+
+  const raw = String(value).trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+
+  const y = parseInt(match[1], 10);
+  const m = parseInt(match[2], 10);
+  const d = parseInt(match[3], 10);
+  const dateObj = new Date(y, m - 1, d);
+  const isValid =
+    dateObj.getFullYear() === y &&
+    dateObj.getMonth() === m - 1 &&
+    dateObj.getDate() === d;
+
+  return isValid ? `${match[1]}-${match[2]}-${match[3]}` : null;
 }
 
 /**
@@ -70,13 +108,8 @@ export const bulletinModel = {
           p.id,
           p.title,
           p.content,
-          p.post_type as postType,
-          p.post_type,
-          p.priority,
-          p.author_id as authorId,
-          p.author_id,
-          p.target_scope,
-          p.attachments,
+          p.display_start_date,
+          p.display_end_date,
           p.is_deleted,
           u.name as authorName,
           u.avatar_url as author_avatar,
@@ -100,7 +133,7 @@ export const bulletinModel = {
 
   /**
    * 掲示板・回覧板の一覧取得（作成者名・承認ステータス結合）
-   * @param {Object} filters - { searchKey, currentUserId, limit, pinned, post_type }
+   * @param {Object} filters - { searchKey, currentUserId, limit, targetGrade, targetDepartment, postedDay, displayStart, displayEnd }
    */
   async findAll(filters = {}) {
     const params = [];
@@ -111,13 +144,12 @@ export const bulletinModel = {
           p.id,
           p.title,
           p.content,
-          p.post_type as postType,
-          p.post_type,
-          p.priority,
           p.author_id as authorId,
           p.author_id,
           p.target_scope,
           p.attachments,
+          p.display_start_date,
+          p.display_end_date,
           u.name as authorName,
           u.avatar_url as author_avatar,
           p.created_at as createdAt,
@@ -140,12 +172,6 @@ export const bulletinModel = {
 
     sql += ` WHERE COALESCE(p.is_deleted, 0) = 0`;
 
-    const postType = filters.post_type || filters.type;
-    if (postType) {
-      params.push(postType);
-      sql += ` AND p.post_type = ${ph()}`;
-    }
-
     if (filters.targetGrade && filters.targetGrade !== 'ALL') {
       params.push(JSON.stringify({ grade: filters.targetGrade }));
       sql += ` AND p.target_scope @> ${ph()}::jsonb`;
@@ -154,10 +180,6 @@ export const bulletinModel = {
     if (filters.targetDepartment && filters.targetDepartment !== 'ALL') {
       params.push(JSON.stringify({ department: filters.targetDepartment }));
       sql += ` AND p.target_scope @> ${ph()}::jsonb`;
-    }
-
-    if (filters.pinned === true || filters.pinned === 'true') {
-      sql += ` AND p.priority = 'URGENT'`;
     }
 
     if (filters.searchKey) {
@@ -183,7 +205,27 @@ export const bulletinModel = {
         sql += ` AND to_char(COALESCE(p.posted_at, p.created_at), 'YYYY-MM-DD') <= ?`;
       }
 
-      sql += ` ORDER BY CASE WHEN p.priority = 'URGENT' THEN 1 ELSE 2 END, COALESCE(p.posted_at, p.created_at) DESC`;
+      // 掲示期間による絞り込み (掲示期間が [displayStart 〜 displayEnd] と重なる投稿)
+      if (filters.displayStart) {
+        params.push(String(filters.displayStart).substring(0, 10));
+        sql += ` AND (p.display_end_date IS NULL OR p.display_end_date >= ${ph()})`;
+      }
+      if (filters.displayEnd) {
+        params.push(String(filters.displayEnd).substring(0, 10));
+        sql += ` AND (p.display_start_date IS NULL OR p.display_start_date <= ${ph()})`;
+      }
+
+      // 掲示期間にその日が含まれる (表示当日ベースの絞り込み)
+      const displayOnDate = filters.displayOnDate;
+      if (displayOnDate) {
+        const displayDay = String(displayOnDate).substring(0, 10);
+        params.push(displayDay);
+        sql += ` AND (p.display_start_date IS NULL OR p.display_start_date <= ${ph()})`;
+        params.push(displayDay);
+        sql += ` AND (p.display_end_date IS NULL OR p.display_end_date >= ${ph()})`;
+      }
+
+      sql += ` ORDER BY COALESCE(p.posted_at, p.created_at) DESC`;
 
     if (filters.limit) {
       params.push(parseInt(filters.limit, 10));
@@ -213,20 +255,22 @@ export const bulletinModel = {
    */
   async create(postData) {
     const id = postData.id || `post_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const postType = postData.post_type || postData.postType || postData.type || 'NOTICE';
-    const priority = postData.priority || (postData.is_urgent || postData.isUrgent ? 'URGENT' : 'NORMAL');
     const authorId = postData.author_id || postData.authorId || 'kyomu01';
     const targetScope = postData.target_scope || postData.targetScope || { grade: 'ALL', department: 'ALL' };
     const attachments = postData.attachments || [];
     const createdAt = nowIso();
     const postedAt = normalizeDateTime(postData.postedAt || postData.posted_at || postData.postedAtInput, createdAt);
+    // 掲示期間 (両方任意。掲示開始日が未指定なら投稿日、掲示終了日が未指定なら「期間限定の掲示ではない」)
+    const displayStart =
+      normalizeDateOnly(postData.displayStart || postData.display_start || postData.display_start_date) || postedAt.substring(0, 10);
+    const displayEnd = normalizeDateOnly(postData.displayEnd || postData.display_end || postData.display_end_date);
 
     try {
       const db = await getDb();
       await db.run(
-        `INSERT INTO posts (id, title, content, post_type, priority, author_id, target_scope, attachments, is_deleted, posted_at, created_at, updated_at)
+        `INSERT INTO posts (id, title, content, author_id, target_scope, attachments, display_start_date, display_end_date, is_deleted, posted_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-        [id, postData.title, postData.content, postType, priority, authorId, JSON.stringify(targetScope), JSON.stringify(attachments), postedAt, createdAt, createdAt]
+        [id, postData.title, postData.content, authorId, JSON.stringify(targetScope), JSON.stringify(attachments), displayStart, displayEnd, postedAt, createdAt, createdAt]
       );
 
       // 投稿作成時に添付ファイル (未紐付け) をこの投稿へ紐付ける
@@ -249,13 +293,14 @@ export const bulletinModel = {
       id,
       title: postData.title,
       content: postData.content,
-      postType,
-      post_type: postType,
-      priority,
       authorId,
       createdAt,
       postedAt,
       posted_at: postedAt,
+      displayStart,
+      displayEnd,
+      display_start_date: displayStart,
+      display_end_date: displayEnd,
       targetScope,
       attachments
     };

@@ -188,7 +188,7 @@ export function initDashboardModule() {
 
             <h3 class="font-bold text-sm text-main flex items-center gap-2">
 
-              <i data-lucide="pin" class="w-4 h-4 text-danger"></i> 本日の優先・重要連絡
+              <i data-lucide="megaphone" class="w-4 h-4 text-accent"></i> 最近の連絡
 
             </h3>
 
@@ -362,7 +362,7 @@ export async function loadDashboardData() {
 
   try {
 
-    const res = await apiGet('/bulletins', { limit: 5, pinned: true });
+    const res = await apiGet('/bulletins', { limit: 5 });
 
     const bulletins = res.bulletins || (Array.isArray(res) ? res : []);
 
@@ -378,7 +378,7 @@ export async function loadDashboardData() {
 
           <div class="flex items-center justify-between text-[11px] mb-1">
 
-            <span class="badge ${b.priority === 'URGENT' || b.category === 'URGENT' ? 'badge-warning' : 'badge'}">${b.postType || b.category || '全般'}</span>
+            <span class="badge">${formatDate(b.postedAt || b.posted_at || b.createdAt || b.created_at)}</span>
 
             <div class="flex items-center gap-1.5 text-muted font-mono">
               ${userAvatarHtml({ name: b.authorName || '教員', avatarUrl: b.authorAvatar || b.author_avatar || null, size: 'xs' })}
@@ -397,7 +397,7 @@ export async function loadDashboardData() {
 
     } else if (listEl) {
 
-      listEl.innerHTML = '<p class="text-xs text-muted text-center py-2">ピン留めされた緊急連絡はありません。</p>';
+      listEl.innerHTML = '<p class="text-xs text-muted text-center py-2">最近の連絡はありません。</p>';
 
     }
 

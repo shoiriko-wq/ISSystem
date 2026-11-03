@@ -7,6 +7,65 @@ import facilityModel from '../models/facility.model.js';
 import auditModel from '../models/audit.model.js';
 import { ApiError } from '../middlewares/error.middleware.js';
 
+/** 施設名・カテゴリの制約 (マスタ管理用) */
+const FACILITY_NAME_MAX = 30;
+
+/** カテゴリキー → 表示名 (教務部マスタ管理UIのセレクトと同一) */
+export const FACILITY_CATEGORY_LABELS = {
+  ROOM: '教室・会議室',
+  GYM: '体育施設 (体育館・武道場)',
+  OUTDOOR: '屋外施設 (運動場・体育広場)',
+  EQUIPMENT: '備品・設備 (プロジェクター等)',
+  VEHICLE: '車両 (マイクロバス等)',
+  SPECIAL: '特別教室 (PC教室・理科室等)',
+};
+
+const CATEGORY_KEYS = Object.keys(FACILITY_CATEGORY_LABELS);
+
+/** 教務主任権限 (KYOMU / ADMIN / is_kyomu) の判定 */
+function isKyomu(user) {
+  if (!user) return false;
+  const role = String(user.role || '').toUpperCase();
+  return user.is_kyomu === true || user.is_kyomu === 1 || role === 'KYOMU' || role === 'ADMIN';
+}
+
+function ensureKyomu(user) {
+  if (!isKyomu(user)) {
+    throw new ApiError(403, '施設・備品マスターの追加・改名・削除は教務部 (KYOMU) のみです。');
+  }
+}
+
+/** 施設名を正規化 (空・長文は 400) */
+function normalizeFacilityName(raw) {
+  const name = String(raw || '').trim().replace(/\s+/g, ' ');
+  if (!name) {
+    throw new ApiError(400, '施設・備品名を入力してください。');
+  }
+  if (name.length > FACILITY_NAME_MAX) {
+    throw new ApiError(400, `施設・備品名は${FACILITY_NAME_MAX}文字以内で入力してください。`);
+  }
+  return name;
+}
+
+/** カテゴリキーを検証して正規化 (未定義キーは 400) */
+function normalizeFacilityCategory(raw) {
+  const key = String(raw || '').trim().toUpperCase();
+  if (!CATEGORY_KEYS.includes(key)) {
+    throw new ApiError(400, `カテゴリ「${raw}」は定義されていません。 (${CATEGORY_KEYS.join(' / ')})`);
+  }
+  return key;
+}
+
+/** 名称の重複チェック (case-insensitive。excludeId 以外の同名が存在すれば 409) */
+function ensureNameAvailable(list, name, excludeId = null) {
+  const conflict = list.find(
+    (f) => String(f.name).toLowerCase() === String(name).toLowerCase() && String(f.id) !== String(excludeId)
+  );
+  if (conflict) {
+    throw new ApiError(409, `施設・備品「${name}」は既に登録されています。`);
+  }
+}
+
 /**
  * 時刻表記 'HH:MM' / 'HH:MM:SS' / 'YYYY-MM-DD HH:MM:SS' を 'HH:MM' に正規化する
  * @param {string} raw
@@ -50,6 +109,136 @@ export const facilityService = {
    */
   async getAllFacilities() {
     return await facilityModel.listFacilities();
+  },
+
+  /**
+   * 施設マスター一覧＋予約使用件数 (マスタ管理UI・削除確認用)
+   * active = 有効予約件数 (削除ガードの基準), total = キャンセル履歴含む全件数
+   */
+  async listFacilitiesWithUsage() {
+    const facilities = await facilityModel.listFacilities();
+    const withUsage = await Promise.all(
+      facilities.map(async (fac) => {
+        const counts = await facilityModel.countReservations(fac.id);
+        return {
+          ...fac,
+          reservation_count: counts.active,
+          reservation_total: counts.total,
+        };
+      })
+    );
+    return { facilities: withUsage };
+  },
+
+  /**
+   * 施設・備品の追加 (教務部のみ)
+   * @param {Object} payload - { name, category }
+   * @param {Object} user - { id, name, role, is_kyomu }
+   */
+  async createFacility(payload, user) {
+    ensureKyomu(user);
+    const name = normalizeFacilityName(payload.name);
+    const category = normalizeFacilityCategory(payload.category || 'ROOM');
+
+    const existing = await facilityModel.listFacilities();
+    ensureNameAvailable(existing, name);
+
+    const facility = await facilityModel.createFacility({ id: payload.id, name, category });
+
+    await auditModel.logAction({
+      userId: user.id,
+      action: 'CREATE_FACILITY',
+      targetEntity: 'FACILITY',
+      targetId: facility.id,
+      changesJson: JSON.stringify({ name, category }),
+    });
+
+    return facility;
+  },
+
+  /**
+   * 施設・備品の改名・カテゴリ変更 (教務部のみ)
+   * 改名は既存予約の表示 (resource_id 参照の JOIN) へ自動反映される
+   * @param {string} id
+   * @param {Object} payload - { name?, category? }
+   * @param {Object} user
+   */
+  async updateFacility(id, payload, user) {
+    ensureKyomu(user);
+
+    const target = await facilityModel.findFacilityById(id);
+    if (!target) {
+      throw new ApiError(404, '施設・備品が見つかりません。');
+    }
+
+    const name = payload.name !== undefined ? normalizeFacilityName(payload.name) : undefined;
+    const category =
+      payload.category !== undefined ? normalizeFacilityCategory(payload.category) : undefined;
+
+    if (name) {
+      const existing = await facilityModel.listFacilities();
+      ensureNameAvailable(existing, name, id);
+    }
+
+    const updated = await facilityModel.updateFacility(id, { name, category });
+    if (!updated) {
+      throw new ApiError(404, '施設・備品が見つかりません。');
+    }
+
+    await auditModel.logAction({
+      userId: user.id,
+      action: 'UPDATE_FACILITY',
+      targetEntity: 'FACILITY',
+      targetId: String(id),
+      changesJson: JSON.stringify({
+        from: { name: target.name, category: target.category },
+        to: { name: updated.name, category: updated.category },
+      }),
+    });
+
+    return updated;
+  },
+
+  /**
+   * 施設・備品の削除 (教務部のみ)
+   * 有効な予約が残る施設は削除不可 (先に予約をキャンセルさせる)。
+   * 削除時は FK 制約を満たすためキャンセル済み予約履歴・編集ロック・セル値も除去する。
+   * @param {string} id
+   * @param {Object} user
+   */
+  async deleteFacility(id, user) {
+    ensureKyomu(user);
+
+    const target = await facilityModel.findFacilityById(id);
+    if (!target) {
+      throw new ApiError(404, '施設・備品が見つかりません。');
+    }
+
+    const counts = await facilityModel.countReservations(id);
+    if (counts.active > 0) {
+      throw new ApiError(
+        409,
+        `施設「${target.name}」は有効な予約が ${counts.active} 件残っているため削除できません。先に予約をキャンセルしてください。`
+      );
+    }
+
+    const removed = await facilityModel.deleteFacility(id);
+
+    await auditModel.logAction({
+      userId: user.id,
+      action: 'DELETE_FACILITY',
+      targetEntity: 'FACILITY',
+      targetId: String(id),
+      changesJson: JSON.stringify({
+        name: target.name,
+        category: target.category,
+        deleted_reservations: removed.deleted_reservations,
+        deleted_locks: removed.deleted_locks,
+        deleted_cells: removed.deleted_cells,
+      }),
+    });
+
+    return removed;
   },
 
   /**

@@ -1,0 +1,44 @@
+(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_seating_zone ON seating_status(group_zone);
+CREATE INDEX IF NOT EXISTS idx_seating_status ON seating_status(current_status);
+
+-- 7. 施設・備品マスター (resources)
+CREATE TABLE IF NOT EXISTS resources (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'ROOM'
+);
+
+-- 8. 施設・備品予約記録 (reservations)
+CREATE TABLE IF NOT EXISTS reservations (
+  id TEXT PRIMARY KEY,
+  resource_id TEXT NOT NULL,
+  facility_id TEXT,
+  user_id TEXT,
+  user_name TEXT DEFAULT '教員',
+  title TEXT NOT NULL,
+  target_date TEXT,
+  start_time TEXT NOT NULL,
+  end_time TEXT NOT NULL,
+  is_cancelled INTEGER DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (resource_id) REFERENCES resources(id),
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_res_target_date ON reservations(target_date);
+CREATE INDEX IF NOT EXISTS idx_res_resource ON reservations(resource_id, start_time, end_time);
+CREATE INDEX IF NOT EXISTS idx_res_cancelled ON reservations(is_cancelled);
+
+-- 9. 校内スケジュール・年間行事 (school_schedules)
+CREATE TABLE IF NOT EXISTS school_schedules (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  event_date TEXT NOT NULL,
+  start_time TEXT,
+  end_time TEXT,
+  category TEXT NOT NULL DEFAULT 'EVENT',
+  target_grade INTEGER,
+  created_by_user_id TEXT,
+  created_at TIME

@@ -35,6 +35,15 @@ function normalizeDate(raw) {
   return match ? `${match[1]}-${match[2]}-${match[3]}` : null;
 }
 
+/** 施設・備品カテゴリの定義 (resources.category に格納する英大文字キー) */
+export const FACILITY_CATEGORIES = ['ROOM', 'GYM', 'OUTDOOR', 'EQUIPMENT', 'VEHICLE', 'SPECIAL'];
+
+/** カテゴリ表記を大文字キーへ正規化 (未定義カテゴリは ROOM に丸める) */
+function normalizeCategory(raw) {
+  const key = String(raw || '').trim().toUpperCase();
+  return FACILITY_CATEGORIES.includes(key) ? key : 'ROOM';
+}
+
 function dateOfRange(startTime) {
   if (!startTime) return todayJst();
   return normalizeDate(startTime) || todayJst();
@@ -75,6 +84,109 @@ export const facilityModel = {
 
   async findResourceById(id) {
     return this.findFacilityById(id);
+  },
+
+  // ================= 施設・備品マスター CRUD (resources) =================
+
+  /**
+   * 施設・備品の追加 (教務部のみ service 側で検証)
+   * @param {Object} data - { id?, name, category }
+   */
+  async createFacility(data = {}) {
+    const facilityId =
+      data.id || `fac${Date.now().toString(36)}${Math.random().toString(36).substring(2, 5)}`;
+    const name = String(data.name || '').trim();
+    const category = normalizeCategory(data.category);
+
+    const res = await query(
+      `INSERT INTO resources (id, name, category) VALUES ($1, $2, $3) RETURNING id, name, category`,
+      [facilityId, name, category]
+    );
+    const row = res.rows[0];
+    const created = row || { id: facilityId, name, category };
+    return { ...created, facility_id: created.id, facility_name: created.name };
+  },
+
+  /**
+   * 施設・備品の改名・カテゴリ変更
+   * 既存予約は resource_id 参照なので改名は JOIN 経由で自動反映される
+   * @param {string} id
+   * @param {Object} payload - { name?, category? }
+   */
+  async updateFacility(id, payload = {}) {
+    const facilityId = String(id);
+    const name = payload.name !== undefined ? String(payload.name).trim() : null;
+    const category = payload.category !== undefined ? normalizeCategory(payload.category) : null;
+
+    const res = await query(
+      `UPDATE resources SET name = COALESCE($1, name), category = COALESCE($2, category)
+       WHERE id = $3 RETURNING id, name, category`,
+      [name, category, facilityId]
+    );
+    const row = res.rows[0];
+    if (!row) return null;
+    return { ...row, facility_id: row.id, facility_name: row.name };
+  },
+
+  /**
+   * 施設の予約使用件数 (active=有効予約, total=キャンセル履歴含む)
+   * @param {string} facilityId
+   */
+  async countReservations(facilityId) {
+    try {
+      const res = await query(
+        `SELECT COUNT(*) FILTER (WHERE COALESCE(r.is_cancelled, 0) = 0) AS active, COUNT(*) AS total
+         FROM reservations r
+         WHERE COALESCE(r.resource_id, r.facility_id) = $1`,
+        [String(facilityId)]
+      );
+      const row = res.rows[0] || {};
+      return { active: Number(row.active) || 0, total: Number(row.total) || 0 };
+    } catch (err) {
+      console.warn('[FacilityModel] countReservations failed:', err.message);
+      return { active: 0, total: 0 };
+    }
+  },
+
+  /**
+   * 施設の削除
+   * reservations.resource_id は resources(id) へ FK 挂けされているため、
+   * 関連する予約履歴・編集ロック・セル値を先に除去してから施設を削除する。
+   * (有効予約の除去は service 側で事前に 409 ガードする)
+   * @param {string} id
+   */
+  async deleteFacility(id) {
+    const facilityId = String(id);
+    const target = await this.findFacilityById(facilityId);
+    if (!target) return null;
+
+    const reservationRows = await query(
+      `DELETE FROM reservations WHERE COALESCE(resource_id, facility_id) = $1 RETURNING id`,
+      [facilityId]
+    );
+    const lockRows = await query(
+      `DELETE FROM editing_locks WHERE resource_id = $1 RETURNING resource_id`,
+      [facilityId]
+    );
+    const cellRows = await query(
+      `DELETE FROM facility_cells WHERE cell_id = $1 RETURNING cell_key`,
+      [facilityId]
+    );
+    const deleted = await query(
+      `DELETE FROM resources WHERE id = $1 RETURNING id, name, category`,
+      [facilityId]
+    );
+
+    const row = deleted.rows[0] || null;
+    return {
+      id: facilityId,
+      name: target.name,
+      category: target.category,
+      facility: row,
+      deleted_reservations: reservationRows.rows.length,
+      deleted_locks: lockRows.rows.length,
+      deleted_cells: cellRows.rows.length,
+    };
   },
 
   // ================= 予約 (reservations) =================
@@ -409,6 +521,10 @@ export const facilityModel = {
 
 export const listAvailable = (...args) => facilityModel.listAvailable(...args);
 export const listFacilities = (...args) => facilityModel.listFacilities(...args);
+export const createFacility = (...args) => facilityModel.createFacility(...args);
+export const updateFacility = (...args) => facilityModel.updateFacility(...args);
+export const deleteFacility = (...args) => facilityModel.deleteFacility(...args);
+export const countReservations = (...args) => facilityModel.countReservations(...args);
 export const getReservationsByDate = (...args) => facilityModel.getReservationsByDate(...args);
 export const getDailyOverview = (...args) => facilityModel.getDailyOverview(...args);
 export const createReservation = (...args) => facilityModel.createReservation(...args);

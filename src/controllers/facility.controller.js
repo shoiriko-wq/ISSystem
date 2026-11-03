@@ -12,7 +12,7 @@ export const facilityController = {
    */
   async getAllFacilities(req, res) {
     try {
-      const facilities = await facilityModel.findAll();
+      const { facilities } = await facilityService.listFacilitiesWithUsage();
       return res.status(200).json({
         success: true,
         count: facilities.length,
@@ -124,6 +124,110 @@ export const facilityController = {
       return res.status(400).json({
         success: false,
         message: err.message || '予約のキャンセルに失敗しました。'
+      });
+    }
+  },
+
+  // ================= 施設・備品マスター CRUD (教務部 KYOMU のみ) =================
+
+  /**
+   * 施設・備品の追加 (POST /api/facilities)
+   */
+  async createFacility(req, res) {
+    try {
+      const user = req.user;
+      const facility = await facilityService.createFacility(req.body, user);
+
+      const io = req.app ? req.app.get('io') : null;
+      if (io) {
+        io.emit('facility:master_changed', {
+          action: 'create',
+          facility,
+          userId: user.id || user._id,
+          userName: user.name || '教務部'
+        });
+      }
+
+      return res.status(201).json({
+        success: true,
+        message: `施設・備品「${facility.name}」を追加しました。`,
+        facility,
+        data: facility
+      });
+    } catch (err) {
+      const status = err.statusCode >= 400 && err.statusCode < 600 ? err.statusCode : 400;
+      return res.status(status).json({
+        success: false,
+        message: err.message || '施設・備品の追加に失敗しました。'
+      });
+    }
+  },
+
+  /**
+   * 施設・備品の改名・カテゴリ変更 (PUT /api/facilities/:facilityId)
+   */
+  async updateFacility(req, res) {
+    try {
+      const user = req.user;
+      const { facilityId } = req.params;
+      const facility = await facilityService.updateFacility(facilityId, req.body, user);
+
+      const io = req.app ? req.app.get('io') : null;
+      if (io) {
+        io.emit('facility:master_changed', {
+          action: 'update',
+          facility,
+          userId: user.id || user._id,
+          userName: user.name || '教務部'
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: `施設・備品「${facility.name}」を更新しました。`,
+        facility,
+        data: facility
+      });
+    } catch (err) {
+      const status = err.statusCode >= 400 && err.statusCode < 600 ? err.statusCode : 400;
+      return res.status(status).json({
+        success: false,
+        message: err.message || '施設・備品の変更に失敗しました。'
+      });
+    }
+  },
+
+  /**
+   * 施設・備品の削除 (DELETE /api/facilities/:facilityId)
+   * 有効な予約が残る場合は 409 で拒否される
+   */
+  async deleteFacility(req, res) {
+    try {
+      const user = req.user;
+      const { facilityId } = req.params;
+      const removed = await facilityService.deleteFacility(facilityId, user);
+
+      const io = req.app ? req.app.get('io') : null;
+      if (io) {
+        io.emit('facility:master_changed', {
+          action: 'delete',
+          facilityId: removed.id,
+          facilityName: removed.name,
+          userId: user.id || user._id,
+          userName: user.name || '教務部'
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: `施設・備品「${removed.name}」を削除しました。`,
+        data: removed
+      });
+    } catch (err) {
+      const status = err.statusCode >= 400 && err.statusCode < 600 ? err.statusCode : 400;
+      return res.status(status).json({
+        success: false,
+        message: err.message || '施設・備品の削除に失敗しました。'
       });
     }
   }

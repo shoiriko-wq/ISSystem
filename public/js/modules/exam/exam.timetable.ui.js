@@ -382,6 +382,204 @@ function buildSlotRows() {
   });
 }
 
+// ============================================================
+// コマ組み（block）：コマ・コマ組み形状・グループ・入れ条件（③-b）
+// ============================================================
+
+/** コマ組みデータ（コマ・コマ組み・グループ・入れ条件）と直近のソルバー結果 */
+let blkData = null;
+let blkResult = null;
+
+const GROUP_KIND_LABEL = { ALL_STUDENTS: '全員受験', SCIENCE: '理系', ARTS: '文系', BROADCAST: '放送' };
+
+/** コマ組みデータ（commands / block-shapes / block-groups / block-conditions）を取得する */
+async function loadBlockData(examId) {
+  if (!examId) return null;
+  const [commands, shapes, groups, conditions] = await Promise.all([
+    examApi.get(`/exam/${examId}/commands`).catch(() => []),
+    examApi.get(`/exam/${examId}/block-shapes`).catch(() => []),
+    examApi.get(`/exam/${examId}/block-groups`).catch(() => []),
+    examApi.get(`/exam/${examId}/block-conditions`).catch(() => []),
+  ]);
+  blkData = {
+    commands: commands || [],
+    shapes: shapes || [],
+    groups: groups || [],
+    conditions: conditions || [],
+  };
+  return blkData;
+}
+
+/** 小テーブル（ヘッダ + 行） */
+function miniTable(headers, rows, emptyText) {
+  if (!rows.length) return `<p class="text-[10px] text-muted">${emptyText}</p>`;
+  return `<table class="w-full text-[11px]">
+    <thead><tr class="text-muted text-left">${headers.map((h) => `<th class="py-1 pr-3 font-normal">${h}</th>`).join('')}</tr></thead>
+    <tbody>${rows.join('')}</tbody>
+  </table>`;
+}
+
+/** クラス行ラベル（学年＋組番号） */
+function classRowLabel(classId) {
+  const c = (examStore.board?.basic_info?.classes || []).find((x) => String(x.id) === String(classId));
+  return c ? `${Number(c.grade) || 0}年${Number(c.class_num) || 0}組` : String(classId);
+}
+
+/** 入れ条件グリッド（コマ組み × クラス行 × 日・時限）。× マスはクリックで入れ不可を設定／解除 */
+function condGridHtml(shape, days, slots, editable) {
+  const rows = (shape.rows || []).map((r) => String(r.class_course_id));
+  if (rows.length === 0 || slots === 0) return '';
+  const forbidden = new Set(
+    (blkData.conditions || [])
+      .filter((c) => String(c.block_shape_id) === String(shape.id) && c.class_course_id && !c.allowed)
+      .map((c) => `${String(c.class_course_id)}|${Number(c.day_number)}|${Number(c.slot_number)}`)
+  );
+  const placed = new Set(
+    (examStore.board?.slots || [])
+      .filter((s) => String(s.block_shape_id || '') === String(shape.id))
+      .map((s) => `${String(s.class_course_id)}|${Number(s.day_number)}|${Number(s.slot_number)}`)
+  );
+  const header = `<th class="px-1 py-1 text-[10px] text-muted font-bold bg-inset">クラス行</th>${days
+    .map((d) => `<th class="px-1 py-1 text-[10px] text-muted font-bold bg-inset text-center" colspan="${slots}">${d}日目</th>`)
+    .join('')}`;
+  const subHeader = `<th class="bg-inset"></th>${days
+    .map((d) =>
+      Array.from({ length: slots }, (_, i) => i + 1)
+        .map((s) => `<th class="px-1 py-0.5 text-[9px] text-muted text-center bg-inset">${s}限</th>`)
+        .join('')
+    )
+    .join('')}`;
+  const body = rows
+    .map((rid) => {
+      const cells = days
+        .map((d) =>
+          Array.from({ length: slots }, (_, i) => i + 1)
+            .map((s) => {
+              const key = `${rid}|${d}|${s}`;
+              const isX = forbidden.has(key);
+              const isPlaced = placed.has(key);
+              const attrs = editable
+                ? ` data-cond-cell data-cond-shape="${shape.id}" data-cond-row="${rid}" data-cond-day="${d}" data-cond-slot="${s}"` +
+                  ` data-place-drop data-place-shape="${shape.id}" data-place-row="${rid}" data-place-day="${d}" data-place-slot="${s}"`
+                : '';
+              const drag =
+                editable && isPlaced
+                  ? ` draggable="true" data-place-src data-place-shape="${shape.id}" data-place-row="${rid}" data-place-day="${d}" data-place-slot="${s}"`
+                  : '';
+              const inner = isPlaced
+                ? '<span class="text-[12px] font-bold text-accent-strong">●</span>'
+                : isX
+                  ? '<span class="text-[12px] font-bold text-danger-strong">×</span>'
+                  : '<span class="text-[10px] text-muted">○</span>';
+              return `<td class="border border-divider p-1 text-center${editable ? ' cursor-pointer' : ''}"${attrs}${drag} title="${escapeHTML(shape.name)} / ${classRowLabel(rid)} ${d}日目${s}限">${inner}</td>`;
+            })
+            .join('')
+        )
+        .join('');
+      return `<tr class="border-t border-divider"><th class="px-1 py-1 text-[10px] font-bold text-main bg-inset">${classRowLabel(rid)}</th>${cells}</tr>`;
+    })
+    .join('');
+  return `<div class="mt-2">
+      <h5 class="text-[11px] font-bold text-main mb-1">${escapeHTML(shape.name)}（${Number(shape.span) || 1}時限 / ${rows.length}クラス行）</h5>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse min-w-[560px]"><thead><tr>${header}</tr><tr>${subHeader}</tr></thead><tbody>${body}</tbody></table>
+      </div>
+    </div>`;
+}
+
+
+
+/** コマ組みセクション（コマ・コマ組み・グループ・入れ条件＋作成／検証） */
+function blockSectionHtml(editable) {
+  if (!blkData) return sectionCard('grid-3x3', 'コマ組み（コマ・グループ・条件）', '読み込み中…', '');
+  const d = blkData;
+  const shapeById = new Map(d.shapes.map((s) => [String(s.id), s]));
+
+  const cmdRows = d.commands.map((c) => `<tr class="border-t border-line/60">
+      <td class="py-1 pr-3 font-bold text-main">${escapeHTML(c.name)}</td>
+      <td class="py-1 pr-3 text-center">${Number(c.duration_slots) || 1}</td>
+      <td class="py-1 pr-3 text-center">${(c.courses || []).length}</td>
+    </tr>`);
+  const shapeRows = d.shapes.map((s) => `<tr class="border-t border-line/60">
+      <td class="py-1 pr-3 font-bold text-main">${escapeHTML(s.name)}</td>
+      <td class="py-1 pr-3 text-center">${Number(s.span) || 1}</td>
+      <td class="py-1 pr-3">${(s.rows || []).map((r) => classRowLabel(r.class_course_id)).join(' / ')}</td>
+    </tr>`);
+  const groupRows = d.groups.map((g) => {
+    const cons = Object.keys(g.constraints || {});
+    return `<tr class="border-t border-line/60">
+      <td class="py-1 pr-3 font-bold text-main">${escapeHTML(g.name)}</td>
+      <td class="py-1 pr-3">${GROUP_KIND_LABEL[g.kind] || g.kind}</td>
+      <td class="py-1 pr-3">${(g.members || []).map((m) => escapeHTML(shapeById.get(String(m))?.name || String(m))).join(' / ')}</td>
+      <td class="py-1 pr-3 text-muted">${cons.join(', ') || '-'}</td>
+    </tr>`;
+  });
+  const condRows = d.conditions.map((c) => `<tr class="border-t border-line/60">
+      <td class="py-1 pr-3">${escapeHTML(shapeById.get(String(c.block_shape_id))?.name || String(c.block_shape_id))}</td>
+      <td class="py-1 pr-3 text-center">${Number(c.day_number) || 0}日目 ${Number(c.slot_number) || 0}限</td>
+      <td class="py-1 pr-3">${c.class_course_id ? classRowLabel(c.class_course_id) : '全クラス'}</td>
+      <td class="py-1 pr-3 ${c.allowed ? 'text-success-strong' : 'text-danger-strong'}">${c.allowed ? '入れ可' : '×'}</td>
+    </tr>`);
+
+  const st = blkResult?.stats || {};
+  const hardList = blkResult?.hard || blkResult?.diagnostics?.hard || [];
+  const softList = blkResult?.soft || blkResult?.diagnostics?.soft || [];
+  const resultHtml = blkResult
+    ? `<div class="flex flex-wrap gap-3 text-[11px] text-soft mt-2">
+        <span>充填率 <strong class="text-accent-strong">${st.fillRate ?? 0}%</strong></span>
+        <span>未配置 <strong class="${st.unplacedBlocks ? 'text-danger-strong' : 'text-success-strong'}">${st.unplacedBlocks ?? 0}</strong> コマ組み</span>
+        <span>ペナルティ <strong class="text-warning-strong">${blkResult.penalty ?? st.penalty ?? 0}</strong></span>
+        <span>保存 ${blkResult.saved ?? 0} コマ</span>
+        ${blkResult.relaxed ? '<span class="text-danger-strong">※ HARD 制約を軟制約へ緩和して構成しました</span>' : ''}
+      </div>${diagnosticsHtml([...hardList, ...softList])}`
+    : '';
+
+
+  const btnCls = editable ? '' : 'disabled';
+  const buttons = `<div class="flex flex-wrap items-center gap-2">
+    <button id="exam-blk-cmds" class="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1" ${btnCls}>
+      <i data-lucide="list" class="w-3.5 h-3.5"></i> コマ生成
+    </button>
+    <button id="exam-blk-shapes" class="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1" ${btnCls}>
+      <i data-lucide="grid-2x2" class="w-3.5 h-3.5"></i> コマ組み生成
+    </button>
+    <button id="exam-blk-groups" class="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1" ${btnCls}>
+      <i data-lucide="users" class="w-3.5 h-3.5"></i> グループ初期化
+    </button>
+    <button id="exam-blk-solve" class="btn-primary py-1.5 px-3 text-xs flex items-center gap-1" ${btnCls}>
+      <i data-lucide="wand-2" class="w-3.5 h-3.5"></i> コマ組みで作成
+    </button>
+    <button id="exam-blk-validate" class="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1" ${btnCls}>
+      <i data-lucide="shield-check" class="w-3.5 h-3.5"></i> 検証
+    </button>
+    <span class="text-[10px] text-muted ml-auto">コマ＝試験科目の 1〜N 時限 ／ コマ組み＝クラス行 × 時限の形状</span>
+  </div>`;
+
+  const condGrids = d.shapes
+    .map((s) => condGridHtml(s, examDayList(examStore.board?.master || {}), Number(examStore.board?.master?.daily_slots) || 0, editable))
+    .join('');
+  const condEditor = condGrids
+    ? `<div class="mt-3 border-t border-line pt-2">
+        <h4 class="text-xs font-bold text-main mb-1">コマ条件（クラス行 × 日・時限の入れ不可）</h4>
+        <p class="text-[10px] text-muted">○ をクリックすると ×（そのクラス行はそのコマに入れない）になります。× をクリックすると解除します。</p>
+        ${condGrids}
+      </div>`
+    : '';
+
+  const body = `${buttons}
+    <div class="grid gap-3 md:grid-cols-2 mt-2">
+      <div>${miniTable(['コマ名', '時限数', '対象クラス数'], cmdRows, 'コマが未作成です。「コマ生成」を押してください。')}</div>
+      <div>${miniTable(['コマ組み', 'コマ数', '対象クラス行'], shapeRows, 'コマ組みが未作成です。「コマ組み生成」を押してください。')}</div>
+      <div>${miniTable(['グループ', '種別', 'メンバー', '制約'], groupRows, 'グループが未作成です。「グループ初期化」を押してください。')}</div>
+      <div>${miniTable(['入れ条件', '位置', '対象', '判定'], condRows, '入れ条件は未設定です。')}</div>
+    </div>
+    ${condEditor}
+    ${resultHtml}`;
+
+  return sectionCard('grid-3x3', 'コマ組み（コマ・グループ・条件）', '実施科目からコマを組み、グループ条件・入れ条件で時間割を作成します', body);
+}
+
+
 export function renderTimetableTab(container) {
   const board = examStore.board;
   if (!board) {
@@ -398,6 +596,7 @@ export function renderTimetableTab(container) {
     ${rulesFormHtml(board.timetable_rules || {}, editable)}
     ${toolbarHtml(master, editable, phase)}
     ${gridSectionHtml(master, plan, editable)}
+    ${blockSectionHtml(editable)}
     ${resultSectionHtml()}
   `;
   refreshLucideIcons();
@@ -581,12 +780,215 @@ export function bindTimetableTab(container, reload) {
       btn.disabled = false;
     }
   });
+
+  // ===== コマ組み（block：コマ・コマ組み・グループ・入れ条件） =====
+  if (!blkData) {
+    loadBlockData(examStore.examId)
+      .then(() => renderTimetableTab(container))
+      .catch((e) => console.warn('[Exam] block data', e));
+  }
+
+  /** コマ組みデータ＋ボードを再取得して再描画する */
+  const blkReload = async () => {
+    await loadBlockData(examStore.examId);
+    await reload();
+    unitPos = slotPositions((examStore.board?.slots) || []);
+    renderTimetableTab(container);
+  };
+
+  /** コマ組み系 API を実行して再描画する（inserted を返す生成系） */
+  const blkRun = async (btn, label, msgFn, path, body = {}) => {
+    btn.disabled = true;
+    try {
+      const data = await examApi.post(`/exam/${examStore.examId}${path}`, body);
+      showToast(msgFn(data), 'success');
+      await blkReload();
+    } catch (err) {
+      showToast(err.message || `${label}に失敗しました`, 'error');
+    }
+    btn.disabled = false;
+  };
+
+  container.querySelector('#exam-blk-cmds')?.addEventListener('click', (e) =>
+    blkRun(e.currentTarget, 'コマ生成', (d) => `コマを ${d.inserted} 件 生成しました`, '/commands/generate'));
+
+  container.querySelector('#exam-blk-shapes')?.addEventListener('click', (e) =>
+    blkRun(e.currentTarget, 'コマ組み生成', (d) => `コマ組みを ${d.inserted} 件 生成しました`, '/block-shapes/generate'));
+
+  container.querySelector('#exam-blk-groups')?.addEventListener('click', (e) =>
+    blkRun(e.currentTarget, 'グループ初期化', (d) => `グループを ${d.created ?? d.inserted} 件 初期化しました`, '/block-groups/seed'));
+
+  container.querySelector('#exam-blk-solve')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      const result = await examApi.post(`/exam/${examStore.examId}/timetable/solve`, { save: true });
+      blkResult = result;
+      const st = result.stats || {};
+      const msg = `コマ組みで作成（充填率 ${st.fillRate ?? 0}% / 未配置 ${st.unplacedBlocks ?? 0} / 保存 ${result.saved ?? 0}）`;
+      showToast(result.feasible ? msg : `${msg} ／ HARD 制約あり`, result.feasible ? 'success' : 'warning');
+      await blkReload();
+    } catch (err) {
+      showToast(err.message || 'コマ組みでの作成に失敗しました', 'error');
+    }
+    btn.disabled = false;
+  });
+
+  container.querySelector('#exam-blk-validate')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      const result = await examApi.post(`/exam/${examStore.examId}/timetable/validate-block`, {});
+      blkResult = result;
+      const hard = (result.hard || result.diagnostics?.hard || []).length;
+      const msg = `検証: HARD 違反 ${hard} 件（充填率 ${result.stats?.fillRate ?? 0}%）`;
+      showToast(msg, hard ? 'warning' : 'success');
+      renderTimetableTab(container);
+    } catch (err) {
+      showToast(err.message || '検証に失敗しました', 'error');
+    }
+    btn.disabled = false;
+  });
+
+  // 入れ条件マスのトグル（コマ条件：クラス行 × 日・時限）
+  container.addEventListener('click', async (e) => {
+    const cell = e.target.closest('[data-cond-cell]');
+    if (!cell) return;
+    const board = examStore.board;
+    if (!board?.editable?.timetable) return;
+    const shapeId = String(cell.dataset.condShape);
+    const row = String(cell.dataset.condRow);
+    const d = Number(cell.dataset.condDay);
+    const s = Number(cell.dataset.condSlot);
+    const shapeName = (blkData?.shapes || []).find((sh) => String(sh.id) === shapeId)?.name || shapeId;
+    const conds = (blkData?.conditions || []).filter((c) => String(c.block_shape_id) === shapeId);
+    const existing = conds.find((c) => String(c.class_course_id) === row && Number(c.day_number) === d && Number(c.slot_number) === s);
+    const next = conds.filter((c) => c !== existing);
+    if (!existing) next.push({ class_course_id: row, day_number: d, slot_number: s, allowed: false });
+    cell.style.pointerEvents = 'none';
+    try {
+      const data = await examApi.put(`/exam/${examStore.examId}/block-conditions/${shapeId}`, { conditions: next });
+      const savedCount = Array.isArray(data?.saved) ? data.saved.length : Number(data?.saved ?? 1);
+      showToast(
+        existing
+          ? `${shapeName} の ${classRowLabel(row)} ${d}日目${s}限 の入れ条件を解除しました`
+          : `${shapeName} を ${classRowLabel(row)} ${d}日目${s}限 で入れ不可に設定（${savedCount}件保存）`,
+        'success'
+      );
+      await loadBlockData(examStore.examId);
+      renderTimetableTab(container);
+    } catch (err) {
+      showToast(err.message || '入れ条件の保存に失敗しました', 'error');
+      cell.style.pointerEvents = '';
+    }
+  });
+
+  // コマ組みの配置（●）をドラッグで移動する。サーバー検証（HARD 違反）を通らないマスには配置できない
+  const shapePlacementMap = (shapeId) =>
+    new Map(
+      (examStore.board?.slots || [])
+        .filter((s) => String(s.block_shape_id || '') === String(shapeId))
+        .map((s) => [String(s.class_course_id), { day: Number(s.day_number), slot: Number(s.slot_number) }])
+    );
+
+  // 設定済み／解除済みの DOM 再描画でも効くよう、コンテナへの委譲でドラッグ＆ドロップを処理する
+  const onDragStart = (e) => {
+    const cell = e.target.closest?.('[data-place-src]');
+    if (!cell) return;
+    const payload = {
+      shape: cell.dataset.placeShape,
+      row: String(cell.dataset.placeRow),
+      day: Number(cell.dataset.placeDay),
+      slot: Number(cell.dataset.placeSlot),
+    };
+    e.dataTransfer.setData('text/plain', JSON.stringify(payload));
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const onDragOver = (e) => {
+    const cell = e.target.closest?.('[data-place-drop]');
+    if (!cell) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const onDrop = async (e) => {
+    const cell = e.target.closest?.('[data-place-drop]');
+    if (!cell) return;
+    e.preventDefault();
+    if (!examStore.board?.editable?.timetable) return;
+    const shapeId = String(cell.dataset.placeShape);
+    const row = String(cell.dataset.placeRow);
+    const d = Number(cell.dataset.placeDay);
+    const s = Number(cell.dataset.placeSlot);
+    let src = {};
+    try {
+      src = JSON.parse(e.dataTransfer.getData('text/plain') || '{}');
+    } catch {
+      src = {};
+    }
+    const shape = (blkData?.shapes || []).find((sh) => String(sh.id) === shapeId);
+    if (!shape) return;
+    if (String(src.shape) !== shapeId) {
+      showToast('同じコマ組み内でのみ移動できます。', 'warning');
+      return;
+    }
+    if (String(src.row) !== row) {
+      showToast(`${shape.name} は同じクラス行内でのみ移動できます。`, 'warning');
+      return;
+    }
+    const map = shapePlacementMap(shapeId);
+    const rows = (shape.rows || [])
+      .map((r) => {
+        const rid = String(r.class_course_id);
+        const pos = rid === row ? { day: d, slot: s } : map.get(rid) || null;
+        return pos ? { class_course_id: rid, day_number: pos.day, slot_number: pos.slot } : null;
+      })
+      .filter(Boolean);
+    const targetForbidden = (blkData?.conditions || []).some(
+      (c) =>
+        !c.allowed &&
+        String(c.block_shape_id) === shapeId &&
+        String(c.class_course_id) === row &&
+        Number(c.day_number) === d &&
+        Number(c.slot_number) === s
+    );
+    if (targetForbidden) {
+      showToast(`${shape.name} を ${classRowLabel(row)} ${d}日目${s}限 に配置する案は入れ条件で弾かれました。`, 'error');
+      await rerender();
+      return;
+    }
+    try {
+      const res = await examApi.put(`/exam/${examStore.examId}/block-shapes/${shapeId}/placements`, { rows });
+      if (res?.ok === false) {
+        const hard = (res.hard || res.diagnostics || []).filter((x) => x.level === 'HARD');
+        const msgs = [...new Set(hard.map((x) => x.message))].slice(0, 2);
+        showToast(msgs.length ? `配置できません: ${msgs[0]}` : 'ルール違反のため配置できません。', 'error');
+      } else {
+        const saved = Array.isArray(res?.saved) ? res.saved.length : Number(res?.saved ?? rows.length);
+        showToast(`${shape.name} を ${classRowLabel(row)} ${d}日目${s}限 に移動しました（${saved}コマ保存）`, 'success');
+      }
+    } catch (err) {
+      showToast(err.message || '配置の保存に失敗しました', 'error');
+    }
+    await rerender();
+  };
+
+  // 再描画でグリッドが作り替わっても効くよう委譲し、bind 多重呼び出しで二重登録しない
+  if (container.dataset.boundDrag !== 'timetable') {
+    container.dataset.boundDrag = 'timetable';
+    container.addEventListener('dragstart', onDragStart);
+    container.addEventListener('dragover', onDragOver);
+    container.addEventListener('drop', onDrop);
+  }
 }
 
 export function resetTimetableState() {
   lastSolve = null;
   manualDiag = null;
   unitPos = new Map();
+  blkData = null;
+  blkResult = null;
 }
 
 export default {

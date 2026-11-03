@@ -101,6 +101,24 @@
   background-color: var(--bg-main);
 }
 
+/* 7.1 Bulletin card list（独立記事カードの縦リスト。ヘッダー・日付ナビ・検索バー分を引いてスクロールさせる） */
+#bulletin-card-list {
+  height: calc(100vh - 15rem);
+  min-height: 320px;
+  overflow-y: auto;
+  padding-right: 0.3rem;
+}
+
+/* main の余白は p-4 (1rem) / md:p-6 (1.5rem)。ツールバー・ミニカレンダー・検索バー分を引く */
+@media (min-width: 768px) {
+  #bulletin-card-list { height: calc(100vh - 16rem); }
+}
+
+/* モバイル（<768px）: 高さは自動（ページ側のスクロールに任せる） */
+@media (max-width: 767px) {
+  #bulletin-card-list { height: auto; max-height: 70vh; }
+}
+
 /* 5. Matrix & Engine Layouts (Seating & Exam Matrix) */
 .seating-matrix-container {
   overflow-x: auto;
@@ -114,6 +132,23 @@
   overflow-x: auto;
   white-space: nowrap;
   padding-bottom: 0.5rem;
+}
+
+/* 施設マトリクスの垂直グリッド線（1時間刻み）: 左辺 2px のみ。
+   border-l + border-divider は readability.css R2 が4面を 2px に復元するため、
+   border-l と border-r が並んで 4px 幅の線になりヘッダーの区切りとズレる。
+   R1 (bg-* + :not([class*="border"])) より勝つため !important を付ける。 */
+.grid-line-v {
+  border: 0 !important;
+  border-left: var(--border-width) solid var(--border-divider) !important;
+  box-sizing: border-box !important;
+  width: var(--border-width) !important;
+}
+
+/* 時間スケールヘッダー: 区切り線は下面のみ（border-b クラスを使うと R2 が左・右にも
+   2px の枠を復元し、トラックが右へ 2px ずれて幅が 4px 狭くなる＝グリッド線とズレる） */
+#facility-time-header {
+  border-bottom: var(--border-width) solid var(--border-divider) !important;
 }
 
 /* 6. Header & Sidebar Responsive Modes */

@@ -28,9 +28,9 @@ const dummyUsers = [
 
 // 2. 掲示板投稿
 const dummyPosts = [
-  { id: 'post_1', title: '【教務部】中間考査採点票の提出期限について', content: '中間考査の全科目採点票の最終締め切りは明後日17時です。未提出の教科・学年はお早めに教務部へご提出ください。', post_type: 'CIRCULAR', priority: 'URGENT', author_id: 'kyomu01', created_at: '2026-10-15 08:30:00' },
-  { id: 'post_2', title: '避難訓練の実施要項および各クラスの避難経路確認', content: '来週火曜日の6限に全校避難訓練を実施します。各担任の先生は事前に生徒へ非常口および避難経路の周知を行ってください。', post_type: 'NOTICE', priority: 'NORMAL', author_id: 't-tanaka', created_at: '2026-10-14 15:10:00' },
-  { id: 'post_3', title: '【進路指導部】第2回進路希望調査集計報告', content: '2学年の第2回進路希望調査の集計が完了いたしました。共有フォルダ「進路資料」内をご確認ください。', post_type: 'NEWS', priority: 'NORMAL', author_id: 't-sato', created_at: '2026-10-13 11:00:00' }
+  { id: 'post_1', title: '【教務部】中間考査採点票の提出期限について', content: '中間考査の全科目採点票の最終締め切りは明後日17時です。未提出の教科・学年はお早めに教務部へご提出ください。', author_id: 'kyomu01', created_at: '2026-10-15 08:30:00', display_start_date: '2026-10-15', display_end_date: '2026-11-20' },
+  { id: 'post_2', title: '避難訓練の実施要項および各クラスの避難経路確認', content: '来週火曜日の6限に全校避難訓練を実施します。各担任の先生は事前に生徒へ非常口および避難経路の周知を行ってください。', author_id: 't-tanaka', created_at: '2026-10-14 15:10:00', display_start_date: '2026-10-14', display_end_date: null },
+  { id: 'post_3', title: '【進路指導部】第2回進路希望調査集計報告', content: '2学年の第2回進路希望調査の集計が完了いたしました。共有フォルダ「進路資料」内をご確認ください。', author_id: 't-sato', created_at: '2026-10-13 11:00:00', display_start_date: '2026-10-13', display_end_date: '2026-10-20' }
 ];
 
 // 3. 承認ログ
@@ -259,9 +259,9 @@ async function seedDatabase() {
 
     for (const p of dummyPosts) {
       await client.query(
-        `INSERT INTO posts (id, title, content, post_type, priority, author_id, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $7)`,
-        [p.id, p.title, p.content, p.post_type, p.priority, p.author_id, p.created_at]
+        `INSERT INTO posts (id, title, content, author_id, display_start_date, display_end_date, posted_at, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $7)`,
+        [p.id, p.title, p.content, p.author_id, p.display_start_date, p.display_end_date, p.created_at]
       );
     }
 

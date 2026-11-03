@@ -17,7 +17,9 @@
     "test:ui:scan": "node scripts/scan-frames.mjs",
     "test:ui:audit": "node scripts/test-ui-audit.mjs",
     "test:ui:nav": "node scripts/check-nav-shapes.mjs",
-    "test:ui:all": "npm run test:ui:modal && npm run test:ui:frames && npm run test:ui:audit && npm run test:ui:scan && npm run test:ui:nav",
+    "test:ui:bulletin": "node scripts/test-bulletin-split.mjs",
+    "test:ui:facility": "node scripts/test-facility-master.mjs",
+    "test:ui:all": "npm run test:ui:modal && npm run test:ui:frames && npm run test:ui:audit && npm run test:ui:scan && npm run test:ui:nav && npm run test:ui:bulletin && npm run test:ui:facility",
     "db:tables": "node scripts/list-tables.js"
   },
   "keywords": [

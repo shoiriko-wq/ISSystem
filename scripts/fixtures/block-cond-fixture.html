@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>入れ条件グリッド回帰テスト用ページ</title>
+  <link rel="stylesheet" href="/public/css/components.css">
+</head>
+<body>
+  <div id="tab" class="p-4"></div>
+
+  <script type="module">
+    import { examStore, examApi } from '/public/js/modules/exam/exam.shared.js';
+    import { renderTimetableTab, bindTimetableTab } from '/public/js/modules/exam/exam.timetable.ui.js';
+
+    const calls = [];
+    const SHAPE = 'blk:理科基礎';
+    let conditions = [];
+
+    const shapes = [{
+      id: SHAPE,
+      name: '理科基礎',
+      span: 1,
+      rows: [{ class_course_id: 'cls-1-1' }, { class_course_id: 'cls-1-2' }],
+      cells: [
+        { class_course_id: 'cls-1-1', offset: 0, command_id: 'cmd:1:理科基礎' },
+        { class_course_id: 'cls-1-2', offset: 0, command_id: 'cmd:1:理科基礎' },
+      ],
+    }];
+
+    examStore.examId = 'ui-exam';
+    examStore.cells = { day_slots: [{ day: 1 }, { day: 2 }, { day: 3 }, { day: 4 }] };
+    examStore.board = {
+      is_kyomu: true,
+      master: { id: 'ui-exam', title: 'UIテスト', days_count: 4, daily_slots: 3, grades: [1] },
+      basic_info: { classes: [
+        { id: 'cls-1-1', grade: 1, class_num: 1, name: '1年1組' },
+        { id: 'cls-1-2', grade: 1, class_num: 2, name: '1年2組' },
+      ] },
+      editable: { timetable: true },
+      phases: { timetable_phase: 'EDIT' },
+      timetable_rules: {},
+      slots: [
+        { command_id: 'cmd:1:理科基礎', class_course_id: 'cls-1-1', day_number: 1, slot_number: 1, block_shape_id: SHAPE, source: 'solve' },
+        { command_id: 'cmd:1:理科基礎', class_course_id: 'cls-1-2', day_number: 1, slot_number: 1, block_shape_id: SHAPE, source: 'solve' },
+      ],
+      subject_plan: [],
+    };
+
+    examApi.get = async (ep) => {
+      if (ep.endsWith('/commands')) return [{ id: 'cmd:1:理科基礎', name: '理科基礎', duration_slots: 1, courses: [] }];
+      if (ep.endsWith('/block-shapes')) return shapes;
+      if (ep.endsWith('/block-groups')) return [];
+      if (ep.endsWith('/block-conditions')) return conditions.map((c) => ({ ...c, block_shape_id: SHAPE }));
+      return [];
+    };
+    examApi.post = async (ep, body) => {
+      calls.push({ method: 'post', ep, body });
+      return { inserted: 0 };
+    };
+    examApi.put = async (ep, body) => {
+      calls.push({ method: 'put', ep, body });
+      if (ep.includes('/placements')) {
+        const rows = body.rows || [];
+        const bad = rows.find((r) =>
+          conditions.some(
+            (c) =>
+              !c.allowed &&
+              String(c.class_course_id) === String(r.class_course_id) &&
+              Number(c.day_number) === Number(r.day_number) &&
+              Number(c.slot_number) === Number(r.slot_number)
+          )
+        );
+        if (bad) {
+          return {
+            ok: false,
+            hard: [{ level: 'HARD', code: 'CONDITION_FORBIDDEN', message: `入れ条件で禁止されたマス（${bad.day_number}日目${bad.slot_number}限 ${bad.class_course_id}）を含みます。` }],
+            saved: 0,
+          };
+        }
+        examStore.board.slots = examStore.board.slots.filter((s) => String(s.block_shape_id) !== SHAPE);
+        for (const r of rows) {
+          examStore.board.slots.push({
+            command_id: 'cmd:1:理科基礎',
+            class_course_id: r.class_course_id,
+            day_number: Number(r.day_number),
+            slot_number: Number(r.slot_number),
+            block_shape_id: SHAPE,
+            source: 'manual',
+          });
+        }
+        return { ok: true, hard: [], saved: rows.length };
+      }
+      conditions = (body.conditions || []).map((c) => ({ ...c }));
+      return { saved: conditions.slice() };
+    };
+
+    window.TestApi = {
+      render() {
+        const c = document.getElementById('tab');
+        renderTimetableTab(c);
+        bindTimetableTab(c, async () => {});
+      },
+      calls() {
+        return calls;
+      },
+      mark(sel) {
+        const el = document.querySelector(sel);
+        return el ? el.textContent.trim() : null;
+      },
+      buttons() {
+        return [...document.querySelectorAll('#tab button')].map((b) => b.id).filter(Boolean);
+      },
+      setEditable(v) {
+        examStore.board.editable.timetable = !!v;
+        renderTimetableTab(document.getElementById('tab'));
+      },
+      gridInfo() {
+        return {
+          cells: document.querySelectorAll('[data-cond-cell]').length,
+          headings: [...document.querySelectorAll('#tab h4, #tab h3')].map((h) => h.textContent.trim()),
+          hasCond: document.getElementById('tab').innerHTML.includes('コマ条件'),
+        };
+      },
+      drag(fromSel, toSel) {
+        const from = document.querySelector(fromSel);
+        const to = document.querySelector(toSel);
+        if (!from || !to) return false;
+        const dt = new DataTransfer();
+        from.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+        to.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+        to.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+        return true;
+      },
+    };
+  </script>
+</body>
+</html>

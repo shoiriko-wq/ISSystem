@@ -1,0 +1,20 @@
+22|function normalizeTime(raw) {
+23|  if (!raw) return null;
+24|  const match = String(raw).trim().match(/(\d{1,2}):(\d{2})(?::\d{2})?$/);
+25|  if (!match) return null;
+26|  const h = parseInt(match[1], 10);
+27|  const m = parseInt(match[2], 10);
+28|  if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+29|  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+30|}
+31|
+32|/** 'YYYY-MM-DD...' を 'YYYY-MM-DD' に正規化 (HH:MM を日付として誤認しない) */
+33|function normalizeDate(raw) {
+34|  if (!raw) return null;
+35|  const match = String(raw).trim().match(DATE_RE);
+36|  return match ? `${match[1]}-${match[2]}-${match[3]}` : null;
+37|}
+38|
+39|function dateOfRange(startTime) {
+40|  if (!startTime) return todayJst();
+41|  return normalizeDate(startTime) || todayJst();
