@@ -153,6 +153,15 @@ textarea.input-field {
   border-color: var(--border-main) !important;
 }
 
+/* 検索欄: 左端の search アイコン (absolute, left-2.5〜left-3 + w-3.5〜w-4 = 右端 24〜28px) に対し、
+   padding shorthand の !important が Tailwind の pl-8/pl-9 (2rem/2.25rem) を 0.9rem (14.4px) へ潰して
+   プレースホルダ文字とアイコンが重なっていた。アイコン右端＋余白分の左パディングを 2クラス specificity で回復し、
+   プレースホルダを右へずらす（アイコン自体は absolute なので文字位置のみ調整） */
+.input-field.pl-8,
+.input-field.pl-9 {
+  padding-left: 2.5rem !important;
+}
+
 input[type="checkbox"],
 input[type="radio"] {
   width: 1.15rem;
@@ -282,21 +291,59 @@ tbody tr:hover {
   border-color: var(--border-main) !important;
 }
 
-/* R2: 明示的な区切り線・枠線（面ルールより後に !important で復元する） */
+/* R2: 明示的な区切り線・枠線（面ルールより後に !important で復元する）。
+   注意: border-width の shorthand は 4 面すべてに展開されるため、方向指定クラス
+   (border-b / border-t / border-l / border-r / border-y / border-x) は指定面のみ復元する。
+   全周の枠は border / border-2 の宣言だけで作る（区切り線が全周枠に化けると、
+   内側の角丸ボックスと重なって「二重枠」になる）。 */
 .border,
-.border-2,
-.border-b,
-.border-t,
-.border-l,
-.border-r,
-.border-y,
-.border-x,
-.border-b-2,
-.border-t-2,
-.border-l-2,
-.border-r-2 {
+.border-2 {
   border-width: var(--border-width) !important;
   border-style: solid !important;
+}
+
+.border-b,
+.border-b-2,
+.border-b-accent,
+.border-b-warning {
+  border-bottom-width: var(--border-width) !important;
+  border-bottom-style: solid !important;
+}
+
+.border-t,
+.border-t-2,
+.border-t-accent {
+  border-top-width: var(--border-width) !important;
+  border-top-style: solid !important;
+}
+
+.border-l,
+.border-l-2,
+.border-l-warning,
+.border-l-danger,
+.border-l-success {
+  border-left-width: var(--border-width) !important;
+  border-left-style: solid !important;
+}
+
+.border-r,
+.border-r-2 {
+  border-right-width: var(--border-width) !important;
+  border-right-style: solid !important;
+}
+
+.border-y {
+  border-top-width: var(--border-width) !important;
+  border-top-style: solid !important;
+  border-bottom-width: var(--border-width) !important;
+  border-bottom-style: solid !important;
+}
+
+.border-x {
+  border-left-width: var(--border-width) !important;
+  border-left-style: solid !important;
+  border-right-width: var(--border-width) !important;
+  border-right-style: solid !important;
 }
 
 .border-l-4 {
@@ -307,23 +354,25 @@ tbody tr:hover {
   border-right-width: 4px !important;
 }
 
-/* R2-派生: 周全周の枠線色クラスは「枠線を持つ合図」として width を復元する（入力欄・チップ・ボタン等） */
-.border-main,
-.border-strong,
-.border-divider,
-.border-muted,
-.border-accent,
-.border-accent-soft,
-.border-accent-strong,
-.border-accent-alt,
-.border-success,
-.border-success-soft,
-.border-warning,
-.border-warning-soft,
-.border-danger,
-.border-danger-soft,
-.border-info,
-.border-info-soft {
+/* R2-派生: 周全周の枠線色クラスは「枠線を持つ合図」として width を復元する（入力欄・チップ・ボタン等）。
+   ただし方向指定クラス (border-b/t/l/r/x/y) を併用している要素は、その面だけでよいので全周化しない
+   （区切り線 + 色クラスで角張った外枠が生まれ、内側の角丸枠と二重になっていた）。 */
+.border-main:not([class*="border-t"]):not([class*="border-r"]):not([class*="border-b"]):not([class*="border-l"]):not([class*="border-x"]):not([class*="border-y"]),
+.border-strong:not([class*="border-t"]):not([class*="border-r"]):not([class*="border-b"]):not([class*="border-l"]):not([class*="border-x"]):not([class*="border-y"]),
+.border-divider:not([class*="border-t"]):not([class*="border-r"]):not([class*="border-b"]):not([class*="border-l"]):not([class*="border-x"]):not([class*="border-y"]),
+.border-muted:not([class*="border-t"]):not([class*="border-r"]):not([class*="border-b"]):not([class*="border-l"]):not([class*="border-x"]):not([class*="border-y"]),
+.border-accent:not([class*="border-t"]):not([class*="border-r"]):not([class*="border-b"]):not([class*="border-l"]):not([class*="border-x"]):not([class*="border-y"]),
+.border-accent-soft:not([class*="border-t"]):not([class*="border-r"]):not([class*="border-b"]):not([class*="border-l"]):not([class*="border-x"]):not([class*="border-y"]),
+.border-accent-strong:not([class*="border-t"]):not([class*="border-r"]):not([class*="border-b"]):not([class*="border-l"]):not([class*="border-x"]):not([class*="border-y"]),
+.border-accent-alt:not([class*="border-t"]):not([class*="border-r"]):not([class*="border-b"]):not([class*="border-l"]):not([class*="border-x"]):not([class*="border-y"]),
+.border-success:not([class*="border-t"]):not([class*="border-r"]):not([class*="border-b"]):not([class*="border-l"]):not([class*="border-x"]):not([class*="border-y"]),
+.border-success-soft:not([class*="border-t"]):not([class*="border-r"]):not([class*="border-b"]):not([class*="border-l"]):not([class*="border-x"]):not([class*="border-y"]),
+.border-warning:not([class*="border-t"]):not([class*="border-r"]):not([class*="border-b"]):not([class*="border-l"]):not([class*="border-x"]):not([class*="border-y"]),
+.border-warning-soft:not([class*="border-t"]):not([class*="border-r"]):not([class*="border-b"]):not([class*="border-l"]):not([class*="border-x"]):not([class*="border-y"]),
+.border-danger:not([class*="border-t"]):not([class*="border-r"]):not([class*="border-b"]):not([class*="border-l"]):not([class*="border-x"]):not([class*="border-y"]),
+.border-danger-soft:not([class*="border-t"]):not([class*="border-r"]):not([class*="border-b"]):not([class*="border-l"]):not([class*="border-x"]):not([class*="border-y"]),
+.border-info:not([class*="border-t"]):not([class*="border-r"]):not([class*="border-b"]):not([class*="border-l"]):not([class*="border-x"]):not([class*="border-y"]),
+.border-info-soft:not([class*="border-t"]):not([class*="border-r"]):not([class*="border-b"]):not([class*="border-l"]):not([class*="border-x"]):not([class*="border-y"]) {
   border-width: var(--border-width) !important;
   border-style: solid !important;
 }

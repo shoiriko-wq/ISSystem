@@ -63,7 +63,24 @@ const measure = () => page.evaluate(() => {
   const rLines = [...rTrack.querySelectorAll('.grid-line-v')];
   const labelLefts = hLabels.map((d) => abs(d) - abs(wrap));
   const labelRightEdges = hLabels.map((d) => abs(d) + Math.round(d.getBoundingClientRect().width) - abs(wrap));
+  // 表の外枠（.timeline-scroll-container）の4面の枠線と横スクロール量
+  const frameEl = wrap.parentElement; // .timeline-scroll-container
+  const fcs = cs(frameEl);
+  const probe = document.createElement('div');
+  probe.className = 'border border-main';
+  document.body.appendChild(probe);
+  const probeColor = getComputedStyle(probe).borderTopColor;
+  probe.remove();
   return {
+    frameBorders: { t: fcs.borderTopWidth, r: fcs.borderRightWidth, b: fcs.borderBottomWidth, l: fcs.borderLeftWidth },
+    frameStyle: fcs.borderTopStyle,
+    frameColor: fcs.borderTopColor,
+    probeColor,
+    frameRadius: fcs.borderTopLeftRadius,
+    frameBg: fcs.backgroundColor,
+    framePadBottom: fcs.paddingBottom,
+    hScrollMax: Math.round(frameEl.scrollWidth - frameEl.clientWidth),
+    scrollLeft: Math.round(frameEl.scrollLeft),
     wrapWidth: Math.round(wrap.getBoundingClientRect().width),
     headerLabelW: Math.round(header.querySelector('.w-40').getBoundingClientRect().width),
     rowLabelW: Math.round(row.querySelector('.w-40').getBoundingClientRect().width),
@@ -90,6 +107,8 @@ log('timeline@1280', {
   lineDelta: wide.lineDelta, labelLineDelta: wide.labelLineDelta,
   labelTexts: wide.labelTexts, gridLineWidthHeader: wide.gridLineWidthHeader,
   gridLineWidthRow: wide.gridLineWidthRow, headerRowBorders: wide.headerRowBorders, labelGaps: wide.labelGaps,
+  frameBorders: wide.frameBorders, frameStyle: wide.frameStyle, frameColor: wide.frameColor,
+  frameRadius: wide.frameRadius, hScrollMax: wide.hScrollMax,
 });
 
 check('ラベル列の幅がヘッダーと本文行で一致（トラック左端が揃う）', wide.headerLabelW === wide.rowLabelW,
@@ -113,6 +132,14 @@ check('ヘッダー行の枠線は下面のみ（左・右 0px = R2 の 4面復�
 check('隣接する時間ラベルが重なっていない（右端と次ラベル左端の余白が 1px 以上）',
   wide.labelGaps.every((g) => g >= 1), { labelGaps: wide.labelGaps });
 
+const num = (v) => parseFloat(v) || 0;
+check('表の外枠が4面とも 2px solid・border-main 色（スクロールバーは枠内の下部余白に収まる）',
+  num(wide.frameBorders.t) >= 2 && num(wide.frameBorders.r) >= 2
+  && num(wide.frameBorders.b) >= 2 && num(wide.frameBorders.l) >= 2
+  && wide.frameStyle === 'solid' && wide.frameColor === wide.probeColor && num(wide.framePadBottom) >= 4,
+  { frameBorders: wide.frameBorders, frameStyle: wide.frameStyle, frameColor: wide.frameColor,
+    probeColor: wide.probeColor, framePadBottom: wide.framePadBottom });
+
 
 // 狭幅（min-w-[880px] で水平スクロールする幅）でも同じ % 位置であることを検証
 await page.setViewport({ width: 720, height: 900 });
@@ -134,6 +161,116 @@ check('狭幅（720px 表示＝min-w-[880px] スクロール）でもラベル�
 check('狭幅でもラベルが重ならず、17:00 ラベルがトラック内に収まる',
   narrow.labelGaps.every((g) => g >= 1) && narrow.lastLabelInsideTrack,
   { labelGaps: narrow.labelGaps, lastLabelInsideTrack: narrow.lastLabelInsideTrack });
+
+// --- ホイールでの横スクロール検証（カーソルが表上にある間はホイールで左右にスクロール） ---
+// document のバブリングで記録するため、モジュールのホイールハンドラ後の defaultPrevented を観察できる
+await page.evaluate(() => {
+  const c = document.querySelector('.timeline-scroll-container');
+  c.scrollLeft = 0;
+  window.__wheelLog = [];
+  document.addEventListener('wheel', (e) => {
+    window.__wheelLog.push({
+      prevented: e.defaultPrevented,
+      deltaY: Math.round(e.deltaY),
+      inTable: c.contains(e.target),
+    });
+  });
+});
+const tablePoint = await page.evaluate(() => {
+  const r = document.querySelector('.timeline-scroll-container').getBoundingClientRect();
+  return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height * 0.65) };
+});
+await page.mouse.move(tablePoint.x, tablePoint.y);
+await page.mouse.wheel({ deltaY: 240 });
+await sleep(250);
+const wheelIn = await page.evaluate(() => {
+  const c = document.querySelector('.timeline-scroll-container');
+  return {
+    scrollLeft: Math.round(c.scrollLeft),
+    maxScroll: Math.round(c.scrollWidth - c.clientWidth),
+    bound: c.dataset.wheelHorizontalBound,
+    last: window.__wheelLog[window.__wheelLog.length - 1],
+  };
+});
+log('wheel@720(表上)', wheelIn);
+check('狭幅では横スクロールバーが存在し、表上でホイールするとバーが動く（ホイールは横向きに消費）',
+  wheelIn.maxScroll > 0 && wheelIn.bound === '1' && wheelIn.scrollLeft > 0
+  && wheelIn.last.inTable === true && wheelIn.last.prevented === true,
+  { scrollLeft: wheelIn.scrollLeft, maxScroll: wheelIn.maxScroll, bound: wheelIn.bound, last: wheelIn.last });
+
+// 右端に到達した後のホイールは消費せず、ページ縦スクロールへ渡す
+await page.evaluate(() => {
+  const c = document.querySelector('.timeline-scroll-container');
+  c.scrollLeft = c.scrollWidth - c.clientWidth;
+});
+await page.mouse.move(tablePoint.x, tablePoint.y);
+await page.mouse.wheel({ deltaY: 120 });
+await sleep(200);
+const wheelEdge = await page.evaluate(() => {
+  const c = document.querySelector('.timeline-scroll-container');
+  return {
+    scrollLeft: Math.round(c.scrollLeft),
+    maxScroll: Math.round(c.scrollWidth - c.clientWidth),
+    last: window.__wheelLog[window.__wheelLog.length - 1],
+  };
+});
+log('wheel@720(右端)', wheelEdge);
+check('右端でホイールを続けると枠位置は最大を維持し、ホイールは消費されない（ページ縦スクロールへ渡る）',
+  wheelEdge.scrollLeft === wheelEdge.maxScroll && wheelEdge.last.inTable === true
+  && wheelEdge.last.prevented === false,
+  { scrollLeft: wheelEdge.scrollLeft, maxScroll: wheelEdge.maxScroll, last: wheelEdge.last });
+
+// 表にカーソルが無い場所のホイールは表を動かさない
+await page.evaluate(() => { document.querySelector('.timeline-scroll-container').scrollLeft = 0; });
+const outsidePoint = await page.evaluate(() => {
+  const r = document.querySelector('.timeline-scroll-container').getBoundingClientRect();
+  return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top - 40) };
+});
+await page.mouse.move(outsidePoint.x, outsidePoint.y);
+await page.mouse.wheel({ deltaY: 200 });
+await sleep(200);
+const wheelOut = await page.evaluate(() => {
+  const c = document.querySelector('.timeline-scroll-container');
+  return {
+    scrollLeft: Math.round(c.scrollLeft),
+    last: window.__wheelLog[window.__wheelLog.length - 1],
+  };
+});
+log('wheel@720(表外)', wheelOut);
+check('表にカーソルが無い場所のホイールは表を動かさない（scrollLeft 0 のまま・表側でホイールを消費しない）',
+  wheelOut.scrollLeft === 0 && wheelOut.last.inTable === false && wheelOut.last.prevented === false,
+  { scrollLeft: wheelOut.scrollLeft, last: wheelOut.last });
+
+// 狭幅（横スクロールバーが枠内の下部に描画される）スクリーンショット
+await sleep(300);
+const shotNarrow = await page.$('.timeline-scroll-container');
+await shotNarrow.screenshot({ path: `${OUT_DIR}/timeline-narrow-frame.png` });
+
+// 広幅（内容が収まり横スクロールが不要）では表上ホイールでもホイールをconsumptionしない
+await page.setViewport({ width: 1280, height: 900 });
+await sleep(400);
+await page.evaluate(() => { document.querySelector('.timeline-scroll-container').scrollLeft = 0; });
+const widePoint = await page.evaluate(() => {
+  const r = document.querySelector('.timeline-scroll-container').getBoundingClientRect();
+  return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height * 0.65) };
+});
+await page.mouse.move(widePoint.x, widePoint.y);
+await page.mouse.wheel({ deltaY: 200 });
+await sleep(200);
+const wheelWide = await page.evaluate(() => {
+  const c = document.querySelector('.timeline-scroll-container');
+  return {
+    scrollLeft: Math.round(c.scrollLeft),
+    maxScroll: Math.round(c.scrollWidth - c.clientWidth),
+    last: window.__wheelLog[window.__wheelLog.length - 1],
+  };
+});
+log('wheel@1280(表上)', wheelWide);
+// 広幅では 18:00 右端境界線分の 2px だけ擬似 overflow する（実質スクロール不要）ため、ホイールは横向きにconsumptionしない
+check('広幅（内容が収まる）では表上ホイールでもホイールをconsumptionしない（ページ縦スクロールが通る）',
+  wheelWide.maxScroll <= 4 && wheelWide.scrollLeft === 0 && wheelWide.last.inTable === true
+  && wheelWide.last.prevented === false,
+  { maxScroll: wheelWide.maxScroll, scrollLeft: wheelWide.scrollLeft, last: wheelWide.last });
 
 // 実ブラウザのスクリーンショット（1280px）を記録
 await page.setViewport({ width: 1280, height: 900 });

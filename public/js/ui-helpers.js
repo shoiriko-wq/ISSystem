@@ -128,6 +128,34 @@ export function highlightElement(elementOrSelector) {
 }
 
 /**
+ * ホイールを水平スクロールへ変換する（カーソルが対象コンテナ上にある間、ホイールで左右にスクロール）
+ * 横スクロールバーを持つ表・マトリクス用。横スクロールが不要な幅（内容が収まっている）と
+ * 左・右のスクロール端では preventDefault しないため、ページ（縦）スクロールがそのまま通る。
+ * @param {HTMLElement|string} elOrSelector 横スクロールするコンテナ要素またはセレクタ
+ */
+export function enableWheelHorizontalScroll(elOrSelector) {
+  const el = typeof elOrSelector === 'string' ? document.querySelector(elOrSelector) : elOrSelector;
+  if (!el) return;
+  // 同一要素への二重登録を防ぐ（モジュール再初期化対策）
+  if (el.dataset.wheelHorizontalBound === '1') return;
+  el.dataset.wheelHorizontalBound = '1';
+
+  el.addEventListener('wheel', (e) => {
+    const maxScroll = el.scrollWidth - el.clientWidth;
+    // 横スクロールが不要な幅（4px 以下の はみ出しは丸角・グリッド線の端描画による擬似 overflow）では縦スクロールを通す
+    if (maxScroll <= 4) return;
+    // deltaMode: 0=ピクセル, 1=行数 (Firefox), 2=ページ数
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientWidth : 1;
+    const dx = (Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY) * unit;
+    const target = Math.max(0, Math.min(maxScroll, el.scrollLeft + dx));
+    // 端に達した後は preventDefault せず、ホイールをページ縦スクロールへ返す
+    if (target === el.scrollLeft) return;
+    e.preventDefault();
+    el.scrollLeft = target;
+  }, { passive: false });
+}
+
+/**
  * 通知履歴への追加
  */
 export function addNotification(message, type = 'info', onClick = null) {

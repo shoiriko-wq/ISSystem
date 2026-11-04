@@ -4,7 +4,7 @@
  */
 
 import { apiGet, apiPost, apiPut, apiDelete } from '../api.js';
-import { formatDate, escapeHTML, refreshLucideIcons, openModal, closeModal, showToast, userAvatarHtml } from '../ui-helpers.js';
+import { formatDate, escapeHTML, refreshLucideIcons, openModal, closeModal, showToast, userAvatarHtml, enableWheelHorizontalScroll } from '../ui-helpers.js';
 import { state } from '../state.js';
 
 /**
@@ -116,9 +116,12 @@ const TIME_END_H = Math.floor(TIME_END_MIN / 60);
  * ヘッダーと本文行で同一の位置に描画するため共用する（.grid-line-v は左辺 2px のみ）
  */
 function gridLinesHtml() {
-  return Array.from({ length: TIME_END_H - TIME_START_H + 1 }, (_, i) => {
+  const lineCount = TIME_END_H - TIME_START_H + 1;
+  return Array.from({ length: lineCount }, (_, i) => {
     const pos = timeToPercent(TIME_START_MIN + i * 60);
-    return `<div class="grid-line-v absolute top-0 bottom-0 pointer-events-none" style="left:${pos}%"></div>`;
+    // 18:00（最後の線）は left:100% + 線幅2px がトラック外へはみ出し、横幅十分でも横スクロールバーが出るため track 内側（right:0）に描く
+    const style = i === lineCount - 1 ? 'right:0' : `left:${pos}%`;
+    return `<div class="grid-line-v absolute top-0 bottom-0 pointer-events-none" style="${style}"></div>`;
   }).join('');
 }
 
@@ -174,9 +177,10 @@ export function initFacilityModule() {
     <div class="card p-4 overflow-hidden mt-4">
       <div class="flex items-center justify-between mb-3 text-xs text-muted">
         <span class="flex items-center gap-1.5"><i data-lucide="clock" class="w-3.5 h-3.5 text-success"></i> ${TIME_START_H}時〜${TIME_END_H}時の連続タイムライン (時限・10分刻み区切りなし)</span>
-        <span class="text-muted">バンドをクリック → 詳細 / キャンセル、空き帯域をクリック → 予約作成</span>
+        <span class="text-muted">バンドをクリック → 詳細 / キャンセル、空き帯域をクリック → 予約作成｜表にカーソルを置くとホイールで左右にスクロール</span>
       </div>
-      <div class="timeline-scroll-container overflow-x-auto">
+      <!-- 表は4面の実枠で囲む（border + border-main は readability R2 が 2px 実枠として復元）-->
+      <div class="timeline-scroll-container overflow-x-auto border border-main rounded-xl">
         <div class="min-w-[880px]">
           <!-- 時間スケールヘッダー（グリッド線は本文行と共用し、ラベルは同一 % 位置に配置） -->
           <div id="facility-time-header" class="flex h-10 items-stretch bg-surface-strong text-[10px] text-muted font-mono">
@@ -258,6 +262,8 @@ export function initFacilityModule() {
   `;
 
   bindEvents();
+  // 表にカーソルが乗っている間のホイールを横スクロールへ変換する（スクロールバーをホイールで動かす）
+  enableWheelHorizontalScroll(document.querySelector('.timeline-scroll-container'));
   // マスタ管理モーダル (教務部) を初期生成し追加フォームを紐付ける
   ensureFacilityMasterDom();
   document.getElementById('facility-master-add-form')?.addEventListener('submit', submitFacilityMasterAdd);

@@ -6,7 +6,9 @@
  *  2. ↑/↓ で選択行が移動し、右ペイン全文が連動。選択行の未読バッジが消える
  *  3. Enter で右ペインへフォーカス
  *  4. ←/→ と ‹ › ボタンは前日/翌日（1日分）ザッピング
- *  5. 中心日表示は固定幅（‹ › の左）で、連打しても › ボタンの位置が動かず、中心日は ‹ › の間に出ない
+ *  5. 中心日は ‹ › の間の固定幅ボタン（‹ [日付] › が同一グループで隣接）。日付クリックでミニカレンダーが
+ *     開き、日付を選ぶと閉じる。連打しても › ボタンの位置は動かず、カレンダー単独ボタンは存在しない。
+ *     開いているカレンダーの月表示・選択日は中心日に追従（‹ › で月を跨いだら月も変わる）
  *  6. 「詳細」ボタン → 詳細モーダル（投稿日時・掲示期間などの読者向け情報はモーダルに集約。aria-hidden 同期）
  *  7. モバイル（<768px）は縦 stacking、横スクロールなし
  *  8. prefers-reduced-motion ではタイトル移動アニメーションが無効（コンテンツ移動なし）
@@ -92,6 +94,7 @@ const snapshot = (page) => page.evaluate(() => {
     paneFocused: document.activeElement === pane,
     centerDate: readout ? readout.dataset.day : null,
     readoutW: readout ? Math.round(readout.getBoundingClientRect().width) : null,
+    calToggleGone: !document.getElementById('bulletin-cal-toggle'),
     nextX: nextBtn ? Math.round(nextBtn.getBoundingClientRect().x) : null,
     prevX: prevBtn ? Math.round(prevBtn.getBoundingClientRect().x) : null,
     nextY: nextBtn ? Math.round(nextBtn.getBoundingClientRect().y) : null,
@@ -124,17 +127,31 @@ const snapshot = (page) => page.evaluate(() => {
 const { browser, page } = await setup();
 await page.setViewport({ width: 1280, height: 900 });
 
-// 投稿数のある日を選択（ミニカレンダーの打点から。中心日表示は ‹ › の左の固定幅）
+// ‹ › の間の日付をクリックしてミニカレンダーを開き、投稿数のある日を選択（選択で閉じる）
 const pickedDay = await page.evaluate(() => {
-  document.getElementById('bulletin-cal-toggle').click();
+  const read = document.getElementById('bulletin-day-current');
+  read.click();
+  const cal = document.getElementById('bulletin-mini-cal');
+  const opened = !cal.classList.contains('hidden');
+  const expanded = read.getAttribute('aria-expanded');
   const day = document.querySelector('#bulletin-mini-cal .mini-cal-has[data-cal-date]');
-  if (day) { day.click(); return day.getAttribute('data-cal-date'); }
-  return null;
+  if (day) {
+    const key = day.getAttribute('data-cal-date');
+    day.click();
+    return { day: key, opened, expanded, closedAfterPick: cal.classList.contains('hidden') };
+  }
+  return { day: null, opened, expanded, closedAfterPick: cal.classList.contains('hidden') };
 });
 await sleep(700);
 log('pickedDay', pickedDay);
+check('‹ › の間の日付クリックでミニカレンダーが開く（aria-expanded=true、日付選択で閉じる）',
+  pickedDay.opened === true && pickedDay.expanded === 'true' && pickedDay.closedAfterPick === true,
+  pickedDay);
+
 const snap1 = await snapshot(page);
 log('after-day-select', snap1);
+check('カレンダー単独ボタンは撤廃（#bulletin-cal-toggle は存在しない）',
+  snap1.calToggleGone === true, { calToggleGone: snap1.calToggleGone });
 check('左右分割（左列 = 16rem 固定、右ペイン余り。ルートの font-size が変わっても rem 基準）',
   snap1.flexDir === 'row'
     && snap1.titlePaneW >= snap1.rootFs * 15.5
@@ -287,21 +304,25 @@ log('dateShift', { c0, c1, c2, c3, c4 });
 check('←/→ キーは前日/翌日（1日分）ザッピング', c1 === shiftDate(c0, 1) && c2 === c0, { c0, c1, c2 });
 check('› ‹ ボタンも 1日分ザッピング（中心日が1日ずつ移動）', c3 === shiftDate(c2, 1) && c4 === c2, { c2, c3, c4 });
 
-// 中心日は ‹ › の間に出さない（‹ の前、› は ‹ の隣で同一グループ＝一緒に折り返す）
+// 中心日は ‹ › の間の固定幅ボタン（‹ [日付] › が同一グループで隣接）。クリックでカレンダーが開く
 const domOrder = await page.evaluate(() => {
   const read = document.getElementById('bulletin-day-current');
   const prev = document.getElementById('bulletin-day-prev');
   const next = document.getElementById('bulletin-day-next');
-  const following = (read.compareDocumentPosition(prev) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
   return {
-    readBeforePrev: following,
-    adjacent: prev.nextElementSibling === next,
-    sameGroup: prev.parentElement === next.parentElement,
+    prevNextIsRead: prev.nextElementSibling === read,
+    readNextIsNext: read.nextElementSibling === next,
+    sameGroup: prev.parentElement === read.parentElement && read.parentElement === next.parentElement,
+    readIsButton: read.tagName === 'BUTTON',
+    ariaControls: read.getAttribute('aria-controls'),
+    calToggleGone: !document.getElementById('bulletin-cal-toggle'),
   };
 });
 log('toolbar-order', domOrder);
-check('中心日の表示は ‹ › の間にない（‹ の前、› は ‹ の隣・同一グループ）',
-  domOrder.readBeforePrev && domOrder.adjacent && domOrder.sameGroup, domOrder);
+check('中心日は ‹ › の間にある（‹ [日付] › が同一グループで隣接、日付はカレンダーを開くボタン）',
+  domOrder.prevNextIsRead && domOrder.readNextIsNext && domOrder.sameGroup
+    && domOrder.readIsButton && domOrder.ariaControls === 'bulletin-mini-cal' && domOrder.calToggleGone,
+  domOrder);
 
 const rapid = await page.evaluate(async () => {
   const nap = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -321,10 +342,33 @@ const uniqW = [...new Set(rapid.readoutWs)];
 check('› を 10 回連打しても › の x 位置は 1px も動かず、中心日表示の幅も一定',
   uniqX.length === 1 && uniqW.length === 1, { uniqX, uniqW });
 check('5 日進・5 日戻りの連打で中心日は元の日に戻る', rapid.day === c4, { c4, day: rapid.day });
+
+// 開いているカレンダーは中心日に追従（‹ › で月を跨ぐと月表示と選択日が中心日と同じ月・同じ日）
+const calFollow = await page.evaluate(async () => {
+  const nap = (ms) => new Promise((r) => setTimeout(r, ms));
+  const read = document.getElementById('bulletin-day-current');
+  const start = read.dataset.day;
+  read.click();   // 日付クリックで開く
+  for (let i = 0; i < 40; i++) { document.getElementById('bulletin-day-next').click(); await nap(70); }
+  const center = read.dataset.day;
+  const header = document.querySelector('#bulletin-mini-cal .text-sm')?.textContent.trim();
+  const sel = document.querySelector('#bulletin-mini-cal .mini-cal-selected')?.getAttribute('data-cal-date');
+  for (let i = 0; i < 40; i++) { document.getElementById('bulletin-day-prev').click(); await nap(70); }
+  read.click();   // 閉じる（中心日は検証用の日に戻す）
+  const [y, m] = center.split('-');
+  return { center, header, sel, restored: read.dataset.day === start,
+    expandedAfterClose: read.getAttribute('aria-expanded'),
+    expected: `${y}年${Number(m)}月` };
+});
+log('cal-follow', calFollow);
+check('‹ › で月を跨ぐと開いているカレンダーの月表示・選択日が中心日に追従（日付クリックで閉じ、中心日は元へ）',
+  calFollow.header === calFollow.expected && calFollow.sel === calFollow.center
+    && calFollow.restored === true && calFollow.expandedAfterClose === 'false', calFollow);
 // === 1日ずれのアニメーションは小刻み（1日移動に見合った小ささ）===
 const dayAnim = await page.evaluate(async () => {
+  // CSS transition（hover 用など）は除き、WAAPI のスライドだけを測る
   const probe = (el) => {
-    const anims = el.getAnimations();
+    const anims = el.getAnimations().filter((a) => !(window.CSSTransition && a instanceof window.CSSTransition));
     if (!anims.length) return null;
     const frames = anims[0].effect.getKeyframes();
     const px = frames.map((f) => {
@@ -432,7 +476,7 @@ const { browser: b2, page: p2 } = await setup(['--force-prefers-reduced-motion']
 await p2.evaluate(() => document.querySelector('a[data-tab="bulletin"]').click());
 await sleep(700);
 await p2.evaluate(() => {
-  document.getElementById('bulletin-cal-toggle').click();
+  document.getElementById('bulletin-day-current').click();
   const hit = document.querySelector('#bulletin-mini-cal .mini-cal-has[data-cal-date]');
   if (hit) hit.click();
 });

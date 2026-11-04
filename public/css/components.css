@@ -340,7 +340,7 @@
 }
 
 /* 9. Bulletin zapping (fixed-width day readout, mini calendar, day group heads, kbd hints) */
-/* 中心日表示は幅を固定。日付が変わっても ‹ › ボタンは同じ位置のまま（連打できる） */
+/* 中心日表示は幅を固定（‹ › の間に置く）。日付が変わっても › ボタンは同じ位置のまま（連打できる） */
 .day-readout {
   width: 5.6rem;
   text-align: center;
@@ -348,6 +348,30 @@
   font-weight: 600;
   color: var(--text-main);
   flex-shrink: 0;
+}
+
+/* ‹ [日付] › の日付ボタン（クリックでミニカレンダーを開閉）。
+   幅固定なので連打しても › の位置が動かず、日付クリックが誘導される左右の区切り線を置く */
+.day-nav-btn {
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--border-divider);
+  border-right: 1px solid var(--border-divider);
+  border-radius: 0;
+  background-color: transparent;
+  cursor: pointer;
+  transition: background-color var(--duration-fast), color var(--duration-fast);
+}
+.day-nav-btn:hover {
+  background-color: var(--bg-surface-strong);
+}
+.day-nav-btn:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: -2px;
+}
+.day-nav-btn[aria-expanded="true"] {
+  background-color: var(--accent-soft);
+  color: var(--accent-strong);
 }
 
 /* 前日/翌日ボタンは内容に依存しない固定サイズの正方形 */
@@ -723,7 +747,8 @@
   margin-top: 0.5rem;
 }
 
-/* 中心日読取（‹ › の左。連打しても幅が動かず › の位置がずれない固定幅・等幅数字） */
+/* 中心日読取（‹ › の間。連打しても幅が動かず › の位置がずれない固定幅・等幅数字。
+   クリックでミニカレンダーを開くボタン。aria-expanded=true で開いていることを着色で示す） */
 #bulletin-day-current.day-readout {
   display: inline-flex;
   align-items: center;

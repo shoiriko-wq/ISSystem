@@ -1,7 +1,8 @@
 /**
  * ISSystem Bulletin Module
  * 掲示板＝マスタ・ディテール（左=タイトル列＋未読バッジ／右=選択記事の全文・コメント）
- * 投稿日はヘッダーのタイトル行に ‹ [日付] › を埋め込む（中心日読取は ‹ › の左の固定幅）。
+ * 投稿日はヘッダーのタイトル行に ‹ [日付] › を埋め込む（中心日は ‹ › の間の固定幅ボタンで、
+ * クリックするとミニカレンダーが開く。カレンダー単独ボタンは置かない）。
  * 選択＝即既読化で右ペインに全文が即表示。コメントは右ペインに並べ、その場で送信できる。
  * 検索は小型インライン、キー操作の手引きは収納（キー操作ボタンで開閉）、詳細モーダル・API連携
  */
@@ -14,7 +15,7 @@ import { API_BASE_URL } from '../config.js';
 let bulletinsCache = [];
 let currentSearch = '';
 
-// ★ 投稿日状態（表示日 = YYYY-MM-DD JST。‹ › と日付入力・←/→ キーで 1 日ずつ移動）
+// ★ 投稿日状態（表示日 = YYYY-MM-DD JST。‹ › と日付クリック（カレンダー）・←/→ キーで 1 日ずつ移動）
 let currentDayDate = '';            // 中心日
 let calendarAnchor = '';            // ミニカレンダー表示月アンカー (YYYY-MM-DD)
 let selectedId = '';               // 右ペインで全文表示中の掲示ID（選択＝即既読化）
@@ -94,18 +95,19 @@ export function initBulletinModule() {
         <p class="text-xs text-muted">校内の全体連絡・指示・緊急連絡を一元共有します。</p>
       </div>
       <div class="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
-        <!-- ★ 中心日読取（‹ › の左。固定幅なので › を連打しても › の位置が動かない） -->
-        <span id="bulletin-day-current" class="day-readout" data-day="" aria-label="表示日"></span>
-        <!-- ★ ‹ › は同一グループで隣接（一緒に折り返す。施設予約と同じ慣習） -->
+        <!-- ★ ‹ [日付] › を同一グループで隣接（一緒に折り返す。施設予約と同じ慣習）。
+             中心日は ‹ › の間。日付は固定幅なので › を連打しても › の位置が動かない。
+             日付クリック（または C キー）でミニカレンダーを開閉。カレンダー単独ボタンは撤廃。 -->
         <div class="flex items-center bg-surface rounded-lg border border-main shrink-0">
           <button type="button" id="bulletin-day-prev" class="icon-btn icon-btn-fixed text-soft"
                   aria-label="前日（← キー）" title="前日（← キー）"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
+          <button type="button" id="bulletin-day-current" class="day-readout day-nav-btn" data-day=""
+                  aria-expanded="false" aria-controls="bulletin-mini-cal"
+                  aria-label="表示日（クリックでカレンダーを開く）" title="カレンダーを開く（C キー）"></button>
           <button type="button" id="bulletin-day-next" class="icon-btn icon-btn-fixed text-soft"
                   aria-label="翌日（→ キー）" title="翌日（→ キー）"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
         </div>
         <button type="button" id="bulletin-btn-today" class="btn-secondary py-1.5 px-2.5 text-xs shrink-0" title="本日（T キー）">本日</button>
-        <button type="button" id="bulletin-cal-toggle" class="icon-btn icon-btn-fixed border border-divider bg-surface shrink-0"
-                aria-expanded="false" aria-controls="bulletin-mini-cal" aria-label="カレンダーで任意日へ（C キー）" title="カレンダー（C キー）"><i data-lucide="calendar" class="w-4 h-4"></i></button>
         <button type="button" id="bulletin-keys-toggle" class="icon-btn icon-btn-fixed border border-divider bg-surface shrink-0"
                 aria-expanded="false" aria-controls="bulletin-keys-pop" aria-label="キーボード操作の手引き" title="キー操作（? キー）"><i data-lucide="keyboard" class="w-4 h-4"></i></button>
         <button type="button" id="bulletin-btn-create" class="btn-primary py-1.5 px-3 text-xs font-bold flex items-center gap-1.5 shrink-0">
@@ -114,16 +116,16 @@ export function initBulletinModule() {
       </div>
     </div>
 
-    <!-- ★ ミニカレンダー（折りたたみ。投稿数の打点付き。C キー・カレンダーボタンで開く） -->
+    <!-- ★ ミニカレンダー（折りたたみ。投稿数の打点付き。‹ › の間の日付クリック・C キーで開く） -->
     <div id="bulletin-mini-cal" class="hidden mt-2 mb-2 bg-surface-strong border border-divider rounded-xl p-3"></div>
 
     <!-- ★ キーボード操作の手引き（収納。キー操作ボタンで開閉。常時表示しない） -->
     <div id="bulletin-keys-pop" class="hidden mt-2 mb-2 bg-surface-strong border border-divider rounded-xl p-2.5 text-[11px] text-soft flex flex-wrap gap-x-3 gap-y-1">
       <span><kbd class="kbd-key">↑</kbd><kbd class="kbd-key">↓</kbd> タイトル間移動（選択で既読・右ペイン連動）</span>
       <span><kbd class="kbd-key">Enter</kbd> 右ペインへフォーカス</span>
-      <span><kbd class="kbd-key">←</kbd><kbd class="kbd-key">→</kbd> 前日・翌日</span>
+      <span><kbd class="kbd-key">←</kbd><kbd class="kbd-key">→</kbd> 前日・翌日（‹ › ボタン）</span>
       <span><kbd class="kbd-key">T</kbd> 今日</span>
-      <span><kbd class="kbd-key">C</kbd> カレンダー</span>
+      <span><kbd class="kbd-key">C</kbd> カレンダー（‹ › の間の日付をクリックでも開く）</span>
       <span><kbd class="kbd-key">?</kbd> 手引き開閉</span>
     </div>
 
@@ -211,11 +213,12 @@ function bindEvents() {
 
   if (eventsBound) return;
 
-  // ★ ヘッダーの日付ナビ（中心日読取・‹ ›・本日・カレンダー・キー手引き）は固定要素なので直接登録
+  // ★ ‹ [日付] ›・本日・キー手引きは固定要素なので直接登録。
+  //    ‹ › の間の日付ボタンをクリックするとミニカレンダーを開閉する（C キーも同じ）
   document.getElementById('bulletin-day-prev')?.addEventListener('click', () => shiftWindow(-1));
   document.getElementById('bulletin-day-next')?.addEventListener('click', () => shiftWindow(1));
   document.getElementById('bulletin-btn-today')?.addEventListener('click', () => selectDay(dayKey(0)));
-  document.getElementById('bulletin-cal-toggle')?.addEventListener('click', () => toggleMiniCalendar());
+  document.getElementById('bulletin-day-current')?.addEventListener('click', () => toggleMiniCalendar());
   document.getElementById('bulletin-keys-toggle')?.addEventListener('click', () => toggleKeysHelp());
 
   // ★ 左列タイトル行（クリックで選択＝即既読化→右ペイン全文。行フォーカス時に削除ボタンが現れる）はリスト側で委譲
@@ -257,18 +260,24 @@ function bindEvents() {
   if (calEl) {
     calEl.addEventListener('click', (e) => {
       const dayBtn = e.target.closest('[data-cal-date]');
-      if (dayBtn) { selectDay(dayBtn.getAttribute('data-cal-date')); return; }
+      if (dayBtn) {
+        selectDay(dayBtn.getAttribute('data-cal-date'));
+        closeMiniCalendar();   // 日を選ぶと ‹ [日付] › に反映して閉じる
+        return;
+      }
       const monthBtn = e.target.closest('[data-cal-month]');
       if (monthBtn) { shiftCalendarMonth(monthBtn.getAttribute('data-cal-month')); return; }
       if (e.target.closest('[data-cal-today]')) {
         calendarAnchor = dayKey(0);
         selectDay(dayKey(0));
+        closeMiniCalendar();
       }
     });
     calEl.addEventListener('change', (e) => {
       if (e.target?.id === 'bulletin-day-date') {
         selectDay(e.target.value || dayKey(0));
         renderMiniCalendar();
+        closeMiniCalendar();
       }
     });
   }
@@ -433,7 +442,7 @@ function animateShift(dir, axis = 'x', days = 1) {
   slide(document.getElementById('bulletin-detail-pane'), contentStep);
 }
 
-/** 中心日読取（‹ › の左の固定幅。data-day に YYYY-MM-DD を保持） */
+/** 中心日読取（‹ › の間の固定幅ボタン。data-day に YYYY-MM-DD を保持。クリックでミニカレンダー開閉） */
 function updateDayReadout() {
   const readout = document.getElementById('bulletin-day-current');
   if (!readout) return;
@@ -442,7 +451,10 @@ function updateDayReadout() {
   const label = `${parts[1]}/${parts[2]} (${weekdayLabel(key)})`;
   readout.dataset.day = key;
   readout.textContent = label;
-  readout.setAttribute('aria-label', `表示日: ${key} ${weekdayLabel(key)}`);
+  readout.setAttribute('aria-label', `表示日: ${key} ${weekdayLabel(key)}（クリックでカレンダーを開く）`);
+  if (readout.getAttribute('aria-expanded') !== 'true') {
+    readout.title = 'カレンダーを開く（C キー）';
+  }
 }
 
 /**
@@ -464,6 +476,10 @@ function selectDay(date, dir = 0) {
   const dateInput = document.getElementById('bulletin-day-date');
   if (dateInput && dateInput.value !== target) dateInput.value = target;
 
+  // ミニカレンダーが開いているなら、中心日（‹ › の間）に合わせて月の表示も追従させる
+  const calOpen = document.getElementById('bulletin-mini-cal');
+  if (calOpen && !calOpen.classList.contains('hidden')) renderMiniCalendar();
+
   renderBulletinList();
   animateShift(shift, 'x', span);
   if (hadFocus) focusSelectedRow();
@@ -479,15 +495,33 @@ function shiftWindow(offset) {
   selectDay(shiftDateKey(base, offset), Math.sign(offset) || 0);
 }
 
-/** ミニカレンダーの開閉 */
+/** ミニカレンダーの開閉（‹ [日付] › の日付クリック・C キー。開いている日は表示日） */
 function toggleMiniCalendar() {
   const cal = document.getElementById('bulletin-mini-cal');
-  const btn = document.getElementById('bulletin-cal-toggle');
+  const btn = document.getElementById('bulletin-day-current');
   if (!cal) return;
   const opening = cal.classList.contains('hidden');
-  if (opening) renderMiniCalendar();
+  if (opening) {
+    calendarAnchor = currentDayDate || dayKey(0);
+    renderMiniCalendar();
+  }
   cal.classList.toggle('hidden', !opening);
-  if (btn) btn.setAttribute('aria-expanded', opening ? 'true' : 'false');
+  if (btn) {
+    btn.setAttribute('aria-expanded', opening ? 'true' : 'false');
+    btn.title = opening ? 'カレンダーを閉じる' : 'カレンダーを開く（C キー）';
+  }
+}
+
+/** ミニカレンダーを閉じる（日付選択後は ‹ [日付] › に反映して閉じる） */
+function closeMiniCalendar() {
+  const cal = document.getElementById('bulletin-mini-cal');
+  const btn = document.getElementById('bulletin-day-current');
+  if (!cal) return;
+  cal.classList.add('hidden');
+  if (btn) {
+    btn.setAttribute('aria-expanded', 'false');
+    btn.title = 'カレンダーを開く（C キー）';
+  }
 }
 
 /** カレンダー表示月をずらす */
@@ -555,7 +589,7 @@ function renderMiniCalendar() {
       <label for="bulletin-day-date" class="text-[10px] text-muted shrink-0">任意日へ</label>
       <input type="date" id="bulletin-day-date" class="input-field py-1 px-2 text-xs" aria-label="投稿日" value="${anchor}">
     </div>
-    <p class="text-[10px] text-muted mt-2">● は投稿のある日です。日付をクリックでその日の記事を表示し、←/→ キーと ‹ › ボタンで前日・翌日（1日分）へ移動できます。</p>
+    <p class="text-[10px] text-muted mt-2">● は投稿のある日です。日付をクリックでその日の記事を表示してカレンダーは閉じます。‹ › ボタンと ←/→ キーで前日・翌日（1日分）へ、‹ › の間の日付クリック（C キー）でこのカレンダーを開閉できます。</p>
   `;
   refreshLucideIcons();
 }
@@ -685,7 +719,7 @@ function renderRows() {
   if (filtered.length === 0) {
     container.innerHTML = `<div class="p-5 text-center text-xs text-muted">
       <i data-lucide="calendar-off" class="w-6 h-6 mx-auto mb-2 opacity-60"></i>
-      <div>この日の掲示連絡はありません。<kbd class="kbd-key">←</kbd><kbd class="kbd-key">→</kbd>・‹ › ボタンで前日・翌日、<kbd class="kbd-key">C</kbd> キーでカレンダーから任意日へ移動できます。</div>
+      <div>この日の掲示連絡はありません。<kbd class="kbd-key">←</kbd><kbd class="kbd-key">→</kbd>・‹ › ボタンで前日・翌日、‹ › の間の日付クリック（<kbd class="kbd-key">C</kbd> キー）でカレンダーから任意日へ移動できます。</div>
     </div>`;
     refreshLucideIcons();
     return;
@@ -708,7 +742,7 @@ function renderDetailPane(b) {
   if (!b) {
     pane.innerHTML = `<div class="p-6 text-center text-xs text-muted">
       <i data-lucide="inbox" class="w-7 h-7 mx-auto mb-2 opacity-60"></i>
-      <div>この日に掲示された連絡はありません。<kbd class="kbd-key">←</kbd><kbd class="kbd-key">→</kbd>・‹ › ボタンで前日・翌日へ移動できます。</div>
+      <div>この日に掲示された連絡はありません。<kbd class="kbd-key">←</kbd><kbd class="kbd-key">→</kbd>・‹ › ボタンで前日・翌日へ移動できます。日付（‹ › の間）をクリックするとカレンダーが開きます。</div>
     </div>`;
     refreshLucideIcons();
     return;

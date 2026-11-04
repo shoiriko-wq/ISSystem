@@ -59,6 +59,23 @@ describe('Chat API (/api/chat)', () => {
     expect(res.body.success).toBe(true);
   });
 
+  it('POST /api/chat/channels/:id/messages - 新着メッセージの未読者はメンバー（送信者以外）であること', async () => {
+    const res = await request(app)
+      .post(`/api/chat/channels/${channelId}/messages`)
+      .set('Authorization', bearer(token))
+      .send({ sender_id: 'kyomu01', message: '未読者名簿確認メッセージ' });
+    expect(res.statusCode).toBe(201);
+
+    const sent = res.body.data || res.body.messageData || res.body.chatMessage || res.body.message;
+    // 投稿直後に未読者名簿が空だと「全員既読」表示化してしまう（UI 症状の根元）
+    expect(Array.isArray(sent.unreadIds)).toBe(true);
+    expect(Array.isArray(sent.unreaders)).toBe(true);
+    expect(sent.unreadIds.includes('kyomu01')).toBe(false);
+    expect(sent.unreadIds.length).toBeGreaterThanOrEqual(1);
+    expect(sent.unreaders.length).toBe(sent.unreadIds.length);
+    expect(sent.unreadIds.includes('t-tanaka')).toBe(true);
+  });
+
   it('GET /api/chat/channels/:id/messages - 投稿したメッセージが取得できること', async () => {
     const res = await request(app)
       .get(`/api/chat/channels/${channelId}/messages`)
@@ -75,6 +92,21 @@ describe('Chat API (/api/chat)', () => {
       .send({});
     expect(res.statusCode).toBe(200);
     expect(res.body.success).toBe(true);
+  });
+
+  it('GET /api/chat/channels/:id/messages - 自分の既読更新で他人の未読まで消えない（一斉全員既読化しない）', async () => {
+    const res = await request(app)
+      .get(`/api/chat/channels/${channelId}/messages`)
+      .set('Authorization', bearer(token));
+    expect(res.statusCode).toBe(200);
+
+    const target = res.body.data.find((m) => m.message === '未読者名簿確認メッセージ');
+    expect(target).toBeTruthy();
+    // 送信者（自分）は未読者名簿の対象外
+    expect(target.unreadIds.includes('kyomu01')).toBe(false);
+    // 未閲覧メンバー（田中先生）の未読はそのまま残る＝自分の既読更新で全員既読化しない
+    expect(target.unreadIds.includes('t-tanaka')).toBe(true);
+    expect(target.unreadIds.length).toBeGreaterThanOrEqual(1);
   });
 
   it('DELETE /api/chat/channels/:id - 自作チャンネルを削除できること', async () => {

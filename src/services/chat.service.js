@@ -139,6 +139,22 @@ export const chatService = {
       attachments_json: attachments || null,
     });
 
+    // 新着メッセージの未読者名簿を付与する（メンバーのうち送信者以外＝全員未読）。
+    // ※ POST 応答・Socket 配信に未読者名簿を載せ、投稿直後の行が「全員既読」化してしまう問題を防ぐ。
+    try {
+      const senderKeySet = new Set([String(senderId), String(sentMessage?.sender_id ?? senderId)]);
+      const newMessageMembers = await chatModel.getMembers(channelId);
+      const unreadMemberList = (newMessageMembers || []).filter(
+        (mem) => mem.user_id && !senderKeySet.has(String(mem.user_id))
+      );
+      sentMessage.unreaders = unreadMemberList.map((mem) => mem.user_name || mem.user_id);
+      sentMessage.unreadIds = unreadMemberList.map((mem) => String(mem.user_id));
+      sentMessage.readers = [];
+      sentMessage.readIds = [];
+    } catch (decorateErr) {
+      console.warn('[ChatService] 新着メッセージの未読者名簿付与に失敗:', decorateErr.message);
+    }
+
     // 監査ログ記録 (チャット送信ログ)
     try {
       await auditModel.logAction({

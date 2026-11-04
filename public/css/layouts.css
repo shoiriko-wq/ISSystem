@@ -174,10 +174,18 @@
   border-radius: 0.75rem;
 }
 
+/* 施設予約タイムラインの表：4面の実枠 (border + border-main クラス) で囲み、
+   下部の横スクロールバーを枠内に収める（padding-bottom がバーの余白になる）。
+   丸角で内側のヘッダー背景が角に突き出さないよう、スクロール内容は角でクリップされる。 */
 .timeline-scroll-container {
   overflow-x: auto;
   white-space: nowrap;
   padding-bottom: 0.5rem;
+  background-color: var(--bg-card);
+  border-radius: 0.75rem;
+  /* Firefox 用の細い横スクロールバー（Webkit 系は base.css の共通装飾） */
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
 /* 施設マトリクスの垂直グリッド線（1時間刻み）: 左辺 2px のみ。

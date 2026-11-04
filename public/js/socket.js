@@ -20,6 +20,8 @@ let socket = null;
 let hasDisconnected = false;
 /** ソケット接続前に登録されたリスナー（connect 時に貼り付け） */
 const pendingListeners = [];
+/** キュー内のイベント別ハンドラ（同じイベントの再登録時に古いものを差し替えるため） */
+const pendingByEvent = new Map();
 
 export const socketClient = {
   socket: null,
@@ -354,13 +356,21 @@ export const socketClient = {
 
   /**
    * モジュール側からのイベントリスナー登録（未接続時は connect 時に貼り付け）
+   * ※ 同じイベントの再登録はキュー内の古いハンドラを差し替える（二重登録による重複発火防止）
    */
   on(event, handler) {
     if (socket) {
       socket.on(event, handler);
       return true;
     }
-    pendingListeners.push({ event, handler });
+    const prev = pendingByEvent.get(event);
+    if (prev) {
+      const idx = pendingListeners.indexOf(prev);
+      if (idx !== -1) pendingListeners.splice(idx, 1);
+    }
+    const entry = { event, handler };
+    pendingByEvent.set(event, entry);
+    pendingListeners.push(entry);
     return false;
   },
 

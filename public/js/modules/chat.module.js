@@ -59,6 +59,10 @@ function updateTotalUnread() {
  */
 const memberById = new Map();
 
+// メンバー名簿が属するチャンネルID（名簿はチャンネル単位で構築されるため）とメンバー数
+let rosterChannelId = null;
+const memberCountByChannel = new Map();
+
 /**
  * 現在ログイン中のユーザーID (staff_code も許容)
  */
@@ -66,6 +70,40 @@ function currentUserId() {
   if (!state.currentUser) return null;
   const id = state.currentUser.id || state.currentUser.staff_code || null;
   return id ? String(id) : null;
+}
+
+/**
+ * チャンネルメンバーから未読者名簿を構築する（新着メッセージ＝送信者以外メンバーは全員未読）
+ * ※ 投稿直後の行が未読0名＝「全員既読」に見えてしまう問題を防ぐための初期名簿
+ * @param {string} channelId
+ * @param {(string|null)[]} [excludeIds] 未読者から除外するユーザーID（通常は送信者）
+ * @returns {{unreadIds: string[]|null, unreaders: string[], unreadEstimate: number}}
+ */
+function buildUnreadRoster(channelId, excludeIds = []) {
+  const excludeSet = new Set(
+    excludeIds.filter((v) => v !== null && v !== undefined).map((v) => String(v))
+  );
+
+  const ids = [];
+  if (String(channelId) === String(rosterChannelId)) {
+    for (const uid of memberById.keys()) {
+      const uidStr = String(uid);
+      if (excludeSet.has(uidStr)) continue;
+      ids.push(uidStr);
+    }
+  }
+
+  const names = ids.map((id) => memberById.get(id)?.name || id);
+  const memberCount = memberCountByChannel.get(String(channelId));
+  // 名簿が未取得でもメンバー数から未読数を推定できる
+  const estimate = ids.length > 0 ? ids.length
+    : (typeof memberCount === 'number' ? Math.max(0, memberCount - excludeSet.size) : 0);
+
+  return {
+    unreadIds: ids.length > 0 ? ids : null,
+    unreaders: names,
+    unreadEstimate: estimate
+  };
 }
 
 /**
@@ -83,6 +121,7 @@ function removeReaderFrom(msg, readerId, readerName = null) {
     if (filtered.length === msg.unreadIds.length) return false;
     msg.unreadIds = filtered;
     msg.unreaders = filtered.map((id) => memberById.get(String(id))?.name || String(id));
+    if (typeof msg.unreadEstimate === 'number' && msg.unreadEstimate > 0) msg.unreadEstimate -= 1;
     return true;
   }
 
@@ -91,6 +130,7 @@ function removeReaderFrom(msg, readerId, readerName = null) {
   const filtered = msg.unreaders.filter((n) => String(n) !== String(readerId) && n !== nameToRemove);
   if (filtered.length === msg.unreaders.length) return false;
   msg.unreaders = filtered;
+  if (typeof msg.unreadEstimate === 'number' && msg.unreadEstimate > 0) msg.unreadEstimate -= 1;
   return true;
 }
 
@@ -340,7 +380,19 @@ async function loadChannels() {
  * Socket.io イベントリスナーのセットアップ
  */
 function setupSocketListeners() {
-  if (socketClient && socketClient.socket) {
+  if (!socketClient) return;
+
+  // 未接続時でも socketClient.on がキュー（pendingListeners）に登録し、connect 時に貼り付けられる
+  // ※ socket.socket が null の時にリスナー登録がSilently放棄され、既読回执（chat:read_receipt）が
+  //   反映されず新着行がいつまでも「未読 N 名」のまま（＝他クライアントでは全員既読扱い）になっていた
+  const registeredHandlers = new Map();
+  const register = (event, handler) => {
+    const prev = registeredHandlers.get(event);
+    if (prev) socketClient.off(event, prev);
+    registeredHandlers.set(event, handler);
+    socketClient.on(event, handler);
+  };
+
     const handleIncomingChatMessage = (data) => {
       const channelId = data.channelId || data.channel_id || (data.message && data.message.channel_id);
       const rawMsg = data.message || data;
@@ -352,6 +404,12 @@ function setupSocketListeners() {
         const senderId = rawMsg.sender_id || rawMsg.senderId;
         const text = rawMsg.message || rawMsg.message_text || rawMsg.text || '';
 
+        // 未読者名簿が配信に無い新着は「メンバーのうち送信者以外＝全員未読」で初期化する
+        // （未読名簿を空にすると「全員既読」表示になる）。メンバー名簿が有効な閲覧中チャンネルのみ適用。
+        const incomingRoster = String(channelId) === String(currentChannelId)
+          ? buildUnreadRoster(channelId, [senderId])
+          : null;
+
         const msgObj = {
           id: msgId,
           senderId: senderId,
@@ -362,8 +420,17 @@ function setupSocketListeners() {
           hasApprovalCard: rawMsg.has_approval_card || rawMsg.hasApprovalCard || false,
           approved: rawMsg.is_approved || rawMsg.approved || false,
           createdAt: rawMsg.created_at || rawMsg.createdAt || new Date().toISOString(),
-          unreaders: rawMsg.unreaders || [],
-          unreadIds: rawMsg.unreadIds || rawMsg.unread_ids || null
+          unreaders: Array.isArray(rawMsg.unreaders)
+            ? rawMsg.unreaders
+            : (incomingRoster ? incomingRoster.unreaders : []),
+          unreadIds: Array.isArray(rawMsg.unreadIds)
+            ? rawMsg.unreadIds
+            : (Array.isArray(rawMsg.unread_ids)
+              ? rawMsg.unread_ids
+              : (incomingRoster ? incomingRoster.unreadIds : null)),
+          unreadEstimate: typeof rawMsg.unreadEstimate === 'number'
+            ? rawMsg.unreadEstimate
+            : (incomingRoster ? incomingRoster.unreadEstimate : 0)
         };
 
         const list = messagesCache[channelId];
@@ -408,8 +475,7 @@ function setupSocketListeners() {
       }
     };
 
-    socketClient.socket.off('chat:message');
-    socketClient.socket.on('chat:message', handleIncomingChatMessage);
+    register('chat:message', handleIncomingChatMessage);
 
     // グループ作成のリアルタイム反映（グループ列表への即時追加）
     const handleChannelCreated = (data) => {
@@ -430,14 +496,11 @@ function setupSocketListeners() {
       }
     };
 
-    socketClient.socket.off('chat:channel_created');
-    socketClient.socket.on('chat:channel_created', handleChannelCreated);
-    socketClient.socket.off('channel_created');
-    socketClient.socket.on('channel_created', handleChannelCreated);
+    register('chat:channel_created', handleChannelCreated);
+    register('channel_created', handleChannelCreated);
 
     // サーバーからのチャンネルリスト同期（他ユーザーによるグループ作成の反映）
-    socketClient.socket.off('channels:synced');
-    socketClient.socket.on('channels:synced', (data) => {
+    register('channels:synced', (data) => {
       const list = data.channels || [];
       if (!Array.isArray(list) || list.length === 0) return;
 
@@ -463,8 +526,7 @@ function setupSocketListeners() {
     });
 
     // 未読件数のリアルタイム更新（コメント取り消し・既読更新時）
-    socketClient.socket.off('chat:unread_count_updated');
-    socketClient.socket.on('chat:unread_count_updated', (data) => {
+    register('chat:unread_count_updated', (data) => {
       const ch = chatChannels.find((c) => c.id === data.channelId);
       if (ch) {
         ch.unread = data.unreadCount || 0;
@@ -474,8 +536,7 @@ function setupSocketListeners() {
     });
 
     // 既読回执（メンバーの既読完了表示：userId で判定し、badge だけ差分更新する）
-    socketClient.socket.off('chat:read_receipt');
-    socketClient.socket.on('chat:read_receipt', (data) => {
+    register('chat:read_receipt', (data) => {
       const list = messagesCache[data.channelId];
       if (!Array.isArray(list)) return;
 
@@ -503,8 +564,7 @@ function setupSocketListeners() {
     });
 
     // コメント取り消しのリアルタイム反映（本文は受信しない。取り消し表示へ差し替える）
-    socketClient.socket.off('chat:message_cancelled');
-    socketClient.socket.on('chat:message_cancelled', (data) => {
+    register('chat:message_cancelled', (data) => {
       const channelId = data.channelId;
       const list = messagesCache[channelId];
       if (!Array.isArray(list)) return;
@@ -526,8 +586,7 @@ function setupSocketListeners() {
     });
 
     // オンライン/オフライン状態のリアルタイム更新
-    socketClient.socket.off('user:presence');
-    socketClient.socket.on('user:presence', (data) => {
+    register('user:presence', (data) => {
       const indicator = document.getElementById(`presence-dot-${data.userId}`);
       const textEl = document.getElementById(`presence-text-${data.userId}`);
       if (indicator && textEl) {
@@ -542,7 +601,6 @@ function setupSocketListeners() {
         }
       }
     });
-  }
 }
 
 /**
@@ -777,7 +835,10 @@ export async function loadMessages(channelId = currentChannelId) {
       approved: m.is_approved || m.approved || false,
       createdAt: m.created_at || m.createdAt,
       unreaders: m.unreaders || [],
-      unreadIds: m.unreadIds || m.unread_ids || null
+      unreadIds: m.unreadIds || m.unread_ids || null,
+      unreadEstimate: Array.isArray(m.unreadIds)
+        ? m.unreadIds.length
+        : ((m.unreaders || []).length)
     }));
 
     // 表示した範囲（最新メッセージまで）を既読としてサーバーの閲覧ログに記録する
@@ -842,6 +903,8 @@ async function loadChannelMembers(channelId = currentChannelId) {
 
     // 既読者名簿の再計算用ユーザー名簿を構築する
     memberById.clear();
+    rosterChannelId = channelId;
+    memberCountByChannel.set(String(channelId), members.length);
     members.forEach((m) => {
       const uid = String(m.user_id || m.id || '');
       if (uid) {
@@ -1038,6 +1101,13 @@ async function sendMessage() {
   const hasApprovalCard = approvalCheck ? approvalCheck.checked : false;
 
   const tempId = 'msg-' + Date.now();
+  // 楽観更新時の未読者名簿：新着コメントは「メンバーのうち送信者（自分）以外＝全員未読」
+  // ※ 未読名簿を空で初期化すると未読0名＝「全員既読」表示になってしまう（真の症状）
+  const myIds = [
+    state.currentUser ? state.currentUser.id : null,
+    state.currentUser ? state.currentUser.staff_code : null
+  ];
+  const optimisticRoster = buildUnreadRoster(currentChannelId, myIds);
   const newMsg = {
     id: tempId,
     senderId: state.currentUser ? (state.currentUser.id || state.currentUser.staff_code) : 'me',
@@ -1047,8 +1117,9 @@ async function sendMessage() {
     hasApprovalCard,
     approved: false,
     createdAt: new Date().toISOString(),
-    unreaders: [],
-    unreadIds: []
+    unreaders: optimisticRoster.unreaders,
+    unreadIds: optimisticRoster.unreadIds,
+    unreadEstimate: optimisticRoster.unreadEstimate
   };
 
   // 楽観的UI更新：送信メッセージを即座にキャッシュへ追加し、該当行だけ追記する（全体再描画しない）
@@ -1081,8 +1152,14 @@ async function sendMessage() {
           hasApprovalCard: serverMsg.has_approval_card || serverMsg.hasApprovalCard || hasApprovalCard,
           approved: serverMsg.is_approved || serverMsg.approved || false,
           createdAt: serverMsg.created_at || serverMsg.createdAt || newMsg.createdAt,
-          unreaders: serverMsg.unreaders || [],
-          unreadIds: serverMsg.unreadIds || serverMsg.unread_ids || null
+          // サーバーが未読者名簿を返さない場合は楽観名簿を維持する（空で潰して「全員既読」化させない）
+          unreaders: Array.isArray(serverMsg.unreaders) ? serverMsg.unreaders : (newMsg.unreaders || []),
+          unreadIds: Array.isArray(serverMsg.unreadIds)
+            ? serverMsg.unreadIds
+            : (newMsg.unreadIds || null),
+          unreadEstimate: typeof serverMsg.unreadEstimate === 'number'
+            ? serverMsg.unreadEstimate
+            : (newMsg.unreadEstimate ?? 0)
         };
         // 楽観行を実データへ差し替える（该行のみ更新）
         replaceMessageRow(tempId, list[idx]);
@@ -1178,13 +1255,23 @@ function isMyMessage(m) {
 }
 
 /**
+ * メッセージの未読者数（未読ID名簿 > 未読者名 > メンバー数からの推定値 の順で採用）
+ * @param {Object} m
+ */
+function countUnreadOf(m) {
+  if (Array.isArray(m.unreadIds)) return m.unreadIds.length;
+  if (Array.isArray(m.unreaders) && m.unreaders.length > 0) return m.unreaders.length;
+  return typeof m.unreadEstimate === 'number' ? m.unreadEstimate : 0;
+}
+
+/**
  * 既読badge部分のHTML（未読名 / 全員既読 / 取り消しボタン）
  * @param {Object} m
  */
 function readFooterInner(m) {
   if (m.cancelled) return '';
 
-  const unreadCount = (m.unreaders || []).length;
+  const unreadCount = countUnreadOf(m);
   const isMe = isMyMessage(m);
 
   const unreadPart = unreadCount > 0
