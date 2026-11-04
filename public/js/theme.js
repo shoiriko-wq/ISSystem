@@ -11,32 +11,57 @@ import { openModal, closeModal, showToast } from './ui-helpers.js';
 // chrome : "saturated" は二色テーマ（内容色＝白系、バー＝原色）。variables.css の data-chrome フックが白いバー用インクを適用
 // hidden : 旧設定（localStorage）との互換エイリアス。テーマ選択UIには表示しない
 export const SUPPORTED_THEMES = [
-  // ---------- ライト（7） ----------
-  { id: 'light-standard', name: 'ライト標準', class: 'theme-light-standard', mode: 'light', palette: ['#f4f6fa', '#4f46e5', '#1e293b'] },
-  { id: 'light-paper', name: 'ペーパー（明・高コントラスト）', class: 'theme-light-paper', mode: 'light', palette: ['#f1f2f4', '#1d4ed8', '#0b0b0f'] },
-  { id: 'light-sepia', name: 'セピア', class: 'theme-light-sepia', mode: 'light', palette: ['#f7f2e9', '#b45309', '#3b3126'] },
-  { id: 'pop-azure', name: 'ポップ：アジュール', class: 'theme-pop-azure', mode: 'light', chrome: 'saturated', palette: ['#0284c7', '#ffffff', '#123a52'] },
-  { id: 'pop-forest', name: 'ポップ：エメラルド', class: 'theme-pop-forest', mode: 'light', chrome: 'saturated', palette: ['#15803d', '#ffffff', '#1e3126'] },
-  { id: 'pop-crimson', name: 'ポップ：クリムゾン', class: 'theme-pop-crimson', mode: 'light', chrome: 'saturated', palette: ['#b91c1c', '#ffffff', '#3b1621'] },
-  { id: 'pop-sunset', name: 'ポップ：サンセット', class: 'theme-pop-sunset', mode: 'light', chrome: 'saturated', palette: ['#1f2937', '#ea580c', '#ffffff'] },
-  // ---------- ダーク（4） ----------
-  { id: 'dark-navy', name: 'ダークネイビー', class: 'theme-dark-navy', mode: 'dark', palette: ['#0f172a', '#6366f1', '#f8fafc'] },
-  { id: 'dark-midnight', name: 'ミッドナイトブラック', class: 'theme-dark-midnight', mode: 'dark', palette: ['#0b1120', '#818cf8', '#e8eefc'] },
-  { id: 'dark-plum', name: 'プラムダーク', class: 'theme-dark-plum', mode: 'dark', palette: ['#1a1226', '#c084fc', '#f2e9fb'] },
-  { id: 'high-contrast-dark', name: 'ハイコントラスト（暗）', class: 'theme-high-contrast-dark', mode: 'dark', palette: ['#000000', '#fbbf24', '#ffffff'] },
-  // ---------- 後方互換エイリアス（旧テーマ設定はそのまま新しいテーマへ対応） ----------
-  { id: 'light-sky', name: 'スカイライト（旧）', class: 'theme-pop-azure', mode: 'light', chrome: 'saturated', hidden: true, palette: [] },
-  { id: 'light-forest', name: 'フォレストライト（旧）', class: 'theme-pop-forest', mode: 'light', chrome: 'saturated', hidden: true, palette: [] },
-  { id: 'light-sakura', name: 'サクラライト（旧）', class: 'theme-pop-crimson', mode: 'light', chrome: 'saturated', hidden: true, palette: [] },
-  { id: 'light-candy', name: 'キャンディライト（旧）', class: 'theme-pop-crimson', mode: 'light', chrome: 'saturated', hidden: true, palette: [] },
-  { id: 'light-mint', name: 'ミントライト（旧）', class: 'theme-pop-forest', mode: 'light', chrome: 'saturated', hidden: true, palette: [] },
-  { id: 'dark-sunset', name: 'サンセットダーク（旧）', class: 'theme-dark-plum', mode: 'dark', hidden: true, palette: [] },
-  { id: 'dark-charcoal', name: 'チャコールダーク（旧）', class: 'theme-dark-midnight', mode: 'dark', hidden: true, palette: [] },
-  { id: 'navy', name: '標準ネイビー（旧）', class: 'theme-dark-navy', mode: 'dark', hidden: true, palette: [] },
-  { id: 'dark', name: 'ダークモード（旧）', class: 'theme-dark-midnight', mode: 'dark', hidden: true, palette: [] },
-  { id: 'warm', name: 'ウォームウッド（旧）', class: 'theme-light-sepia', mode: 'light', hidden: true, palette: [] },
-  { id: 'high-contrast', name: 'ハイコントラスト（旧）', class: 'theme-high-contrast-dark', mode: 'dark', hidden: true, palette: [] }
+  // ---------- ライト基調（明）6 ----------
+  { id: 'light-azure',  name: 'ライト：ブルー',   class: 'theme-light-azure',  mode: 'light', palette: ['#f4f6fa', '#2563eb', '#1e293b'] },
+  { id: 'light-forest', name: 'ライト：グリーン', class: 'theme-light-forest', mode: 'light', palette: ['#f2f7f3', '#15803d', '#16281f'] },
+  { id: 'light-amber',  name: 'ライト：アンバー', class: 'theme-light-amber',  mode: 'light', palette: ['#faf6ee', '#b45309', '#2a2115'] },
+  { id: 'light-rose',   name: 'ライト：ローズ',   class: 'theme-light-rose',   mode: 'light', palette: ['#fbf3f5', '#be123c', '#291a1e'] },
+  { id: 'light-slate',  name: 'ライト：スレート', class: 'theme-light-slate',  mode: 'light', palette: ['#eef1f5', '#475569', '#1b2128'] },
+  { id: 'light-teal',   name: 'ライト：ティール', class: 'theme-light-teal',   mode: 'light', palette: ['#f0f7f7', '#0d9488', '#102a2e'] },
+  // ---------- ダーク基調（暗）6 ----------
+  { id: 'dark-navy',    name: 'ダーク：ネイビー',   class: 'theme-dark-navy',    mode: 'dark', palette: ['#0f172a', '#60a5fa', '#1b2b45'] },
+  { id: 'dark-emerald', name: 'ダーク：エメラルド', class: 'theme-dark-emerald', mode: 'dark', palette: ['#0b1f1a', '#34d399', '#14312a'] },
+  { id: 'dark-plum',    name: 'ダーク：プラム',     class: 'theme-dark-plum',    mode: 'dark', palette: ['#1a1226', '#c084fc', '#2b1c40'] },
+  { id: 'dark-amber',   name: 'ダーク：アンバー',   class: 'theme-dark-amber',   mode: 'dark', palette: ['#1a1206', '#fbbf24', '#2b2113'] },
+  { id: 'dark-rose',    name: 'ダーク：ローズ',     class: 'theme-dark-rose',    mode: 'dark', palette: ['#1a0d12', '#fb7185', '#2b1820'] },
+  { id: 'dark-slate',   name: 'ダーク：スレート',   class: 'theme-dark-slate',   mode: 'dark', palette: ['#121417', '#94a3b8', '#1d2228'] },
+  // ---------- ツートン（明内容＋暗バー / saturated）6 ----------
+  { id: 'cb-azure',  name: 'ツートン：明×青', class: 'theme-cb-azure',  mode: 'light', chrome: 'saturated', palette: ['#ffffff', '#0284c7', '#0369a1'] },
+  { id: 'cb-forest', name: 'ツートン：明×緑', class: 'theme-cb-forest', mode: 'light', chrome: 'saturated', palette: ['#ffffff', '#15803d', '#166534'] },
+  { id: 'cb-crimson',name: 'ツートン：明×紅', class: 'theme-cb-crimson',mode: 'light', chrome: 'saturated', palette: ['#ffffff', '#be123c', '#9f1239'] },
+  { id: 'cb-violet', name: 'ツートン：明×紫', class: 'theme-cb-violet', mode: 'light', chrome: 'saturated', palette: ['#ffffff', '#6d28d9', '#5b21b6'] },
+  { id: 'cb-teal',   name: 'ツートン：明×藍', class: 'theme-cb-teal',   mode: 'light', chrome: 'saturated', palette: ['#ffffff', '#0d9488', '#0f766e'] },
+  { id: 'cb-slate',  name: 'ツートン：明×墨', class: 'theme-cb-slate',  mode: 'light', chrome: 'saturated', palette: ['#ffffff', '#475569', '#1e293b'] },
+  // ---------- ツートン逆転（暗内容＋明バー / inverted）6 ----------
+  { id: 'dc-azure',  name: 'ツートン：暗×青', class: 'theme-dc-azure',  mode: 'dark', chrome: 'inverted', palette: ['#0b1c2b', '#38bdf8', '#bae6fd'] },
+  { id: 'dc-forest', name: 'ツートン：暗×緑', class: 'theme-dc-forest', mode: 'dark', chrome: 'inverted', palette: ['#0b1f1a', '#4ade80', '#bbf7d0'] },
+  { id: 'dc-rose',   name: 'ツートン：暗×桃', class: 'theme-dc-rose',   mode: 'dark', chrome: 'inverted', palette: ['#1a0d12', '#fb7185', '#fecdd3'] },
+  { id: 'dc-amber',  name: 'ツートン：暗×黄', class: 'theme-dc-amber',  mode: 'dark', chrome: 'inverted', palette: ['#1a1206', '#fbbf24', '#fde68a'] },
+  { id: 'dc-violet', name: 'ツートン：暗×藤', class: 'theme-dc-violet', mode: 'dark', chrome: 'inverted', palette: ['#171027', '#a78bfa', '#ddd6fe'] },
+  { id: 'dc-slate',  name: 'ツートン：暗×灰', class: 'theme-dc-slate',  mode: 'dark', chrome: 'inverted', palette: ['#121417', '#94a3b8', '#cbd5e1'] },
+  // ---------- 後方互換エイリアス（旧設定を新テーマへ対応、UIには表示しない） ----------
+  { id: 'light-standard',    name: 'ライト標準（旧）',       class: 'theme-light-azure',  mode: 'light', hidden: true, palette: [] },
+  { id: 'light-paper',       name: 'ペーパー（旧）',         class: 'theme-light-azure',  mode: 'light', hidden: true, palette: [] },
+  { id: 'light-sepia',       name: 'セピア（旧）',           class: 'theme-light-amber',  mode: 'light', hidden: true, palette: [] },
+  { id: 'warm',              name: 'ウォームウッド（旧）',   class: 'theme-light-amber',  mode: 'light', hidden: true, palette: [] },
+  { id: 'pop-azure',         name: 'アジュール（旧）',       class: 'theme-cb-azure',     mode: 'light', chrome: 'saturated', hidden: true, palette: [] },
+  { id: 'light-sky',         name: 'スカイライト（旧）',     class: 'theme-cb-azure',     mode: 'light', chrome: 'saturated', hidden: true, palette: [] },
+  { id: 'pop-forest',        name: 'エメラルド（旧）',       class: 'theme-cb-forest',    mode: 'light', chrome: 'saturated', hidden: true, palette: [] },
+  { id: 'light-forest',      name: 'フォレストライト（旧）', class: 'theme-cb-forest',    mode: 'light', chrome: 'saturated', hidden: true, palette: [] },
+  { id: 'light-mint',        name: 'ミントライト（旧）',     class: 'theme-cb-forest',    mode: 'light', chrome: 'saturated', hidden: true, palette: [] },
+  { id: 'pop-crimson',       name: 'クリムゾン（旧）',       class: 'theme-cb-crimson',   mode: 'light', chrome: 'saturated', hidden: true, palette: [] },
+  { id: 'light-sakura',      name: 'サクラライト（旧）',     class: 'theme-cb-crimson',   mode: 'light', chrome: 'saturated', hidden: true, palette: [] },
+  { id: 'light-candy',       name: 'キャンディライト（旧）', class: 'theme-cb-crimson',   mode: 'light', chrome: 'saturated', hidden: true, palette: [] },
+  { id: 'pop-sunset',        name: 'サンセット（旧）',       class: 'theme-cb-slate',     mode: 'light', chrome: 'saturated', hidden: true, palette: [] },
+  { id: 'dark-midnight',     name: 'ミッドナイト（旧）',     class: 'theme-dark-navy',    mode: 'dark', hidden: true, palette: [] },
+  { id: 'navy',              name: '標準ネイビー（旧）',     class: 'theme-dark-navy',    mode: 'dark', hidden: true, palette: [] },
+  { id: 'dark',              name: 'ダークモード（旧）',     class: 'theme-dark-navy',    mode: 'dark', hidden: true, palette: [] },
+  { id: 'dark-sunset',       name: 'サンセットダーク（旧）', class: 'theme-dark-plum',    mode: 'dark', hidden: true, palette: [] },
+  { id: 'dark-charcoal',     name: 'チャコールダーク（旧）', class: 'theme-dark-slate',   mode: 'dark', hidden: true, palette: [] },
+  { id: 'high-contrast-dark',name: 'ハイコントラスト暗（旧）', class: 'theme-dark-amber', mode: 'dark', hidden: true, palette: [] },
+  { id: 'high-contrast',     name: 'ハイコントラスト（旧）', class: 'theme-dark-amber',   mode: 'dark', hidden: true, palette: [] }
 ];
+
 
 // テーマクラスの一覧（applyTheme で全消去する）
 const ALL_THEME_CLASSES = [...new Set(SUPPORTED_THEMES.map(t => t.class))];

@@ -8,7 +8,7 @@ import { apiGet, apiPost, apiPut, apiDelete } from '../api.js';
 import { escapeHTML, refreshLucideIcons, openModal, closeModal, showToast, formatDate, userAvatarHtml } from '../ui-helpers.js';
 import { state } from '../state.js';
 
-const WEEKDAYS = ['月', '火', '水', '木', '金', '土', '日'];
+const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 const WEEKDAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
 
 const COLOR_KEYS = ['ACCENT', 'SUCCESS', 'INFO', 'WARNING', 'DANGER', 'PURPLE', 'SLATE'];
@@ -65,7 +65,7 @@ function firstOfMonthStr(month) {
 
 function weekdayIndex(dateStr) {
   const d = new Date(dateStr);
-  return (d.getDay() + 6) % 7;
+  return d.getDay();
 }
 
 function daysInMonth(month) {
@@ -341,17 +341,164 @@ function renderFilterChips() {
   }
 }
 
-/** 月ナビ行（‹ [年月] ›）。カレンダー / 1日一覧の最上段に置く。
- *  ‹ › は同じ 32px ボタンなので、flex-1 text-center の年月は日のグリッドの中心と中心が揃う
- *  （年月はグリッドの中央直上にあるべき、というユーザビリティ上の指摘に対応）。
+/** 月ナビ行（‹ [年月] ›）。ラベルはクリックで年月选择メニューを開く。
+ *  ‹ › はラベルに隣接させ、表示部（7列グリッド）の中心直上にまとめる
+ *  （左右端に離すと的が遠く操作性が悪い、というユーザビリティ上の指摘に対応）。
+ *  ‹ › は同じ固定 1.8rem ボタンなので中心対称が保たれ、年月の中心 x はグリッド中心と揃う。
  *  見出し + aria-live で月替えをスクリーンリーダーが読み上げる。 */
 function monthNavHtml(y, m) {
-  return `<div class="flex items-center gap-2 mb-2">
-    <button type="button" id="sched-prev-month" class="btn-secondary w-8 h-8 rounded-lg flex items-center justify-center" aria-label="前月"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
-    <h3 id="sched-month-label" class="flex-1 text-center text-sm font-bold text-main" aria-live="polite">${y}年${m + 1}月</h3>
-    <button type="button" id="sched-next-month" class="btn-secondary w-8 h-8 rounded-lg flex items-center justify-center" aria-label="次月"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
-  </div>`;
+  return `
+    <div class="flex justify-center mb-2">
+      <div class="flex items-center gap-1.5">
+        <button type="button" id="sched-prev-month" class="icon-btn icon-btn-fixed border border-main bg-surface text-soft"
+                aria-label="前月（1ヶ月前へ）" title="前月（1ヶ月前へ）"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
+        <h3 id="sched-month-label" class="text-sm font-bold text-main" aria-live="polite">
+          <button type="button" id="sched-month-menu-btn"
+                  class="sched-month-label-btn flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-main bg-surface"
+                  aria-haspopup="dialog" aria-expanded="false" aria-controls="sched-month-menu"
+                  aria-label="${y}年${m + 1}月（クリックで年月选择を開く）" title="クリックで年・月を直接选べます">
+            ${y}年${m + 1}月<i data-lucide="chevron-down" class="w-3.5 h-3.5 text-muted"></i>
+          </button>
+        </h3>
+        <button type="button" id="sched-next-month" class="icon-btn icon-btn-fixed border border-main bg-surface text-soft"
+                aria-label="次月（1ヶ月先へ）" title="次月（1ヶ月先へ）"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
+      </div>
+    </div>
+    <div id="sched-month-menu" class="sched-month-menu hidden" role="dialog" aria-label="年月选择"></div>`;
 }
+// ★ 年月选择メニュー状態（ラベルクリックで開く。年 ‹ › と12ヶ月ボタン、键盘操作対応）
+let monthMenuOpen = false;
+let menuYear = 0;
+let menuDocBound = false;
+
+/** メニュー内容（年行 + 12ヶ月ボタン + 今月へ） */
+function monthMenuHtml(y, curY, curM) {
+  const items = Array.from({ length: 12 }, (_, i) => {
+    const cur = y === curY && i === curM;
+    return `<button type="button" class="sched-month-item" data-menu-month="${i}" aria-label="${y}年${i + 1}月へ"${cur ? ' aria-current="true"' : ''}>${i + 1}月</button>`;
+  }).join('');
+  return `
+    <div class="flex items-center justify-center gap-2 mb-2">
+      <button type="button" class="icon-btn icon-btn-fixed border border-main bg-surface text-soft" data-menu-year="-1"
+              aria-label="前年（${y - 1}年）" title="前年"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
+      <span class="text-sm font-bold text-main min-w-[3.2rem] text-center">${y}年</span>
+      <button type="button" class="icon-btn icon-btn-fixed border border-main bg-surface text-soft" data-menu-year="1"
+              aria-label="次年（${y + 1}年）" title="次年"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
+    </div>
+    <div class="grid grid-cols-4 gap-1.5">${items}</div>
+    <div class="flex justify-center mt-2">
+      <button type="button" class="btn-secondary px-2.5 py-1 text-[11px] rounded-lg" data-menu-today aria-label="今月へ戻る">今月へ</button>
+    </div>`;
+}
+
+/** メニューを描画（monthMenuOpen に応じて表示/非表示、aria-expanded 同期） */
+function renderMonthMenu() {
+  const menu = document.getElementById('sched-month-menu');
+  const labelBtn = document.getElementById('sched-month-menu-btn');
+  if (!menu) return;
+  if (!monthMenuOpen) {
+    menu.classList.add('hidden');
+    menu.innerHTML = '';
+    if (labelBtn) labelBtn.setAttribute('aria-expanded', 'false');
+    return;
+  }
+  menu.classList.remove('hidden');
+  menu.innerHTML = monthMenuHtml(menuYear, currentMonth.getFullYear(), currentMonth.getMonth());
+  if (labelBtn) labelBtn.setAttribute('aria-expanded', 'true');
+  refreshLucideIcons();
+}
+
+/** メニューを開き、現在の月のボタンへフォーカスを移す */
+function openMonthMenu() {
+  monthMenuOpen = true;
+  menuYear = currentMonth.getFullYear();
+  renderMonthMenu();
+  const menu = document.getElementById('sched-month-menu');
+  const target = (menu && menu.querySelector(`[data-menu-month="${currentMonth.getMonth()}"]`))
+    || (menu && menu.querySelector('[data-menu-month="0"]'));
+  if (target) target.focus();
+}
+
+/** メニューを閉じる（returnFocus=true はラベルへフォーカスを戻す。Esc は必ず戻す） */
+function closeMonthMenu(returnFocus = true) {
+  monthMenuOpen = false;
+  renderMonthMenu();
+  if (returnFocus) {
+    const labelBtn = document.getElementById('sched-month-menu-btn');
+    if (labelBtn) labelBtn.focus();
+  }
+}
+
+/** メニューの年月选择（現在月へ移動して閉じ、API 再取得で反映） */
+function gotoMonth(y, mIdx) {
+  currentMonth = new Date(y, mIdx, 1);
+  monthMenuOpen = false;
+  loadSchedules().then(() => {
+    const labelBtn = document.getElementById('sched-month-menu-btn');
+    if (labelBtn) labelBtn.focus();
+  });
+}
+
+/** メニュー操作（ラベル開閉・年 ‹ ›・月選択・今月・键盘矢印/Esc・外側クリックで閉じる） */
+function bindMonthMenuEvents(area) {
+  const menu = document.getElementById('sched-month-menu');
+  const labelBtn = document.getElementById('sched-month-menu-btn');
+  if (!menu || !labelBtn) return;
+
+  labelBtn.addEventListener('click', () => {
+    if (monthMenuOpen) closeMonthMenu(false);
+    else openMonthMenu();
+  });
+
+  // ラベルがフォーカスされているときの ←/→ は月移動（メニューを開けず素早く月を替える）
+  labelBtn.addEventListener('keydown', (e) => {
+    if (monthMenuOpen) return;
+    if (e.key === 'ArrowLeft') { e.preventDefault(); currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1); loadSchedules(); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1); loadSchedules(); }
+  });
+
+  menu.addEventListener('click', (e) => {
+    const yBtn = e.target.closest('[data-menu-year]');
+    if (yBtn) {
+      const dir = Number(yBtn.getAttribute('data-menu-year'));
+      menuYear += dir;
+      renderMonthMenu();
+      const again = document.getElementById('sched-month-menu')?.querySelector(`[data-menu-year="${dir}"]`);
+      if (again) again.focus();
+      return;
+    }
+    const mBtn = e.target.closest('[data-menu-month]');
+    if (mBtn) { gotoMonth(menuYear, Number(mBtn.getAttribute('data-menu-month'))); return; }
+    const tBtn = e.target.closest('[data-menu-today]');
+    if (tBtn) { const t = new Date(); gotoMonth(t.getFullYear(), t.getMonth()); }
+  });
+
+  // 键盘矢印で月ボタン間を移動（4列グリッド）、Home/End、Esc で閉じラベルへ
+  menu.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); closeMonthMenu(true); return; }
+    const items = Array.from(menu.querySelectorAll('.sched-month-item'));
+    const idx = items.indexOf(document.activeElement);
+    if (idx < 0) return;
+    const cols = 4;
+    const moves = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: cols, ArrowUp: -cols, Home: -idx, End: items.length - 1 - idx };
+    const d = moves[e.key];
+    if (d === undefined) return;
+    e.preventDefault();
+    const next = items[idx + d];
+    if (next) next.focus();
+  });
+
+  // メニュー外クリックで閉じる（ビュー再描画でも 1 度だけ登録）
+  if (!menuDocBound) {
+    menuDocBound = true;
+    document.addEventListener('click', (e) => {
+      if (!monthMenuOpen) return;
+      if (e.target.closest('#sched-month-menu') || e.target.closest('#sched-month-menu-btn')) return;
+      closeMonthMenu(false);
+    });
+  }
+}
+
 
 /** カレンダー形式（月グリッド・枠内に行事名チップ） */
 function renderCalendarView(y, m, list) {
@@ -381,7 +528,7 @@ function renderCalendarView(y, m, list) {
   area.innerHTML = `
     ${monthNavHtml(y, m)}
     <div class="grid grid-cols-7 gap-1 mb-1 text-center text-[10px] font-bold">
-      ${WEEKDAYS.map((w, i) => `<div class="${i >= 5 ? 'text-danger-strong' : 'text-muted'}">${w}</div>`).join('')}
+      ${WEEKDAYS.map((w, i) => `<div class="${i === 0 || i === 6 ? 'text-danger-strong' : 'text-muted'}">${w}</div>`).join('')}
     </div>
     <div class="grid grid-cols-7 gap-1">${cells.join('')}</div>
   `;
@@ -401,12 +548,14 @@ function calendarCellHtml(y, m, day, byDate, isCurrentMonth) {
     ? `<button type="button" data-more-date="${dateStr}" class="sched-more-chip text-[10px] font-semibold text-accent-strong rounded-md bg-accent-soft px-1.5 py-0.5 w-full truncate" title="この日の行事を1日一覧表示で開く">+${rest}件 表示</button>`
     : '';
 
-  return `<div class="sched-cell rounded-lg border ${isCurrentMonth ? 'border-divider' : 'border-muted'} p-1 bg-surface-soft ${isToday ? 'border-2 border-accent' : ''} min-h-[84px]">
+  const isWeekend = weekdayIndex(dateStr) === 0 || weekdayIndex(dateStr) === 6;
+  const other = !isCurrentMonth;
+  return `<div class="sched-cell rounded-lg border ${isCurrentMonth ? 'border-divider' : 'border-muted'} p-1 ${isCurrentMonth ? 'bg-surface-soft' : 'bg-surface'} ${isToday ? 'border-2 border-accent' : ''} min-h-[84px] ${other ? 'opacity-70' : ''}">
     <div class="flex items-center justify-between mb-1">
-      <span class="text-[11px] font-bold ${isToday ? 'text-accent-strong' : 'text-main'}">${day}</span>
-      <span class="text-[10px] ${weekdayIndex(dateStr) >= 5 ? 'text-danger-strong' : 'text-muted'}">${wd}</span>
+      <span class="text-[11px] font-bold ${isToday ? 'text-accent-strong' : other ? 'text-muted' : 'text-main'}">${day}</span>
+      <span class="text-[10px] ${other ? 'text-muted opacity-60' : isWeekend ? 'text-danger-strong' : 'text-muted'}">${wd}</span>
     </div>
-    <div class="flex flex-col gap-1">${chips}${more}</div>
+    <div class="flex flex-col gap-1 ${other ? 'opacity-50' : ''}">${chips}${more}</div>
   </div>`;
 }
 
@@ -442,7 +591,7 @@ function renderListView(y, m, list) {
 /** 1日分の行（左=日付・曜日列、右=予定列。予定は flex-wrap で横に並ぶ） */
 function listRowHtml(dateStr, day, events, canAdd) {
   const wd = WEEKDAYS[weekdayIndex(dateStr)];
-  const isWeekend = weekdayIndex(dateStr) >= 5;
+  const isWeekend = weekdayIndex(dateStr) === 0 || weekdayIndex(dateStr) === 6;
   const isToday = dateStr === jstTodayStr();
 
   const chips = events.map((ev) => eventChipHtml(ev, 'w-auto max-w-[168px] shrink-0')).join('');
@@ -485,9 +634,9 @@ function bindHeaderEvents() {
   const addBtn = document.getElementById('sched-add-btn');
   const adminBtn = document.getElementById('sched-cat-admin-btn');
 
-  if (prev) prev.addEventListener('click', () => { currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1); renderScheduleView(); });
-  if (next) next.addEventListener('click', () => { currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1); renderScheduleView(); });
-  if (today) today.addEventListener('click', () => { currentMonth = new Date(); currentMonth.setDate(1); renderScheduleView(); });
+  if (prev) prev.addEventListener('click', () => { currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1); loadSchedules(); });
+  if (next) next.addEventListener('click', () => { currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1); loadSchedules(); });
+  if (today) today.addEventListener('click', () => { currentMonth = new Date(); currentMonth.setDate(1); loadSchedules(); });
   if (calBtn) calBtn.addEventListener('click', () => setMode('calendar'));
   if (listBtn) listBtn.addEventListener('click', () => setMode('list'));
   if (addBtn) addBtn.addEventListener('click', () => openScheduleForm(null));
@@ -496,9 +645,10 @@ function bindHeaderEvents() {
   paintModeButtons();
 }
 
-/** ビュー内クリック（行事名クリックで詳細モーダル、+nでその日を1日一覧表示、行の + でその日の予定を追加） */
+/** ビュー内クリック（行事名クリックで詳細モーダル、+nでその日を1日一覧表示、行の + でその日の予定を追加、月ナビ・年月メニュー） */
 function bindViewEvents(area) {
   if (!area) return;
+  bindMonthMenuEvents(area);
   area.querySelectorAll('[data-event-id]').forEach((btn) => {
     btn.addEventListener('click', () => openScheduleDetail(btn.dataset.eventId));
   });

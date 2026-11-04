@@ -28,8 +28,31 @@ export const logger = {
         created_at: new Date().toISOString(),
       };
 
-      // auditModelを通してデータベースに保存
-      await auditModel.createAuditLog(logEntry);
+      // auditModel の実API (logAction) へマップして保存する。
+      // target ('BULLETIN:12' 形式) は resource_type / resource_id に分割してマッピングする
+      const targetStr = String(logEntry.target);
+      const colon = targetStr.indexOf(':');
+      const resourceType = colon >= 0 ? targetStr.slice(0, colon) : targetStr;
+      const resourceId = colon >= 0 ? targetStr.slice(colon + 1) : null;
+      let detailsObj = details;
+      if (typeof detailsObj === 'string') {
+        try {
+          detailsObj = JSON.parse(detailsObj);
+        } catch (e) {
+          detailsObj = { raw: detailsObj };
+        }
+      }
+
+      await auditModel.logAction({
+        userId: logEntry.user_id,
+        action: logEntry.action,
+        resourceType,
+        resourceId,
+        oldValue: null,
+        newValue: detailsObj,
+        ipAddress: logEntry.ip_address,
+        userAgent: logEntry.user_agent,
+      });
 
       // コンソール出力 (デバッグ/開発用)
       if (process.env.NODE_ENV !== 'production') {

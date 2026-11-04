@@ -274,6 +274,46 @@ function initEventsAndListeners() {
     });
   });
 
+  // サイドバーせり出し（中幅 768px〜1023px のみ）の発動制御
+  // ホバリングとフォーカスでせり出し、カーソルがサイドバーから離れると収納する。
+  // :focus-within はクリック後のフォーカスを保持してマウス離脱で閉じないため、
+  // JS で is-hover / is-focus を管理し、離脱時に両方解除して収納する。
+  const sidebarEl = document.querySelector('.app-sidebar');
+  if (sidebarEl) {
+    const narrowMode = window.matchMedia('(min-width: 768px) and (max-width: 1023px)');
+    const collapseSidebar = () => sidebarEl.classList.remove('is-hover', 'is-focus');
+
+    sidebarEl.addEventListener('mouseenter', () => {
+      if (narrowMode.matches) sidebarEl.classList.add('is-hover');
+    });
+    // カーソルがサイドバーから離れたら、ホバリング由来・フォーカス由来の
+    // せり出しを両方解除して収納する（クリック後の保持をここで閉じる）。
+    sidebarEl.addEventListener('mouseleave', () => {
+      sidebarEl.classList.remove('is-hover', 'is-focus');
+    });
+
+    // サイドバー内へのフォーカス(クリック/Tab)でせり出し、外へ移れば収納。
+    document.addEventListener('focusin', (e) => {
+      if (!narrowMode.matches) return;
+      if (sidebarEl.contains(e.target)) {
+        sidebarEl.classList.add('is-focus');
+      } else {
+        collapseSidebar();
+      }
+    });
+
+    // サイドバー外へのクリックで収納する。
+    document.addEventListener('pointerdown', (e) => {
+      if (!narrowMode.matches) return;
+      if (!sidebarEl.contains(e.target)) collapseSidebar();
+    });
+
+    // 画面幅が中幅モードから外れたら収納する。
+    narrowMode.addEventListener('change', (e) => {
+      if (!e.matches) collapseSidebar();
+    });
+  }
+
   // ステート変化時のUI追従
   subscribeState((currState, key) => {
     if (key === 'currentUser') {

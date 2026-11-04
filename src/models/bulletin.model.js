@@ -11,10 +11,40 @@ async function getDb() {
   return openDb();
 }
 
+/**
+ * 投稿日時値 (PostgreSQL TIMESTAMP 由来の Date / 素朴 'YYYY-MM-DD HH:MM:SS' / ISO) を
+ * 明示オフセット付き JST 文字列 'YYYY-MM-DD HH:MM:SS+09:00' に正規化する。
+ * ※ pg は TIMESTAMP (タイムゾーンなし) をサーバーローカル TZ の Date として返すため、
+ *   JST 壁時計へ正規化してオフセットを付与し、往復の多義性 (ブラウザローカル解析) を除去する。
+ * @param {string|Date} value
+ * @returns {string|null}
+ */
+function toJstIso(value) {
+  if (!value) return null;
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    const wall = value.toLocaleString('sv-SE', { timeZone: 'Asia/Tokyo' });
+    return `${wall}+09:00`;
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  // 素朴な 'YYYY-MM-DD HH:MM:SS' / 'YYYY-MM-DDTHH:MM' (JST 壁時計として格納) → 明示オフセット付与
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?$/.test(raw)) {
+    const wall = raw.replace('T', ' ');
+    if (wall.length <= 16) wall = `${wall}:00`;
+    return `${wall}+09:00`;
+  }
+
+  return raw;
+}
+
 function mapPost(row) {
   if (!row) return null;
-  const postedAt = row.postedAt || row.posted_at || row.createdAt;
-  const updatedAt = row.updatedAt || row.updated_at || postedAt;
+  const postedAt = toJstIso(row.postedAt || row.posted_at || row.createdAt);
+  const updatedAt = toJstIso(row.updatedAt || row.updated_at || postedAt);
   const displayStart = normalizeDateOnly(row.displayStart || row.display_start_date);
   const displayEnd = normalizeDateOnly(row.displayEnd || row.display_end_date);
   return {
@@ -74,6 +104,20 @@ function normalizeDateTime(value, fallback = nowIso()) {
   const raw = String(value || '').trim();
   if (!raw) return fallback;
 
+  // ISO / オフセット付き (例: 2026-11-04T10:00:00.000+09:00 / 2026-11-04T10:00:00.000Z)
+  // → 瞬時点から JST 壁時計 'YYYY-MM-DD HH:MM:SS' へ正規化して保存する
+  const isoMatch = raw.match(
+    /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/
+  );
+  if (isoMatch) {
+    const inst = new Date(raw.replace(' ', 'T'));
+    if (!Number.isNaN(inst.getTime())) {
+      return inst.toLocaleString('sv-SE', { timeZone: 'Asia/Tokyo' }).replace(' ', ' ');
+    }
+    return fallback;
+  }
+
+  // 素朴な 'YYYY-MM-DD HH:MM:SS' / 'YYYY-MM-DDTHH:MM' (JST 壁時計として格納)
   const normalized = raw.replace('T', ' ');
   const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ ](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
   if (!match) return fallback;

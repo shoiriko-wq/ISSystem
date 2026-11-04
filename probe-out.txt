@@ -1,0 +1,37 @@
+﻿node : [eval]:1
+発生場所 行:1 文字:75
++ ... hrome.exe'; node -e "import('puppeteer-core').then(async (m)=>{const  ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([eval]:1:String) [], RemoteExcepti 
+   on
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+import('puppeteer-core').then(async (m)=>{const b=await m.launch({executablePath
+:process.env.CHROME_PATH,headless:'new',args:['--no-sandbox']});const p=await b.
+newPage();await p.goto('http://localhost:3000',{waitUntil:'domcontentloaded'});a
+wait p.evaluate(()=>localStorage.setItem('token',''));const u=process.env.UI_USE
+R||'T2026001';const pw=process.env.UI_PASS||'password123';await p.type('#login-u
+serid',u);await p.type('#login-password',pw);await p.evaluate(()=>window.handleL
+oginClick());await p.waitForSelector('#app-container:not(.hidden)',{timeout:1000
+0});await new Promise(r=>setTimeout(r,1200));await p.evaluate(()=>{localStorage.
+setItem('isschedule_view_mode','calendar');document.querySelector('a[data-tab=" 
+schedule\]').click();});await
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                             
+Expression expected
+
+SyntaxError: Unexpected end of input
+    at makeContextifyScript (node:internal/vm:194:14)
+    at compileScript (node:internal/process/execution:388:10)
+    at evalTypeScript (node:internal/process/execution:260:22)
+    at node:internal/main/eval_string:71:3
+
+Node.js v24.17.0

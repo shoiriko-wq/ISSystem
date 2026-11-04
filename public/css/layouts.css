@@ -101,22 +101,68 @@
   background-color: var(--bg-main);
 }
 
-/* 7.1 Bulletin card list（独立記事カードの縦リスト。ヘッダー・日付ナビ・検索バー分を引いてスクロールさせる） */
-#bulletin-card-list {
+/* 7.1 Bulletin マスタ・ディテール分割（左=タイトル列 16rem 固定、右=全文ペインが余り。ヘッダー・日付ナビ・検索バー分を引く） */
+.bulletin-split {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0.9rem;
   height: calc(100vh - 15rem);
-  min-height: 320px;
-  overflow-y: auto;
-  padding-right: 0.3rem;
+  min-height: 340px;
 }
 
 /* main の余白は p-4 (1rem) / md:p-6 (1.5rem)。ツールバー・ミニカレンダー・検索バー分を引く */
 @media (min-width: 768px) {
-  #bulletin-card-list { height: calc(100vh - 16rem); }
+  .bulletin-split { height: calc(100vh - 16rem); }
 }
 
-/* モバイル（<768px）: 高さは自動（ページ側のスクロールに任せる） */
+/* 左列（16rem 固定。flex の min-width:auto を解除し、長いタイトルで列が押し広げられない） */
+.bulletin-title-pane {
+  flex: 0 0 16rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  background-color: var(--bg-surface-strong);
+  border: 1px solid var(--border-divider);
+  border-radius: 0.8rem;
+  padding: 0.5rem 0.35rem 0.5rem 0.5rem;
+}
+
+#bulletin-list-container {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 0.25rem;
+}
+
+/* 右ペイン（全文・添付・コメント）。横スクロールを出さず縦スクロールで読む */
+.bulletin-detail-pane {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-divider);
+  border-radius: 0.8rem;
+  padding: 0.9rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-shadow: 0 1px 3px var(--shadow-color);
+}
+.bulletin-detail-pane:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+/* モバイル（<768px）: 縦 stacking（左列が全幅で上、右ペインが下）。高さはページ側に任せる */
 @media (max-width: 767px) {
-  #bulletin-card-list { height: auto; max-height: 70vh; }
+  .bulletin-split { flex-direction: column; height: auto; min-height: 0; }
+  .bulletin-title-pane { flex: 1 1 auto; width: 100%; }
+  .bulletin-detail-pane { flex: 1 1 auto; width: 100%; }
+  #bulletin-list-container { max-height: 40vh; }
 }
 
 /* 5. Matrix & Engine Layouts (Seating & Exam Matrix) */
@@ -179,9 +225,14 @@
     padding: 0.5rem 0.25rem !important;
   }
 
-  /* ホバリングでメニューがスライドしてせり出し、文字も表示 */
+  /* ホバリングでメニューがスライドしてせり出し、文字も表示。
+     せり出しの発動はホバリング(:hover / is-hover)とフォーカス(is-focus)。
+     クリック(フォーカス)でせり出した後は、カーソルがサイドバーから
+     離れると収納する。:focus-within はフォーカスを保持するためマウス
+     離脱で解除できないので、JS が is-focus を管理し離脱時に解除する。 */
   .app-sidebar:hover,
-  .app-sidebar:focus-within {
+  .app-sidebar.is-hover,
+  .app-sidebar.is-focus {
     width: 12.5rem !important;
     box-shadow: 10px 0 28px -8px var(--shadow-color);
   }
@@ -226,12 +277,14 @@
 
   /* ホバリング/フォーカスでせり出し：アイコン左寄せ + ラベルをレイアウトに戻す */
   #app-body .app-sidebar:hover nav,
-  #app-body .app-sidebar:focus-within nav {
+  #app-body .app-sidebar.is-hover nav,
+  #app-body .app-sidebar.is-focus nav {
     padding: 0.55rem 0.75rem !important;
   }
 
   #app-body .app-sidebar:hover nav .nav-item,
-  #app-body .app-sidebar:focus-within nav .nav-item {
+  #app-body .app-sidebar.is-hover nav .nav-item,
+  #app-body .app-sidebar.is-focus nav .nav-item {
     width: 100% !important;
     height: auto !important;
     aspect-ratio: auto !important;
@@ -241,12 +294,14 @@
   }
 
   .app-sidebar:hover .nav-item > div,
-  .app-sidebar:focus-within .nav-item > div {
+  .app-sidebar.is-hover .nav-item > div,
+  .app-sidebar.is-focus .nav-item > div {
     gap: 0.7rem;
   }
 
   .app-sidebar:hover .nav-label,
-  .app-sidebar:focus-within .nav-label {
+  .app-sidebar.is-hover .nav-label,
+  .app-sidebar.is-focus .nav-label {
     display: inline;
   }
 
@@ -257,7 +312,8 @@
   }
 
   .app-sidebar:hover .nav-badge,
-  .app-sidebar:focus-within .nav-badge {
+  .app-sidebar.is-hover .nav-badge,
+  .app-sidebar.is-focus .nav-badge {
     display: inline-flex !important;
   }
 

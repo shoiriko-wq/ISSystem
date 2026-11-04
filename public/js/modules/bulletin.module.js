@@ -1,11 +1,12 @@
 /**
  * ISSystem Bulletin Module
- * 掲示板＝記事カードのリスト（カードはタイトル→本文が直下に続く独立記事。年月日・件数欄なし）。
- * 投稿日は施設予約と同じ慣習でヘッダーのタイトル行に ‹ [日付] › をシンプルに埋め込み、
- * 検索は小型インライン、キーボード操作の手引きは収納（キー操作ボタンで開閉）・詳細モーダル・API連携
+ * 掲示板＝マスタ・ディテール（左=タイトル列＋未読バッジ／右=選択記事の全文・コメント）
+ * 投稿日はヘッダーのタイトル行に ‹ [日付] › を埋め込む（中心日読取は ‹ › の左の固定幅）。
+ * 選択＝即既読化で右ペインに全文が即表示。コメントは右ペインに並べ、その場で送信できる。
+ * 検索は小型インライン、キー操作の手引きは収納（キー操作ボタンで開閉）、詳細モーダル・API連携
  */
 
-import { apiGet, apiPost, apiPut } from '../api.js';
+import { apiGet, apiPost, apiPut, apiPostForm, apiDelete } from '../api.js';
 import { formatDate, escapeHTML, refreshLucideIcons, openModal, closeModal, showToast, userAvatarHtml } from '../ui-helpers.js';
 import { state } from '../state.js';
 import { API_BASE_URL } from '../config.js';
@@ -16,8 +17,11 @@ let currentSearch = '';
 // ★ 投稿日状態（表示日 = YYYY-MM-DD JST。‹ › と日付入力・←/→ キーで 1 日ずつ移動）
 let currentDayDate = '';            // 中心日
 let calendarAnchor = '';            // ミニカレンダー表示月アンカー (YYYY-MM-DD)
-let selectedId = '';            // 右ペインで全文表示中の掲示ID（選択＝即既読化）
-let eventsBound = false;            // イベント多重登録防止
+let selectedId = '';               // 右ペインで全文表示中の掲示ID（選択＝即既読化）
+let eventsBound = false;           // イベント多重登録防止
+
+/** 掲示ID → コメント一覧（API の ack コメント＋ローカルで送信した分） */
+const commentsById = new Map();
 
 /** 未読数の安全な更新ヘルパー */
 function updateUnread(count) {
@@ -74,7 +78,7 @@ function isDisplayExpired(b) {
 }
 
 /**
- * 掲示板モジュールの初期化と画面構築
+ * 掲示板モジュールの初期化と画面構築（左=タイトル列、右=全文ペインの分割）
  */
 export function initBulletinModule() {
   const container = document.getElementById('view-bulletin');
@@ -90,11 +94,12 @@ export function initBulletinModule() {
         <p class="text-xs text-muted">校内の全体連絡・指示・緊急連絡を一元共有します。</p>
       </div>
       <div class="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
-        <!-- ★ 投稿日ナビ（施設予約と同じ慣習：タイトル行に ‹ [日付] › をシンプルに埋め込む） -->
+        <!-- ★ 中心日読取（‹ › の左。固定幅なので › を連打しても › の位置が動かない） -->
+        <span id="bulletin-day-current" class="day-readout" data-day="" aria-label="表示日"></span>
+        <!-- ★ ‹ › は同一グループで隣接（一緒に折り返す。施設予約と同じ慣習） -->
         <div class="flex items-center bg-surface rounded-lg border border-main shrink-0">
           <button type="button" id="bulletin-day-prev" class="icon-btn icon-btn-fixed text-soft"
                   aria-label="前日（← キー）" title="前日（← キー）"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
-          <input type="date" id="bulletin-day-date" class="bg-transparent text-main font-bold px-1 py-1 focus:outline-none text-xs" aria-label="投稿日">
           <button type="button" id="bulletin-day-next" class="icon-btn icon-btn-fixed text-soft"
                   aria-label="翌日（→ キー）" title="翌日（→ キー）"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
         </div>
@@ -109,14 +114,13 @@ export function initBulletinModule() {
       </div>
     </div>
 
-
     <!-- ★ ミニカレンダー（折りたたみ。投稿数の打点付き。C キー・カレンダーボタンで開く） -->
     <div id="bulletin-mini-cal" class="hidden mt-2 mb-2 bg-surface-strong border border-divider rounded-xl p-3"></div>
 
     <!-- ★ キーボード操作の手引き（収納。キー操作ボタンで開閉。常時表示しない） -->
     <div id="bulletin-keys-pop" class="hidden mt-2 mb-2 bg-surface-strong border border-divider rounded-xl p-2.5 text-[11px] text-soft flex flex-wrap gap-x-3 gap-y-1">
-      <span><kbd class="kbd-key">↑</kbd><kbd class="kbd-key">↓</kbd> 記事間移動（選択で既読）</span>
-      <span><kbd class="kbd-key">Enter</kbd> 全文を開く</span>
+      <span><kbd class="kbd-key">↑</kbd><kbd class="kbd-key">↓</kbd> タイトル間移動（選択で既読・右ペイン連動）</span>
+      <span><kbd class="kbd-key">Enter</kbd> 右ペインへフォーカス</span>
       <span><kbd class="kbd-key">←</kbd><kbd class="kbd-key">→</kbd> 前日・翌日</span>
       <span><kbd class="kbd-key">T</kbd> 今日</span>
       <span><kbd class="kbd-key">C</kbd> カレンダー</span>
@@ -129,19 +133,29 @@ export function initBulletinModule() {
       <input type="text" id="bulletin-search-input" class="input-field pl-8 pr-2 py-1 text-xs w-full" placeholder="タイトル・本文を検索" aria-label="掲示検索">
     </div>
 
-    <!-- ★ 記事カードリスト（各記事は独立カード。タイトル直下に記事本文が来る。年月日・件数の欄は置かない） -->
-    <div id="bulletin-card-list" class="space-y-3" role="listbox" aria-label="掲示記事">
-      <div class="text-center py-10 text-xs text-muted">掲示板データを読み込み中...</div>
+    <!-- ★ 左右分割（左=タイトル列＋未読バッジ、右=選択記事の全文・コメント） -->
+    <div class="bulletin-split">
+      <div class="bulletin-title-pane">
+        <div class="pane-label">
+          <span class="flex items-center gap-1.5"><i data-lucide="list" class="w-3.5 h-3.5 text-accent"></i> タイトル</span>
+          <span id="bulletin-title-count" class="text-[11px] text-muted">0 件</span>
+        </div>
+        <div id="bulletin-list-container" class="bulletin-list-container" role="listbox" aria-label="掲示タイトル">
+          <div class="p-4 text-center text-xs text-muted">掲示板データを読み込み中...</div>
+        </div>
+      </div>
+      <div id="bulletin-detail-pane" class="bulletin-detail-pane" tabindex="0" aria-live="polite" aria-label="掲示全文">
+        <div class="p-6 text-center text-xs text-muted">表示日の掲示全文を読み込み中...</div>
+      </div>
     </div>
   `;
 
   bindEvents();
 
-  // 初期表示日 = 今日 (JST)。カードリストは今日の投稿だけを出す
+  // 初期表示日 = 今日 (JST)。左列はその日のタイトルだけを出す
   currentDayDate = currentDayDate || todayJstDate();
   calendarAnchor = currentDayDate;
-  const dayInput = document.getElementById('bulletin-day-date');
-  if (dayInput) dayInput.value = currentDayDate;
+  updateDayReadout();
 
   // 認証済み（トークンが存在する）場合のみデータ通信を実行
   if (state.currentUser && state.authToken) {
@@ -195,60 +209,80 @@ function bindEvents() {
     });
   }
 
-  // ★ ヘッダーの日付ナビ（‹ ›・日付入力・本日・カレンダー・キー手引き）は固定要素なので直接登録
-  if (!eventsBound) {
-    document.getElementById('bulletin-day-prev')?.addEventListener('click', () => shiftWindow(-1));
-    document.getElementById('bulletin-day-next')?.addEventListener('click', () => shiftWindow(1));
-    document.getElementById('bulletin-btn-today')?.addEventListener('click', () => selectDay(dayKey(0)));
-    document.getElementById('bulletin-cal-toggle')?.addEventListener('click', () => toggleMiniCalendar());
-    document.getElementById('bulletin-keys-toggle')?.addEventListener('click', () => toggleKeysHelp());
+  if (eventsBound) return;
 
-    document.getElementById('bulletin-day-date')?.addEventListener('change', (e) => {
-      selectDay(e.target.value || dayKey(0));
+  // ★ ヘッダーの日付ナビ（中心日読取・‹ ›・本日・カレンダー・キー手引き）は固定要素なので直接登録
+  document.getElementById('bulletin-day-prev')?.addEventListener('click', () => shiftWindow(-1));
+  document.getElementById('bulletin-day-next')?.addEventListener('click', () => shiftWindow(1));
+  document.getElementById('bulletin-btn-today')?.addEventListener('click', () => selectDay(dayKey(0)));
+  document.getElementById('bulletin-cal-toggle')?.addEventListener('click', () => toggleMiniCalendar());
+  document.getElementById('bulletin-keys-toggle')?.addEventListener('click', () => toggleKeysHelp());
+
+  // ★ 左列タイトル行（クリックで選択＝即既読化→右ペイン全文。行フォーカス時に削除ボタンが現れる）はリスト側で委譲
+  const listEl = document.getElementById('bulletin-list-container');
+  if (listEl) {
+    listEl.addEventListener('click', (e) => {
+      const del = e.target.closest('[data-bulletin-delete]');
+      if (del) {
+        e.stopPropagation();
+        deleteBulletinPost(del.getAttribute('data-bulletin-delete'));
+        return;
+      }
+      const row = e.target.closest('[data-bulletin-toggle]');
+      if (row) selectBulletin(row.getAttribute('data-bulletin-toggle'));
     });
-
-    // ★ カード操作（全文を読む・コメント・選択）。カードは再描画されるのでリスト側で委譲
-    const cardListEl = document.getElementById('bulletin-card-list');
-    if (cardListEl) {
-      cardListEl.addEventListener('click', (e) => {
-        const detail = e.target.closest('[data-bulletin-detail]');
-        if (detail) { openBulletinDetail(detail.getAttribute('data-bulletin-detail')); return; }
-
-        const comment = e.target.closest('[data-bulletin-comment]');
-        if (comment) { sendBulletinComment(comment.getAttribute('data-bulletin-comment')); return; }
-
-        const card = e.target.closest('[data-bulletin-toggle]');
-        if (card) { selectBulletin(card.getAttribute('data-bulletin-toggle')); }
-      });
-    }
-
-    // ★ ミニカレンダー（日付選択・月送りの委譲）
-    const calEl = document.getElementById('bulletin-mini-cal');
-    if (calEl) {
-      calEl.addEventListener('click', (e) => {
-        const dayBtn = e.target.closest('[data-cal-date]');
-        if (dayBtn) { selectDay(dayBtn.getAttribute('data-cal-date')); return; }
-        const monthBtn = e.target.closest('[data-cal-month]');
-        if (monthBtn) { shiftCalendarMonth(monthBtn.getAttribute('data-cal-month')); return; }
-        if (e.target.closest('[data-cal-today]')) {
-          calendarAnchor = dayKey(0);
-          selectDay(dayKey(0));
-        }
-      });
-    }
-
-
-    // ★ キーボード操作（掲示タブがアクティブな時のみ）
-    document.addEventListener('keydown', bulletinKeyHandler);
-
-    eventsBound = true;
   }
+
+  // ★ 右ペイン（「詳細」・「削除」・コメント送信）はペイン側で委譲
+  const paneEl = document.getElementById('bulletin-detail-pane');
+  if (paneEl) {
+    paneEl.addEventListener('click', (e) => {
+      const del = e.target.closest('[data-bulletin-delete]');
+      if (del) {
+        deleteBulletinPost(del.getAttribute('data-bulletin-delete'));
+        return;
+      }
+      const detail = e.target.closest('[data-bulletin-detail]');
+      if (detail) {
+        openBulletinDetail(detail.getAttribute('data-bulletin-detail'));
+        return;
+      }
+      const send = e.target.closest('[data-bulletin-comment]');
+      if (send) sendBulletinComment(send.getAttribute('data-bulletin-comment'));
+    });
+  }
+
+  // ★ ミニカレンダー（日付選択・月送り・任意日入力の委譲）
+  const calEl = document.getElementById('bulletin-mini-cal');
+  if (calEl) {
+    calEl.addEventListener('click', (e) => {
+      const dayBtn = e.target.closest('[data-cal-date]');
+      if (dayBtn) { selectDay(dayBtn.getAttribute('data-cal-date')); return; }
+      const monthBtn = e.target.closest('[data-cal-month]');
+      if (monthBtn) { shiftCalendarMonth(monthBtn.getAttribute('data-cal-month')); return; }
+      if (e.target.closest('[data-cal-today]')) {
+        calendarAnchor = dayKey(0);
+        selectDay(dayKey(0));
+      }
+    });
+    calEl.addEventListener('change', (e) => {
+      if (e.target?.id === 'bulletin-day-date') {
+        selectDay(e.target.value || dayKey(0));
+        renderMiniCalendar();
+      }
+    });
+  }
+
+  // ★ キーボード操作（掲示タブがアクティブな時のみ）
+  document.addEventListener('keydown', bulletinKeyHandler);
+
+  eventsBound = true;
 }
 
 /**
  * キーボードによるザッピング操作
- * ↑/↓ カード間移動（選択時点で既読化）、Enter/Space 全文（詳細モーダル）を開く、
- * Enter/Space 全文を開く、←/→ 前日・翌日（±1日）、T 今日、C カレンダー、? 手引き開閉
+ * ↑/↓ タイトル行間移動（選択＝即既読化・右ペイン全文が連動）、Enter 右ペイン（全文）へフォーカス、
+ * ←/→ 前日・翌日（±1日）、T 今日、C カレンダー、? 手引き開閉
  */
 function bulletinKeyHandler(e) {
   if (state.currentTab !== 'bulletin') return;
@@ -260,7 +294,7 @@ function bulletinKeyHandler(e) {
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
   // モーダル開時はキーボード操作をモーダル側に譲る
   const openModals = Array.from(document.querySelectorAll('.modal-overlay'))
-    .filter(m => !m.classList.contains('hidden'));
+    .filter((m) => !m.classList.contains('hidden'));
   if (openModals.length > 0) return;
 
   const ids = bulletinRowIds();
@@ -283,7 +317,10 @@ function bulletinKeyHandler(e) {
   }
 
   if (e.key === 'Enter' || e.key === ' ') {
-    if (selectedId) { e.preventDefault(); openBulletinDetail(selectedId); }
+    if (selectedId) {
+      e.preventDefault();
+      focusDetailPane();
+    }
     return;
   }
 
@@ -293,9 +330,9 @@ function bulletinKeyHandler(e) {
   if (e.key === '?' || e.key === '/') { e.preventDefault(); toggleKeysHelp(); return; }
 }
 
-/** カードリストの記事 ID 一覧（表示順は filteredBulletins と同一） */
+/** 左列タイトル行の掲示ID一覧（表示順は filteredBulletins と同一） */
 function bulletinRowIds() {
-  return Array.from(document.querySelectorAll('#bulletin-card-list [data-bulletin-toggle]'))
+  return Array.from(document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]'))
     .map((row) => String(row.getAttribute('data-bulletin-toggle')));
 }
 
@@ -308,6 +345,12 @@ const WEEKDAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
 /** 投稿日を JST キー (YYYY-MM-DD) に正規化 */
 function toJstDay(iso) {
   if (!iso) return '';
+  const s = String(iso);
+  // オフセット (Z / +HH:MM / -HH:MM) を含まない素朴 'YYYY-MM-DD HH:MM:SS' は JST 壁時計 → 暦日を直接抽出
+  const naive = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T]\d{2}:\d{2}/);
+  if (naive && !/[Zz]|[+-]\d{2}/.test(s)) {
+    return naive[1];
+  }
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '';
   return new Date(d.getTime() + 9 * 3600000).toISOString().split('T')[0];
@@ -333,19 +376,17 @@ function weekdayLabel(key) {
   return WEEKDAY_LABELS[new Date(Date.UTC(p[0], p[1] - 1, p[2])).getUTCDay()];
 }
 
-
-
 /** キャッシュから日別件数を算出 */
 function dayCounts() {
   const map = new Map();
-  bulletinsCache.forEach(b => {
+  bulletinsCache.forEach((b) => {
     const k = toJstDay(b.postedAt || b.posted_at || b.createdAt || b.created_at);
     if (k) map.set(k, (map.get(k) || 0) + 1);
   });
   return map;
 }
 
-/** 投稿日が選択日（7日ウィンドウの中心日）と一致するか */
+/** 投稿日が中心日と一致するか */
 function matchesDay(b) {
   const posted = toJstDay(b.postedAt || b.posted_at || b.createdAt || b.created_at);
   return posted === (currentDayDate || dayKey(0));
@@ -370,27 +411,42 @@ function animateShift(dir, axis = 'x', days = 1) {
 
   const span = Math.max(1, Math.min(Math.abs(days) || 1, 7));
   const prop = axis === 'y' ? 'translateY' : 'translateX';
-  // 1日はずっと小さく、複数日ジャンプだけ大きく動く
-  const contentStep = axis === 'y' ? dir * 18 : dir * (4 + span * 1.5);
-  const fade = axis === 'y' ? 0.2 : 0.6;
+  // 1日はずっと小さく、複数日ジャンプだけ大きく動く（中心日は ≤6px、内容は ≤12px）
+  const contentStep = axis === 'y' ? dir * 10 : dir * (3 + span * 2);
+  const readoutStep = axis === 'x' ? dir * Math.min(3 + span, 6) : 0;
+  const fade = 0.62;
   const opts = {
-    duration: axis === 'y' ? 260 : 170,
+    duration: axis === 'y' ? 200 : 150,
     easing: 'cubic-bezier(0.22, 1, 0.36, 1)'
   };
 
   const slide = (el, offset) => {
-    if (!el || typeof el.animate !== 'function') return;
+    if (!el || typeof el.animate !== 'function' || !offset) return;
     el.animate(
       [{ transform: `${prop}(${offset}px)`, opacity: fade }, { transform: `${prop}(0)`, opacity: 1 }],
       opts
     );
   };
 
-  slide(document.getElementById('bulletin-card-list'), contentStep);
+  slide(document.getElementById('bulletin-day-current'), readoutStep);
+  slide(document.getElementById('bulletin-list-container'), contentStep);
+  slide(document.getElementById('bulletin-detail-pane'), contentStep);
+}
+
+/** 中心日読取（‹ › の左の固定幅。data-day に YYYY-MM-DD を保持） */
+function updateDayReadout() {
+  const readout = document.getElementById('bulletin-day-current');
+  if (!readout) return;
+  const key = currentDayDate || dayKey(0);
+  const parts = key.split('-');
+  const label = `${parts[1]}/${parts[2]} (${weekdayLabel(key)})`;
+  readout.dataset.day = key;
+  readout.textContent = label;
+  readout.setAttribute('aria-label', `表示日: ${key} ${weekdayLabel(key)}`);
 }
 
 /**
- * 表示日の設定（カードリスト再描画を駆動する中心関数）。ヘッダーの日付入力に追従
+ * 表示日の設定（左列・右ペインの再描画を駆動する中心関数）
  * @param {string} date YYYY-MM-DD
  * @param {number} [dir] 移動方向 (1=未来/右, -1=過去/左)。省略時は日付差から算出
  */
@@ -399,16 +455,18 @@ function selectDay(date, dir = 0) {
   // 移動日数（アニメーションの大きさ用。1日ずれは小さく、複数日ジャンプだけ大きく動く）
   const span = Math.abs(dayDiff(currentDayDate, target)) || 1;
   const shift = dir || Math.sign(dayDiff(currentDayDate, target)) || 0;
-  const hadFocus = document.activeElement && document.activeElement.closest('#bulletin-card-list');
+  const hadFocus = document.activeElement && document.activeElement.closest('#bulletin-list-container');
   currentDayDate = target;
   calendarAnchor = target;
 
+  updateDayReadout();
+
   const dateInput = document.getElementById('bulletin-day-date');
-  if (dateInput) dateInput.value = target;
+  if (dateInput && dateInput.value !== target) dateInput.value = target;
 
   renderBulletinList();
   animateShift(shift, 'x', span);
-  if (hadFocus) focusSelectedCard();
+  if (hadFocus) focusSelectedRow();
   refreshLucideIcons();
 }
 
@@ -443,9 +501,6 @@ function shiftCalendarMonth(delta) {
   calendarAnchor = `${ny}-${String(nm).padStart(2, '0')}-01`;
   renderMiniCalendar();
 }
-
-
-
 
 /**
  * ミニカレンダー（投稿数打点付き）の描画
@@ -493,14 +548,27 @@ function renderMiniCalendar() {
       </div>
     </div>
     <div class="mini-cal-grid mb-1">
-      ${WEEKDAY_LABELS.map(w => `<span class="mini-cal-wd">${w}</span>`).join('')}
+      ${WEEKDAY_LABELS.map((w) => `<span class="mini-cal-wd">${w}</span>`).join('')}
     </div>
     <div class="mini-cal-grid">${cells.join('')}</div>
+    <div class="flex items-center gap-2 mt-2">
+      <label for="bulletin-day-date" class="text-[10px] text-muted shrink-0">任意日へ</label>
+      <input type="date" id="bulletin-day-date" class="input-field py-1 px-2 text-xs" aria-label="投稿日" value="${anchor}">
+    </div>
     <p class="text-[10px] text-muted mt-2">● は投稿のある日です。日付をクリックでその日の記事を表示し、←/→ キーと ‹ › ボタンで前日・翌日（1日分）へ移動できます。</p>
   `;
   refreshLucideIcons();
 }
 
+/** キーボード操作の手引き（収納パネル）の開閉 */
+function toggleKeysHelp() {
+  const pop = document.getElementById('bulletin-keys-pop');
+  const btn = document.getElementById('bulletin-keys-toggle');
+  if (!pop) return;
+  const opening = pop.classList.contains('hidden');
+  pop.classList.toggle('hidden', !opening);
+  if (btn) btn.setAttribute('aria-expanded', opening ? 'true' : 'false');
+}
 
 /* ==========================================================================
    マスタ・ディテール描画（左=タイトル列、右=全文ペイン）
@@ -527,11 +595,11 @@ export async function loadBulletins() {
 
 /** 検索・投稿日による絞り込みと日時降順ソート（カテゴリフィルタは撤廃） */
 function filteredBulletins() {
-  const filtered = bulletinsCache.filter(b => {
+  const filtered = bulletinsCache.filter((b) => {
     const matchQuery = !currentSearch ||
-      b.title.toLowerCase().includes(currentSearch) ||
-      b.content.toLowerCase().includes(currentSearch) ||
-      (b.authorName && b.authorName.toLowerCase().includes(currentSearch));
+      String(b.title || '').toLowerCase().includes(currentSearch) ||
+      String(b.content || '').toLowerCase().includes(currentSearch) ||
+      (b.authorName && String(b.authorName).toLowerCase().includes(currentSearch));
 
     return matchQuery && matchesDay(b);
   });
@@ -544,93 +612,44 @@ function filteredBulletins() {
   return filtered;
 }
 
-/** 未読・掲示終了・添付のバッジ群（左列と右ペインヘッダーで共用） */
 /** 未読判定（未読 = 既読でも承認済みでもない） */
 function isUnreadBulletin(b) {
   return !b.isRead && b.ackStatus !== 'READ' && b.ackStatus !== 'APPROVED';
 }
 
-function badgeSpans(b) {
-  const isRead = !isUnreadBulletin(b);
+/** 掲示ID でキャッシュの掲示を探す */
+function findBulletin(id) {
+  return bulletinsCache.find((b) => String(b.id) === String(id)) || null;
+}
+
+/** 右ペインヘッダーのバッジ群（読者向けに日付・掲示期間の表記は置かない） */
+function paneBadgeHtml(b) {
   const attachments = b.attachments || [];
   return `
-    ${!isRead ? '<span class="badge bg-danger-soft text-danger border-danger-soft shrink-0">未読</span>' : ''}
+    ${isUnreadBulletin(b) ? '<span class="badge bg-danger-soft text-danger border-danger-soft shrink-0">未読</span>' : ''}
     ${isDisplayExpired(b) ? '<span class="badge bg-surface-strong text-muted border-divider flex items-center gap-1 shrink-0"><i data-lucide="calendar-off" class="w-3 h-3"></i> 掲示終了</span>' : ''}
     ${attachments.length > 0 ? `<span class="badge bg-accent-soft text-accent-strong border-accent-soft flex items-center gap-1 shrink-0"><i data-lucide="paperclip" class="w-3 h-3"></i> 添付 ${attachments.length}</span>` : ''}
   `;
 }
 
 /**
- * 記事カード（独立記事：タイトル行の直下に本文が来る。タイトルは左寄せ、右端に投稿者・時刻）
+ * 左列タイトル行（1行・右端に未読バッジ、行頭シグニファイア › でクリック誘導。全文は右ペインに出す）
  * @param {Object} b
  * @param {boolean} selected 選択中（既読化済み・強調表示）か
  */
-function articleCardHtml(b, selected) {
+function titleRowHtml(b, selected) {
   const unread = isUnreadBulletin(b);
-  const attachments = b.attachments || [];
-  const author = b.authorName || b.author_name || '教員';
-  const avatar = b.authorAvatar || b.author_avatar || null;
-  const time = timeOfJstLabel(b.postedAt || b.posted_at || b.createdAt || b.created_at);
-  const longBody = String(b.content || '').length > 240;
-
   return `
-    <article class="bulletin-card${selected ? ' active' : ''}" data-bulletin-toggle="${b.id}"
-             data-unread="${unread ? 'true' : 'false'}" role="option" tabindex="0"
-             aria-selected="${selected ? 'true' : 'false'}">
-      <div class="bulletin-card-head">
-        <h3 class="bulletin-card-title">${escapeHTML(b.title)}</h3>
-        ${badgeSpans(b)}
-        <div class="bulletin-card-meta">
-          ${userAvatarHtml({ name: author, avatarUrl: avatar, size: 'xs' })}
-          <span>${escapeHTML(author)}</span>
-          ${time ? `<span class="font-mono text-muted">${time}</span>` : ''}
-        </div>
-      </div>
-      <div class="bulletin-card-body${longBody && !selected ? ' clamped' : ''}">${escapeHTML(b.content)}</div>
-      ${longBody ? `
-        <button type="button" data-bulletin-detail="${b.id}"
-                class="btn-secondary py-1 px-2.5 text-[11px] mt-1.5 flex items-center gap-1">
-          <i data-lucide="maximize-2" class="w-3 h-3"></i> 全文を読む
-        </button>` : ''}
-      ${attachmentsHtml(attachments)}
-    </article>`;
-}
-
-/** JST 基準の投稿時刻 (HH:MM)。日付はカードリストの共通前提なので時刻だけ出す */
-function timeOfJstLabel(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  const jst = new Date(d.getTime() + 9 * 3600000);
-  const h = String(jst.getUTCHours()).padStart(2, '0');
-  const m = String(jst.getUTCMinutes()).padStart(2, '0');
-  return `${h}:${m}`;
-}
-
-
-/** 添付ファイル一覧（カード内・モーダル共用） */
-function attachmentsHtml(atts = []) {
-  if (atts.length === 0) return '';
-  return `
-    <div class="mt-3">
-      <p class="text-[11px] font-semibold text-soft mb-1.5 flex items-center gap-1">
-        <i data-lucide="paperclip" class="w-3.5 h-3.5 text-accent"></i> 添付ファイル (${atts.length})
-      </p>
-      <ul class="space-y-1.5">
-        ${atts.map(a => `
-          <li class="flex items-center gap-2 text-[11px] bg-surface-strong border border-divider rounded-lg px-2.5 py-1.5">
-            <span class="truncate text-main">${escapeHTML(a.name)}</span>
-            <span class="text-muted shrink-0">${formatBytes(a.size)}</span>
-            ${a.kgs ? '<span class="badge bg-warning-soft text-warning-strong border border-warning-soft shrink-0">KAGOSHIMA EDU</span>' : ''}
-            <a href="${API_BASE_URL}/bulletins/attachments/${a.id}" target="_blank" rel="noopener"
-               class="ml-auto text-accent-strong hover-text-accent-strong shrink-0 flex items-center gap-1">
-              <i data-lucide="download" class="w-3.5 h-3.5"></i> ダウンロード
-            </a>
-          </li>`).join('')}
-      </ul>
+    <div class="bulletin-title-row${selected ? ' active' : ''}" data-bulletin-toggle="${b.id}"
+         data-unread="${unread ? 'true' : 'false'}" role="option" tabindex="0"
+         aria-selected="${selected ? 'true' : 'false'}">
+      <span class="bulletin-row-signifier" aria-hidden="true"><i data-lucide="chevron-right" class="w-3.5 h-3.5"></i></span>
+      <span class="bulletin-row-title">${escapeHTML(String(b.title || ''))}</span>
+      ${unread ? '<span class="bulletin-unread-badge" aria-hidden="true">未読</span>' : ''}
+      <span class="bulletin-row-delete"><button type="button" class="bulletin-row-delete-btn"
+                data-bulletin-delete="${b.id}" title="この掲示を削除">削除</button></span>
     </div>`;
 }
-
 
 /**
  * 掲示板一覧の描画（左=タイトル列＋右=全文ペイン。選択記事の全文を右に即表示）
@@ -639,88 +658,250 @@ function renderBulletinList() {
   const filtered = filteredBulletins();
 
   // 右ペイン表示中の選択が現在の絞り込みから外れた場合、その日の最初の項目を自動選択
-  const ids = filtered.map(b => String(b.id));
-  if (ids.length > 0 && !ids.includes(String(selectedId))) {
+  const ids = filtered.map((b) => String(b.id));
+  const autoSelect = ids.length > 0 && !ids.includes(String(selectedId));
+  if (autoSelect) {
     selectedId = ids[0];
-    markBulletinRead(selectedId);   // 表示＝全文が見えるので選択時点で既読化
   } else if (ids.length === 0) {
     selectedId = '';
   }
 
-  renderCards();
+  renderRows();
+  if (autoSelect && selectedId) markBulletinRead(selectedId);  // 表示＝全文が見えるので選択時点で既読化
+  renderDetailPane(findBulletin(selectedId));
   refreshLucideIcons();
+  if (selectedId) loadComments(selectedId);
 }
 
-/** 記事カードリストの描画（日付・件数の欄は置かない。カードが記事単位で独立） */
-function renderCards() {
-  const container = document.getElementById('bulletin-card-list');
+/** 左列タイトル行の描画（日付・件数の欄は左列ヘッダーに寄せる。行は1行タイトル＋未読バッジ） */
+function renderRows() {
+  const container = document.getElementById('bulletin-list-container');
   if (!container) return;
 
   const filtered = filteredBulletins();
+  const countEl = document.getElementById('bulletin-title-count');
+  if (countEl) countEl.textContent = `${filtered.length} 件`;
+
   if (filtered.length === 0) {
-    container.innerHTML = `<div class="p-6 text-center text-xs text-muted bg-surface-strong border border-divider rounded-xl">
-      <i data-lucide="calendar-off" class="w-7 h-7 mx-auto mb-2 opacity-60"></i>
+    container.innerHTML = `<div class="p-5 text-center text-xs text-muted">
+      <i data-lucide="calendar-off" class="w-6 h-6 mx-auto mb-2 opacity-60"></i>
       <div>この日の掲示連絡はありません。<kbd class="kbd-key">←</kbd><kbd class="kbd-key">→</kbd>・‹ › ボタンで前日・翌日、<kbd class="kbd-key">C</kbd> キーでカレンダーから任意日へ移動できます。</div>
     </div>`;
     refreshLucideIcons();
     return;
   }
 
-  container.innerHTML = filtered.map((b) => articleCardHtml(b, String(b.id) === String(selectedId))).join('');
+  container.innerHTML = filtered
+    .map((b) => titleRowHtml(b, String(b.id) === String(selectedId)))
+    .join('');
   refreshLucideIcons();
 }
 
-/** 右ペイン（選択記事の全文）の描画 */
+/**
+ * 右ペイン（選択記事の全文・添付・コメント）の描画
+ * @param {Object|null} b 選択中の掲示
+ */
+function renderDetailPane(b) {
+  const pane = document.getElementById('bulletin-detail-pane');
+  if (!pane) return;
+
+  if (!b) {
+    pane.innerHTML = `<div class="p-6 text-center text-xs text-muted">
+      <i data-lucide="inbox" class="w-7 h-7 mx-auto mb-2 opacity-60"></i>
+      <div>この日に掲示された連絡はありません。<kbd class="kbd-key">←</kbd><kbd class="kbd-key">→</kbd>・‹ › ボタンで前日・翌日へ移動できます。</div>
+    </div>`;
+    refreshLucideIcons();
+    return;
+  }
+
+  const atts = b.attachments || [];
+  const comments = commentsById.get(String(b.id)) || [];
+
+  pane.innerHTML = `
+    <div class="bulletin-detail-body">
+      <div class="pane-header">
+        <h3 class="pane-title">${escapeHTML(String(b.title || ''))}</h3>
+        <div class="pane-badges">${paneBadgeHtml(b)}</div>
+        <button type="button" class="btn-primary py-1 px-2.5 text-[11px] font-bold flex items-center gap-1 shrink-0"
+                data-bulletin-detail="${b.id}" title="投稿日時・掲示期間・添付をモーダルで開く">
+          <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i> 詳細
+        </button>
+        <button type="button" class="btn-secondary py-1 px-2.5 text-[11px] font-bold flex items-center gap-1 shrink-0 text-danger"
+                data-bulletin-delete="${b.id}" title="この掲示を削除">
+          <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> 削除
+        </button>
+      </div>
+      <pre class="pane-body-text">${escapeHTML(String(b.content || ''))}</pre>
+      ${attachmentsHtml(atts)}
+      <div class="bulletin-comments">
+        <p class="comment-heading"><i data-lucide="message-square" class="w-3.5 h-3.5 text-accent"></i> 投稿者への補足・コメント (${comments.length})</p>
+        ${comments.length > 0 ? `<ul class="comment-list">${comments.map(commentHtml).join('')}</ul>` : '<p class="comment-empty">まだコメントはありません。</p>'}
+        <div class="comment-form">
+          <label for="bulletin-comment-input" class="text-[10px] text-muted shrink-0">補足・確認コメント</label>
+          <textarea id="bulletin-comment-input" rows="2" class="input-field w-full min-w-0 p-2 text-xs" placeholder="投稿者へ補足・確認コメントを書く" aria-label="補足・確認コメント"></textarea>
+          <button type="button" class="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1.5 shrink-0"
+                  data-bulletin-comment="${b.id}"><i data-lucide="send" class="w-3.5 h-3.5"></i> 送信</button>
+        </div>
+      </div>
+    </div>`;
+  refreshLucideIcons();
+}
+
+/** コメント1件（投稿者名・本文・時刻。自分が送ったものは「自分」表記） */
+function commentHtml(c) {
+  const time = c.createdAt ? timeOfJstLabel(c.createdAt) : '';
+  return `
+    <li class="comment-item">
+      <div class="comment-head">
+        ${userAvatarHtml({ name: c.authorName || '教員', avatarUrl: c.avatarUrl || '', size: 'xs' })}
+        <span class="comment-author">${escapeHTML(String(c.authorName || '教員'))}</span>
+        ${time ? `<span class="comment-time">${time}</span>` : ''}
+        ${c.mine ? '<span class="badge bg-accent-soft text-accent-strong border-accent-soft shrink-0">自分</span>' : ''}
+      </div>
+      <p class="comment-body">${escapeHTML(String(c.commentText || ''))}</p>
+    </li>`;
+}
 
 /**
- * タイトル選択（左列の行クリック・↑/↓ キー。選択時点で既読化し、右ペインに全文を表示）
+ * 1件の掲示に対するコメント（ack コメント）を取得して右ペインに反映
  * @param {string} id 掲示ID
- * @param {number} [dir] 移動方向（1=次/下、-1=前/上）。省略時は表示順の位置差から算出
  */
+async function loadComments(id) {
+  const key = String(id);
+  try {
+    const res = await apiGet(`/bulletins/${key}`);
+    const detail = res.bulletin || res;
+    const acks = detail.acknowledgements || detail.acknowledgments || [];
+    const apiComments = acks
+      .filter((a) => String(a.comment || '').trim())
+      .map((a) => ({
+        authorName: a.author_name || a.authorName || a.user_name || a.userName || a.name
+          || a.user_id || a.userId || '教員',
+        avatarUrl: a.avatar_url || a.avatarUrl || null,
+        commentText: String(a.comment).trim(),
+        createdAt: a.acknowledged_at || a.acknowledgedAt || null,
+      }));
+    const mine = (commentsById.get(key) || []).filter((c) => c.mine);
+    commentsById.set(key, [...apiComments, ...mine]);
+  } catch (e) {
+    /* オフライン時はローカル送信分だけ残す */
+  }
+
+  if (String(selectedId) === key) {
+    renderDetailPane(findBulletin(key));
+    refreshLucideIcons();
+  }
+}
+
 /**
- * カード選択（↑/↓ キー・カードクリック。選択時点で既読化し、カードを強調表示）
+ * 投稿者への補足・コメント送信（右ペインのその場。送信後はサーバー応答へ置き換える）
+ * @param {string} id 掲示ID
+ */
+async function sendBulletinComment(id) {
+  const key = String(id);
+  const input = document.getElementById('bulletin-comment-input');
+  const text = input ? String(input.value).trim() : '';
+  if (!text) {
+    showToast('コメントを入力してください', 'warning');
+    return;
+  }
+
+  const local = {
+    authorName: (state.currentUser && (state.currentUser.name || state.currentUser.userId)) || '自分',
+    avatarUrl: (state.currentUser && (state.currentUser.avatar_url || state.currentUser.avatarUrl)) || null,
+    commentText: text,
+    createdAt: new Date().toISOString(),
+    mine: true,
+  };
+  commentsById.set(key, [...(commentsById.get(key) || []), local]);
+  renderDetailPane(findBulletin(key));
+  refreshLucideIcons();
+
+  try {
+    await apiPost(`/bulletins/${key}/comments`, { comment: text });
+    showToast('コメントを送信しました', 'success');
+    // サーバーの ack コメントに反映されるためローコピーは捨てて再取得
+    commentsById.delete(key);
+    await loadComments(key);
+  } catch (e) {
+    showToast('コメント送信に失敗しました', 'error');
+    commentsById.set(key, (commentsById.get(key) || []).filter((c) => c !== local));
+    if (String(selectedId) === key) renderDetailPane(findBulletin(key));
+  }
+}
+
+/**
+ * タイトル行の選択（左列の行クリック・↑/↓ キー。選択時点で既読化し、右ペインに全文を表示）
  * @param {string} id 掲示ID
  * @param {number} [dir] 移動方向（1=次/下、-1=前/上）。省略時は表示順の位置差から算出
  */
 function selectBulletin(id, dir = 0) {
   const key = String(id);
   const items = filteredBulletins();
-  const item = items.find(b => String(b.id) === key);
+  const item = items.find((b) => String(b.id) === key);
   if (!item) return;
 
-  const prevIdx = items.findIndex(b => String(b.id) === String(selectedId));
-  const nextIdx = items.findIndex(b => String(b.id) === key);
+  const prevIdx = items.findIndex((b) => String(b.id) === String(selectedId));
+  const nextIdx = items.findIndex((b) => String(b.id) === key);
   const shift = dir || Math.sign(nextIdx - prevIdx) || 0;
 
   selectedId = key;
-  markBulletinRead(key);          // 非同期 PUT（ローカル状態は即更新）
-  renderCards();
+  markBulletinRead(key);          // 非同期 PUT（ローカル状態は即更新で未読バッジが消失）
+  renderRows();
+  renderDetailPane(item);
   animateShift(shift, 'y');
-  focusSelectedCard();
+  focusSelectedRow();
   refreshLucideIcons();
+  loadComments(key);
 }
 
-/** 選択カードへフォーカスを引き継ぐ（↑/↓ 移動でキーボード操作を止めない） */
-function focusSelectedCard() {
-  const card = document.querySelector(`#bulletin-card-list [data-bulletin-toggle="${selectedId}"]`);
-  if (!card) return;
-  card.focus();
-  card.scrollIntoView({ block: 'nearest' });
+/** 選択タイトル行へフォーカスを引き継ぐ（↑/↓ 移動でキーボード操作を止めない） */
+function focusSelectedRow() {
+  const row = document.querySelector(`#bulletin-list-container [data-bulletin-toggle="${selectedId}"]`);
+  if (!row) return;
+  row.focus();
+  row.scrollIntoView({ block: 'nearest' });
 }
 
-/** キーボード操作の手引き（収納パネル）の開閉 */
-function toggleKeysHelp() {
-  const pop = document.getElementById('bulletin-keys-pop');
-  const btn = document.getElementById('bulletin-keys-toggle');
-  if (!pop) return;
-  const opening = pop.classList.contains('hidden');
-  pop.classList.toggle('hidden', !opening);
-  if (btn) btn.setAttribute('aria-expanded', opening ? 'true' : 'false');
+/** 右ペイン（全文）へフォーカスを移す（Enter キー） */
+function focusDetailPane() {
+  const pane = document.getElementById('bulletin-detail-pane');
+  if (!pane) return;
+
+  pane.focus();
+  pane.scrollIntoView({ block: 'nearest' });
 }
 
-/** 既読化（PUT /api/bulletins/:id/read）。再描画は呼び出し側で行う */
+/**
+ * 掲示の削除（行フォーカス時の削除ボタン・右ペインヘッダーの「削除」から）
+ * 確認後に DELETE /api/bulletins/:id。成功時はキャッシュから除き、次の行へ選択を進める
+ * @param {string} id 掲示ID
+ */
+async function deleteBulletinPost(id) {
+  const key = String(id);
+  const item = bulletinsCache.find((b) => String(b.id) === key);
+  const title = item ? String(item.title || '') : '';
+  if (!window.confirm(`「${title}」を削除しますか？`)) return;
+
+  try {
+    await apiDelete(`/bulletins/${key}`);
+    bulletinsCache = bulletinsCache.filter((b) => String(b.id) !== key);
+    commentsById.delete(key);
+    const ids = filteredBulletins().map((b) => String(b.id));
+    if (!ids.includes(String(selectedId))) selectedId = ids[0] || '';
+    updateUnread(bulletinsCache.filter(isUnreadBulletin).length);
+    showToast('削除しました', 'success');
+    renderBulletinList();
+    focusSelectedRow();
+  } catch (err) {
+    console.warn('[Bulletin] 削除失敗:', err.message);
+    showToast('削除に失敗しました', 'error');
+  }
+}
+
+/** 既読化（PUT /api/bulletins/:id/read）。左列の未読バッジだけ更新する */
 async function markBulletinRead(id) {
-  const item = bulletinsCache.find(b => String(b.id) === String(id));
+  const item = bulletinsCache.find((b) => String(b.id) === String(id));
   if (!item) return;
   if (item.isRead || item.ackStatus === 'READ' || item.ackStatus === 'APPROVED') return;
 
@@ -732,28 +913,26 @@ async function markBulletinRead(id) {
 
   const unreadCount = bulletinsCache.filter(isUnreadBulletin).length;
   updateUnread(unreadCount);
-  renderCards();  // カードの未読バッジだけ更新
+  renderRows();  // 未読バッジの消失だけ反映（右ペインは再描画しない）
 }
 
-/** 投稿者への補足・コメント送信 */
-async function sendBulletinComment(id) {
-  const comment = prompt('投稿者への補足・確認コメントを入力してください:');
-  if (!comment) return;
-  try {
-    await apiPost(`/bulletins/${id}/comments`, { comment });
-    showToast('コメントを送信しました', 'success');
-  } catch (e) {
-    showToast('コメントを送信しました', 'info');
-  }
+/** JST 基準の投稿時刻 (HH:MM)。日付は左列の共通前提なので時刻だけ出す */
+function timeOfJstLabel(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const jst = new Date(d.getTime() + 9 * 3600000);
+  const h = String(jst.getUTCHours()).padStart(2, '0');
+  const m = String(jst.getUTCMinutes()).padStart(2, '0');
+  return `${h}:${m}`;
 }
-
 
 /**
- * 詳細モーダルの表示 & 既読処理
- * @param {string} id
+ * 詳細モーダルの表示 & 既読処理（読者向けの情報を全部載せる）
+ * @param {string} id 掲示ID
  */
 async function openBulletinDetail(id) {
-  const item = bulletinsCache.find(b => String(b.id) === String(id));
+  const item = bulletinsCache.find((b) => String(b.id) === String(id));
   if (!item) return;
 
   if (!item.isRead && item.ackStatus !== 'READ' && item.ackStatus !== 'APPROVED') {
@@ -761,10 +940,10 @@ async function openBulletinDetail(id) {
     item.ackStatus = 'READ';
     try {
       await apiPut(`/bulletins/${id}/read`, {});
-    } catch (e) {}
+    } catch (e) { /* オフライン時はローカル状態のみ更新 */ }
     const unreadCount = bulletinsCache.filter(isUnreadBulletin).length;
     updateUnread(unreadCount);
-    renderCards();  // カードの未読バッジを更新
+    renderRows();  // 左列の未読バッジを更新
   }
 
   const titleEl = document.getElementById('detail-bulletin-title');
@@ -775,10 +954,11 @@ async function openBulletinDetail(id) {
 
   if (titleEl) titleEl.textContent = item.title;
   if (metaEl) {
-    // 詳細モーダルは読者向けの情報を全部載せる（未読・掲示終了・添付、投稿者、投稿日時、掲示期間）
+    const author = item.authorName || item.author_name || '教員';
+    const avatar = item.authorAvatar || item.author_avatar || null;
     metaEl.innerHTML = `
-      <span class="flex items-center gap-1.5">${badgeSpans(item)}</span>
-      <span class="flex items-center gap-1.5">投稿者: ${userAvatarHtml({ name: item.authorName || item.author_name || '教員', avatarUrl: item.authorAvatar || item.author_avatar || null, size: 'xs' })}${escapeHTML(item.authorName || item.author_name || '教員')}</span>
+      <span class="flex items-center gap-1.5">${paneBadgeHtml(item)}</span>
+      <span class="flex items-center gap-1.5">投稿者: ${userAvatarHtml({ name: author, avatarUrl: avatar, size: 'xs' })}${escapeHTML(author)}</span>
       <span>投稿日時: <strong class="text-main">${formatDate(item.postedAt || item.posted_at || item.createdAt || item.created_at)}</strong></span>
       ${displayPeriodLabel(item) ? `<span>掲示期間: <strong class="text-main">${displayPeriodLabel(item)}</strong></span>` : '<span>掲示期間: <strong class="text-main">指定なし</strong></span>'}
     `;
@@ -795,19 +975,44 @@ async function openBulletinDetail(id) {
 
   if (actionsEl) {
     actionsEl.innerHTML = `
-      <button id="btn-revise-request" class="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1.5 text-warning border-warning-soft">
+      <button id="btn-detail-comment" class="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1.5 text-warning border-warning-soft">
         <i data-lucide="message-square" class="w-3.5 h-3.5"></i> 補足・コメント
       </button>
       <button class="modal-close btn-secondary py-1.5 px-4 text-xs">閉じる</button>
     `;
 
-    document.getElementById('btn-revise-request')?.addEventListener('click', () => sendBulletinComment(id));
+    document.getElementById('btn-detail-comment')?.addEventListener('click', () => {
+      closeModal('bulletin-detail-modal');
+      selectBulletin(id);
+      focusDetailPane();
+      showToast('右ペイン下のコメント欄から送信してください', 'info');
+    });
   }
 
   openModal('bulletin-detail-modal');
   refreshLucideIcons();
 }
 
+/** 添付ファイル一覧（右ペイン・モーダル共用） */
+function attachmentsHtml(atts = []) {
+  if (atts.length === 0) return '';
+  return `
+    <div class="attachment-block">
+      <p class="attachment-heading"><i data-lucide="paperclip" class="w-3.5 h-3.5 text-accent"></i> 添付ファイル (${atts.length})</p>
+      <ul class="attachment-list">
+        ${atts.map((a) => `
+          <li class="attachment-item">
+            <span class="truncate text-main">${escapeHTML(String(a.name || ''))}</span>
+            <span class="text-muted shrink-0">${formatBytes(a.size)}</span>
+            ${a.kgs ? '<span class="badge bg-warning-soft text-warning-strong border border-warning-soft shrink-0">KAGOSHIMA EDU</span>' : ''}
+            <a href="${API_BASE_URL}/bulletins/attachments/${a.id}" target="_blank" rel="noopener"
+               class="ml-auto text-accent-strong hover-text-accent-strong shrink-0 flex items-center gap-1">
+              <i data-lucide="download" class="w-3.5 h-3.5"></i> ダウンロード
+            </a>
+          </li>`).join('')}
+      </ul>
+    </div>`;
+}
 
 /**
  * 新規投稿処理
@@ -844,7 +1049,7 @@ async function handleCreateBulletin(e) {
   }
 
   const maxBytes = 10 * 1024 * 1024;
-  const oversize = files.find(f => f.size > maxBytes);
+  const oversize = files.find((f) => f.size > maxBytes);
   if (oversize) {
     showToast(`「${oversize.name}」は10MBを超えています`, 'warning');
     return;
@@ -889,6 +1094,11 @@ async function handleCreateBulletin(e) {
   form?.reset();
   if (fileInput) fileInput.value = '';
   renderSelectedFiles([]);
+
+  // 新規投稿は左列に出るように中心日を投稿日へ寄せる
+  currentDayDate = toJstDay(postedAt) || currentDayDate;
+  calendarAnchor = currentDayDate;
+  updateDayReadout();
   loadBulletins();
 }
 
@@ -905,7 +1115,7 @@ function renderSelectedFiles(files = []) {
     return;
   }
 
-  listEl.innerHTML = files.map(f => `
+  listEl.innerHTML = files.map((f) => `
     <li class="flex items-center gap-2 text-[11px] text-soft">
       <i data-lucide="paperclip" class="w-3 h-3 text-accent shrink-0"></i>
       <span class="truncate">${escapeHTML(f.name)}</span>
@@ -954,4 +1164,3 @@ function getDummyBulletins() {
     }
   ];
 }
-

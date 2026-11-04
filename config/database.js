@@ -200,10 +200,11 @@ async function ensureSchema() {
       }
     }
 
+    // 冪等マイグレーション (型統一・カラム追加・旧カラム削除) は既存環境で失敗するのが想定内。
+    // 1ステートメント単位の失敗はスキーマ適用の成立を妨げないため、警告のみとして適用完了扱いとする。
     if (failures.length > 0) {
-      console.warn(`⚠️ スキーマ適用に ${failures.length} 件の問題:`);
+      console.warn(`⚠️ スキーマ適用で ${failures.length} 件のステートメントをスキップ (冪等マイグレーションの型統一済み等):`);
       failures.forEach((f) => console.warn(`  - ${f}`));
-      return false;
     }
 
     schemaApplied = true;

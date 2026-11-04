@@ -8,6 +8,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import config from '../config/default.js';
+import { ensureSchema, closeDatabase } from '../config/database.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -64,21 +65,23 @@ async function setupDatabase() {
   });
 
   try {
-    // 1. schema.sql の存在確認と読み込み
+    // 1. schema.sql の存在確認 (ensureSchema がステートメント単位で読み込み・適用する)
     if (!fs.existsSync(schemaPath)) {
       throw new Error(`schema.sql が見つかりません: ${schemaPath}`);
     }
-    const sqlScript = fs.readFileSync(schemaPath, 'utf-8');
 
     // 2. データベース自体が存在しなければ作成
     await ensureDatabaseExists();
 
-    // 3. 対象データベースへ接続
+    // 3. 最新スキーマの冪等適用 (import 時に ensureSchema が走り始めるため、完了を待ってから接続する)
+    const applied = await ensureSchema();
+    if (!applied) {
+      throw new Error('スキーマ適用に失敗しました。schema.sql と DB 接続を確認してください。');
+    }
+
+    // 4. 対象データベースへ接続
     await client.connect();
     await client.query("SET TIME ZONE 'Asia/Tokyo'");
-
-    // 4. 最新スキーマの一括実行（外部キー制約は PostgreSQL では常に有効）
-    await client.query(sqlScript);
 
     const tableCount = await client.query(
       `SELECT count(*) AS cnt FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`
@@ -90,6 +93,7 @@ async function setupDatabase() {
     process.exit(1);
   } finally {
     await client.end();
+    await closeDatabase();
   }
 }
 

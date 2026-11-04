@@ -70,6 +70,14 @@ ALTER TABLE posts ADD COLUMN IF NOT EXISTS display_end_date DATE;
 -- 区分・優先度は撤廃（カテゴリフィルタの廃止に伴いカラムを削除）
 ALTER TABLE posts DROP COLUMN IF EXISTS post_type;
 ALTER TABLE posts DROP COLUMN IF EXISTS priority;
+-- 論理削除フラグは INTEGER (0/1) に統一 (DB スキーマ統一の完結)
+-- 旧 boolean 環境からの冪等マイグレーション。型統一済み環境では失敗し、ensureSchema は警告扱いとする
+-- boolean 型インデックス idx_posts_deleted が型変換を妨げるため、先に DROP → 型変換 → 再作成する
+DROP INDEX IF EXISTS idx_posts_deleted;
+ALTER TABLE posts ALTER COLUMN is_deleted DROP DEFAULT;
+ALTER TABLE posts ALTER COLUMN is_deleted TYPE integer USING (CASE WHEN is_deleted::text = 'true' THEN 1 ELSE 0 END);
+ALTER TABLE posts ALTER COLUMN is_deleted SET DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_posts_deleted ON posts(is_deleted);
 
 CREATE INDEX IF NOT EXISTS idx_posts_author ON posts(author_id);
 CREATE INDEX IF NOT EXISTS idx_posts_deleted ON posts(is_deleted);
@@ -204,6 +212,13 @@ CREATE TABLE IF NOT EXISTS reservations (
 );
 CREATE INDEX IF NOT EXISTS idx_res_target_date ON reservations(target_date);
 CREATE INDEX IF NOT EXISTS idx_res_resource ON reservations(resource_id, start_time, end_time);
+CREATE INDEX IF NOT EXISTS idx_res_cancelled ON reservations(is_cancelled);
+-- キャンセルフラグは INTEGER (0/1) に統一 (DB スキーマ統一の完結)
+-- boolean 型インデックス idx_res_cancelled が型変換を妨げるため、先に DROP → 型変換 → 再作成する
+DROP INDEX IF EXISTS idx_res_cancelled;
+ALTER TABLE reservations ALTER COLUMN is_cancelled DROP DEFAULT;
+ALTER TABLE reservations ALTER COLUMN is_cancelled TYPE integer USING (CASE WHEN is_cancelled::text = 'true' THEN 1 WHEN is_cancelled::text = 'false' THEN 0 WHEN is_cancelled::text = '1' THEN 1 WHEN is_cancelled::text = '0' THEN 0 ELSE NULL END);
+ALTER TABLE reservations ALTER COLUMN is_cancelled SET DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_res_cancelled ON reservations(is_cancelled);
 
 -- 9. 校内スケジュール・年間行事 (school_schedules)
@@ -831,6 +846,8 @@ ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFA
 ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS notes TEXT;
 -- × と科目配置が同じ (日, 時限, クラス) に並存できるよう複合ユニークを拡張
 ALTER TABLE exam_slots DROP CONSTRAINT IF EXISTS exam_slots_exam_master_id_day_number_slot_number_class_id_key;
+-- 4キー版 uniq_exam_slot は × 行と科目配置行の並存を許さないため、5キー版 uniq_exam_slot_cell に置き換える
+DROP INDEX IF EXISTS uniq_exam_slot;
 CREATE UNIQUE INDEX IF NOT EXISTS uniq_exam_slot_cell ON exam_slots(exam_master_id, day_number, slot_number, class_id, is_blocked);
 
 

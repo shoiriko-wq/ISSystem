@@ -85,6 +85,12 @@ const measure = () => page.evaluate(() => {
     todayInArea: !!document.getElementById('sched-goto-today') && document.getElementById('sched-goto-today').closest('#sched-view-area') !== null,
     todayExists: !!document.getElementById('sched-goto-today'),
     labelFocusable: label ? label.tabIndex >= 0 : null,
+    labelBtnExists: !!document.getElementById('sched-month-menu-btn'),
+    labelBtnHasPopup: document.getElementById('sched-month-menu-btn') ? document.getElementById('sched-month-menu-btn').getAttribute('aria-haspopup') : null,
+    labelBtnExpanded: document.getElementById('sched-month-menu-btn') ? document.getElementById('sched-month-menu-btn').getAttribute('aria-expanded') : null,
+    labelBtnControls: document.getElementById('sched-month-menu-btn') ? document.getElementById('sched-month-menu-btn').getAttribute('aria-controls') : null,
+    prevGap: label && prev ? Math.round(label.getBoundingClientRect().left - (prev.getBoundingClientRect().left + prev.getBoundingClientRect().width)) : null,
+    nextGap: label && next ? Math.round((next.getBoundingClientRect().left) - (label.getBoundingClientRect().left + label.getBoundingClientRect().width)) : null,
   };
 });
 
@@ -133,6 +139,72 @@ check('再描画後もラベル中心 = グリッド中心（±3px）',
   Math.abs(afterCal.labelCenter - afterCal.gridCenter) <= 3 && afterCal.labelTop < afterCal.gridTop,
   { labelCenter: afterCal.labelCenter, gridCenter: afterCal.gridCenter, labelTop: afterCal.labelTop, gridTop: afterCal.gridTop });
 
+// ★ 月ナビの近接配置（‹ › は年月ラベルに隣接し、左右端に離れない）
+const nav = await measure();
+check('‹ › がラベルに隣接（左右の余白 0〜20px・左右対称）',
+  nav.prevGap >= 0 && nav.prevGap <= 20 && nav.nextGap >= 0 && nav.nextGap <= 20 && Math.abs(nav.prevGap - nav.nextGap) <= 4,
+  { prevGap: nav.prevGap, nextGap: nav.nextGap });
+
+// ★ 年月ラベルはボタン（クリックで年月选择メニューが開く）
+check('年月ラベルは aria-expanded / aria-controls / aria-haspopup を持つ開閉ボタン',
+  nav.labelBtnExists && nav.labelBtnHasPopup === 'dialog' && nav.labelBtnExpanded === 'false' && nav.labelBtnControls === 'sched-month-menu',
+  { labelBtnExists: nav.labelBtnExists, hasPopup: nav.labelBtnHasPopup, expanded: nav.labelBtnExpanded, controls: nav.labelBtnControls });
+
+
+// ★ ラベルクリックでメニューが開く：12ヶ月ボタン・年‹›・現在月の aria-current、中央配置
+const opened = await page.evaluate(() => {
+  document.getElementById('sched-month-menu-btn').click();
+  return new Promise((r) => setTimeout(r, 350));
+}).then(() => page.evaluate(() => {
+  const menu = document.getElementById('sched-month-menu');
+  const center = (el) => Math.round(el.getBoundingClientRect().left + el.getBoundingClientRect().width / 2);
+  const items = Array.from(document.querySelectorAll('.sched-month-item'));
+  const grid = document.querySelector('#sched-view-area .grid.grid-cols-7:last-of-type');
+  return {
+    visible: !!menu && !menu.classList.contains('hidden'),
+    expanded: document.getElementById('sched-month-menu-btn').getAttribute('aria-expanded'),
+    items: items.length,
+    ariaLabels: items.slice(0, 3).map((b) => b.getAttribute('aria-label')),
+    currentMonth: items.findIndex((b) => b.getAttribute('aria-current') === 'true') + 1,
+    yearBtns: document.querySelectorAll('#sched-month-menu [data-menu-year]').length,
+    yearText: (menu.innerText.match(/(\d{4})年/) || [null, null])[1],
+    todayBtn: !!document.querySelector('#sched-month-menu [data-menu-today]'),
+    menuCenter: menu ? center(menu) : null,
+    gridCenter: grid ? center(grid) : null,
+    focusedMonth: (document.activeElement && document.activeElement.getAttribute('data-menu-month') !== null)
+      ? Number(document.activeElement.getAttribute('data-menu-month')) + 1 : null,
+    menuOverflowX: menu ? Math.round(menu.scrollWidth - menu.clientWidth) : null,
+  };
+}));
+log('month-menu-open', opened);
+check('ラベルクリックでメニューが開き aria-expanded=true・12ヶ月ボタン・年‹›・今月へがある',
+  opened.visible && opened.expanded === 'true' && opened.items === 12 && opened.yearBtns === 2 && opened.todayBtn
+  && opened.ariaLabels.length === 3 && /\d{4}年\d{1,2}月/.test(String(opened.ariaLabels[0])),
+  { visible: opened.visible, expanded: opened.expanded, items: opened.items, yearBtns: opened.yearBtns, todayBtn: opened.todayBtn, ariaLabels: opened.ariaLabels });
+check('メニューは中央に開き現在月に aria-current・横スクロールなし',
+  opened.currentMonth > 0 && Math.abs(opened.menuCenter - opened.gridCenter) <= 30 && opened.menuOverflowX === 0,
+  { currentMonth: opened.currentMonth, menuCenter: opened.menuCenter, gridCenter: opened.gridCenter, menuOverflowX: opened.menuOverflowX });
+check('メニュー開時にフォーカスは現在月のボタンへ',
+  opened.focusedMonth === opened.currentMonth, { focusedMonth: opened.focusedMonth, currentMonth: opened.currentMonth });
+
+// ★ 年‹›で表示年が変わり、今月へで現在月へ戻る（閉じる）
+const yearShift = await page.evaluate(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const read = () => document.getElementById('sched-month-label').textContent.trim();
+  const menu = () => document.getElementById('sched-month-menu');
+  const yr = () => (menu().innerText.match(/(\d{4})年/) || [null, null])[1];
+  const y0 = yr();
+  menu().querySelector('[data-menu-year="-1"]').click();
+  await sleep(250);
+  const y1 = yr();
+  menu().querySelector('[data-menu-today]').click();
+  await sleep(400);
+  return { y0, y1, label: read(), open: !document.getElementById('sched-month-menu').classList.contains('hidden') };
+});
+log('menu-year-shift', yearShift);
+check('メニューの‹で前年表示になり、今月へで現在月へ戻りメニューが閉じる',
+  Number(yearShift.y1) === Number(yearShift.y0) - 1 && yearShift.label.includes(`${Number(yearShift.y0)}年`) && !yearShift.open,
+  { y0: yearShift.y0, y1: yearShift.y1, label: yearShift.label, open: yearShift.open });
 
 // 1日一覧モードでも年月ラベルは一覧部の中央直上
 await page.evaluate(() => document.getElementById('sched-mode-list').click());
@@ -142,6 +214,76 @@ log('list-nav', { labelCenter: lst.labelCenter, listCenter: lst.listCenter, area
 check('1日一覧モードでもラベル中心は表示部の中心 x と一致（±3px）',
   Math.abs(lst.labelCenter - (lst.listCenter !== null ? lst.listCenter : lst.areaCenter)) <= 3 && lst.labelInArea,
   { labelCenter: lst.labelCenter, listCenter: lst.listCenter, areaCenter: lst.areaCenter, labelInArea: lst.labelInArea });
+
+// ★ 键盘操作：ラベル Enter で開く→月ボタン間を ←→ で移動→Enter で决定→Esc で閉じラベルへ
+const kb = await page.evaluate(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const parse = (s) => { const m = s.match(/(\d+)年(\d+)月/); return m ? Number(m[1]) * 12 + Number(m[2]) : null; };
+  const read = () => document.getElementById('sched-month-label').textContent.trim();
+  const openState = () => !document.getElementById('sched-month-menu').classList.contains('hidden');
+  const focusMonth = () => (document.activeElement && document.activeElement.getAttribute('data-menu-month') !== null)
+    ? Number(document.activeElement.getAttribute('data-menu-month')) : null;
+
+  const labelBtn = document.getElementById('sched-month-menu-btn');
+  labelBtn.focus();
+  const base = parse(read());
+  const out = { base };
+
+  labelBtn.click();  // Enter/Space はボタン native click と同じ挙動
+  await sleep(300);
+  out.opened = openState();
+  out.focusAtOpen = focusMonth();
+
+  const menu = document.getElementById('sched-month-menu');
+  menu.querySelector('[data-menu-month="11"]').focus();
+  menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+  await sleep(120);
+  out.afterArrow = focusMonth();
+
+  document.activeElement.click();
+  await sleep(500);
+  out.afterPick = parse(read());
+  out.closedAfterPick = !openState();
+  out.focusAfterPick = document.activeElement.id;
+
+  labelBtn.click();
+  await sleep(300);
+  out.reopened = openState();
+  document.getElementById('sched-month-menu').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await sleep(250);
+  out.closedByEsc = !openState();
+  out.focusAfterEsc = document.activeElement.id;
+  out.expandedAfterEsc = document.getElementById('sched-month-menu-btn').getAttribute('aria-expanded');
+
+  document.getElementById('sched-goto-today').click();
+  await sleep(400);
+  out.restored = parse(read());
+  out.restoredBase = base;
+  return out;
+});
+log('menu-keyboard', kb);
+check('键盘: ラベルクリックで開きフォーカスが月に当たる（←→で月ボタン間を移動）',
+  kb.opened && kb.focusAtOpen !== null && kb.afterArrow === kb.focusAtOpen - 1,
+  { opened: kb.opened, focusAtOpen: kb.focusAtOpen, afterArrow: kb.afterArrow });
+check('键盘: Enter相当で月を决定しラベルが更新・閉じ・フォーカスがラベルへ戻る',
+  kb.afterPick === kb.base + 11 && kb.closedAfterPick && kb.focusAfterPick === 'sched-month-menu-btn',
+  { afterPick: kb.afterPick, base: kb.base, closed: kb.closedAfterPick, focus: kb.focusAfterPick });
+check('键盘: Esc でメニューが閉じ aria-expanded=false・フォーカスがラベルへ戻る',
+  kb.reopened && kb.closedByEsc && kb.expandedAfterEsc === 'false' && kb.focusAfterEsc === 'sched-month-menu-btn',
+  { reopened: kb.reopened, closedByEsc: kb.closedByEsc, expanded: kb.expandedAfterEsc, focus: kb.focusAfterEsc });
+
+// ★ メニュー外クリックで閉じる（フォーカスはラベルにとどめる）
+const outside = await page.evaluate(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  document.getElementById('sched-month-menu-btn').click();
+  await sleep(300);
+  const wasOpen = !document.getElementById('sched-month-menu').classList.contains('hidden');
+  document.getElementById('sched-summary').click();
+  await sleep(250);
+  return { wasOpen, closed: document.getElementById('sched-month-menu').classList.contains('hidden') };
+});
+log('menu-outside-click', outside);
+check('メニュー外クリックでメニューが閉じる', outside.wasOpen && outside.closed, outside);
 
 // 狭幅（ツールバーが折り返してもグリッド中央直上は保つ）
 await page.evaluate(() => document.getElementById('sched-mode-calendar').click());

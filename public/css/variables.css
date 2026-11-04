@@ -194,154 +194,128 @@
   --on-status-shadow: 0 1px 1px rgba(255, 255, 255, 0.35);
 }
 
+/* ---- Pattern A: LIGHT base (mode = light) ---- */
 
-/* --------------------------------------------------------------------------
-   1. Light themes
-   -------------------------------------------------------------------------- */
-
-/* 01 - ライト標準 (default) */
-html.theme-light-standard {
+html.theme-light-azure {
   --base-bg-main: #f4f6fa;
-  --base-bg-sidebar: #e2e8f0;
+  --base-bg-sidebar: #dbe4ef;
   --base-bg-card: #ffffff;
   --base-text-main: #1e293b;
-  --base-accent-primary: #4f46e5;
-  --base-accent-alt: #9333ea;
+  --base-accent-primary: #2563eb;
+  --base-accent-alt: #7c3aed;
   --base-border-main: #cbd5e1;
 }
 
-/* 02 - ペーパー（明・高コントラスト） */
-html.theme-light-paper {
-  --base-bg-main: #f1f2f4;
-  --base-bg-sidebar: #d4d7de;
+html.theme-light-forest {
+  --base-bg-main: #f2f7f3;
+  --base-bg-sidebar: #d7e6dd;
   --base-bg-card: #ffffff;
-  --base-text-main: #0b0b0f;
-  --base-accent-primary: #1d4ed8;
-  --base-accent-alt: #6d28d9;
-  --base-border-main: #94a3b8;
+  --base-text-main: #16281f;
+  --base-accent-primary: #15803d;
+  --base-accent-alt: #0d9488;
+  --base-border-main: #c1d3c8;
+  --base-success: #15803d;
+  --base-warning: #b45309;
+  --base-danger: #be123c;
+  --base-info: #0369a1;
 }
 
-/* 03 - セピア（暖色） */
-html.theme-light-sepia {
-  --base-bg-main: #f7f2e9;
-  --base-bg-sidebar: #e6d9c4;
-  --base-bg-card: #fffdf8;
-  --base-text-main: #3b3126;
+html.theme-light-amber {
+  --base-bg-main: #faf6ee;
+  --base-bg-sidebar: #ecdfc9;
+  --base-bg-card: #fffdf6;
+  --base-text-main: #2a2115;
   --base-accent-primary: #b45309;
   --base-accent-alt: #a16207;
-  --base-border-main: #dccdb8;
+  --base-border-main: #dccbba;
   --base-success: #15803d;
   --base-warning: #a16207;
   --base-danger: #b91c1c;
   --base-info: #0369a1;
 }
 
-
-/* 04 - POP アジュール（白＋強い青バー） */
-html.theme-pop-azure {
-  --base-bg-main: #ffffff;
-  --base-bg-sidebar: #0284c7;
-  --base-bg-card: #ffffff;
-  --base-text-main: #123a52;
-  --base-accent-primary: #0284c7;
-  --base-accent-alt: #0d9488;
-  --base-border-main: #7dd3fc;
-  --base-info: #0369a1;
+html.theme-light-rose {
+  --base-bg-main: #fbf3f5;
+  --base-bg-sidebar: #ecd7dc;
+  --base-bg-card: #fffafb;
+  --base-text-main: #291a1e;
+  --base-accent-primary: #be123c;
+  --base-accent-alt: #9333ea;
+  --base-border-main: #d9bfc5;
 }
 
-/* 05 - POP エメラルド（白＋強い緑バー） */
-html.theme-pop-forest {
-  --base-bg-main: #ffffff;
-  --base-bg-sidebar: #15803d;
+html.theme-light-slate {
+  --base-bg-main: #eef1f5;
+  --base-bg-sidebar: #d7dfe8;
   --base-bg-card: #ffffff;
-  --base-text-main: #1e3126;
-  --base-accent-primary: #15803d;
-  --base-accent-alt: #65a30d;
-  --base-border-main: #86efac;
+  --base-text-main: #1b2128;
+  --base-accent-primary: #475569;
+  --base-accent-alt: #64748b;
+  --base-border-main: #c2cbd6;
+}
+
+html.theme-light-teal {
+  --base-bg-main: #f0f7f7;
+  --base-bg-sidebar: #d5e8ea;
+  --base-bg-card: #ffffff;
+  --base-text-main: #102a2e;
+  --base-accent-primary: #0d9488;
+  --base-accent-alt: #0284c7;
+  --base-border-main: #bcd3d4;
   --base-success: #15803d;
+  --base-warning: #b45309;
+  --base-danger: #be123c;
   --base-info: #0284c7;
 }
 
-/* 06 - POP クリムゾン（白＋強い赤バー） */
-html.theme-pop-crimson {
-  --base-bg-main: #ffffff;
-  --base-bg-sidebar: #b91c1c;
-  --base-bg-card: #ffffff;
-  --base-text-main: #3b1621;
-  --base-accent-primary: #be123c;
-  --base-accent-alt: #8b5cf6;
-  --base-border-main: #f9b4c2;
-  --base-danger: #b91c1c;
-  --base-info: #2563eb;
-}
+/* ---- Pattern B: DARK base (mode = dark) ---- */
 
-/* 07 - POP サンセット（白＋黒バー×オレンジ） */
-html.theme-pop-sunset {
-  --base-bg-main: #ffffff;
-  --base-bg-sidebar: #1f2937;
-  --base-bg-card: #ffffff;
-  --base-text-main: #1f2a37;
-  --base-accent-primary: #ea580c;
-  --base-accent-alt: #f59e0b;
-  --base-border-main: #d1d5db;
-  --base-warning: #d97706;
-  --base-info: #2563eb;
-}
-
-
-/* --------------------------------------------------------------------------
-   2. Dark themes
-   -------------------------------------------------------------------------- */
-
-/* 08 - ダークネイビー */
 html.theme-dark-navy {
   --color-scheme: dark;
   --base-bg-main: #0f172a;
   --base-bg-sidebar: #1b2b45;
   --base-bg-card: #1e293b;
-  --base-text-main: #f8fafc;
+  --base-text-main: #eef2f8;
   --base-text-inverse: #0f172a;
-  --base-accent-primary: #6366f1;
-  --base-accent-alt: #a855f7;
-  --base-border-main: #334155;
+  --base-accent-primary: #60a5fa;
+  --base-accent-alt: #a78bfa;
+  --base-border-main: #34405a;
   --base-success: #34d399;
   --base-warning: #fbbf24;
   --base-danger: #fb7185;
   --base-info: #60a5fa;
-  --base-bg-scrim: rgba(0, 0, 0, 0.6);
-  --base-shadow-color: rgba(0, 0, 0, 0.5);
-}
-
-/* 09 - ミッドナイトブラック */
-html.theme-dark-midnight {
-  --color-scheme: dark;
-  --base-bg-main: #0b1120;
-  --base-bg-sidebar: #1d2739;
-  --base-bg-card: #151d2d;
-  --base-text-main: #e8eefc;
-  --base-text-inverse: #0b1120;
-  --base-accent-primary: #818cf8;
-  --base-accent-alt: #c084fc;
-  --base-border-main: #26334a;
-  --base-success: #34d399;
-  --base-warning: #fbbf24;
-  --base-danger: #fb7185;
-  --base-info: #60a5fa;
-  --base-bg-scrim: rgba(0, 0, 0, 0.65);
+  --base-bg-scrim: rgba(0, 0, 0, 0.62);
   --base-shadow-color: rgba(0, 0, 0, 0.55);
 }
 
-/* 10 - プラムダーク */
+html.theme-dark-emerald {
+  --color-scheme: dark;
+  --base-bg-main: #0b1f1a;
+  --base-bg-sidebar: #14312a;
+  --base-bg-card: #122a23;
+  --base-text-main: #e4f2ea;
+  --base-text-inverse: #0b1f1a;
+  --base-accent-primary: #34d399;
+  --base-accent-alt: #22d3ee;
+  --base-border-main: #2a453a;
+  --base-success: #34d399;
+  --base-warning: #fbbf24;
+  --base-danger: #fb7185;
+  --base-info: #38bdf8;
+  --base-bg-scrim: rgba(0, 0, 0, 0.62);
+  --base-shadow-color: rgba(0, 0, 0, 0.55);
+}
+
 html.theme-dark-plum {
   --color-scheme: dark;
   --base-bg-main: #1a1226;
-  --base-bg-sidebar: #2c1c40;
-  --base-bg-card: #261936;
-  --base-text-main: #f2e9fb;
+  --base-bg-sidebar: #2b1c40;
+  --base-bg-card: #26193a;
+  --base-text-main: #f0e6fb;
   --base-text-inverse: #1a1226;
   --base-accent-primary: #c084fc;
   --base-accent-alt: #f472b6;
-  --base-border-main: #372a48;
+  --base-border-main: #3a2c4c;
   --base-success: #34d399;
   --base-warning: #fbbf24;
   --base-danger: #fb7185;
@@ -350,25 +324,255 @@ html.theme-dark-plum {
   --base-shadow-color: rgba(0, 0, 0, 0.55);
 }
 
-/* 11 - ハイコントラスト（暗） */
-html.theme-high-contrast-dark {
+html.theme-dark-amber {
   --color-scheme: dark;
-  --base-bg-main: #000000;
-  --base-bg-sidebar: #161616;
-  --base-bg-card: #0d0d0d;
-  --base-text-main: #ffffff;
-  --base-text-inverse: #000000;
+  --base-bg-main: #1a1206;
+  --base-bg-sidebar: #2b2113;
+  --base-bg-card: #241b0e;
+  --base-text-main: #f7ecd9;
+  --base-text-inverse: #1a1206;
   --base-accent-primary: #fbbf24;
-  --base-accent-alt: #22d3ee;
-  --base-border-main: #6b6b6b;
-  --base-success: #4ade80;
+  --base-accent-alt: #fb923c;
+  --base-border-main: #3d2f1a;
+  --base-success: #34d399;
   --base-warning: #fbbf24;
-  --base-danger: #f87171;
+  --base-danger: #fb7185;
   --base-info: #38bdf8;
-  --base-bg-scrim: rgba(0, 0, 0, 0.72);
-  --base-shadow-color: rgba(255, 255, 255, 0.06);
+  --base-bg-scrim: rgba(0, 0, 0, 0.66);
+  --base-shadow-color: rgba(0, 0, 0, 0.55);
 }
 
+html.theme-dark-rose {
+  --color-scheme: dark;
+  --base-bg-main: #1a0d12;
+  --base-bg-sidebar: #2b1820;
+  --base-bg-card: #24121a;
+  --base-text-main: #f7e2ea;
+  --base-text-inverse: #1a0d12;
+  --base-accent-primary: #fb7185;
+  --base-accent-alt: #f472b6;
+  --base-border-main: #3a2128;
+  --base-success: #34d399;
+  --base-warning: #fbbf24;
+  --base-danger: #fb7185;
+  --base-info: #60a5fa;
+  --base-bg-scrim: rgba(0, 0, 0, 0.66);
+  --base-shadow-color: rgba(0, 0, 0, 0.55);
+}
+
+html.theme-dark-slate {
+  --color-scheme: dark;
+  --base-bg-main: #121417;
+  --base-bg-sidebar: #1d2228;
+  --base-bg-card: #171b20;
+  --base-text-main: #e6eaf0;
+  --base-text-inverse: #121417;
+  --base-accent-primary: #94a3b8;
+  --base-accent-alt: #a5b4fc;
+  --base-border-main: #2b3138;
+  --base-success: #34d399;
+  --base-warning: #fbbf24;
+  --base-danger: #fb7185;
+  --base-info: #60a5fa;
+  --base-bg-scrim: rgba(0, 0, 0, 0.66);
+  --base-shadow-color: rgba(0, 0, 0, 0.55);
+}
+
+/* ---- Pattern C: LIGHT content + DARK bars (chrome = saturated) ---- */
+
+html.theme-cb-azure {
+  --base-bg-main: #ffffff;
+  --base-bg-sidebar: #0369a1;
+  --base-bg-card: #ffffff;
+  --base-text-main: #0c3a52;
+  --base-accent-primary: #0284c7;
+  --base-accent-alt: #0d9488;
+  --base-border-main: #7dd3fc;
+  --base-success: #15803d;
+  --base-warning: #b45309;
+  --base-danger: #be123c;
+  --base-info: #0369a1;
+}
+
+html.theme-cb-forest {
+  --base-bg-main: #ffffff;
+  --base-bg-sidebar: #166534;
+  --base-bg-card: #ffffff;
+  --base-text-main: #1a3524;
+  --base-accent-primary: #15803d;
+  --base-accent-alt: #65a30d;
+  --base-border-main: #86efac;
+  --base-success: #15803d;
+  --base-warning: #b45309;
+  --base-danger: #be123c;
+  --base-info: #0369a1;
+}
+
+html.theme-cb-crimson {
+  --base-bg-main: #ffffff;
+  --base-bg-sidebar: #9f1239;
+  --base-bg-card: #ffffff;
+  --base-text-main: #3b1621;
+  --base-accent-primary: #be123c;
+  --base-accent-alt: #8b5cf6;
+  --base-border-main: #f9b4c2;
+  --base-success: #15803d;
+  --base-warning: #b45309;
+  --base-danger: #b91c1c;
+  --base-info: #2563eb;
+}
+
+html.theme-cb-violet {
+  --base-bg-main: #ffffff;
+  --base-bg-sidebar: #5b21b6;
+  --base-bg-card: #ffffff;
+  --base-text-main: #241a3a;
+  --base-accent-primary: #6d28d9;
+  --base-accent-alt: #c084fc;
+  --base-border-main: #c4b5fd;
+  --base-success: #15803d;
+  --base-warning: #b45309;
+  --base-danger: #be123c;
+  --base-info: #2563eb;
+}
+
+html.theme-cb-teal {
+  --base-bg-main: #ffffff;
+  --base-bg-sidebar: #0f766e;
+  --base-bg-card: #ffffff;
+  --base-text-main: #123530;
+  --base-accent-primary: #0d9488;
+  --base-accent-alt: #0284c7;
+  --base-border-main: #7fd1c9;
+  --base-success: #15803d;
+  --base-warning: #b45309;
+  --base-danger: #be123c;
+  --base-info: #0284c7;
+}
+
+html.theme-cb-slate {
+  --base-bg-main: #ffffff;
+  --base-bg-sidebar: #1e293b;
+  --base-bg-card: #ffffff;
+  --base-text-main: #1f2a37;
+  --base-accent-primary: #475569;
+  --base-accent-alt: #64748b;
+  --base-border-main: #cbd5e1;
+  --base-success: #15803d;
+  --base-warning: #b45309;
+  --base-danger: #be123c;
+  --base-info: #2563eb;
+}
+
+/* ---- Pattern D: DARK content + LIGHT bars (chrome = inverted) ---- */
+
+html.theme-dc-azure {
+  --color-scheme: dark;
+  --base-bg-main: #0b1c2b;
+  --base-bg-sidebar: #bae6fd;
+  --base-bg-card: #12212f;
+  --base-text-main: #d6effb;
+  --base-text-inverse: #0b1c2b;
+  --base-accent-primary: #38bdf8;
+  --base-accent-alt: #22d3ee;
+  --base-border-main: #1f3a4d;
+  --base-success: #34d399;
+  --base-warning: #fbbf24;
+  --base-danger: #fb7185;
+  --base-info: #38bdf8;
+  --base-bg-scrim: rgba(0, 0, 0, 0.62);
+  --base-shadow-color: rgba(0, 0, 0, 0.5);
+}
+
+html.theme-dc-forest {
+  --color-scheme: dark;
+  --base-bg-main: #0b1f1a;
+  --base-bg-sidebar: #bbf7d0;
+  --base-bg-card: #12241f;
+  --base-text-main: #dcefe6;
+  --base-text-inverse: #0b1f1a;
+  --base-accent-primary: #4ade80;
+  --base-accent-alt: #a3e635;
+  --base-border-main: #1c372c;
+  --base-success: #34d399;
+  --base-warning: #fbbf24;
+  --base-danger: #fb7185;
+  --base-info: #38bdf8;
+  --base-bg-scrim: rgba(0, 0, 0, 0.62);
+  --base-shadow-color: rgba(0, 0, 0, 0.5);
+}
+
+html.theme-dc-rose {
+  --color-scheme: dark;
+  --base-bg-main: #1a0d12;
+  --base-bg-sidebar: #fecdd3;
+  --base-bg-card: #241219;
+  --base-text-main: #f6dbe3;
+  --base-text-inverse: #1a0d12;
+  --base-accent-primary: #fb7185;
+  --base-accent-alt: #f472b6;
+  --base-border-main: #331a22;
+  --base-success: #34d399;
+  --base-warning: #fbbf24;
+  --base-danger: #fb7185;
+  --base-info: #60a5fa;
+  --base-bg-scrim: rgba(0, 0, 0, 0.62);
+  --base-shadow-color: rgba(0, 0, 0, 0.5);
+}
+
+html.theme-dc-amber {
+  --color-scheme: dark;
+  --base-bg-main: #1a1206;
+  --base-bg-sidebar: #fde68a;
+  --base-bg-card: #241b0e;
+  --base-text-main: #f5e8d4;
+  --base-text-inverse: #1a1206;
+  --base-accent-primary: #fbbf24;
+  --base-accent-alt: #fb923c;
+  --base-border-main: #322212;
+  --base-success: #34d399;
+  --base-warning: #fbbf24;
+  --base-danger: #fb7185;
+  --base-info: #38bdf8;
+  --base-bg-scrim: rgba(0, 0, 0, 0.66);
+  --base-shadow-color: rgba(0, 0, 0, 0.5);
+}
+
+html.theme-dc-violet {
+  --color-scheme: dark;
+  --base-bg-main: #171027;
+  --base-bg-sidebar: #ddd6fe;
+  --base-bg-card: #221636;
+  --base-text-main: #e9e2f9;
+  --base-text-inverse: #171027;
+  --base-accent-primary: #a78bfa;
+  --base-accent-alt: #c084fc;
+  --base-border-main: #2b2140;
+  --base-success: #34d399;
+  --base-warning: #fbbf24;
+  --base-danger: #fb7185;
+  --base-info: #60a5fa;
+  --base-bg-scrim: rgba(6, 3, 12, 0.65);
+  --base-shadow-color: rgba(0, 0, 0, 0.5);
+}
+
+html.theme-dc-slate {
+  --color-scheme: dark;
+  --base-bg-main: #121417;
+  --base-bg-sidebar: #cbd5e1;
+  --base-bg-card: #171b20;
+  --base-text-main: #e6eaf0;
+  --base-text-inverse: #121417;
+  --base-accent-primary: #94a3b8;
+  --base-accent-alt: #a5b4fc;
+  --base-border-main: #2b3138;
+  --base-success: #34d399;
+  --base-warning: #fbbf24;
+  --base-danger: #fb7185;
+  --base-info: #60a5fa;
+  --base-bg-scrim: rgba(0, 0, 0, 0.66);
+  --base-shadow-color: rgba(0, 0, 0, 0.5);
+}
 
 /* --------------------------------------------------------------------------
    3. Two-tone pop themes
@@ -461,3 +665,100 @@ html[data-chrome="saturated"][data-theme-mode="light"] .app-header #user-dropdow
   border-color: var(--base-border-strong) !important;
 }
 
+
+/* --------------------------------------------------------------------------
+   4. Inverted two-tone themes (DARK content + LIGHT bars)
+      theme.js sets data-chrome="inverted". Content is dark, the header &
+      sidebar bars are light, so chrome ink is remapped to the theme inverse
+      (dark) ink. Mirrors the saturated hook above for the opposite polarity.
+   -------------------------------------------------------------------------- */
+html[data-chrome="inverted"] .app-header,
+html[data-chrome="inverted"] .app-sidebar,
+html[data-chrome="inverted"] .chat-sidebar-channels {
+  --text-accent: var(--base-text-inverse);
+  --text-accent-strong: var(--base-text-inverse);
+  --text-accent-alt: var(--base-text-inverse);
+  --text-success: var(--base-text-inverse);
+  --text-warning: var(--base-text-inverse);
+  --text-danger: var(--base-text-inverse);
+  --text-info: var(--base-text-inverse);
+  --bg-surface: rgba(0, 0, 0, 0.08);
+  --bg-surface-soft: rgba(0, 0, 0, 0.05);
+  --border-divider: rgba(0, 0, 0, 0.32);
+  --border-muted: rgba(0, 0, 0, 0.2);
+  --hover-ring: rgba(0, 0, 0, 0.45);
+  --shadow-color: rgba(0, 0, 0, 0.12);
+}
+
+/* The dark-mode layer deepens bg-sidebar, so neutralize it on the bars to keep
+   their light color and pin dark ink (specificity 0,2,1 beats the dark layer). */
+html[data-chrome="inverted"][data-theme-mode="dark"] {
+  --bg-header: var(--base-bg-sidebar);
+  --bg-sidebar: var(--base-bg-sidebar);
+  --bg-surface-strong: var(--base-bg-sidebar);
+  --bg-input: var(--base-bg-sidebar);
+  --bg-elevated: var(--base-bg-sidebar);
+  --chrome-text: var(--base-text-inverse);
+  --border-main: var(--base-accent-primary);
+  --border-strong: var(--base-accent-primary);
+  --border-divider: var(--base-border-main);
+  --border-muted: var(--base-border-muted);
+  --shadow-color: var(--base-shadow-color);
+  --glass-bg: var(--base-glass-bg);
+}
+
+/* Bar text is forced to the dark inverse ink. */
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar,
+html[data-chrome="inverted"][data-theme-mode="dark"] .chat-sidebar-channels,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header .text-main,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header .text-soft,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header .text-muted,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header .text-faint,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar .text-main,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar .text-soft,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar .text-muted,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar .text-faint,
+html[data-chrome="inverted"][data-theme-mode="dark"] .chat-sidebar-channels .text-main,
+html[data-chrome="inverted"][data-theme-mode="dark"] .chat-sidebar-channels .text-soft,
+html[data-chrome="inverted"][data-theme-mode="dark"] .chat-sidebar-channels .text-muted {
+  color: var(--base-text-inverse) !important;
+}
+
+/* Active nav: a saturated pill with white ink so it stands out on the light bar. */
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar .nav-item.active,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar .nav-item.active .nav-label,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar .nav-item.active i,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar .nav-item.active svg {
+  background-color: var(--base-accent-primary) !important;
+  color: #ffffff !important;
+  text-shadow: none !important;
+}
+
+/* Inner pills on the light bars keep a light frame and dark ink. */
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar .bg-surface,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header .bg-surface {
+  background-color: var(--base-bg-sidebar) !important;
+  color: var(--base-text-inverse) !important;
+  border-color: var(--base-accent-primary) !important;
+}
+
+/* Modal header bars sit on the chrome, so dark ink is applied in one scope. */
+html[data-chrome="inverted"][data-theme-mode="dark"] .modal-header .text-main,
+html[data-chrome="inverted"][data-theme-mode="dark"] .modal-header .text-soft,
+html[data-chrome="inverted"][data-theme-mode="dark"] .modal-header .text-muted,
+html[data-chrome="inverted"][data-theme-mode="dark"] .modal-header .modal-title,
+html[data-chrome="inverted"][data-theme-mode="dark"] .modal-header .modal-close,
+html[data-chrome="inverted"][data-theme-mode="dark"] .modal-header .text-accent,
+html[data-chrome="inverted"][data-theme-mode="dark"] .modal-header .text-accent-alt {
+  color: var(--base-text-inverse) !important;
+}
+
+/* Dropdown panels inside the light bars stay dark content cards with light ink. */
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar #user-dropdown-menu,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header #notification-dropdown-menu,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header #user-dropdown-menu {
+  background-color: var(--base-bg-card) !important;
+  color: var(--base-text-main) !important;
+  border-color: var(--base-accent-primary) !important;
+}

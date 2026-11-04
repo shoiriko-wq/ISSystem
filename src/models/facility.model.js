@@ -369,7 +369,7 @@ export const facilityModel = {
     try {
       const res = await query(
         `INSERT INTO reservations (id, resource_id, facility_id, user_id, user_name, title, target_date, start_time, end_time, is_cancelled, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 0, $10)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CAST(0 AS integer), $10)
          RETURNING *`,
         [id, fId, fId, userId, userName, title, targetDate, startTime, endTime, nowIso()]
       );

@@ -27,17 +27,25 @@ const dummyUsers = [
 ];
 
 // 2. 掲示板投稿
+// 2. 掲示投稿（JST 基準の現在日に寄せる。ミニカレンダーの打点・未読検証が当日基準で動く）
+function seedDay(offset = 0) {
+  const d = new Date(Date.now() + 9 * 3600000);
+  d.setUTCDate(d.getUTCDate() + offset);
+  return d.toISOString().split('T')[0];
+}
+
 const dummyPosts = [
-  { id: 'post_1', title: '【教務部】中間考査採点票の提出期限について', content: '中間考査の全科目採点票の最終締め切りは明後日17時です。未提出の教科・学年はお早めに教務部へご提出ください。', author_id: 'kyomu01', created_at: '2026-10-15 08:30:00', display_start_date: '2026-10-15', display_end_date: '2026-11-20' },
-  { id: 'post_2', title: '避難訓練の実施要項および各クラスの避難経路確認', content: '来週火曜日の6限に全校避難訓練を実施します。各担任の先生は事前に生徒へ非常口および避難経路の周知を行ってください。', author_id: 't-tanaka', created_at: '2026-10-14 15:10:00', display_start_date: '2026-10-14', display_end_date: null },
-  { id: 'post_3', title: '【進路指導部】第2回進路希望調査集計報告', content: '2学年の第2回進路希望調査の集計が完了いたしました。共有フォルダ「進路資料」内をご確認ください。', author_id: 't-sato', created_at: '2026-10-13 11:00:00', display_start_date: '2026-10-13', display_end_date: '2026-10-20' }
+  { id: 'post_1', title: '【教務部】中間考査採点票の提出期限について', content: '中間考査の全科目採点票の最終締め切りは明後日17時です。未提出の教科・学年はお早めに教務部へご提出ください。', author_id: 'kyomu01', created_at: `${seedDay(0)} 08:30:00`, display_start_date: seedDay(0), display_end_date: seedDay(16) },
+  { id: 'post_2', title: '避難訓練の実施要項および各クラスの避難経路確認', content: '来週火曜日の6限に全校避難訓練を実施します。各担任の先生は事前に生徒へ非常口および避難経路の周知を行ってください。', author_id: 't-tanaka', created_at: `${seedDay(0)} 15:10:00`, display_start_date: seedDay(0), display_end_date: null },
+  { id: 'post_3', title: '【進路指導部】第2回進路希望調査集計報告', content: '2学年の第2回進路希望調査の集計が完了いたしました。共有フォルダ「進路資料」内をご確認ください。', author_id: 't-sato', created_at: `${seedDay(0)} 11:00:00`, display_start_date: seedDay(0), display_end_date: seedDay(6) }
 ];
 
 // 3. 承認ログ
 const dummyAcknowledgements = [
-  { id: 'ack_1', post_id: 'post_1', user_id: 't-tanaka', status: 'APPROVED', comment: '英語科採点完了し提出済み', acknowledged_at: '2026-10-15 09:12:00' },
-  { id: 'ack_2', post_id: 'post_1', user_id: 't-sato', status: 'READ', comment: null, acknowledged_at: '2026-10-15 10:00:00' },
-  { id: 'ack_3', post_id: 'post_1', user_id: 't-suzuki', status: 'UNREAD', comment: null, acknowledged_at: null }
+  { id: 'ack_1', post_id: 'post_1', user_id: 't-tanaka', status: 'APPROVED', comment: '英語科採点完了し提出済み', acknowledged_at: `${seedDay(0)} 09:12:00` },
+  { id: 'ack_2', post_id: 'post_1', user_id: 't-sato', status: 'READ', comment: null, acknowledged_at: `${seedDay(0)} 10:00:00` },
+  { id: 'ack_3', post_id: 'post_1', user_id: 't-suzuki', status: 'UNREAD', comment: null, acknowledged_at: null },
+  { id: 'ack_4', post_id: 'post_2', user_id: 'kyomu01', status: 'READ', comment: null, acknowledged_at: `${seedDay(0)} 16:05:00` }
 ];
 
 // 4. チャットチャンネル
@@ -438,9 +446,9 @@ async function seedDatabase() {
 
     for (const sl of dummyExamSlots) {
       await client.query(
-        `INSERT INTO exam_slots (exam_master_id, day_number, slot_number, class_id, subject_id, subject_teacher_id)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (exam_master_id, day_number, slot_number, class_id)
+        `INSERT INTO exam_slots (exam_master_id, day_number, slot_number, class_id, subject_id, subject_teacher_id, is_blocked)
+         VALUES ($1, $2, $3, $4, $5, $6, false)
+         ON CONFLICT (exam_master_id, day_number, slot_number, class_id, is_blocked)
          DO UPDATE SET
            subject_id = EXCLUDED.subject_id,
            subject_teacher_id = EXCLUDED.subject_teacher_id`,
