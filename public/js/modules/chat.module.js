@@ -21,6 +21,28 @@ let messagesCache = {};
 const HIDDEN_STORAGE_PREFIX = 'iss_chat_hidden_groups:';
 let hiddenChannels = new Map(); // channelId -> channel
 let showHiddenSection = false;
+// 非表示編集モード（サイドバーの目のマークボタンで ON/OFF。ON の時だけグループ名の横に非表示ボタンが出る）
+let hideEditMode = false;
+
+/**
+ * 非表示編集モードの切替（目のマークボタン）
+ */
+function setHideEditMode(on) {
+  hideEditMode = on;
+  const btn = document.getElementById('chat-btn-toggle-hide');
+  const label = on
+    ? '非表示モード中（目のマークを押すとグループ名の横の非表示ボタンが消えます）'
+    : '非表示モード（目のマークを押すとグループ名の横に非表示ボタンが出ます）';
+  if (btn) {
+    btn.setAttribute('aria-pressed', String(on));
+    btn.setAttribute('title', label);
+    btn.setAttribute('aria-label', label);
+    btn.classList.toggle('bg-warning-soft', on);
+    btn.classList.toggle('border-warning-soft', on);
+    btn.classList.toggle('text-warning-strong', on);
+  }
+  renderChannels();
+}
 
 function hiddenStorageKey() {
   const uid = (state.currentUser && (state.currentUser.id || state.currentUser.staff_code)) || 'anonymous';
@@ -200,23 +222,20 @@ export async function initChatModule() {
             <h3 class="font-bold text-xs text-main flex items-center gap-1.5">
               <i data-lucide="message-square" class="w-4 h-4 text-accent"></i> 職員チャット
             </h3>
-            <button id="chat-btn-create-group" class="btn-primary py-1 px-2 text-[10px] flex items-center gap-1 bg-accent hover-primary text-main font-bold rounded">
-              <i data-lucide="plus" class="w-3 h-3"></i> グループ作成
-            </button>
           </div>
           <nav id="chat-channels-list" class="p-2 space-y-1">
             <!-- 動的チャンネルリスト -->
           </nav>
         </div>
 
-        <!-- サイドバーフッター -->
-        <div class="p-3 border-t border-divider text-[11px] text-muted bg-surface-strong">
-          <div class="flex items-center justify-between">
-            <span>接続状態:</span>
-            <span class="text-success font-bold flex items-center gap-1" id="chat-socket-status">
-              <span class="w-2 h-2 rounded-full bg-success animate-ping"></span> オンライン
-            </span>
-          </div>
+        <!-- サイドバーフッター（接続状態の文字表示は撤廃。グループ操作ボタンを置く） -->
+        <div class="p-3 border-t border-divider bg-surface-strong flex items-center justify-between gap-2">
+          <button id="chat-btn-create-group" class="btn-primary py-1 px-2 text-[10px] flex items-center gap-1 bg-accent hover-primary text-main font-bold rounded">
+            <i data-lucide="plus" class="w-3 h-3"></i> グループ作成
+          </button>
+          <button id="chat-btn-toggle-hide" type="button" class="btn-secondary py-1 px-2.5 text-[11px] flex items-center gap-1 text-muted border-main bg-surface hover-surface-strong rounded" aria-pressed="false" aria-label="非表示モード（目のマークを押すとグループ名の横に非表示ボタンが出ます）" title="非表示モード（目のマークを押すとグループ名の横に非表示ボタンが出ます）">
+            <i data-lucide="eye-off" class="w-4 h-4"></i>
+          </button>
         </div>
       </div>
 
@@ -227,7 +246,6 @@ export async function initChatModule() {
           <div class="flex items-center gap-2">
             <i id="chat-active-icon" data-lucide="globe" class="w-4 h-4 text-accent"></i>
             <h3 id="chat-active-title" class="font-bold text-sm text-main">全体職員連絡</h3>
-            <span id="chat-active-desc" class="text-xs text-muted hidden md:inline">| 全教職員宛ての連絡・協議チャット</span>
           </div>
           <div class="flex items-center gap-2" id="chat-header-actions">
             <button id="chat-btn-members" class="btn-secondary py-1 px-2.5 text-[11px] flex items-center gap-1 text-main border-main bg-surface hover-surface-strong">
@@ -313,6 +331,7 @@ export async function initChatModule() {
 
   loadHiddenChannels();
   bindEvents();
+  refreshLucideIcons();
 
   // 未ログイン (ログイン画面表示中) に認証必須APIを叩かない。
   // チャンネル一覧は switchTab → loadActiveTabData('chat') → loadChannels で取得する。
@@ -352,6 +371,7 @@ function bindEvents() {
   }
 
   document.getElementById('chat-btn-create-group')?.addEventListener('click', openCreateGroupModal);
+  document.getElementById('chat-btn-toggle-hide')?.addEventListener('click', () => setHideEditMode(!hideEditMode));
   document.getElementById('chat-btn-members')?.addEventListener('click', () => {
     openModal('chat-members-modal');
     loadChannelMembers(currentChannelId);
@@ -629,7 +649,7 @@ function channelRowHtml(ch, { hidden }) {
       </button>
       ${hidden
         ? `<button class="chat-unhide-btn text-success hover-text-success-strong p-1.5 rounded hover-surface" data-unhide-id="${ch.id}" title="このグループをリストに再表示する"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>`
-        : (ch.type !== 'PUBLIC'
+        : (hideEditMode && ch.type !== 'PUBLIC'
           ? `<button class="chat-hide-btn text-muted hover-text-warning-strong p-1.5 rounded hover-surface" data-hide-id="${ch.id}" title="グループを非表示にする（削除はされません）"><i data-lucide="eye-off" class="w-3.5 h-3.5"></i></button>`
           : '')}
     </div>
@@ -731,10 +751,7 @@ function renderChannels() {
       <div class="mt-2 pt-2 border-t border-divider">
         <button id="chat-toggle-hidden" class="w-full flex items-center justify-between px-2 py-1.5 text-[10px] text-muted hover-text-main rounded">
           <span class="flex items-center gap-1.5"><i data-lucide="eye-off" class="w-3.5 h-3.5"></i> 非表示グループ</span>
-          <span class="flex items-center gap-1">
-            <span class="badge-count">${hiddenList.length}</span>
-            <i data-lucide="${showHiddenSection ? 'chevron-up' : 'chevron-down'}" class="w-3.5 h-3.5"></i>
-          </span>
+          <i data-lucide="${showHiddenSection ? 'chevron-up' : 'chevron-down'}" class="w-3.5 h-3.5"></i>
         </button>
         ${showHiddenSection ? hiddenList.map((ch) => channelRowHtml(ch, { hidden: true })).join('') : ''}
       </div>
@@ -791,41 +808,18 @@ export async function loadMessages(channelId = currentChannelId) {
   if (titleEl && channelInfo) titleEl.textContent = channelInfo.name;
   if (iconEl && channelInfo) iconEl.setAttribute('data-lucide', channelInfo.icon || 'users');
 
-  // カスタムグループの「非表示 / 再表示」トグル（グループ削除機能は廃止済み）
-  const isHidden = hiddenChannels.has(channelId);
-
   const headerActionsEl = document.getElementById('chat-header-actions');
   if (headerActionsEl) {
+    // 「リストから非表示」「既読にする」ボタンは撤廃（非表示は左サイドバーの目のマークで行う）
     headerActionsEl.innerHTML = `
       <button id="chat-btn-members" class="btn-secondary py-1 px-2.5 text-[11px] flex items-center gap-1 text-main border-main bg-surface hover-surface-strong">
         <i data-lucide="users" class="w-3.5 h-3.5 text-accent"></i> メンバー (<span id="chat-member-count">0</span>名)
-      </button>
-      ${channelInfo && channelInfo.type !== 'PUBLIC' ? `
-        <button id="chat-btn-toggle-visibility" class="btn-secondary py-1 px-2.5 text-[11px] flex items-center gap-1 text-warning-strong border-warning-soft hover-warning-soft">
-          <i data-lucide="${isHidden ? 'eye' : 'eye-off'}" class="w-3.5 h-3.5"></i> ${isHidden ? 'リストに再表示' : 'リストから非表示'}
-        </button>
-      ` : ''}
-      <button id="chat-btn-mark-read" class="btn-secondary py-1 px-2.5 text-[11px] flex items-center gap-1 text-success border-success-soft">
-        <i data-lucide="check-check" class="w-3.5 h-3.5"></i> 既読にする
       </button>
     `;
 
     document.getElementById('chat-btn-members')?.addEventListener('click', () => {
       openModal('chat-members-modal');
       loadChannelMembers(currentChannelId);
-    });
-    document.getElementById('chat-btn-mark-read')?.addEventListener('click', () => {
-      const msgs = messagesCache[channelId] || [];
-      // 既読位置は最新メッセージまで（先頭では既読が-progress しない）
-      const newestId = msgs.length > 0 ? msgs[msgs.length - 1].id : null;
-      markChannelRead(channelId, newestId);
-    });
-    document.getElementById('chat-btn-toggle-visibility')?.addEventListener('click', () => {
-      if (isHidden) {
-        unhideChannel(channelId);
-      } else {
-        hideChannel(channelId);
-      }
     });
   }
 

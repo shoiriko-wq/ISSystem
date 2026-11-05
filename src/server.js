@@ -1,16 +1,38 @@
 /**
- * ISSystem HTTP & Socket.io Server Entrypoint
- * データベース接続初期化・HTTP/WebSocket サーバー起動・Cronタスク起動 & グレースフルシャットダウン
+ * ISSystem Secure Server Entrypoint (HTTPS/WSS + CA配布HTTPサーバ)
+ * データベース接続初期化・TLS(HTTPS/WSS)サーバー起動・非HTTP CAページ起動・Cron起動 & グレースフルシャットダウン
  */
 
 import http from 'http';
+import https from 'https';
 import { Server as SocketIOServer } from 'socket.io';
+import config from '../config/default.js';
 import app from './app.js';
+import insecureApp from './app.insecure.js';
 import { initializeDatabase, closeDatabase } from '../config/database.js';
 import { initializeSockets } from './sockets/socket.index.js';
 import { initializeCronJobs } from './utils/cron.jobs.js';
+import { loadTlsOptions, getCaInfo } from './services/ca.service.js';
+import { parseCorsOrigin } from './utils/origins.js';
 
-const PORT = process.env.PORT || 3000;
+const SSL_PORT = config.ssl.httpsPort; // HTTPS / WSS（アプリ本体）
+const SSL_HOST = config.ssl.host; // 安全サーバーの監視ホスト
+const INSECURE_PORT = config.ssl.insecurePort; // CAダウンロードページ専用
+const INSECURE_HOST = config.server.host; // CA配布サーバーの監視ホスト
+
+/** リスニングエラー（EADDRINUSE 等）の共通ハンドラー */
+const attachListenErrorHandler = (server, port, label) => {
+  server.on('error', (error) => {
+    if (error.code === 'EADDRINUSE') {
+      console.error(`❌ ポート ${port} (${label}) は既に使用されています（EADDRINUSE）。`);
+      console.error('   確認: ss -ltnp | grep :' + port);
+      console.error('   既存インスタンスの停止: pkill -f "node src/server.js" （nodemon 側も停止してください）');
+      process.exit(1);
+    }
+    console.error(`❌ ${label} のリスニング中にエラーが発生しました:`, error);
+    process.exit(1);
+  });
+};
 
 async function startServer() {
   try {
@@ -22,59 +44,86 @@ async function startServer() {
     await initializeDatabase();
     console.log('[Database] データベースの初期化と接続が完了しました。');
 
-    // 2. HTTP サーバーの作成
-    const server = http.createServer(app);
+    const servers = [];
 
-    // 3. Socket.io WebSocket サーバーの初期化
-    const io = new SocketIOServer(server, {
-      cors: {
-        origin: process.env.CLIENT_ORIGIN || '*',
-        methods: ['GET', 'POST'],
-        credentials: true,
-      },
-      pingTimeout: 60000,
-      pingInterval: 25000,
+    // 2. プライベートCA・サーバー証明書の読み込み
+    const tls = loadTlsOptions();
+    const caInfo = getCaInfo();
+
+    if (tls && caInfo.exists) {
+      // 3. HTTPS サーバー（アプリ本体）の作成
+      const secureServer = https.createServer(tls, app);
+
+      // 4. Socket.io WebSocket サーバー（wss）の初期化
+      const io = new SocketIOServer(secureServer, {
+        cors: {
+          origin: parseCorsOrigin(process.env.CLIENT_ORIGIN, '*'),
+          methods: ['GET', 'POST'],
+          credentials: true,
+        },
+        pingTimeout: 60000,
+        pingInterval: 25000,
+      });
+
+      // 5. Socket.io イベントハンドラーと認証ミドルウェアの登録
+      initializeSockets(io);
+      app.set('io', io);
+      console.log('[Socket.io] WSS リアルタイム通信レイヤーを初期化しました。');
+
+      // 6. 定期バックグラウンドタスク (Cron) の登録
+      initializeCronJobs(io);
+
+      attachListenErrorHandler(secureServer, SSL_PORT, 'HTTPS/WSS');
+      secureServer.listen(SSL_PORT, SSL_HOST, () => {
+        console.log('====================================================');
+        console.log('🔒 安全接続サーバー (HTTPS / WSS)');
+        console.log(`   - 監視ホスト:   ${SSL_HOST}`);
+        console.log(`   - HTTPS URL:  https://localhost:${SSL_PORT}/`);
+        console.log(`   - WSS URL:    wss://localhost:${SSL_PORT}`);
+        console.log(`   - ルートCA指紋: ${caInfo.fingerprint}`);
+        console.log(`   - 実行環境:    ${process.env.NODE_ENV || 'development'}`);
+        console.log('====================================================');
+      });
+      servers.push(secureServer);
+    } else {
+      console.error('❌ プライベートCA / サーバー証明書が見つかりません。');
+      console.error('   生成: npm run cert:gen  (scripts/create-ca.mjs)');
+      console.error('   証明書が存在する間はアプリ（画面・API）は安全接続でのみ提供されます。');
+    }
+
+    // 7. 非HTTPサーバー（CAダウンロードページ専用）の起動
+    const insecureServer = http.createServer(insecureApp);
+    attachListenErrorHandler(insecureServer, INSECURE_PORT, 'HTTP(CA配布)');
+    insecureServer.listen(INSECURE_PORT, INSECURE_HOST, () => {
+      console.log('----------------------------------------------------');
+      console.log('📄 非安全ポート (HTTP) はCA証明書の配布専用です。');
+      console.log(`   - 監視ホスト: ${INSECURE_HOST}`);
+      console.log(`   - CAページ: http://localhost:${INSECURE_PORT}/ca`);
+      console.log('   - APIアクセスは 426 Upgrade Required で拒否されます。');
+      console.log('----------------------------------------------------');
     });
+    servers.push(insecureServer);
 
-    // 4. Socket.io イベントハンドラーと認証ミドルウェアの登録
-    initializeSockets(io);
-    app.set('io', io);
-    console.log('[Socket.io] WebSocket リアルタイム通信レイヤーを初期化しました。');
-
-    // 5. 定期バックグラウンドタスク (Cron) の登録
-    initializeCronJobs(io);
-
-    // 6. HTTP & WebSocket サーバーのリスニング開始
-    server.on('error', (error) => {
-      if (error.code === 'EADDRINUSE') {
-        console.error(`❌ ポート ${PORT} は既に使用されています（EADDRINUSE）。`);
-        console.error('   既に ISSystem サーバーが稼働している可能性があります。');
-        console.error('   確認: ss -ltnp | grep :' + PORT);
-        console.error('   既存インスタンスの停止: pkill -f "node src/server.js" （nodemon 側も停止してください）');
-        process.exit(1);
-      }
-      console.error('❌ リスニング中にエラーが発生しました:', error);
-      process.exit(1);
-    });
-
-    server.listen(PORT, () => {
-      console.log('====================================================');
-      console.log(`🚀 ISSystem サーバーが正常に起動しました！`);
-      console.log(`   - HTTP API URL:   http://localhost:${PORT}/api`);
-      console.log(`   - WebSocket URL:  ws://localhost:${PORT}`);
-      console.log(`   - 実行環境:        ${process.env.NODE_ENV || 'development'}`);
-      console.log('====================================================');
-    });
-
-    // 7. SIGINT / SIGTERM シグナルによるグレースフルシャットダウン
+    // 8. SIGINT / SIGTERM シグナルによるグレースフルシャットダウン
     const gracefulShutdown = (signal) => {
       console.log(`\n[Server Shutdown] シグナル ${signal} を受信しました。サーバーを終了します...`);
 
-      server.close(async () => {
-        console.log('[Server Shutdown] HTTP/WebSocket サーバーを停止しました。');
+      let remaining = servers.length;
+      const finish = async () => {
+        console.log('[Server Shutdown] HTTP/HTTPS・WebSocket サーバーを停止しました。');
         await closeDatabase();
         process.exit(0);
-      });
+      };
+
+      if (remaining === 0) {
+        return finish();
+      }
+      servers.forEach((s) =>
+        s.close(() => {
+          remaining -= 1;
+          if (remaining === 0) finish();
+        })
+      );
 
       // 10秒以内に終了しない場合は強制終了
       setTimeout(() => {

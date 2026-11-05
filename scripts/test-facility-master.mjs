@@ -16,7 +16,7 @@
  */
 import puppeteer from 'puppeteer-core';
 
-const BASE = process.env.UI_BASE || 'http://127.0.0.1:3000';
+const BASE = process.env.UI_BASE || 'https://127.0.0.1:3443';
 const USER = process.env.UI_USER || 'T2026001';
 const PASS = process.env.UI_PASS || 'password123';
 const TEACHER = process.env.UI_TEACHER || 'T2026002';
@@ -39,7 +39,10 @@ const snapshot = (page) => page.evaluate(() => {
   return {
     masterRows: rows.length,
     masterNames: rows.map((r) => r.querySelector('[data-field=name]').value.trim()),
-    masterBadges: rows.map((r) => (r.querySelector('span')?.textContent || '').replace(/\s+/g, ' ').trim()),
+    masterBadges: rows.map((r) => (r.querySelector('[data-badge]')?.textContent || '').replace(/\s+/g, ' ').trim()),
+    masterPositions: rows.map((r) => Number(r.querySelector('[data-pos]')?.textContent)),
+    upDisabled: rows.map((r) => r.querySelector('[data-action=up]')?.disabled === true),
+    downDisabled: rows.map((r) => r.querySelector('[data-action=down]')?.disabled === true),
     matrixRows: matrix.length,
     matrixNames: matrix.map((r) => r.querySelector('span')?.textContent.trim()),
     matrixChips: document.querySelectorAll('#facility-matrix-body [data-res-id]').length,
@@ -189,8 +192,8 @@ const SYNC_NAME = 'UI同期室A';
 
 const browser = await puppeteer.launch({
   executablePath: CHROME,
-  headless: 'new',
-  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+  headless: 'new', ignoreHTTPSErrors: true,
+  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--ignore-certificate-errors'],
 });
 
 const kyomu = await setup(browser, USER);

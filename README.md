@@ -25,8 +25,24 @@ npm install
 npm run db:create   # issystem データベースを作成
 npm run db:init     # db/schema.sql を適用 (全テーブル + インデックス)
 npm run db:seed     # ダミーデータを一括投入
-npm start           # PORT 環境変数が無ければ 3000 で起動
+npm run cert:gen    # プライベートCA + サーバー証明書生成 (.env と同じ階層の certs/)
+npm start           # HTTPS/WSS は SSL_PORT (既定 3443)、PORT (既定 3000) はCA配布専用
 ```
+
+## プライベートCA と安全通信 (HTTPS / WSS)
+
+メール機能を含む全通信は TLS で暗号化する。サーバーは2つのポートを持つ:
+
+| ポート | 内容 |
+| --- | --- |
+| `SSL_PORT` (既定 3443) | HTTPS/WSS によるアプリ本体・API・Socket.io（サーバー証明書はプライベートCAで署名） |
+| `PORT` (既定 3000) | 非安全 HTTP。**CA証明書のダウンロードページ専用に固定**。アプリ画面は提供せず API は `426 Upgrade Required` で拒否 |
+
+- `npm run cert:gen` が `certs/` に発行する: ルートCA `issystem-ca.pem`（秘密鍵 `issystem-ca.key`）、サーバー証明書 `server.pem` + 鍵 `server.key`（SAN: localhost, issystem.local, issystem, 127.0.0.1, ::1。CAにサーバ証明書を提示するため WSS でも検証可能）。再発行は `--force`。
+- **端末の信頼ストアに `certs/issystem-ca.pem` をインストール**するとブラウザのアドレスバーで「安全な接続」として開ける。Windows はダブルクリック →「信頼されたルート証明機関」、macOS は「常時信頼」。Node からのアクセスは `NODE_EXTRA_CA_CERTS=./certs/issystem-ca.pem`。
+- **非HTTP (`http://` や `ws://`) でアクセスしてきた相手には CAダウンロードページ (`/ca`) が表示される。** ページには SHA-256指紋、OS別のインストール手順、ダウンロードリンク、`https://HOST:SSL_PORT/` へ移動するボタンがある。アプリ画面や API は返らない。HTTPS の `/ca` も同じページ（指紋とダウンロード）で利用可能。
+- 設定は `.env` の `SSL_PORT` / `SSL_HOST` / `SSL_DIR` / `SSL_KEY` / `SSL_CERT` / `SSL_CA` / `SSL_HOSTS` / `SSL_CA_PAGE_BASE`（`PORT` は CA配布専用ポート）。
+- 検証: `npm run test:ui:https`（CA検証・TLSハンドシェイク・CAページ表示・API 426・CAダウンロード・ブラウザ wss 接続・非HTTP ws 拒否の 23項目）。
 
 ### .env の設定
 
@@ -34,7 +50,12 @@ npm start           # PORT 環境変数が無ければ 3000 で起動
 | --- | --- | --- |
 | `DB_PASSWORD` | PostgreSQL の接続パスワード (`otome601`) | **アプリのログインパスワードとは別物** |
 | `JWT_SECRET` | JWT 署名シークレット | `config/default.js` の `auth.jwtSecret` と同一値が必要 |
-| `PORT` | HTTP/WSS ポート | 既定 3000。`api:check` は 3100 を参照するため `PORT=3100` で起動する |
+| `SSL_PORT` | HTTPS/WSS ポート | 既定 3443。アプリ・API・Socket.io はこのポートのみ |
+| `SSL_HOST` | HTTPS/WSS の監視ホスト | 既定 `0.0.0.0` |
+| `SSL_DIR` / `SSL_KEY` / `SSL_CERT` / `SSL_CA` | 鍵と証明書のパス | `.env` と同じ階層の `certs/`（`npm run cert:gen` が生成。Gitには入れない） |
+| `SSL_HOSTS` | サーバー証明書のSANホスト | 既定 `localhost,issystem.local,issystem,127.0.0.1,::1` |
+| `SSL_CA_PAGE_BASE` | 非HTTPで CAページを見た際の安全URL基点 | 例 `https://127.0.0.1:3443`。「安全接続で開く」ボタンを作る |
+| `PORT` | 非安全 HTTP (CA配布専用) ポート | 既定 3000。アプリは提供せず API は 426。CAページは `/` と `/ca` |
 
 ### アカウントのパスワード2系統
 
@@ -51,9 +72,11 @@ $env:PGPASSWORD='otome601'
 
 | コマンド | 内容 |
 | --- | --- |
-| `npm start` / `npm run dev` | サーバー起動 (HTTP + Socket.io + Cron) |
+| `npm start` / `npm run dev` | サーバー起動 (HTTPS/WSS + Cron + CA配布用HTTP) |
+| `npm run cert:gen` | プライベートCAとサーバー証明書を生成（既存があればスキップ。`--force` で再発行） |
 | `npm test` | jest 統合テスト (5スイート / 40テスト、各スイートで pg プールを close するため `--forceExit` 不要) |
-| `npm run api:check` | API スモークテスト (GET/POST/PUT/DELETE を実行しステータスを検証) |
+| `npm run api:check` | API スモークテスト (HTTPS の GET/POST/PUT/DELETE を実行しステータスを検証) |
+| `npm run test:ui:https` | 安全通信検証 (CA検証 / TLS / CAページ / API 426 / CA配布 / ブラウザ wss) |
 | `npm run db:create` / `db:init` / `db:seed` | DB 作成 / スキーマ適用 / ダミーデータ投入 |
 | `npm run db:tables` | コード内参照テーブル名の一覧表示 (スキーマ整合チェック) |
 
@@ -99,4 +122,5 @@ $env:PGPASSWORD='otome601'
 - 二重予約判定は `toDateTime()` で `HH:MM` を `YYYY-MM-DD HH:MM:SS` に正規化して比較
 - システムメッセージの `sender_id` は FK 制約のため、`resolveSenderId()` で `system` ユーザーへ変換
 - `ensureSchema()` はプロメモ化され、複数プロセスからの同時適用による「pool closed」を防止
-- スモークテストは `PORT=3100` でサーバーを起動してから `npm run api:check` を実行する
+- スモークテストは `npm start`（HTTPS 3443）でサーバーを起動してから `npm run api:check` を実行する（`NODE_EXTRA_CA_CERTS=./certs/issystem-ca.pem` が付与されCAトラストで検証する）
+

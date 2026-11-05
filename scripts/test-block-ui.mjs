@@ -62,8 +62,8 @@ const check = (name, ok) => {
 const { server, port } = await startServer();
 const browser = await puppeteer.launch({
   executablePath: findChrome(),
-  headless: 'new',
-  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+  headless: 'new', ignoreHTTPSErrors: true,
+  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--ignore-certificate-errors'],
 });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log(`  [page js error] ${e.message}`));

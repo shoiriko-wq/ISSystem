@@ -4,7 +4,7 @@
  * 使用: npm run api:check  (API_BASE 環境変数で URL 指定, 既定 http://localhost:3100/api)
  */
 
-const BASE = process.env.API_BASE || 'http://localhost:3100/api';
+const BASE = process.env.API_BASE || 'https://127.0.0.1:3443/api';
 
 const loginRes = await fetch(`${BASE}/auth/login`, {
   method: 'POST',
@@ -61,7 +61,10 @@ async function put(path, payload) {
   return json;
 }
 
-await get('/facilities');
+const facilitiesRes = await getJson('/facilities');
+const facilities = facilitiesRes.data || facilitiesRes.facilities || [];
+const facilityIds = facilities.map((f) => f.id);
+console.log('FACILITY_IDS', facilityIds.slice(0, 4).join(','), `(count=${facilityIds.length})`);
 await get('/facilities/daily-overview?date=2026-11-20');
 await get('/bulletins');
 await get('/chat/channels');
@@ -71,7 +74,7 @@ await get('/approvals');
 const uniqDate = new Date(Date.now() + 40 * 86400000).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
 
 const reservation = {
-  facility_id: '1',
+  facility_id: facilityIds[0] || 'fac_1',
   title: 'API確認予約',
   target_date: uniqDate,
   start_time: '15:00',
@@ -133,7 +136,7 @@ const sweep = [
   '/bulletins/post_1',
   '/chat/channels/general/messages',
   '/chat/channels/general/members',
-  '/facilities/1/reservations?date=2026-11-20',
+  `/facilities/${facilityIds[0] || 'fac_1'}/reservations?date=2026-11-20`,
   '/schedules',
   '/schedules/categories',
   '/schedules/today',
@@ -252,7 +255,7 @@ if (scheduleId) {
 
 // --- 予約作成 → キャンセル ---
 const newRes = await post('/facilities/reservations', {
-  facility_id: '2',
+  facility_id: facilityIds[1] || 'fac_2',
   title: 'API確認予約B',
   target_date: '2026-12-05',
   start_time: '10:00',

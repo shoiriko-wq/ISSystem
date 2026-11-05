@@ -86,19 +86,21 @@ export function initBulletinModule() {
   if (!container) return;
 
   container.innerHTML = `
-    <!-- ヘッダーツールバー -->
-    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-surface-strong p-4 rounded-xl border border-divider mb-4">
-      <div>
-        <h2 class="text-lg font-bold text-main flex items-center gap-2">
-          <i data-lucide="megaphone" class="w-5 h-5 text-accent"></i> 職員連絡・掲示板
-        </h2>
-        <p class="text-sm text-muted">校内の全体連絡・指示・緊急連絡を一元共有します。</p>
-      </div>
+    <!-- ヘッダーツールバー（検索・日付ナビ・本日・キー操作・新規投稿。コントロール高さを 2.4rem に統一） -->
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-surface-strong p-3 rounded-xl border border-divider mb-4">
+      <h2 class="text-base font-bold text-main flex items-center gap-2 shrink-0">
+        <i data-lucide="megaphone" class="w-4 h-4 text-accent"></i> 職員掲示板
+      </h2>
       <div class="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
+        <!-- ★ 検索（ヘッダー内。タイトル・本文をインクリメンタル検索） -->
+        <div class="relative w-full sm:w-72 max-w-full shrink-0">
+          <i data-lucide="search" class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none"></i>
+          <input type="text" id="bulletin-search-input" class="input-field pl-8 pr-2 w-full" placeholder="タイトル・本文を検索" aria-label="掲示検索">
+        </div>
         <!-- ★ ‹ [日付] › を同一グループで隣接（一緒に折り返す。施設予約と同じ慣習）。
              中心日は ‹ › の間。日付は固定幅なので › を連打しても › の位置が動かない。
              日付クリック（または C キー）でミニカレンダーを開閉。カレンダー単独ボタンは撤廃。 -->
-        <div class="flex items-center bg-surface rounded-lg border border-main shrink-0">
+        <div class="flex items-center bg-surface rounded-lg border border-main shrink-0" id="bulletin-day-group">
           <button type="button" id="bulletin-day-prev" class="icon-btn icon-btn-fixed text-soft"
                   aria-label="前日（← キー）" title="前日（← キー）"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
           <button type="button" id="bulletin-day-current" class="day-readout day-nav-btn" data-day=""
@@ -107,10 +109,10 @@ export function initBulletinModule() {
           <button type="button" id="bulletin-day-next" class="icon-btn icon-btn-fixed text-soft"
                   aria-label="翌日（→ キー）" title="翌日（→ キー）"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
         </div>
-        <button type="button" id="bulletin-btn-today" class="btn-secondary py-1.5 px-2.5 text-sm shrink-0" title="本日（T キー）">本日</button>
+        <button type="button" id="bulletin-btn-today" class="btn-secondary shrink-0" title="本日（T キー）">本日</button>
         <button type="button" id="bulletin-keys-toggle" class="icon-btn icon-btn-fixed border border-divider bg-surface shrink-0"
                 aria-expanded="false" aria-controls="bulletin-keys-pop" aria-label="キーボード操作の手引き" title="キー操作（? キー）"><i data-lucide="keyboard" class="w-4 h-4"></i></button>
-        <button type="button" id="bulletin-btn-create" class="btn-primary py-1.5 px-3 text-sm font-bold flex items-center gap-1.5 shrink-0">
+        <button type="button" id="bulletin-btn-create" class="btn-primary font-bold flex items-center gap-1.5 shrink-0">
           <i data-lucide="plus" class="w-4 h-4"></i> 新規投稿
         </button>
       </div>
@@ -127,12 +129,6 @@ export function initBulletinModule() {
       <span><kbd class="kbd-key">T</kbd> 今日</span>
       <span><kbd class="kbd-key">C</kbd> カレンダー（‹ › の間の日付をクリックでも開く）</span>
       <span><kbd class="kbd-key">?</kbd> 手引き開閉</span>
-    </div>
-
-    <!-- ★ 検索（小型。タイトル・本文をインクリメンタル検索） -->
-    <div class="relative mt-3 mb-3 w-72 max-w-full">
-      <i data-lucide="search" class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none"></i>
-      <input type="text" id="bulletin-search-input" class="input-field pl-8 pr-2 py-1 text-sm w-full" placeholder="タイトル・本文を検索" aria-label="掲示検索">
     </div>
 
     <!-- ★ 左右分割（左=タイトル列＋未読バッジ、右=選択記事の全文・コメント） -->
@@ -244,7 +240,7 @@ function bindEvents() {
     });
   }
 
-  // ★ ミニカレンダー（日付選択・月送り・任意日入力の委譲）
+  // ★ ミニカレンダー（日付選択・月送りの委譲。今日ボタンと「任意日へ」入力は撤廃済み）
   const calEl = document.getElementById('bulletin-mini-cal');
   if (calEl) {
     calEl.addEventListener('click', (e) => {
@@ -256,18 +252,6 @@ function bindEvents() {
       }
       const monthBtn = e.target.closest('[data-cal-month]');
       if (monthBtn) { shiftCalendarMonth(monthBtn.getAttribute('data-cal-month')); return; }
-      if (e.target.closest('[data-cal-today]')) {
-        calendarAnchor = dayKey(0);
-        selectDay(dayKey(0));
-        closeMiniCalendar();
-      }
-    });
-    calEl.addEventListener('change', (e) => {
-      if (e.target?.id === 'bulletin-day-date') {
-        selectDay(e.target.value || dayKey(0));
-        renderMiniCalendar();
-        closeMiniCalendar();
-      }
     });
   }
 
@@ -489,9 +473,6 @@ function selectDay(date, dir = 0) {
 
   updateDayReadout();
 
-  const dateInput = document.getElementById('bulletin-day-date');
-  if (dateInput && dateInput.value !== target) dateInput.value = target;
-
   // ミニカレンダーが開いているなら、中心日（‹ › の間）に合わせて月の表示も追従させる
   const calOpen = document.getElementById('bulletin-mini-cal');
   if (calOpen && !calOpen.classList.contains('hidden')) renderMiniCalendar();
@@ -590,22 +571,15 @@ function renderMiniCalendar() {
         <i data-lucide="chevron-left" class="w-4 h-4"></i>
       </button>
       <span class="text-sm font-bold text-main">${y}年${m}月</span>
-      <div class="flex items-center gap-1">
-        <button type="button" class="btn-secondary px-2 py-1 text-sm" data-cal-today>今日</button>
-        <button type="button" class="icon-btn border border-divider bg-surface" data-cal-month="1" aria-label="次の月">
-          <i data-lucide="chevron-right" class="w-4 h-4"></i>
-        </button>
-      </div>
+      <button type="button" class="icon-btn border border-divider bg-surface" data-cal-month="1" aria-label="次の月">
+        <i data-lucide="chevron-right" class="w-4 h-4"></i>
+      </button>
     </div>
     <div class="mini-cal-grid mb-1">
       ${WEEKDAY_LABELS.map((w) => `<span class="mini-cal-wd">${w}</span>`).join('')}
     </div>
     <div class="mini-cal-grid">${cells.join('')}</div>
-    <div class="flex items-center gap-2 mt-2">
-      <label for="bulletin-day-date" class="text-sm text-muted shrink-0">任意日へ</label>
-      <input type="date" id="bulletin-day-date" class="input-field py-1 px-2 text-sm" aria-label="投稿日" value="${anchor}">
-    </div>
-    <p class="text-sm text-muted mt-2">● は投稿のある日です。日付をクリックでその日の記事を表示してカレンダーは閉じます。‹ › ボタンと ←/→ キーで前日・翌日（1日分）へ、‹ › の間の日付クリック（C キー）でこのカレンダーを開閉できます。</p>
+    <p class="text-sm text-muted mt-2">● は投稿のある日です。日付をクリックでその日の記事を表示してカレンダーは閉じます。‹ › ボタンと ←/→ キーで前日・翌日（1日分）へ、‹ › の間の日付クリック（<kbd class="kbd-key">C</kbd> キー）でこのカレンダーを開閉できます。本日へは ‹ › の間の「本日」ボタンと T キーで戻ります。</p>
   `;
   refreshLucideIcons();
 }
@@ -682,14 +656,30 @@ function findBulletin(id) {
   return bulletinsCache.find((b) => String(b.id) === String(id)) || null;
 }
 
-/** 右ペインヘッダーのバッジ群（読者向けに日付・掲示期間の表記は置かない） */
+/**
+ * 右ペインヘッダーのバッジ群（未読バッジは撤廃済み。掲示終了・添付のみ。
+ * 読者向けに日付・掲示期間の表記は置かない）
+ */
 function paneBadgeHtml(b) {
   const attachments = b.attachments || [];
   return `
-    ${isUnreadBulletin(b) ? '<span class="badge bg-danger-soft text-danger border-danger-soft shrink-0">未読</span>' : ''}
     ${isDisplayExpired(b) ? '<span class="badge bg-surface-strong text-muted border-divider flex items-center gap-1 shrink-0"><i data-lucide="calendar-off" class="w-3 h-3"></i> 掲示終了</span>' : ''}
     ${attachments.length > 0 ? `<span class="badge bg-accent-soft text-accent-strong border-accent-soft flex items-center gap-1 shrink-0"><i data-lucide="paperclip" class="w-3 h-3"></i> 添付 ${attachments.length}</span>` : ''}
   `;
+}
+
+/**
+ * 右ペインタイトル行の投稿者（アバターアイコン＋投稿者名。右寄せ）
+ * @param {Object} b 掲示
+ */
+function paneAuthorHtml(b) {
+  const author = b.authorName || b.author_name || '教員';
+  const avatar = b.authorAvatar || b.author_avatar || null;
+  return `
+    <div class="pane-author" aria-label="投稿者" title="投稿者">
+      ${userAvatarHtml({ name: author, avatarUrl: avatar, size: 'sm' })}
+      <span class="pane-author-name">${escapeHTML(String(author))}</span>
+    </div>`;
 }
 
 /**
@@ -743,7 +733,7 @@ function renderRows() {
   if (filtered.length === 0) {
     container.innerHTML = `<div class="p-5 text-center text-sm text-muted">
       <i data-lucide="calendar-off" class="w-6 h-6 mx-auto mb-2 opacity-60"></i>
-      <div>この日の掲示連絡はありません。<kbd class="kbd-key">←</kbd><kbd class="kbd-key">→</kbd>・‹ › ボタンで前日・翌日、‹ › の間の日付クリック（<kbd class="kbd-key">C</kbd> キー）でカレンダーから任意日へ移動できます。</div>
+      <div>この日の掲示連絡はありません。<kbd class="kbd-key">←</kbd><kbd class="kbd-key">→</kbd>・‹ › ボタンで前日・翌日、‹ › の間の日付クリック（<kbd class="kbd-key">C</kbd> キー）でカレンダーを開いて好きな日へ移動できます。</div>
     </div>`;
     refreshLucideIcons();
     return;
@@ -779,6 +769,7 @@ function renderDetailPane(b) {
     <div class="bulletin-detail-body">
       <div class="pane-header">
         <h3 class="pane-title">${escapeHTML(String(b.title || ''))}</h3>
+        ${paneAuthorHtml(b)}
         <div class="pane-badges">${paneBadgeHtml(b)}</div>
         <button type="button" class="btn-primary py-1 px-2.5 text-sm font-bold flex items-center gap-1 shrink-0"
                 data-bulletin-detail="${b.id}" title="投稿日時・掲示期間・添付をモーダルで開く">

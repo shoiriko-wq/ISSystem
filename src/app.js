@@ -10,7 +10,9 @@ import morgan from 'morgan';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import routes from './routes/index.js';
+import caRoutes from './routes/ca.routes.js';
 import { errorHandler, notFoundHandler } from './middlewares/error.middleware.js';
+import { parseCorsOrigin } from './utils/origins.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -28,7 +30,7 @@ app.use(
 // 2. CORS (Cross-Origin Resource Sharing) 設定
 app.use(
   cors({
-    origin: process.env.CLIENT_ORIGIN || true, // 開発時はあらゆるOriginを動的に許可
+    origin: parseCorsOrigin(process.env.CLIENT_ORIGIN, true), // カンマ区切りOriginリスト (HTTPS) にも対応
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     credentials: true,
@@ -54,13 +56,16 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// 6. マスター API ルーティング登録 (/api)
+// 6. プライベートCAダウンロードページ / 証明書配布 (/ca)
+app.use('/ca', caRoutes);
+
+// 7. マスター API ルーティング登録 (/api)
 app.use('/api', routes);
 
-// 7. 静的ファイル（public/ ディレクトリ配下の index.html, css, js）配信設定
+// 8. 静的ファイル（public/ ディレクトリ配下の index.html, css, js）配信設定
 app.use(express.static(path.join(__dirname, '../public')));
 
-// 8. SPA/UIフォールバック処理 (Express v5対応ワイルドカード構文)
+// 9. SPA/UIフォールバック処理 (Express v5対応ワイルドカード構文)
 app.get('{*path}', (req, res, next) => {
   // /api/ から始まる未定義リクエストは 404 ハンドラーへ流す
   if (req.path.startsWith('/api')) {

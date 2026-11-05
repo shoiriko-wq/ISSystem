@@ -20,7 +20,7 @@
  */
 import puppeteer from 'puppeteer-core';
 
-const BASE = process.env.UI_BASE || 'http://127.0.0.1:3000';
+const BASE = process.env.UI_BASE || 'https://127.0.0.1:3443';
 const USER = process.env.UI_USER || 'T2026001';
 const PASS = process.env.UI_PASS || 'password123';
 const CHROME = process.env.CHROME_PATH || '/usr/bin/google-chrome';
@@ -50,8 +50,8 @@ const shiftDate = (iso, days) => {
 async function setup(args = []) {
   const browser = await puppeteer.launch({
     executablePath: CHROME,
-    headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', ...args],
+    headless: 'new', ignoreHTTPSErrors: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--ignore-certificate-errors', ...args],
   });
   const page = await browser.newPage();
   page.on('pageerror', (e) => console.log(`[page js error] ${e.message}`));
@@ -138,6 +138,42 @@ const snapshot = (page) => page.evaluate(() => {
       const h = pane.querySelector('.pane-header');
       return h ? h.textContent.replace(/\s+/g, ' ').trim() : null;
     })(),
+    paneAuthorText: (() => {
+      const a = pane.querySelector('.pane-author .pane-author-name');
+      return a ? a.textContent.trim() : null;
+    })(),
+    paneAuthorHasIcon: (() => {
+      const a = pane.querySelector('.pane-author');
+      if (!a) return false;
+      const chip = a.querySelector('div.rounded-full');
+      return Boolean(chip && (chip.querySelector('img, svg') || chip.textContent.trim().length > 0));
+    })(),
+    paneAuthorRightGap: (() => {
+      const h = pane.querySelector('.pane-header');
+      const a = pane.querySelector('.pane-author');
+      if (!h || !a) return null;
+      return Math.round(h.getBoundingClientRect().right - a.getBoundingClientRect().right);
+    })(),
+    paneAuthorTitleGap: (() => {
+      const h = pane.querySelector('.pane-header');
+      const a = pane.querySelector('.pane-author');
+      const t = pane.querySelector('.pane-title');
+      if (!h || !a || !t) return null;
+      return Math.round(a.getBoundingClientRect().left - t.getBoundingClientRect().left);
+    })(),
+    paneHeaderHasUnread: (() => {
+      const h = pane.querySelector('.pane-header');
+      return h ? (h.textContent || '').includes('未読') : false;
+    })(),
+    /* 枠線の太さ（他の UI と共通の var(--border-width)=2px であることを検証） */
+    borderStd: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--border-width')),
+    paneBorderW: [getComputedStyle(pane).borderTopWidth, getComputedStyle(pane).borderRightWidth,
+      getComputedStyle(pane).borderBottomWidth, getComputedStyle(pane).borderLeftWidth].map((v) => parseFloat(v)),
+    titlePaneBorderW: [getComputedStyle(titlePane).borderTopWidth, getComputedStyle(titlePane).borderRightWidth,
+      getComputedStyle(titlePane).borderBottomWidth, getComputedStyle(titlePane).borderLeftWidth].map((v) => parseFloat(v)),
+    paneHeaderBorderW: pane.querySelector('.pane-header')
+      ? parseFloat(getComputedStyle(pane.querySelector('.pane-header')).borderBottomWidth) : null,
+    rowBorderW: rows.length ? parseFloat(getComputedStyle(rows[0]).borderBottomWidth) : null,
     detailBtnText: (() => {
       const b = pane.querySelector('[data-bulletin-detail]');
       return b ? b.textContent.replace(/\s+/g, ' ').trim() : null;
@@ -156,19 +192,30 @@ const pickedDay = await page.evaluate(() => {
   const cal = document.getElementById('bulletin-mini-cal');
   const opened = !cal.classList.contains('hidden');
   const expanded = read.getAttribute('aria-expanded');
+  const hasTodayButton = [...cal.querySelectorAll('button')].some((b) => b.textContent.trim() === '今日');
+  const hasAnyDayLabel = [...cal.querySelectorAll('label')].some((l) => l.textContent.includes('任意日'));
+  const hasDateInput = !!cal.querySelector('input[type=date]');
+  const monthBtns = cal.querySelectorAll('[data-cal-month]').length;
+  const dayCells = cal.querySelectorAll('[data-cal-date]').length;
+  const base = { opened, expanded, hasTodayButton, hasAnyDayLabel, hasDateInput, monthBtns, dayCells };
   const day = document.querySelector('#bulletin-mini-cal .mini-cal-has[data-cal-date]');
   if (day) {
     const key = day.getAttribute('data-cal-date');
     day.click();
-    return { day: key, opened, expanded, closedAfterPick: cal.classList.contains('hidden') };
+    return { ...base, day: key, closedAfterPick: cal.classList.contains('hidden') };
   }
-  return { day: null, opened, expanded, closedAfterPick: cal.classList.contains('hidden') };
+  return { ...base, day: null, closedAfterPick: cal.classList.contains('hidden') };
 });
 await sleep(700);
 log('pickedDay', pickedDay);
 check('‹ › の間の日付クリックでミニカレンダーが開く（aria-expanded=true、日付選択で閉じる）',
   pickedDay.opened === true && pickedDay.expanded === 'true' && pickedDay.closedAfterPick === true,
   pickedDay);
+check('ミニカレンダーに「今日」ボタンと「任意日へ」入力はない（月送り ‹ › と日付セルのみ。本日へはツールバーの本日/T キー）',
+  pickedDay.hasTodayButton === false && pickedDay.hasAnyDayLabel === false && pickedDay.hasDateInput === false
+    && pickedDay.monthBtns === 2 && pickedDay.dayCells > 28,
+  { hasTodayButton: pickedDay.hasTodayButton, hasAnyDayLabel: pickedDay.hasAnyDayLabel,
+    hasDateInput: pickedDay.hasDateInput, monthBtns: pickedDay.monthBtns, dayCells: pickedDay.dayCells });
 
 const snap1 = await snapshot(page);
 log('after-day-select', snap1);
@@ -220,6 +267,12 @@ check('左列タイトル行に時間の表記がない（タイトル文字列�
   rowStyle.rows > 0 && rowStyle.timeInRow.every((x) => x === false), rowStyle.timeInRow);
 check('左列タイトル行は常に1行（行高<=40px、タイトルは1行分）',
   rowStyle.rowH.every((h) => h <= 40) && rowStyle.titleH.every((h) => h <= 24), { rowH: rowStyle.rowH, titleH: rowStyle.titleH });
+check('左列・右ペインの枠と区切り線は共通の 2px（var(--border-width)。カード・ツールバー・入力欄と同じ太さ）',
+  snap1.borderStd === 2 && snap1.paneBorderW.every((w) => w === snap1.borderStd)
+    && snap1.titlePaneBorderW.every((w) => w === snap1.borderStd)
+    && snap1.paneHeaderBorderW === snap1.borderStd && snap1.rowBorderW === snap1.borderStd,
+  { borderStd: snap1.borderStd, paneBorderW: snap1.paneBorderW, titlePaneBorderW: snap1.titlePaneBorderW,
+    paneHeaderBorderW: snap1.paneHeaderBorderW, rowBorderW: snap1.rowBorderW });
 check('未読バッチは行の右端に揃いて固定（右端からの差が全未読行で同じ）。既読行にバッチなし、バッチは行クリックを邪魔しない',
   rowStyle.badgeRows > 0 && rowStyle.badgeRightGap.every((g) => Math.abs(g - rowStyle.badgeRightGap[0]) <= 1)
     && rowStyle.readHasBadge === false && rowStyle.badgeText.length === 1 && rowStyle.badgePointer === 'none',
@@ -238,6 +291,41 @@ check('左列タイトル行に削除ボタンがない（削除は詳細モー�
   snap1.rows > 0 && snap1.rowDeleteButtons === 0, { rowDeleteButtons: snap1.rowDeleteButtons, rows: snap1.rows });
 check('右ペイン（ヘッダー・本文）に削除ボタンがない',
   snap1.paneDeleteButtons === 0, { paneDeleteButtons: snap1.paneDeleteButtons, footerButtons: snap1.footerButtons });
+
+// ★ 右ペインタイトル行の投稿者（アバターアイコン＋投稿者名、右寄せ）。行内の未読バッジは撤去済み
+check('右ペインタイトル行に投稿者名とアバターアイコンが表示されている',
+  Boolean(snap1.paneAuthorText) && snap1.paneAuthorText.length > 0 && snap1.paneAuthorHasIcon === true,
+  { paneAuthorText: snap1.paneAuthorText, icon: snap1.paneAuthorHasIcon });
+check('投稿者表示はタイトル行の右側へ右寄せ（ヘッダー右端との差 130px 以内・タイトルより右）',
+  snap1.paneAuthorRightGap !== null && snap1.paneAuthorRightGap <= 130 && snap1.paneAuthorTitleGap > 40,
+  { paneAuthorRightGap: snap1.paneAuthorRightGap, paneAuthorTitleGap: snap1.paneAuthorTitleGap });
+check('右ペインタイトル行の未読バッジは撤去（左列タイトル行の未読バッジは残る）',
+  snap1.paneHeaderHasUnread === false && rowStyle.badgeRows > 0 && rowStyle.readHasBadge === false,
+  { paneHeaderHasUnread: snap1.paneHeaderHasUnread, leftBadgeRows: rowStyle.badgeRows, leftUnread: snap1.unread });
+
+// 表示記事の投稿者名は API の実データ（authorName）と一致
+const authorMatch = await page.evaluate(async () => {
+  const tok = localStorage.getItem('is_system_jwt_token_v251');
+  const res = await fetch('/api/bulletins', { headers: { Authorization: tok ? `Bearer ${tok}` : '' } });
+  const json = await res.json();
+  const list = json.bulletins || (Array.isArray(json) ? json : []);
+  const paneTitle = document.querySelector('#bulletin-detail-pane .pane-title')?.textContent.trim();
+  const paneAuthor = document.querySelector('#bulletin-detail-pane .pane-author .pane-author-name')?.textContent.trim();
+  const item = list.find((b) => String(b.title || '').trim() === paneTitle);
+  const real = item ? String(item.authorName || item.author_name || '') : null;
+  return { paneTitle, paneAuthor, real, found: Boolean(item), ok: Boolean(real) && real === paneAuthor };
+});
+log('pane-author-data', authorMatch);
+check('右ペインの投稿者名は表示記事の実際の投稿者名と一致', authorMatch.ok, authorMatch);
+
+// ★ 投稿者表示のスクリーンショット（タイトル行を切り出し）
+const headerBox = await page.evaluate(() => {
+  const h = document.querySelector('#bulletin-detail-pane .pane-header');
+  if (!h) return null;
+  const r = h.getBoundingClientRect();
+  return { x: Math.round(r.x) - 8, y: Math.round(r.y) - 8, width: Math.round(r.width) + 16, height: Math.round(r.height) + 16 };
+});
+if (headerBox) await page.screenshot({ path: 'scripts/output/bulletin-pane-author.png', clip: headerBox });
 
 // 長いタイトルは1行のまま未読バッチの下に潜って省略される（合成行で寸法を検証）
 const longRow = await page.evaluate(() => {

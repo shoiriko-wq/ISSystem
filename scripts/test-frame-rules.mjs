@@ -60,9 +60,9 @@ const noRing = (v) => v === 'none' || v === 'normal';
 const { server, port } = await startServer();
 const browser = await puppeteer.launch({
   executablePath: findChrome(),
-  headless: 'new',
+  headless: 'new', ignoreHTTPSErrors: true,
   protocolTimeout: 60000,
-  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--ignore-certificate-errors']
 });
 
 const page = await browser.newPage();

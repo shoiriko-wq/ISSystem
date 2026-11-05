@@ -133,6 +133,8 @@ router.delete('/facilities/reservations/:reservationId', authenticateToken, safe
 
 // 施設・備品マスタの追加・改名・削除（教務部 KYOMU / ADMIN のみ・削除は有効予約が残ると 409）
 // ※ /facilities/reservations/... を先に登録しているため ':facilityId' より後ろに置く
+// ※ '/facilities/order' は ':facilityId' に食われるため必ず前に置く
+router.put('/facilities/order', authenticateToken, requireKyomuRole, safe(facilityController?.reorderFacilities));
 router.post('/facilities', authenticateToken, requireKyomuRole, safe(facilityController?.createFacility));
 router.put('/facilities/:facilityId', authenticateToken, requireKyomuRole, safe(facilityController?.updateFacility));
 router.delete('/facilities/:facilityId', authenticateToken, requireKyomuRole, safe(facilityController?.deleteFacility));

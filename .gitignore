@@ -6,6 +6,11 @@ node_modules/
 .env.local
 *.pem
 *.key
+# プライベートCA・サーバー証明書の鍵と証明書（配布用CAページで配るためGitに入れない）
+certs/
+*.p12
+*.pfx
+*.csr
 
 # SQLite データベース実ファイル & WAL アーティファクト (Gitに含めない)
 *.sqlite

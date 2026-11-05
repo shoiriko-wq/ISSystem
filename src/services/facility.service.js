@@ -176,6 +176,51 @@ export const facilityService = {
   },
 
   /**
+   * 施設・備品の表示順を変更 (教務部のみ)
+   * タイムライン行・予約フォーム select の並びはこの順へ従う
+   * @param {Object} payload - { ids: string[] } (全施設 ID を新順で並べた配列)
+   * @param {Object} user
+   */
+  async reorderFacilities(payload, user) {
+    ensureKyomu(user);
+    await ensureDefaultFacilities();
+
+    const ids = (Array.isArray(payload.ids) ? payload.ids : payload.order || []).map((id) => String(id));
+    if (ids.length === 0) {
+      throw new ApiError(400, '並び順の施設一覧が空です。');
+    }
+
+    const facilities = await facilityModel.listFacilities();
+    const known = new Set(facilities.map((f) => String(f.id)));
+    const seen = new Set();
+    for (const id of ids) {
+      if (!known.has(id)) {
+        throw new ApiError(404, `施設ID「${id}」が見つかりません。`);
+      }
+      if (seen.has(id)) {
+        throw new ApiError(400, `施設ID「${id}」が並び順に重複しています。`);
+      }
+      seen.add(id);
+    }
+    if (seen.size !== known.size) {
+      const missing = [...known].filter((id) => !seen.has(id));
+      throw new ApiError(400, `全施設 ${known.size} 件を含む並び順が必要です。不足: ${missing.join(' / ')}`);
+    }
+
+    const ordered = await facilityModel.reorderFacilities(ids);
+
+    await auditModel.logAction({
+      userId: user.id,
+      action: 'REORDER_FACILITY',
+      targetEntity: 'FACILITY',
+      targetId: null,
+      changesJson: JSON.stringify({ order: ordered.map((f) => f.name) }),
+    });
+
+    return { facilities: ordered };
+  },
+
+  /**
    * 施設・備品の追加 (教務部のみ)
    * @param {Object} payload - { name, category }
    * @param {Object} user - { id, name, role, is_kyomu }

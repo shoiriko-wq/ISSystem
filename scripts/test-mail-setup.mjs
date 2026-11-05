@@ -7,6 +7,8 @@
  *  2. メールタブの初回は設定フォームが表示され、メールアドレスはユーザー情報からプリフィルされる
  *  3. 不正メールアドレスの送信はエラートーストになり、フォームは残る
  *  4. 正常な設定保存で受信箱パネルへ切り替わり、ヘッダーにアドレスが表示される
+ *  4a. ヘッダーデザインは職員掲示板・施設物品予約と同一（ツールバー面＋text-base タイトル＋w-4 アイコン、
+ *      コントロール高さは 2.4rem に統一）。「はじめてご利用…暗号化して保存されます」の案内文は存在しない
  *  5. ページ再読み込み後も設定済み状態 (フォームは出ない) が続く
  *  6. 「設定を削除」で初回フォームへ戻り、後続検証のため DB を未設定状態へ戻す
  * 実行: node scripts/test-mail-setup.mjs   （ISSystem サーバーが必要）
@@ -20,7 +22,7 @@ import puppeteer from 'puppeteer-core';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_DIR = path.join(ROOT, 'scripts', 'output');
-const BASE = process.env.UI_BASE || 'http://127.0.0.1:3000';
+const BASE = process.env.UI_BASE || 'https://127.0.0.1:3443';
 const USER = process.env.UI_USER || 'T2026001';
 const PASS = process.env.UI_PASS || 'password123';
 
@@ -85,14 +87,37 @@ const snapshot = (page) => page.evaluate(() => {
     unreadBadgeText: badge ? badge.textContent.trim() : '',
     unreadBadgeHidden: badge ? badge.classList.contains('hidden') : null,
     headerText: (document.getElementById('view-mail')?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 160),
+    fullViewText: document.getElementById('view-mail')?.textContent || '',
+    headerInfo: (() => {
+      const h = document.querySelector('#view-mail > div');
+      if (!h) return null;
+      const rootFont = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+      const h2 = h.querySelector('h2');
+      const sb = document.getElementById('mail-btn-settings');
+      const rb = document.getElementById('mail-btn-refresh');
+      const px = (el) => (el ? Math.round(parseFloat(getComputedStyle(el).height) * 10) / 10 : null);
+      const wx = (el) => (el ? Math.round(parseFloat(getComputedStyle(el).width) * 10) / 10 : null);
+      return {
+        toolbar: h.classList.contains('bg-surface-strong') && h.classList.contains('rounded-xl') && h.classList.contains('border'),
+        isCard: h.classList.contains('card'),
+        h2Text: (h2?.textContent || '').replace(/\s+/g, ' ').trim(),
+        h2Class: h2?.className || '',
+        h2Size: h2 ? Math.round(parseFloat(getComputedStyle(h2).fontSize) * 10) / 10 : null,
+        iconClass: h2?.querySelector('i[data-lucide], svg')?.getAttribute('class') || '',
+        settingsH: px(sb),
+        refreshH: px(rb),
+        refreshW: wx(rb),
+        targetH: Math.round(rootFont * 2.4 * 10) / 10,
+      };
+    })(),
     toasts,
   };
 });
 
 fs.mkdirSync(OUT_DIR, { recursive: true });
 const browser = await puppeteer.launch({
-  executablePath: findChrome(), headless: 'new',
-  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+  executablePath: findChrome(), headless: 'new', ignoreHTTPSErrors: true,
+  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--ignore-certificate-errors'],
 });
 
 const page = await browser.newPage();
@@ -116,6 +141,18 @@ const setup = await snapshot(page);
 check('メールタブ表示', setup.viewActive === true, setup.viewActive);
 check('初回は設定フォーム', setup.hasForm === true && setup.passwordField === true, { hasForm: setup.hasForm, passwordField: setup.passwordField });
 check('メールアドレスはユーザー情報からプリフィル', setup.emailValue.includes('@'), setup.emailValue);
+
+// 2b. ヘッダーデザイン（職員掲示板・施設物品予約と同一のツールバー。card 枠ではない）
+const hi = setup.headerInfo;
+check('メールヘッダーはツールバー面（bg-surface-strong + 実枠。card 枠ではない）',
+  hi && hi.toolbar === true && hi.isCard === false,
+  { toolbar: hi?.toolbar, isCard: hi?.isCard });
+check('メールタイトルは text-base と w-4 アイコン',
+  hi && hi.h2Text === 'メール' && hi.h2Class.includes('text-base') && /\bw-4\b/.test(hi.iconClass),
+  { h2Text: hi?.h2Text, h2Class: hi?.h2Class, h2Size: hi?.h2Size, iconClass: hi?.iconClass });
+check('初回の案内文（はじめてご利用…暗号化して保存されます）は表示されない',
+  !/はじめてご利用|暗号化して保存/.test(setup.fullViewText),
+  { fullViewText: setup.fullViewText.slice(0, 120) });
 
 // 3a. ブラウザ側バリデーション: 明らかな不正メールは送信がblockされ、フォームは残る
 await page.evaluate(() => {
@@ -153,6 +190,15 @@ await sleep(1500);
 const configured = await snapshot(page);
 check('保存で受信箱へ切り替わる', configured.hasInbox === true && configured.hasForm === false, { hasInbox: configured.hasInbox, hasForm: configured.hasForm });
 check('ヘッダーにアドレス表示', configured.headerText.includes('tanaka.ui@issystem.example'), configured.headerText);
+
+// 4a2. ヘッダーコントロール高さは掲示板・施設物品予約と同じ 2.4rem に統一
+const hc = configured.headerInfo;
+check('メール設定・再読み込みボタンは 2.4rem 高に統一（再読み込みは正方形）',
+  hc && hc.settingsH === hc.targetH && hc.refreshH === hc.targetH && hc.refreshW === hc.targetH,
+  { settingsH: hc?.settingsH, refreshH: hc?.refreshH, refreshW: hc?.refreshW, targetH: hc?.targetH });
+check('設定済みヘッダーに受信箱案内文は出ない',
+  !/はじめてご利用|暗号化して保存/.test(configured.fullViewText),
+  { fullViewText: configured.fullViewText.slice(0, 120) });
 
 // 4b. 「メール設定」ボタン
 check('メール設定ボタンがある', configured.settingsBtn.includes('メール設定'), configured.settingsBtn);

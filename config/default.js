@@ -17,6 +17,8 @@ const config = {
 
   server: {
     port: toInt(process.env.PORT, 3000),
+    // 非HTTP（CA配布専用）サーバーの監視ホスト
+    host: process.env.HOST || '0.0.0.0',
   },
 
   // 2. 認証・セキュリティ設定 (auth.middleware.js / auth.service.js / socket.index.js が参照)
@@ -98,6 +100,26 @@ const config = {
     // 3分無操作編集ロックの自動解放閾値
     editingLockTimeoutSeconds: toInt(process.env.EDITING_LOCK_TIMEOUT_SECONDS, 180),
     auditRetentionDays: toInt(process.env.AUDIT_RETENTION_DAYS, 90),
+  },
+
+  // 8. 安全通信（プライベートCA / HTTPS・WSS）
+  //    - HTTPS/WSS: SSL_PORT（既定 3443）。サーバー証明書はプライベートCAで署名
+  //    - 非HTTP(PORT 既定 3000): CAダウンロードページを表示し API は 426 で拒否
+  ssl: {
+    httpsPort: toInt(process.env.SSL_PORT, 3443),
+    insecurePort: toInt(process.env.HTTP_PORT, toInt(process.env.PORT, 3000)),
+    // 安全サーバーの監視ホスト（0.0.0.0 = 全インターフェース）
+    host: process.env.SSL_HOST || '0.0.0.0',
+    // 非HTTPのCAページから「安全接続で開く」ボタンを作るURL基点（未設定なら https://host:port/）
+    caPageBase: process.env.SSL_CA_PAGE_BASE || null,
+    dir: process.env.SSL_DIR || 'certs',
+    key: process.env.SSL_KEY || 'certs/server.key',
+    cert: process.env.SSL_CERT || 'certs/server.pem',
+    ca: process.env.SSL_CA || 'certs/issystem-ca.pem',
+    hosts: (process.env.SSL_HOSTS || 'localhost,issystem.local,issystem,127.0.0.1,::1')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
   },
 };
 

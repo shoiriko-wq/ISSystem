@@ -158,19 +158,20 @@
   --danger-ring: color-mix(in srgb, var(--danger) 35%, transparent);
 
   /* Status colors are used both as link text and as labels on tinted (soft) chips,
-     so every text variant mixes 60% of the color with the theme tint. That keeps
-     light themes dark enough and dark themes bright enough for 4.5:1. */
+     so every text variant mixes with the theme tint. The -strong variants sit on
+     soft chips, so they lean 68% towards the tint: that keeps light themes dark
+     enough (>=4.5:1 on the soft chip) and dark themes bright enough. */
   --text-accent: color-mix(in srgb, var(--accent-primary) 60%, var(--text-tint));
-  --text-accent-strong: color-mix(in srgb, var(--accent-primary) 45%, var(--text-tint));
+  --text-accent-strong: color-mix(in srgb, var(--accent-primary) 32%, var(--text-tint));
   --text-accent-alt: color-mix(in srgb, var(--accent-alt) 60%, var(--text-tint));
   --text-success: color-mix(in srgb, var(--success) 60%, var(--text-tint));
-  --text-success-strong: color-mix(in srgb, var(--success) 45%, var(--text-tint));
+  --text-success-strong: color-mix(in srgb, var(--success) 32%, var(--text-tint));
   --text-warning: color-mix(in srgb, var(--warning) 60%, var(--text-tint));
-  --text-warning-strong: color-mix(in srgb, var(--warning) 45%, var(--text-tint));
+  --text-warning-strong: color-mix(in srgb, var(--warning) 32%, var(--text-tint));
   --text-danger: color-mix(in srgb, var(--danger) 60%, var(--text-tint));
-  --text-danger-strong: color-mix(in srgb, var(--danger) 45%, var(--text-tint));
+  --text-danger-strong: color-mix(in srgb, var(--danger) 32%, var(--text-tint));
   --text-info: color-mix(in srgb, var(--info) 60%, var(--text-tint));
-  --text-info-strong: color-mix(in srgb, var(--info) 45%, var(--text-tint));
+  --text-info-strong: color-mix(in srgb, var(--info) 32%, var(--text-tint));
 
   --glow-accent: color-mix(in srgb, var(--accent-primary) 35%, transparent);
   --glow-warning: color-mix(in srgb, var(--warning) 30%, transparent);
@@ -598,31 +599,145 @@ html[data-chrome="saturated"] .chat-sidebar-channels {
   --shadow-color: rgba(0, 0, 0, 0.22);
 }
 
-/* The saturated bars must keep their full-strength color, so the light-mode
-   contrast layer is neutralized for the chrome tokens (specificity 0,2,1
-   beats the layer's html[data-theme-mode="light"]). */
-html[data-chrome="saturated"][data-theme-mode="light"] {
-  --bg-main: var(--base-bg-main);
-  --bg-card: var(--base-bg-card);
-  --bg-card-static: var(--base-bg-card);
+/* Bars keep their saturated color. The remaps live in the chrome scope, so the
+   content area keeps the light contrast layer (white cards + dark ink). */
+
+/* White bar ink gets a dark glow so small text stays legible on the saturated fill. */
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar,
+html[data-chrome="saturated"][data-theme-mode="light"] .chat-sidebar-channels {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+/* Bar ink is white on the saturated bars. The remaps live inside the chrome
+   scope, so the content area keeps the light contrast layer (white cards +
+   dark ink). */
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar,
+html[data-chrome="saturated"][data-theme-mode="light"] .chat-sidebar-channels {
   --bg-surface-strong: var(--base-bg-sidebar);
   --bg-header: var(--base-bg-sidebar);
   --bg-sidebar: var(--base-bg-sidebar);
-  --bg-input: var(--base-bg-card);
-  --bg-elevated: var(--base-bg-card);
-  --bg-overlay: var(--base-bg-main);
-  --bg-inset: var(--base-bg-inset);
+  --bg-input: var(--base-bg-sidebar);
+  --bg-elevated: var(--base-bg-sidebar);
+  --bg-card-hover: var(--base-bg-card);
   --chrome-text: #ffffff;
-  --text-soft: var(--base-text-soft);
-  --text-muted: var(--base-text-muted);
-  --text-faint: var(--base-text-faint);
+  --text-main: #ffffff;
+  --badge-text: #ffffff;
+  --text-soft: #ffffff;
+  --text-muted: #ffffff;
+  --text-faint: #ffffff;
   --border-main: var(--base-border-main);
   --border-strong: var(--base-accent-primary);
   --border-divider: var(--base-border-main);
   --border-muted: var(--base-border-muted);
   --shadow-color: var(--base-shadow-color);
   --glass-bg: var(--base-glass-bg);
-  --bg-card-hover: var(--base-bg-card);
+  /* Status chips inside the dark bars are derived from the bar, so white ink
+     keeps a big luminance gap. */
+  --accent-soft: color-mix(in srgb, var(--base-accent-primary) 24%, var(--base-text-main));
+  --success-soft: color-mix(in srgb, var(--base-success) 24%, var(--base-text-main));
+  --warning-soft: color-mix(in srgb, var(--base-warning) 24%, var(--base-text-main));
+  --danger-soft: color-mix(in srgb, var(--base-danger) 24%, var(--base-text-main));
+  --info-soft: color-mix(in srgb, var(--base-info) 24%, var(--base-text-main));
+}
+
+/* White chips inside the saturated bars take the dark content ink. The chrome
+   rules would otherwise paint them white on white. */
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header .bg-surface,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .bg-surface,
+html[data-chrome="saturated"][data-theme-mode="light"] .chat-sidebar-channels .bg-surface,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header .bg-surface .text-main,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header .bg-surface .text-soft,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header .bg-surface .text-muted,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header .bg-surface .text-faint,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .bg-surface .text-main,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .bg-surface .text-soft,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .bg-surface .text-muted,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .bg-surface .text-faint,
+html[data-chrome="saturated"][data-theme-mode="light"] .chat-sidebar-channels .bg-surface .text-main,
+html[data-chrome="saturated"][data-theme-mode="light"] .chat-sidebar-channels .bg-surface .text-soft,
+html[data-chrome="saturated"][data-theme-mode="light"] .chat-sidebar-channels .bg-surface .text-muted,
+html[data-chrome="saturated"][data-theme-mode="light"] .chat-sidebar-channels .bg-surface .text-faint {
+  color: var(--base-text-main) !important;
+}
+
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header .bg-surface .text-accent,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header .bg-surface .text-accent-strong,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .bg-surface .text-accent,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .bg-surface .text-accent-strong,
+html[data-chrome="saturated"][data-theme-mode="light"] .chat-sidebar-channels .bg-surface .text-accent {
+  color: color-mix(in srgb, var(--base-accent-primary) 60%, var(--base-text-main)) !important;
+}
+
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header .bg-surface .text-danger,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .bg-surface .text-danger,
+html[data-chrome="saturated"][data-theme-mode="light"] .chat-sidebar-channels .bg-surface .text-danger {
+  color: var(--base-danger) !important;
+}
+
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header .bg-surface .text-success,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .bg-surface .text-success,
+html[data-chrome="saturated"][data-theme-mode="light"] .chat-sidebar-channels .bg-surface .text-success {
+  color: var(--base-success) !important;
+}
+
+/* Status text on the saturated bars must stay bright: the mixed status ink is too
+   dim for the saturated fill. */
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header .text-success,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .text-success,
+html[data-chrome="saturated"][data-theme-mode="light"] .chat-sidebar-channels .text-success,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header .bg-surface-strong .text-success,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .bg-surface-strong .text-success,
+html[data-chrome="saturated"][data-theme-mode="light"] .chat-sidebar-channels .bg-surface-strong .text-success {
+  color: #d7f3e3 !important;
+}
+
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header .text-warning,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .text-warning,
+html[data-chrome="saturated"][data-theme-mode="light"] .chat-sidebar-channels .text-warning,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header .bg-surface-strong .text-warning,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .bg-surface-strong .text-warning,
+html[data-chrome="saturated"][data-theme-mode="light"] .chat-sidebar-channels .bg-surface-strong .text-warning {
+  color: #fde8c9 !important;
+}
+
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header .text-danger,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .text-danger,
+html[data-chrome="saturated"][data-theme-mode="light"] .chat-sidebar-channels .text-danger,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header .bg-surface-strong .text-danger,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .bg-surface-strong .text-danger,
+html[data-chrome="saturated"][data-theme-mode="light"] .chat-sidebar-channels .bg-surface-strong .text-danger {
+  color: #ffd4de !important;
+}
+
+/* Badge pills on the bars take white ink: their tinted fill is derived from the
+   bar, so the default status ink lands dark-on-dark. */
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header .nav-badge,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header .badge,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header .badge-count,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .nav-badge,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .badge,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .badge-count,
+html[data-chrome="saturated"][data-theme-mode="light"] .chat-sidebar-channels .nav-badge,
+html[data-chrome="saturated"][data-theme-mode="light"] .chat-sidebar-channels .badge,
+html[data-chrome="saturated"][data-theme-mode="light"] .chat-sidebar-channels .badge-count {
+  color: #ffffff !important;
+}
+
+/* The clock & weather widgets sit on the saturated bar: give them a dark inset
+   plate so the white ink clears 4.5:1. */
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header .header-widget {
+  background-color: rgba(0, 0, 0, 0.28) !important;
+  border-color: var(--base-border-main) !important;
+  color: #ffffff !important;
+}
+
+/* Content surfaces must stay light in the cb themes: the saturated bar color is
+   the base for the derived surface tokens, so re-derive them from the card ink. */
+html[data-chrome="saturated"][data-theme-mode="light"] {
+  --bg-surface-strong: color-mix(in srgb, var(--base-bg-card) 84%, var(--base-text-main));
+  --bg-surface-soft: color-mix(in srgb, var(--base-bg-card) 92%, var(--base-text-main));
 }
 
 
@@ -690,9 +805,11 @@ html[data-chrome="inverted"] .chat-sidebar-channels {
   --shadow-color: rgba(0, 0, 0, 0.12);
 }
 
-/* The dark-mode layer deepens bg-sidebar, so neutralize it on the bars to keep
-   their light color and pin dark ink (specificity 0,2,1 beats the dark layer). */
-html[data-chrome="inverted"][data-theme-mode="dark"] {
+/* The bars keep their light color and dark ink. These remaps stay inside the
+   chrome scope so the dark content area keeps the dark contrast layer. */
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar,
+html[data-chrome="inverted"][data-theme-mode="dark"] .chat-sidebar-channels {
   --bg-header: var(--base-bg-sidebar);
   --bg-sidebar: var(--base-bg-sidebar);
   --bg-surface-strong: var(--base-bg-sidebar);
@@ -705,6 +822,42 @@ html[data-chrome="inverted"][data-theme-mode="dark"] {
   --border-muted: var(--base-border-muted);
   --shadow-color: var(--base-shadow-color);
   --glass-bg: var(--base-glass-bg);
+  --bg-card: var(--base-bg-sidebar);
+  --bg-card-hover: color-mix(in srgb, var(--base-text-inverse) 8%, var(--base-bg-sidebar));
+  --text-main: var(--base-text-inverse);
+  --badge-text: var(--base-text-inverse);
+  --text-soft: var(--base-text-inverse);
+  --text-muted: var(--base-text-inverse);
+  --text-faint: var(--base-text-inverse);
+  /* Status chips inside the light bars are derived from the bar, so the dark
+     inverse ink keeps a big luminance gap. */
+  --accent-soft: color-mix(in srgb, var(--base-accent-primary) 22%, var(--base-bg-sidebar));
+  --success-soft: color-mix(in srgb, var(--base-success) 22%, var(--base-bg-sidebar));
+  --warning-soft: color-mix(in srgb, var(--base-warning) 22%, var(--base-bg-sidebar));
+  --danger-soft: color-mix(in srgb, var(--base-danger) 22%, var(--base-bg-sidebar));
+  --info-soft: color-mix(in srgb, var(--base-info) 22%, var(--base-bg-sidebar));
+}
+
+/* Badge pills on the light bars take the dark inverse ink (their tinted fill is
+   derived from the bar, so the default status ink lands light-on-light). */
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header .nav-badge,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header .badge,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header .badge-count,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar .nav-badge,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar .badge,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar .badge-count,
+html[data-chrome="inverted"][data-theme-mode="dark"] .chat-sidebar-channels .nav-badge,
+html[data-chrome="inverted"][data-theme-mode="dark"] .chat-sidebar-channels .badge,
+html[data-chrome="inverted"][data-theme-mode="dark"] .chat-sidebar-channels .badge-count {
+  color: var(--base-text-inverse) !important;
+}
+
+/* Content surfaces stay dark in the dc themes: the light bar color is the base of
+   the derived surface tokens, so re-derive them from the dark card. */
+html[data-chrome="inverted"][data-theme-mode="dark"] {
+  --bg-surface: color-mix(in srgb, var(--base-bg-card) 90%, #ffffff);
+  --bg-surface-strong: color-mix(in srgb, var(--base-bg-card) 85%, #ffffff);
+  --bg-surface-soft: var(--base-bg-card);
 }
 
 /* Bar text is forced to the dark inverse ink. */
@@ -725,12 +878,13 @@ html[data-chrome="inverted"][data-theme-mode="dark"] .chat-sidebar-channels .tex
   color: var(--base-text-inverse) !important;
 }
 
-/* Active nav: a saturated pill with white ink so it stands out on the light bar. */
+/* Active nav: the raw accent is too light for white ink on the light bars, so the
+   pill is deepened toward the inverse ink and keeps white text. */
 html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar .nav-item.active,
 html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar .nav-item.active .nav-label,
 html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar .nav-item.active i,
 html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar .nav-item.active svg {
-  background-color: var(--base-accent-primary) !important;
+  background-color: color-mix(in srgb, var(--base-accent-primary) 52%, var(--base-text-inverse)) !important;
   color: #ffffff !important;
   text-shadow: none !important;
 }
@@ -743,16 +897,8 @@ html[data-chrome="inverted"][data-theme-mode="dark"] .app-header .bg-surface {
   border-color: var(--base-accent-primary) !important;
 }
 
-/* Modal header bars sit on the chrome, so dark ink is applied in one scope. */
-html[data-chrome="inverted"][data-theme-mode="dark"] .modal-header .text-main,
-html[data-chrome="inverted"][data-theme-mode="dark"] .modal-header .text-soft,
-html[data-chrome="inverted"][data-theme-mode="dark"] .modal-header .text-muted,
-html[data-chrome="inverted"][data-theme-mode="dark"] .modal-header .modal-title,
-html[data-chrome="inverted"][data-theme-mode="dark"] .modal-header .modal-close,
-html[data-chrome="inverted"][data-theme-mode="dark"] .modal-header .text-accent,
-html[data-chrome="inverted"][data-theme-mode="dark"] .modal-header .text-accent-alt {
-  color: var(--base-text-inverse) !important;
-}
+/* Modal headers are content cards in the dark area, so the normal light ink
+   from the dark contrast layer is kept (no forced inverse ink here). */
 
 /* Dropdown panels inside the light bars stay dark content cards with light ink. */
 html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar #user-dropdown-menu,

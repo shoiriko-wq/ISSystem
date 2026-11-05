@@ -43,23 +43,23 @@ function dashTimeAndSeason(now = new Date()) {
   return { slot, season };
 }
 
-/** 時刻帯別の労い・確認案内 */
+/** 時刻帯別の労い・確認案内（体言止め・短縮版） */
 const DASH_TIME_CLAUSES = {
-  MORNING: '朝の時間帯です。午前の予定と新着掲示を先に確認してください。',
-  NOON: '昼休み前後の時間帯です。午後の予定と緊急連絡を優先して確認してください。',
-  AFTERNOON: '午後の授業・部活動の時間帯です。施設予約と承認依頼を確認してください。',
-  EVENING: '夕方以降の時間帯です。未処理の承認依頼と当日の記録を今日中に済ませてください。',
-  NIGHT: '深夜の時間帯です。緊急連絡以外は翌日の確認で十分です。早めに区切ってください。',
+  MORNING: '午前の予定と新着掲示を先に確認。',
+  NOON: '午後の予定と緊急連絡を優先。',
+  AFTERNOON: '施設予約と承認依頼を確認。',
+  EVENING: '未処理の承認と当日記録を今日中に。',
+  NIGHT: '緊急連絡以外は翌日で十分。',
 };
 
-/** 季節別の状況案内 */
+/** 季節別の状況案内（体言止め・短縮版） */
 const DASH_SEASON_CLAUSES = {
-  SPRING: '新年度・新学期の切り替わり期です。',
-  RAIN: '梅雨時期につき体育施設と雨天対応の予約が増えています。',
-  EARLY_SUMMER: '考査前につき試験・成績入力が集中しています。',
-  SUMMER: '夏季休業・補充授業の時期です。',
-  AUTUMN: '文化祭・体育祭の季節で施設予約が混み合っています。',
-  WINTER: '期末考査・冬季休業の時期です。',
+  SPRING: '新学期の切り替わり期。',
+  RAIN: '雨天対応の予約が増加中。',
+  EARLY_SUMMER: '考査前で成績入力が集中。',
+  SUMMER: '夏季休業・補充授業の時期。',
+  AUTUMN: '文化祭・体育祭で予約が混雑。',
+  WINTER: '期末考査・冬季休業の時期。',
 };
 
 /**
@@ -111,15 +111,13 @@ export function initDashboardModule() {
 
             <span class="badge badge-warning">本日: ${formatDate(new Date(), false)}</span>
 
-            <span class="text-[11px] text-muted font-mono">校内ネットワーク: 正常稼働</span>
-
           </div>
 
           <h2 class="text-xl font-bold text-main mb-1" id="dash-greeting">お疲れ様です、<span id="dash-user-name" class="text-primary font-bold">先生</span></h2>
 
           <p class="text-xs text-soft leading-relaxed">
 
-            本日の全校行事・施設予約・重要掲示の最新サマリーです。緊急連絡や承認依頼が届いている場合は即座に確認できます。
+            本日の行事・予約・掲示のサマリーです。
 
           </p>
 
@@ -157,17 +155,26 @@ export function initDashboardModule() {
 
         </div>
 
-        <!-- 区分別人数 (absence.module.js の renderAbsenceCounts が数値を流し込む) -->
-        <div class="flex items-center justify-center gap-5 mb-3">
-          <div class="flex items-center gap-1.5" title="本日年休等（年休・半日休・早退・遅刻・欠席）の人数">
-            <i data-lucide="bed-double" class="w-4 h-4 text-info shrink-0"></i>
-            <span class="text-sm text-soft">年休等</span>
-            <span id="dash-absence-leave" class="text-lg font-bold text-info">0名</span>
+        <!-- 区分別人数 (absence.module.js の renderAbsenceCounts が数値を流し込む)
+             配色は「記入する」モーダル（index.html の区分別人数サマリー）と同一トークン:
+             年休等 = 赤系 (bg-danger-soft / border-danger-soft / text-danger)
+             出張   = 黄系 (bg-warning-soft / border-warning-soft / text-warning) -->
+        <div class="grid grid-cols-2 gap-2 mb-3 items-start">
+          <div class="flex flex-col items-center gap-1 py-2.5 px-0 rounded-lg bg-danger-soft border border-danger-soft"
+               title="本日年休等（年休・半日休・早退・遅刻・欠席）の人数">
+            <div class="flex items-center gap-1.5 text-danger text-xs font-bold whitespace-nowrap">
+              <i data-lucide="bed-double" class="w-3.5 h-3.5 shrink-0"></i>
+              <span>年休等</span>
+            </div>
+            <span id="dash-absence-leave" class="text-xl font-black text-danger leading-none">0名</span>
           </div>
-          <div class="flex items-center gap-1.5" title="本日出張（校外・校内研修）の人数">
-            <i data-lucide="briefcase" class="w-4 h-4 text-success shrink-0"></i>
-            <span class="text-sm text-soft">出張</span>
-            <span id="dash-absence-trip" class="text-lg font-bold text-success">0名</span>
+          <div class="flex flex-col items-center gap-1 py-2.5 px-0 rounded-lg bg-warning-soft border border-warning-soft"
+               title="本日出張（校外・校内研修）の人数">
+            <div class="flex items-center gap-1.5 text-warning text-xs font-bold whitespace-nowrap">
+              <i data-lucide="briefcase" class="w-3.5 h-3.5 shrink-0"></i>
+              <span>出張</span>
+            </div>
+            <span id="dash-absence-trip" class="text-xl font-black text-warning leading-none">0名</span>
           </div>
         </div>
 
@@ -245,8 +252,6 @@ export function initDashboardModule() {
 
             </h3>
 
-            <span class="text-sm text-muted">全校教職員対象</span>
-
           </div>
 
           <div id="dash-pinned-bulletins" class="dash-news-list">
@@ -291,7 +296,7 @@ export function initDashboardModule() {
 
       <div class="dash-col-side space-y-6">
 
-        <!-- 本日の施設利用予定 -->
+        <!-- 本日の施設物品予約（その日の予約を実データから一覧。行クリックで施設タブへ） -->
 
         <div class="card p-5">
 
@@ -299,17 +304,19 @@ export function initDashboardModule() {
 
             <h3 class="font-bold text-sm text-main flex items-center gap-2">
 
-              <i data-lucide="building-2" class="w-4 h-4 text-success"></i> 本日の施設予約
+              <i data-lucide="building-2" class="w-4 h-4 text-success"></i>
+              本日の施設物品予約
+              <span id="dash-facility-count" class="dash-facility-count">0 件</span>
 
             </h3>
 
-            <button id="dash-btn-facility" class="text-xs text-success hover:underline">予約する</button>
+            <button type="button" id="dash-btn-facility" class="btn-secondary py-1 px-2.5 text-sm shrink-0">予約する</button>
 
           </div>
 
-          <div id="dash-today-facilities" class="space-y-2 text-xs">
+          <div id="dash-today-facilities" class="dash-facility-list">
 
-            <div class="text-muted py-2 text-center">読み込み中...</div>
+            <div class="dash-facility-empty">読み込み中...</div>
 
           </div>
 
@@ -457,10 +464,12 @@ export async function loadDashboardData() {
 
         return `
           <div class="dash-news-item">
-            <h4 class="dash-news-title">${escapeHTML(b.title || '')}</h4>
-            <div class="dash-news-author">
-              ${userAvatarHtml({ ...author, size: 'xs' })}
-              <span class="dash-news-author-name">${escapeHTML(author.name)} 教員</span>
+            <div class="dash-news-head">
+              <h4 class="dash-news-title">${escapeHTML(b.title || '')}</h4>
+              <div class="dash-news-author">
+                ${userAvatarHtml({ ...author, size: 'xs' })}
+                <span class="dash-news-author-name">${escapeHTML(author.name)} 教員</span>
+              </div>
             </div>
             <p class="dash-news-body">${escapeHTML(b.content || '')}</p>
           </div>
@@ -506,7 +515,8 @@ export async function loadDashboardData() {
 
 
 
-  // ★ 2. 本日の施設予約データの取得と描画 (追加部分)
+  // ★ 2. 本日の施設物品予約（daily-overview は施設単位のグループ { facility, reservations } を返す。
+  //   予約だけをフラット化して開始時間順に並べ、行クリックで施設タブへ飛べるようにする）
 
   const todayStr = new Date().toISOString().split('T')[0];
 
@@ -518,80 +528,62 @@ export async function loadDashboardData() {
 
       const res = await apiGet('/facilities/daily-overview', { date: todayStr });
 
-      const rawList = res.facilitiesOverview || res.overview || res.reservations || res.data || (Array.isArray(res) ? res : []);
+      const groups = res.facilitiesOverview || res.data || res.reservations || (Array.isArray(res) ? res : []);
 
+      const todayRes = [];
+      for (const g of (groups || [])) {
+        const facName = g.facility?.name || g.facility_name || g.name || '施設';
+        const list = Array.isArray(g.reservations) ? g.reservations : (g && g.start_time ? [g] : []);
+        for (const r of list) {
+          if (!r) continue;
+          todayRes.push({ ...r, facilityName: facName });
+        }
+      }
 
+      const countEl = document.getElementById('dash-facility-count');
+      if (countEl) countEl.textContent = `${todayRes.length} 件`;
 
-      if (rawList && rawList.length > 0) {
+      const timeOf = (t) => {
+        const raw = String(t || '').replace('T', ' ');
+        const hhmm = (raw.split(' ')[1] || raw).slice(0, 5);
+        return hhmm;
+      };
 
-        facEl.innerHTML = rawList.map(r => {
+      if (todayRes.length > 0) {
+        todayRes.sort((a, b) => String(a.start_time || '').localeCompare(String(b.start_time || '')));
 
-          const facilityName = r.facility_name || r.facilityName || r.name || '施設';
-
+        facEl.innerHTML = todayRes.map((r) => {
           const title = r.title || r.purpose || '利用';
-
-          const userName = r.user_name || r.userName || '教員';
-
+          const userName = r.user_name || r.userName || r.user_id || '教員';
           const avatarUrl = r.avatar_url || r.avatarUrl || null;
-
-
-
-          let timeRange = '';
-
-          if (r.start_time || r.startTime) {
-
-            const sTime = (r.start_time || r.startTime).split(' ')[1] || r.start_time;
-
-            const eTime = (r.end_time || r.endTime).split(' ')[1] || r.end_time;
-
-            timeRange = `${sTime.substring(0, 5)} - ${eTime.substring(0, 5)}`;
-
-          }
-
-
+          const timeRange = r.start_time ? `${timeOf(r.start_time)} - ${timeOf(r.end_time || r.start_time)}` : '終日';
 
           return `
-
-            <div class="p-2.5 rounded-lg bg-surface-strong border border-divider flex items-center justify-between">
-
-              <div class="overflow-hidden pr-2">
-
-                <div class="flex items-center gap-1.5 mb-0.5">
-
-                  <span class="px-1.5 py-0.5 text-[9px] font-bold rounded bg-success-inset text-success border border-success-soft">
-
-                    ${escapeHTML(facilityName)}
-
-                  </span>
-
-                  <span class="font-bold text-main text-xs truncate">${escapeHTML(title)}</span>
-
-                </div>
-
-                <div class="text-[10px] text-muted font-mono">${timeRange}</div>
-
+            <button type="button" class="dash-facility-item" data-facility-open title="施設タブのタイムラインでこの日の予約を見る"
+                    aria-label="${escapeHTML(r.facilityName)} ${escapeHTML(title)} ${escapeHTML(timeRange)}（施設タブを開く）">
+              <div class="dash-facility-head">
+                <span class="dash-facility-fac">${escapeHTML(r.facilityName)}</span>
+                <span class="dash-facility-time font-mono">${escapeHTML(timeRange)}</span>
               </div>
-
-              <div class="flex items-center gap-1.5 flex-shrink-0">
-                ${userAvatarHtml({ name: userName, avatarUrl, size: 'xs' })}
-                <span class="text-[10px] text-soft font-bold">${escapeHTML(userName)}</span>
+              <div class="dash-facility-body">
+                <span class="dash-facility-title">${escapeHTML(title)}</span>
+                <span class="dash-facility-author">${userAvatarHtml({ name: userName, avatarUrl, size: 'xs' })}<span class="dash-facility-author-name">${escapeHTML(userName)}</span></span>
               </div>
-
-            </div>
-
+            </button>
           `;
-
         }).join('');
-
       } else {
-
-        facEl.innerHTML = '<div class="text-muted py-2 text-center text-xs">本日の施設予約はありません</div>';
-
+        facEl.innerHTML = '<div class="dash-facility-empty">本日の施設物品予約はありません</div>';
       }
+
+      // 行クリック → 施設タブ（本日指定でタイムラインを表示）
+      facEl.querySelectorAll('[data-facility-open]').forEach((row) => {
+        row.addEventListener('click', () => switchTab('facility'));
+      });
 
     } catch (e) {
 
-      facEl.innerHTML = '<div class="text-muted py-2 text-center text-xs">予約データの取得に失敗しました</div>';
+      facEl.innerHTML = '<div class="dash-facility-empty">予約データの取得に失敗しました</div>';
 
     }
 

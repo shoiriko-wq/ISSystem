@@ -16,7 +16,7 @@
  */
 import puppeteer from 'puppeteer-core';
 
-const BASE = process.env.UI_BASE || 'http://127.0.0.1:3000';
+const BASE = process.env.UI_BASE || 'https://127.0.0.1:3443';
 const USER = process.env.UI_USER || 'T2026001';
 const PASS = process.env.UI_PASS || 'password123';
 const CHROME = process.env.CHROME_PATH || '/usr/bin/google-chrome';
@@ -35,8 +35,8 @@ const pageErrors = [];
 
 const browser = await puppeteer.launch({
   executablePath: CHROME,
-  headless: 'new',
-  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+  headless: 'new', ignoreHTTPSErrors: true,
+  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--ignore-certificate-errors'],
 });
 const page = await browser.newPage();
 page.on('pageerror', (e) => pageErrors.push(e.message));
@@ -262,11 +262,12 @@ const kb = await page.evaluate(async () => {
   return out;
 });
 log('menu-keyboard', kb);
-check('键盘: ラベルクリックで開きフォーカスが月に当たる（←→で月ボタン間を移動）',
-  kb.opened && kb.focusAtOpen !== null && kb.afterArrow === kb.focusAtOpen - 1,
-  { opened: kb.opened, focusAtOpen: kb.focusAtOpen, afterArrow: kb.afterArrow });
+check('键盘: ラベルクリックで開きフォーカスが現在月に当たる（←→で月ボタン間を移動）',
+  kb.opened && kb.focusAtOpen !== null && kb.afterArrow === kb.focusAtOpen
+  && kb.focusAtOpen === kb.base % 12 - 1,
+  { opened: kb.opened, focusAtOpen: kb.focusAtOpen, afterArrow: kb.afterArrow, base: kb.base });
 check('键盘: Enter相当で月を决定しラベルが更新・閉じ・フォーカスがラベルへ戻る',
-  kb.afterPick === kb.base + 11 && kb.closedAfterPick && kb.focusAfterPick === 'sched-month-menu-btn',
+  kb.afterPick === kb.base && kb.closedAfterPick && kb.focusAfterPick === 'sched-month-menu-btn',
   { afterPick: kb.afterPick, base: kb.base, closed: kb.closedAfterPick, focus: kb.focusAfterPick });
 check('键盘: Esc でメニューが閉じ aria-expanded=false・フォーカスがラベルへ戻る',
   kb.reopened && kb.closedByEsc && kb.expandedAfterEsc === 'false' && kb.focusAfterEsc === 'sched-month-menu-btn',
@@ -284,6 +285,98 @@ const outside = await page.evaluate(async () => {
 });
 log('menu-outside-click', outside);
 check('メニュー外クリックでメニューが閉じる', outside.wasOpen && outside.closed, outside);
+
+// ★ 実マウス操作での年月选择（ユーザ報告「クリックするとメニューが消えて機能しない」）
+//  原因: 1) メニューが通常フローにあったため Grid が押し下げられ、クリックがグリッド側に
+//  落ちた 2) 年 ‹ › が innerHTML を作り替えると e.target が DOM から離れ、外側クリックと
+//  誤判定されてメニューが閉じた。→ メニューはオーバーレイ（absolute）、外側判定は capture。
+const mouseClickSel = async (sel) => {
+  const pt = await page.evaluate((s) => {
+    const b = document.querySelector(s);
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }, sel);
+  if (!pt) return false;
+  await page.mouse.click(pt.x, pt.y);
+  return true;
+};
+const mstate = () => page.evaluate(() => {
+  const menu = document.getElementById('sched-month-menu');
+  const cont = document.querySelector('main') || document.querySelector('#view-schedule .overflow-y-auto');
+  const grid = document.querySelector('#sched-view-area .grid.grid-cols-7');
+  const mr = menu.getBoundingClientRect();
+  const cr = cont.getBoundingClientRect();
+  const items = Array.from(menu.querySelectorAll('.sched-month-item'));
+  return {
+    open: !menu.classList.contains('hidden'),
+    label: document.getElementById('sched-month-label').textContent.trim(),
+    yearText: (menu.innerText.match(/(\d{4})年/) || [null, null])[1],
+    gridTop: Math.round(grid.getBoundingClientRect().top),
+    fitsInCont: Math.round(mr.top) >= Math.round(cr.top) - 1 && Math.round(mr.bottom) <= Math.round(cr.bottom) + 1,
+    fitsInVw: Math.round(mr.left) >= 0 && Math.round(mr.right) <= Math.round(window.innerWidth),
+    items: items.length,
+    activeId: document.activeElement.id || document.activeElement.getAttribute('data-menu-year') || null,
+  };
+});
+// カレンダーモードで計測（一覧モードでの計測はこの後）
+await page.evaluate(() => document.getElementById('sched-mode-calendar').click());
+await sleep(1200);
+const m0 = await mstate();
+await mouseClickSel('#sched-month-menu-btn');
+await sleep(400);
+const m1 = await mstate();
+log('mouse-menu-open', { gridTopBefore: m0.gridTop, gridTopAfter: m1.gridTop, open: m1.open, fitsInCont: m1.fitsInCont, fitsInVw: m1.fitsInVw });
+check('実マウス: ラベルクリックでメニューが開き、Grid は押し下げられず、メニューはスクロール枠内に収まる',
+  m1.open && Math.abs(m1.gridTop - m0.gridTop) <= 2 && m1.fitsInCont && m1.fitsInVw && m1.items === 12,
+  { gridTopBefore: m0.gridTop, gridTopAfter: m1.gridTop, open: m1.open, fitsInCont: m1.fitsInCont, fitsInVw: m1.fitsInVw });
+
+// 実マウスで 3月を選択 → 2026年3月、閉じる、ラベルへ焦点
+await mouseClickSel('#sched-month-menu [data-menu-month="2"]');
+await sleep(1300);
+const m2 = await mstate();
+log('mouse-month-pick', m2);
+check('実マウス: 月ボタンをクリックすると表示月が切り替わり、閉じてラベルに焦点が戻る',
+  m2.label === '2026年3月' && !m2.open && m2.activeId === 'sched-month-menu-btn', m2);
+
+// 実マウスで年 › を 2回 → メニューは開いたまま 2028年表示（消えない）
+await mouseClickSel('#sched-month-menu-btn');
+await sleep(400);
+await mouseClickSel('#sched-month-menu [data-menu-year="1"]');
+await sleep(350);
+await mouseClickSel('#sched-month-menu [data-menu-year="1"]');
+await sleep(350);
+const m3 = await mstate();
+log('mouse-year-next', m3);
+check('実マウス: 年 › を押すとメニューが消えず 2028年表示になる（表示月は 2026年3月）',
+  m3.open && m3.yearText === '2028' && m3.label === '2026年3月' && m3.items === 12, m3);
+
+// 実マウスで「今月へ」→ 2026年11月へ戻り閉じる
+await mouseClickSel('#sched-month-menu [data-menu-today]');
+await sleep(1300);
+const m4 = await mstate();
+log('mouse-today', m4);
+check('実マウス: 「今月へ」で 2026年11月へ戻りメニューが閉じる',
+  m4.label === '2026年11月' && !m4.open, m4);
+
+// モバイル 390px: メニューがラベル直下・枠内に収まる（スクロールで「今月へ」が見える）
+await page.setViewport({ width: 390, height: 800 });
+await sleep(500);
+await mouseClickSel('#sched-month-menu-btn');
+await sleep(450);
+const m5 = await mstate();
+const mobOverflow = await page.evaluate(() => Math.round(document.documentElement.scrollWidth - document.documentElement.clientWidth));
+log('mobile-menu', { ...m5, mobOverflow });
+check('モバイル390px: メニューが枠内（スクロール後）に収まり「今月へ」ボタンが視界に入る',
+  m5.open && m5.fitsInCont && m5.fitsInVw && mobOverflow === 0, { ...m5, mobOverflow });
+await page.screenshot({ path: `${OUT_DIR}/schedule-month-menu-mobile.png` });
+await page.setViewport({ width: 1280, height: 900 });
+await sleep(400);
+await mouseClickSel('#sched-month-menu-btn');
+await sleep(400);
+await page.screenshot({ path: `${OUT_DIR}/schedule-month-menu.png` });
+await mouseClickSel('#sched-month-menu [data-menu-today]');
+await sleep(1200);
 
 // 狭幅（ツールバーが折り返してもグリッド中央直上は保つ）
 await page.evaluate(() => document.getElementById('sched-mode-calendar').click());

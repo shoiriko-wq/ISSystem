@@ -10,7 +10,7 @@ import puppeteer from 'puppeteer-core';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_DIR = path.join(ROOT, 'scripts', 'output');
-const BASE = process.env.UI_BASE || 'http://127.0.0.1:3100';
+const BASE = process.env.UI_BASE || 'https://127.0.0.1:3443';
 const USER = process.env.UI_USER || 'T2026001';
 const PASS = process.env.UI_PASS || 'password123';
 const VIEWPORTS = [320, 500, 760, 1020, 1280];
@@ -24,8 +24,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 fs.mkdirSync(OUT_DIR, { recursive: true });
 const browser = await puppeteer.launch({
-  executablePath: findChrome(), headless: 'new',
-  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+  executablePath: findChrome(), headless: 'new', ignoreHTTPSErrors: true,
+  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--ignore-certificate-errors']
 });
 
 for (const vw of VIEWPORTS) {

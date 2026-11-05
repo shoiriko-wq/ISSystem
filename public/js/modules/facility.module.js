@@ -4,7 +4,7 @@
  */
 
 import { apiGet, apiPost, apiPut, apiDelete } from '../api.js';
-import { formatDate, escapeHTML, refreshLucideIcons, openModal, closeModal, showToast, userAvatarHtml, enableWheelHorizontalScroll } from '../ui-helpers.js';
+import { formatDate, escapeHTML, refreshLucideIcons, openModal, closeModal, showToast, userAvatarHtml } from '../ui-helpers.js';
 import { state } from '../state.js';
 
 /**
@@ -39,6 +39,18 @@ function isKyomuUser() {
   return u.is_kyomu === true || u.is_kyomu === 1 || role === 'KYOMU' || role === 'ADMIN';
 }
 
+/** API が返す施設行を UI キャッシュ形式へ正規化する (配列順 = 表示順) */
+function normalizeFacilityRow(f) {
+  return {
+    id: String(f.id),
+    name: f.name || '施設',
+    category: String(f.category || 'ROOM').toUpperCase(),
+    sort_order: f.sort_order === null || f.sort_order === undefined ? null : Number(f.sort_order),
+    reservation_count: Number(f.reservation_count) || 0,
+    reservation_total: Number(f.reservation_total) || 0,
+  };
+}
+
 /**
  * 施設マスターの取得（使用予約件数を含む）
  * @param {boolean} force 強制再取得
@@ -48,13 +60,7 @@ export async function loadFacilities(force = false) {
   try {
     const facRes = await apiGet('/facilities');
     const facList = (facRes && (facRes.facilities || facRes.data)) || (Array.isArray(facRes) ? facRes : []);
-    facilities = (facList || []).map((f) => ({
-      id: String(f.id),
-      name: f.name || '施設',
-      category: String(f.category || 'ROOM').toUpperCase(),
-      reservation_count: Number(f.reservation_count) || 0,
-      reservation_total: Number(f.reservation_total) || 0,
-    }));
+    facilities = (facList || []).map((f) => normalizeFacilityRow(f));
   } catch (err) {
     console.warn('[Facility] 施設マスター取得失敗:', err.message);
   }
@@ -142,32 +148,29 @@ export function initFacilityModule() {
   if (!container) return;
 
   container.innerHTML = `
-    <!-- ヘッダー・日付コントロール -->
-    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-surface-strong p-4 rounded-xl border border-divider">
-      <div>
-        <h2 class="text-lg font-bold text-main flex items-center gap-2">
-          <i data-lucide="building-2" class="w-5 h-5 text-success"></i> 特別教室・施設予約タイムライン
-        </h2>
-        <p class="text-xs text-muted">体育館・PC教室・会議室等の予約状況確認および新規取得を行えます。</p>
-      </div>
+    <!-- ヘッダー・日付コントロール（検索・日付ナビ・本日・新規予約・施設管理の高さを 2.4rem に統一） -->
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-surface-strong p-3 rounded-xl border border-divider">
+      <h2 class="text-base font-bold text-main flex items-center gap-2 shrink-0">
+        <i data-lucide="building-2" class="w-4 h-4 text-success"></i> 施設物品予約
+      </h2>
 
-      <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
-        <div class="flex items-center bg-surface rounded-lg p-1 border border-main text-xs">
-          <button id="facility-prev-day" class="p-1.5 hover-surface-strong rounded text-soft">
+      <div class="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
+        <div class="flex items-center bg-surface rounded-lg border border-main shrink-0" id="facility-day-group">
+          <button type="button" id="facility-prev-day" class="icon-btn icon-btn-fixed text-soft" aria-label="前日" title="前日">
             <i data-lucide="chevron-left" class="w-4 h-4"></i>
           </button>
-          <input type="date" id="facility-date-picker" class="bg-transparent text-main font-bold px-2 py-0.5 focus:outline-none text-xs" value="${selectedDate}">
-          <button id="facility-next-day" class="p-1.5 hover-surface-strong rounded text-soft">
+          <input type="date" id="facility-date-picker" class="day-date-input" value="${selectedDate}" aria-label="表示日">
+          <button type="button" id="facility-next-day" class="icon-btn icon-btn-fixed text-soft" aria-label="翌日" title="翌日">
             <i data-lucide="chevron-right" class="w-4 h-4"></i>
           </button>
         </div>
 
-        <button id="facility-btn-today" class="btn-secondary py-1.5 px-3 text-xs">本日</button>
-        <button id="facility-btn-create" class="btn-primary py-1.5 px-3 text-xs font-bold flex items-center gap-1.5">
+        <button type="button" id="facility-btn-today" class="btn-secondary shrink-0" title="本日">本日</button>
+        <button type="button" id="facility-btn-create" class="btn-primary font-bold flex items-center gap-1.5 shrink-0">
           <i data-lucide="plus" class="w-4 h-4"></i> 新規予約
         </button>
         ${isKyomuUser() ? `
-        <button id="facility-btn-manage" class="btn-secondary py-1.5 px-3 text-xs font-bold flex items-center gap-1.5" title="施設・備品の追加・改名・削除 (教務部のみ)">
+        <button type="button" id="facility-btn-manage" class="btn-secondary font-bold flex items-center gap-1.5 shrink-0" title="施設・備品の追加・改名・削除 (教務部のみ)">
           <i data-lucide="building-2" class="w-4 h-4"></i> 施設管理
         </button>` : ''}
       </div>
@@ -176,14 +179,14 @@ export function initFacilityModule() {
     <!-- タイムラインマトリクス表示エリア (時間帯バンド表示) -->
     <div class="card p-4 overflow-hidden mt-4">
       <div class="flex items-center justify-between mb-3 text-xs text-muted">
-        <span class="flex items-center gap-1.5"><i data-lucide="clock" class="w-3.5 h-3.5 text-success"></i> ${TIME_START_H}時〜${TIME_END_H}時の連続タイムライン (時限・10分刻み区切りなし)</span>
-        <span class="text-muted">バンドをクリック → 詳細 / キャンセル、空き帯域をクリック → 予約作成｜表にカーソルを置くとホイールで左右にスクロール</span>
+        <span class="text-muted">バンドをクリック → 詳細 / キャンセル、空き帯域をクリック → 予約作成｜表にカーソルを置くとホイールで上下にスクロール（時間ヘッダー行は固定）</span>
       </div>
       <!-- 表は4面の実枠で囲む（border + border-main は readability R2 が 2px 実枠として復元）-->
-      <div class="timeline-scroll-container overflow-x-auto border border-main rounded-xl">
+      <div class="timeline-scroll-container overflow-x-auto overflow-y-auto border border-main rounded-xl"
+           tabindex="0" role="region" aria-label="施設物品予約タイムライン（ホイール・矢印キーで上下にスクロール、時間ヘッダー行は固定）">
         <div class="min-w-[880px]">
-          <!-- 時間スケールヘッダー（グリッド線は本文行と共用し、ラベルは同一 % 位置に配置） -->
-          <div id="facility-time-header" class="flex h-10 items-stretch bg-surface-strong text-[10px] text-muted font-mono">
+          <!-- 時間スケールヘッダー（グリッド線は本文行と共用し、ラベルは同一 % 位置に配置。縦スクロールでも sticky で固定） -->
+          <div id="facility-time-header" class="flex h-10 items-stretch bg-surface-strong text-xs text-soft font-mono sticky top-0 z-20">
             <div class="w-40 shrink-0 border-r border-divider p-2 flex items-center font-bold text-soft font-sans">施設名称</div>
             <div class="flex-1 relative">
               ${gridLinesHtml()}
@@ -262,8 +265,7 @@ export function initFacilityModule() {
   `;
 
   bindEvents();
-  // 表にカーソルが乗っている間のホイールを横スクロールへ変換する（スクロールバーをホイールで動かす）
-  enableWheelHorizontalScroll(document.querySelector('.timeline-scroll-container'));
+  // ホイールは表の縦スクロールに使う（ヘッダー行は sticky で固定。横スクロールバーは Drag/バー操作で動かす）
   // マスタ管理モーダル (教務部) を初期生成し追加フォームを紐付ける
   ensureFacilityMasterDom();
   // 予約詳細モーダル (投稿者本人に変更・削除メニュー) を初期生成
@@ -793,6 +795,7 @@ function ensureFacilityMasterDom() {
           <div class="p-2 rounded-lg bg-info-soft border border-info-soft text-[11px] text-info-strong mb-3">
             施設・備品マスタは<b>教務部 (KYOMU)</b> のみ追加・改名・削除できます。改名は既存予約の表示へ即座に反映されます。
             <b>有効な予約が残る施設は削除できません</b>（先に予約をキャンセルしてください）。削除するとキャンセル済みの予約履歴も除去されます。
+            <b>▲▼ で並び順を変更</b>できます（この順がタイムラインの行順・予約フォームの施設一覧順になります）。
           </div>
           <form id="facility-master-add-form" class="flex flex-wrap items-end gap-2 mb-3">
             <div class="flex-1 min-w-[170px]">
@@ -828,11 +831,20 @@ function renderFacilityMasterList() {
     return;
   }
 
-  holder.innerHTML = facilities.map((f) => `
+  holder.innerHTML = facilities.map((f, i) => `
     <div class="facility-master-row flex flex-wrap items-center gap-2 p-2 rounded-lg border border-divider bg-surface-soft" data-facility-master-id="${f.id}">
+      <span class="flex items-center gap-0.5 shrink-0" title="タイムラインの第 ${i + 1} 行">
+        <span data-pos="${i + 1}" class="text-[11px] font-bold text-soft w-5 text-right">${i + 1}</span>
+        <button type="button" data-action="up" class="icon-btn icon-btn-fixed text-soft" aria-label="${escapeHTML(f.name)} を上へ移動" title="上へ移動${i > 0 ? ` (第 ${i} 行へ)` : ''}"${i === 0 ? ' disabled' : ''}>
+          <i data-lucide="arrow-up" class="w-3.5 h-3.5"></i>
+        </button>
+        <button type="button" data-action="down" class="icon-btn icon-btn-fixed text-soft" aria-label="${escapeHTML(f.name)} を下へ移動" title="下へ移動${i < facilities.length - 1 ? ` (第 ${i + 2} 行へ)` : ''}"${i === facilities.length - 1 ? ' disabled' : ''}>
+          <i data-lucide="arrow-down" class="w-3.5 h-3.5"></i>
+        </button>
+      </span>
       <input type="text" data-field="name" value="${escapeHTML(f.name)}" maxlength="${FACILITY_NAME_MAX}" class="w-44 bg-surface border border-main rounded p-1.5 text-xs focus:outline-none focus-border-accent text-main" required>
       <select data-field="category" class="w-48 bg-surface border border-main rounded p-1.5 text-xs focus:outline-none focus-border-accent text-main">${categoryOptionsHtml(f.category)}</select>
-      <span class="text-[10px] text-muted shrink-0" title="有効予約 ${f.reservation_count || 0} 件 / キャンセル履歴含む ${f.reservation_total || 0} 件">
+      <span data-badge class="text-[10px] text-muted shrink-0" title="有効予約 ${f.reservation_count || 0} 件 / キャンセル履歴含む ${f.reservation_total || 0} 件">
         <i data-lucide="calendar-check" class="w-3 h-3 inline"></i> 有効予約 ${f.reservation_count || 0} 件
       </span>
       <button type="button" data-action="save" class="btn-secondary py-1 px-2.5 text-[11px] rounded flex items-center gap-1">
@@ -894,7 +906,43 @@ function bindFacilityMasterRows(holder) {
         showToast(`削除に失敗しました: ${e.message}`, 'error');
       }
     });
+
+    // ▲▼ 行入れ替え (並び順はタイムライン行順・予約フォーム select 順へ反映される)
+    row.querySelector('[data-action=up]')?.addEventListener('click', () => moveFacilityRow(id, -1));
+    row.querySelector('[data-action=down]')?.addEventListener('click', () => moveFacilityRow(id, 1));
   });
+}
+
+/**
+ * 施設行を 1 つ上下へ移動し、新しい並び順をサーバーへ保存する
+ * @param {string} id 移動する施設 ID
+ * @param {number} dir -1 = 上へ / 1 = 下へ
+ */
+async function moveFacilityRow(id, dir) {
+  const idx = facilities.findIndex((f) => String(f.id) === String(id));
+  const target = idx + dir;
+  if (idx < 0 || target < 0 || target >= facilities.length) return;
+
+  const moved = facilities[idx];
+  const ids = facilities.map((f) => String(f.id));
+  [ids[idx], ids[target]] = [ids[target], ids[idx]];
+
+  try {
+    const res = await apiPut('/facilities/order', { ids });
+    const serverList = (res && (res.facilities || res.data)) || null;
+    if (Array.isArray(serverList) && serverList.length === facilities.length) {
+      facilities = serverList.map((f) => normalizeFacilityRow(f));
+    } else {
+      // サーバー一覧が返らない場合のみ楽観更新で整える
+      facilities.splice(target, 0, facilities.splice(idx, 1)[0]);
+    }
+    showToast(`「${moved.name}」を第 ${target + 1} 行目へ移動しました。`, 'success');
+    renderFacilitySelect();
+    renderMatrix();
+    renderFacilityMasterList();
+  } catch (e) {
+    showToast(`並び順の変更に失敗しました: ${e.message}`, 'error');
+  }
 }
 
 /** 施設追加フォーム (教務部 KYOMU) */

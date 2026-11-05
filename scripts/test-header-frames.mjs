@@ -21,7 +21,7 @@
  */
 import puppeteer from 'puppeteer-core';
 
-const BASE = process.env.UI_BASE || 'http://127.0.0.1:3000';
+const BASE = process.env.UI_BASE || 'https://127.0.0.1:3443';
 const USER = process.env.UI_USER || 'T2026001';
 const PASS = process.env.UI_PASS || 'password123';
 const CHROME = process.env.CHROME_PATH || '/usr/bin/google-chrome';
@@ -44,8 +44,8 @@ const THEMES = [
 
 const browser = await puppeteer.launch({
   executablePath: CHROME,
-  headless: 'new',
-  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+  headless: 'new', ignoreHTTPSErrors: true,
+  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--ignore-certificate-errors'],
 });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log(`  [page js error] ${e.message}`));

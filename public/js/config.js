@@ -3,13 +3,11 @@
  */
 
 // API & WebSocket Base URLs
-export const API_BASE_URL = window.location.origin.includes('localhost') 
-  ? 'http://localhost:3000/api' 
-  : '/api';
+// 安全通信 (HTTPS/WSS)：サーバーが同一オリジンで画面・API・WSS を提供するため相対/オリジンで解決する
+export const API_BASE_URL = '/api';
 
-export const WS_BASE_URL = window.location.origin.includes('localhost')
-  ? 'http://localhost:3000'
-  : window.location.origin;
+// https://... → socket.io は wss:// に、http://... → ws:// へ自動で対応する
+export const WS_BASE_URL = window.location.origin;
 
 // API Endpoints Mapping
 export const ENDPOINTS = {

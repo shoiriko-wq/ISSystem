@@ -371,7 +371,7 @@ export function startClockWidget() {
   const clockEl = document.getElementById('clock-widget');
   if (!clockEl) return;
 
-  // 表示形式: 2026/11/05 金 12:00 (JST基準)
+  // 表示形式: 2026-11-05(金)12:00:00 (JST基準)
   const fmt = new Intl.DateTimeFormat('ja-JP', {
     timeZone: 'Asia/Tokyo',
     year: 'numeric',
@@ -379,15 +379,15 @@ export function startClockWidget() {
     day: '2-digit',
     weekday: 'short',
     hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
+    minute: '2-digit', second: '2-digit',
+    hourCycle: 'h23',
   });
 
   const update = () => {
     const parts = {};
     for (const p of fmt.formatToParts(new Date())) parts[p.type] = p.value;
     const weekday = String(parts.weekday || '').replace(/[（）()]/g, '');
-    clockEl.textContent = `${parts.year}/${parts.month}/${parts.day} ${weekday} ${parts.hour}:${parts.minute}`;
+    clockEl.textContent = `${parts.year}-${parts.month}-${parts.day}(${weekday})${parts.hour}:${parts.minute}:${parts.second}`;
   };
 
   update();

@@ -229,6 +229,41 @@ export const facilityController = {
   },
 
   /**
+   * 施設・備品の表示順変更 (PUT /api/facilities/order)
+   * 教務部のみ。タイムライン・予約フォーム select の並び順へ反映される
+   */
+  async reorderFacilities(req, res) {
+    try {
+      const user = req.user;
+      const { facilities } = await facilityService.reorderFacilities(req.body, user);
+
+      const io = req.app ? req.app.get('io') : null;
+      if (io) {
+        io.emit('facility:master_changed', {
+          action: 'reorder',
+          facilities,
+          userId: user.id || user._id,
+          userName: user.name || '教務部'
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: '施設・備品の表示順を変更しました。',
+        count: facilities.length,
+        facilities,
+        data: facilities
+      });
+    } catch (err) {
+      const status = err.statusCode >= 400 && err.statusCode < 600 ? err.statusCode : 400;
+      return res.status(status).json({
+        success: false,
+        message: err.message || '施設・備品の表示順の変更に失敗しました。'
+      });
+    }
+  },
+
+  /**
    * 施設・備品の削除 (DELETE /api/facilities/:facilityId)
    * 有効な予約が残る場合は 409 で拒否される
    */

@@ -266,6 +266,7 @@ export const socketClient = {
 
       const actionText = data.action === 'create' ? '施設を新規追加'
         : data.action === 'update' ? '施設名・カテゴリを変更'
+        : data.action === 'reorder' ? '施設の並び順を変更'
         : '施設を削除';
 
       if (!isSelf) {

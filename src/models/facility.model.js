@@ -4,7 +4,7 @@
  */
 
 import { query } from '../../config/database.js';
-import { openDb, nowIso, todayJst } from '../utils/db.js';
+import { openDb, nowIso, todayJst, withTransaction } from '../utils/db.js';
 
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})/;
 
@@ -64,7 +64,9 @@ const isDateLike = (value) => typeof value === 'string' && DATE_RE.test(value.tr
 export const facilityModel = {
   async findAll() {
     try {
-      const res = await query(`SELECT id, name, category FROM resources ORDER BY category, name`);
+      const res = await query(
+        `SELECT id, name, category, sort_order FROM resources ORDER BY sort_order NULLS LAST, category, name`
+      );
       return (res.rows || []).map((r) => ({ ...r, facility_id: r.id, facility_name: r.name }));
     } catch (err) {
       console.warn('[FacilityModel] findAll failed:', err.message);
@@ -77,7 +79,7 @@ export const facilityModel = {
   },
 
   async findFacilityById(id) {
-    const res = await query('SELECT id, name, category FROM resources WHERE id = $1', [String(id)]);
+    const res = await query('SELECT id, name, category, sort_order FROM resources WHERE id = $1', [String(id)]);
     const row = res.rows[0];
     return row ? { ...row, facility_id: row.id, facility_name: row.name } : null;
   },
@@ -99,7 +101,9 @@ export const facilityModel = {
     const category = normalizeCategory(data.category);
 
     const res = await query(
-      `INSERT INTO resources (id, name, category) VALUES ($1, $2, $3) RETURNING id, name, category`,
+      `INSERT INTO resources (id, name, category, sort_order)
+       VALUES ($1, $2, $3, COALESCE((SELECT MAX(sort_order) FROM resources), -1) + 1)
+       RETURNING id, name, category, sort_order`,
       [facilityId, name, category]
     );
     const row = res.rows[0];
@@ -126,6 +130,21 @@ export const facilityModel = {
     const row = res.rows[0];
     if (!row) return null;
     return { ...row, facility_id: row.id, facility_name: row.name };
+  },
+
+  /**
+   * 施設・備品の表示順を変更 (教務部のみ service 側で検証)
+   * ids の並び順どおりに sort_order = 0..n-1 を采番する
+   * @param {string[]} ids
+   */
+  async reorderFacilities(ids = []) {
+    const orderedIds = ids.map((id) => String(id));
+    await withTransaction(async (client) => {
+      for (let i = 0; i < orderedIds.length; i += 1) {
+        await client.query('UPDATE resources SET sort_order = $1 WHERE id = $2', [i, orderedIds[i]]);
+      }
+    });
+    return this.findAll();
   },
 
   /**
@@ -562,6 +581,7 @@ export const listAvailable = (...args) => facilityModel.listAvailable(...args);
 export const listFacilities = (...args) => facilityModel.listFacilities(...args);
 export const createFacility = (...args) => facilityModel.createFacility(...args);
 export const updateFacility = (...args) => facilityModel.updateFacility(...args);
+export const reorderFacilities = (...args) => facilityModel.reorderFacilities(...args);
 export const deleteFacility = (...args) => facilityModel.deleteFacility(...args);
 export const countReservations = (...args) => facilityModel.countReservations(...args);
 export const getReservationsByDate = (...args) => facilityModel.getReservationsByDate(...args);

@@ -82,30 +82,31 @@ function errorCardHtml(message) {
     </div>`;
 }
 
-/** モジュール共通ヘッダー (アカウント状態 + メール設定ボタン + 再読み込み) */
+/** モジュール共通ヘッダー（掲示板・施設物品予約と同一デザインのツールバー：左にアイコン＋タイトル、右にコントロール。高さを 2.4rem に統一） */
 function headerHtml() {
   const meta = statusMeta(account?.status || 'UNVERIFIED');
   const configured = !!account && !account.needs_setup;
   const summary = configured
     ? `接続アカウント: <span class="font-bold text-main">${escapeHTML(account.email_address)}</span> / 最終受信確認: ${formatDateTime(account.last_checked_at || account.updated_at)}`
-    : 'はじめてご利用の方は、メールアドレスとパスワードを入力してください。パスワードはサーバー内で暗号化して保存されます。';
+    : '';
 
   return `
-    <div class="card p-4">
-      <div class="flex items-center justify-between gap-3 flex-wrap">
-        <div class="flex items-center gap-2.5">
-          <i data-lucide="mail" class="w-5 h-5 text-info"></i>
-          <h2 class="text-sm font-bold text-main">メール</h2>
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="text-[10px] px-2 py-0.5 rounded border border-divider ${meta.bg} ${meta.cls} font-bold">${meta.label}</span>
-          <button type="button" id="mail-btn-settings" class="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1.5">
-            <i data-lucide="settings" class="w-3.5 h-3.5"></i> メール設定
-          </button>
-          <button type="button" id="mail-btn-refresh" class="btn-secondary py-1.5 px-3 text-xs">再読み込み</button>
-        </div>
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-surface-strong p-3 rounded-xl border border-divider">
+      <div class="min-w-0">
+        <h2 class="text-base font-bold text-main flex items-center gap-2 shrink-0">
+          <i data-lucide="mail" class="w-4 h-4 text-info"></i> メール
+        </h2>
+        ${summary ? `<p id="mail-account-summary" class="text-[11px] text-muted mt-1 leading-relaxed">${summary}</p>` : ''}
       </div>
-      <p class="text-[11px] text-soft mt-2 leading-relaxed">${summary}</p>
+      <div class="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
+        <span class="text-[10px] px-2 py-0.5 rounded border border-divider ${meta.bg} ${meta.cls} font-bold shrink-0">${meta.label}</span>
+        <button type="button" id="mail-btn-settings" class="btn-secondary shrink-0 flex items-center gap-1.5" title="メール接続設定（メールアドレス・パスワード）">
+          <i data-lucide="settings" class="w-4 h-4"></i> メール設定
+        </button>
+        <button type="button" id="mail-btn-refresh" class="icon-btn icon-btn-fixed border border-divider bg-surface shrink-0" aria-label="受信箱を再読み込み" title="再読み込み">
+          <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+        </button>
+      </div>
     </div>`;
 }
 
@@ -274,6 +275,8 @@ export async function loadMailData() {
       const inbox = await apiGet('/mail/messages');
       messages = inbox.messages || [];
       if (!messages.some((m) => m.id === selectedId)) selectedId = messages[0]?.id || null;
+      // 設定済みなら受信箱を表示（ページ再読み込み後は showSetupForm が初期値 true のため必ず落とす）
+      showSetupForm = false;
     } else {
       messages = [];
       selectedId = null;

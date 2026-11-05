@@ -175,6 +175,36 @@ label {
   letter-spacing: 0.02em;
 }
 
+/* The invitation-code button is a saturated warning plate that keeps the default
+   dark ink: in light themes deepen the plate so white ink clears AA. */
+html[data-theme-mode='light'] #generate-invitation-btn,
+html[data-theme-mode='light'] .btn-primary.bg-warning,
+html[data-theme-mode='light'] .bg-warning.text-on-accent,
+html[data-theme-mode='light'] .bg-warning-strong.text-on-accent {
+  background-color: color-mix(in srgb, var(--warning) 45%, #000000) !important;
+  border-color: color-mix(in srgb, var(--warning) 45%, #000000) !important;
+  color: #ffffff !important;
+  text-shadow: var(--on-accent-shadow) !important;
+}
+
+/* Schedule category chips sit on the pastel fill, so the label takes the content
+   ink (the fill itself is already dark enough to keep the chip visible). */
+html[data-theme-mode="light"] .sched-cat-chip,
+html[data-theme-mode="light"] .sched-cat-chip .text-muted,
+html[data-theme-mode="light"] .sched-cat-chip .text-soft,
+html[data-theme-mode="light"] .sched-cat-chip .text-main,
+html[data-theme-mode="dark"] .sched-cat-chip,
+html[data-theme-mode="dark"] .sched-cat-chip .text-muted,
+html[data-theme-mode="dark"] .sched-cat-chip .text-soft,
+html[data-theme-mode="dark"] .sched-cat-chip .text-main {
+  color: var(--text-main) !important;
+}
+
+html[data-theme-mode="light"] .sched-cat-chip-unselected,
+html[data-theme-mode="dark"] .sched-cat-chip-unselected {
+  opacity: 0.85;
+}
+
 .btn-primary,
 .btn-secondary,
 .btn-danger {
@@ -736,8 +766,18 @@ html[data-theme-mode="light"] {
   --border-divider: color-mix(in srgb, var(--base-border-divider) 45%, #8794a5);
   --border-muted: color-mix(in srgb, var(--base-border-muted) 55%, #8794a5);
   --text-soft: color-mix(in srgb, var(--base-text-soft) 50%, #0b1424);
-  --text-muted: color-mix(in srgb, var(--base-text-muted) 45%, #0b1424);
+  --text-muted: color-mix(in srgb, var(--base-text-muted) 52%, #0b1424);
   --text-faint: color-mix(in srgb, var(--base-text-faint) 45%, #263241);
+  /* Colored status labels sit on white cards in light themes, so the ink gets a
+     small dark blend to clear 4.5:1 without losing the hue cue. */
+  --text-success: color-mix(in srgb, var(--success) 50%, #0b1424);
+  --text-success-strong: color-mix(in srgb, var(--success) 25%, #0b1424);
+  --text-warning: color-mix(in srgb, var(--warning) 40%, #0b1424);
+  --text-warning-strong: color-mix(in srgb, var(--warning) 24%, #0b1424);
+  --text-accent: color-mix(in srgb, var(--accent-primary) 44%, #0b1424);
+  --text-accent-strong: color-mix(in srgb, var(--accent-primary) 24%, #0b1424);
+  --text-danger: color-mix(in srgb, var(--danger) 45%, #0b1424);
+  --text-danger-strong: color-mix(in srgb, var(--danger) 24%, #0b1424);
   --chrome-text: color-mix(in srgb, var(--base-text-main) 82%, #050c16);
   --shadow-color: rgba(10, 18, 30, 0.16);
   --bg-card-hover: color-mix(in srgb, var(--accent-primary) 14%, #ffffff);
@@ -769,8 +809,16 @@ html[data-theme-mode="dark"] {
   --border-divider: color-mix(in srgb, var(--base-border-divider) 55%, #ffffff);
   --border-muted: color-mix(in srgb, var(--base-border-muted) 42%, #ffffff);
   --text-soft: color-mix(in srgb, var(--base-text-soft) 80%, #ffffff);
-  --text-muted: color-mix(in srgb, var(--base-text-muted) 55%, #ffffff);
-  --text-faint: color-mix(in srgb, var(--base-text-faint) 62%, #ffffff);
+  --text-muted: color-mix(in srgb, var(--base-text-muted) 62%, #ffffff);
+  --text-faint: color-mix(in srgb, var(--base-text-faint) 50%, #ffffff);
+  /* Unread badges and status chips sit on soft tinted plates in dark themes, so
+     the ink leans bright and the plate stays close to the card luminance. */
+  --danger-strong: color-mix(in srgb, var(--danger) 42%, #ffffff);
+  --danger-soft: color-mix(in srgb, var(--danger) 10%, var(--bg-card));
+  --success-strong: color-mix(in srgb, var(--success) 42%, #ffffff);
+  --success-soft: color-mix(in srgb, var(--success) 10%, var(--bg-card));
+  --warning-strong: color-mix(in srgb, var(--warning) 42%, #ffffff);
+  --warning-soft: color-mix(in srgb, var(--warning) 10%, var(--bg-card));
   --chrome-text: color-mix(in srgb, var(--base-text-main) 90%, #ffffff);
   --shadow-color: rgba(0, 0, 0, 0.62);
   --bg-card-hover: color-mix(in srgb, var(--accent-primary) 24%, var(--base-bg-surface));

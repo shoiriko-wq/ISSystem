@@ -49,8 +49,8 @@ function findChrome() {
 const { server, port } = await startServer();
 const browser = await puppeteer.launch({
   executablePath: findChrome(),
-  headless: 'new',
-  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+  headless: 'new', ignoreHTTPSErrors: true,
+  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--ignore-certificate-errors']
 });
 
 const page = await browser.newPage();

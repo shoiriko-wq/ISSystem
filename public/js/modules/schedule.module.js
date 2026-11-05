@@ -345,10 +345,14 @@ function renderFilterChips() {
  *  ‹ › はラベルに隣接させ、表示部（7列グリッド）の中心直上にまとめる
  *  （左右端に離すと的が遠く操作性が悪い、というユーザビリティ上の指摘に対応）。
  *  ‹ › は同じ固定 1.8rem ボタンなので中心対称が保たれ、年月の中心 x はグリッド中心と揃う。
- *  見出し + aria-live で月替えをスクリーンリーダーが読み上げる。 */
+ *  見出し + aria-live で月替えをスクリーンリーダーが読み上げる。
+ *  ★ メニュー（#sched-month-menu）はラベル直下に出るオーバーレイ（absolute）。
+ *    通常フローで開くと Grid が 230px ほど押し下げられてレイアウトがずれて-click が
+ *    グリッド側に落ち、外側クリック扱いでメニューが消えて機能が効かない。
+ *    → ラベル行（relative）の直下に重ねて出し、グリッドを動かさない。 */
 function monthNavHtml(y, m) {
   return `
-    <div class="flex justify-center mb-2">
+    <div class="relative flex justify-center mb-2">
       <div class="flex items-center gap-1.5">
         <button type="button" id="sched-prev-month" class="icon-btn icon-btn-fixed border border-main bg-surface text-soft"
                 aria-label="前月（1ヶ月前へ）" title="前月（1ヶ月前へ）"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
@@ -363,8 +367,9 @@ function monthNavHtml(y, m) {
         <button type="button" id="sched-next-month" class="icon-btn icon-btn-fixed border border-main bg-surface text-soft"
                 aria-label="次月（1ヶ月先へ）" title="次月（1ヶ月先へ）"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
       </div>
-    </div>
-    <div id="sched-month-menu" class="sched-month-menu hidden" role="dialog" aria-label="年月选择"></div>`;
+      <!-- オーバーレイ（ラベル行の直下、中央）。フローに影響しない -->
+      <div id="sched-month-menu" class="sched-month-menu hidden" role="dialog" aria-label="年月选择"></div>
+    </div>`;
 }
 // ★ 年月选择メニュー状態（ラベルクリックで開く。年 ‹ › と12ヶ月ボタン、键盘操作対応）
 let monthMenuOpen = false;
@@ -414,9 +419,18 @@ function openMonthMenu() {
   menuYear = currentMonth.getFullYear();
   renderMonthMenu();
   const menu = document.getElementById('sched-month-menu');
+  // メニューがスクロール枠（mobile では枠高が小さい）の下からはみ出す場合は、
+  // ラベルをvisibleに保ったまま枠内だけで最小スクロールして「今月へ」を見せる
+  const cont = menu.closest('.overflow-y-auto') || document.querySelector('main');
+  if (cont) {
+    const cr = cont.getBoundingClientRect();
+    const mr = menu.getBoundingClientRect();
+    if (mr.bottom > cr.bottom) cont.scrollTop += Math.round(mr.bottom - cr.bottom);
+    if (mr.top < cr.top) cont.scrollTop -= Math.round(cr.top - mr.top);
+  }
   const target = (menu && menu.querySelector(`[data-menu-month="${currentMonth.getMonth()}"]`))
     || (menu && menu.querySelector('[data-menu-month="0"]'));
-  if (target) target.focus();
+  if (target) target.focus({ preventScroll: true });
 }
 
 /** メニューを閉じる（returnFocus=true はラベルへフォーカスを戻す。Esc は必ず戻す） */
@@ -425,7 +439,7 @@ function closeMonthMenu(returnFocus = true) {
   renderMonthMenu();
   if (returnFocus) {
     const labelBtn = document.getElementById('sched-month-menu-btn');
-    if (labelBtn) labelBtn.focus();
+    if (labelBtn) labelBtn.focus({ preventScroll: true });
   }
 }
 
@@ -435,7 +449,7 @@ function gotoMonth(y, mIdx) {
   monthMenuOpen = false;
   loadSchedules().then(() => {
     const labelBtn = document.getElementById('sched-month-menu-btn');
-    if (labelBtn) labelBtn.focus();
+    if (labelBtn) labelBtn.focus({ preventScroll: true });
   });
 }
 
@@ -464,7 +478,7 @@ function bindMonthMenuEvents(area) {
       menuYear += dir;
       renderMonthMenu();
       const again = document.getElementById('sched-month-menu')?.querySelector(`[data-menu-year="${dir}"]`);
-      if (again) again.focus();
+      if (again) again.focus({ preventScroll: true });
       return;
     }
     const mBtn = e.target.closest('[data-menu-month]');
@@ -489,13 +503,16 @@ function bindMonthMenuEvents(area) {
   });
 
   // メニュー外クリックで閉じる（ビュー再描画でも 1 度だけ登録）
+  // ★ capture=true で判定する。メニュー自身の click（年 ‹› は innerHTML を作り替える）が
+  //   先に走ると e.target は DOM から切り離され、外側クリックと誤判定されてメニューが閉じる
+  //   → 年 ‹› が機能しない（ユーザ報告の「クリックすると消えて機能しない」）。
   if (!menuDocBound) {
     menuDocBound = true;
     document.addEventListener('click', (e) => {
       if (!monthMenuOpen) return;
       if (e.target.closest('#sched-month-menu') || e.target.closest('#sched-month-menu-btn')) return;
       closeMonthMenu(false);
-    });
+    }, true);
   }
 }
 

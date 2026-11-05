@@ -23,7 +23,7 @@ import puppeteer from 'puppeteer-core';
 import { io } from 'socket.io-client';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const BASE = process.env.UI_BASE || 'http://127.0.0.1:3000';
+const BASE = process.env.UI_BASE || 'https://127.0.0.1:3443';
 const USER = process.env.UI_USER || 'T2026001';
 const PASS = process.env.UI_PASS || 'password123';
 const CHROME = process.env.CHROME_PATH || '/usr/bin/google-chrome';
@@ -38,8 +38,8 @@ const check = (name, ok, detail = null) => {
 
 const browser = await puppeteer.launch({
   executablePath: CHROME,
-  headless: 'new',
-  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+  headless: 'new', ignoreHTTPSErrors: true,
+  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--ignore-certificate-errors'],
 });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log(`  [page js error] ${e.message}`));
@@ -71,6 +71,10 @@ const chatView = await page.evaluate(() => {
   const buttons = [...document.querySelectorAll('#chat-messages button, #chat-header-actions button')];
   const renotifyButtons = buttons.filter((b) => b.textContent.includes('再通知'));
   const headerBtns = [...document.querySelectorAll('#chat-header-actions button')].map((b) => b.textContent.replace(/\s+/g, ' ').trim());
+  const sidebar = document.querySelector('.chat-sidebar-channels');
+  const footer = sidebar ? sidebar.querySelector('div.border-t') : null;
+  const headerRow = sidebar ? sidebar.querySelector('div.border-b') : null;
+  const toggleHide = document.querySelector('#chat-btn-toggle-hide');
   return {
     renotifyCount: renotifyButtons.length,
     headerBtns,
@@ -79,6 +83,16 @@ const chatView = await page.evaluate(() => {
     hasMembersBtn: !!document.querySelector('#chat-btn-members'),
     renotifyGlobal: typeof window.handleRenotifyAll,
     unreadListGlobal: typeof window.showUnreadersList,
+    sidebarText: (sidebar?.textContent || '').replace(/\s+/g, ' ').trim(),
+    createInFooter: !!footer?.querySelector('#chat-btn-create-group'),
+    createInHeaderRow: !!headerRow?.querySelector('#chat-btn-create-group'),
+    hasToggleHide: !!toggleHide,
+    togglePressed: toggleHide ? toggleHide.getAttribute('aria-pressed') : null,
+    toggleText: (toggleHide?.textContent || '').trim(),
+    toggleHasEyeIcon: !!toggleHide?.querySelector('svg,i[data-lucide]'),
+    hideBtnsInFooter: !!footer?.querySelector('.chat-hide-btn'),
+    hideBtns: document.querySelectorAll('#chat-channels-list .chat-hide-btn').length,
+    toggleBadge: document.querySelectorAll('#chat-toggle-hidden .badge-count').length,
   };
 });
 log('chat-view', chatView);
@@ -87,9 +101,21 @@ check('チャット画面に「再通知」ボタンがない（ヘッダー・�
   { renotifyCount: chatView.renotifyCount, headerBtns: chatView.headerBtns });
 check('再通知ハンドラ handleRenotifyAll はグローバルに存在しない', chatView.renotifyGlobal === 'undefined',
   { renotifyGlobal: chatView.renotifyGlobal });
-check('「未読: N名」ボタン・既読にする・メンバー表示は残る',
-  chatView.hasUnreadListBtn && chatView.hasMarkReadBtn && chatView.hasMembersBtn,
-  { hasUnreadListBtn: chatView.hasUnreadListBtn, hasMarkReadBtn: chatView.hasMarkReadBtn, hasMembersBtn: chatView.hasMembersBtn });
+check('「未読: N名」とメンバー表示は残り、右ヘッダーの「既読にする」「リストから非表示」は撤廃',
+  chatView.hasUnreadListBtn && chatView.hasMembersBtn &&
+  chatView.headerBtns.length === 1 &&
+  !chatView.headerBtns.some((t) => t.includes('既読') || t.includes('非表示')) &&
+  chatView.hasMarkReadBtn === false,
+  { headerBtns: chatView.headerBtns, hasUnreadListBtn: chatView.hasUnreadListBtn, hasMembersBtn: chatView.hasMembersBtn, hasMarkReadBtn: chatView.hasMarkReadBtn });
+check('サイドバーの「接続状態: オンライン」の文字がない',
+  !chatView.sidebarText.includes('接続状態') && !chatView.sidebarText.includes('オンライン'),
+  { sidebarText: chatView.sidebarText });
+check('グループ作成ボタンはフッター（ヘッダー行にはない）で、目のマークの非表示トグルボタンがフッターにある',
+  chatView.createInFooter === true && chatView.createInHeaderRow === false &&
+  chatView.hasToggleHide === true && chatView.toggleText === '' &&
+  chatView.toggleHasEyeIcon === true && chatView.togglePressed === 'false',
+  { createInFooter: chatView.createInFooter, createInHeaderRow: chatView.createInHeaderRow, toggleText: chatView.toggleText, toggleHasEyeIcon: chatView.toggleHasEyeIcon, togglePressed: chatView.togglePressed });
+check('目のマークを押す前はグループ名の横に非表示ボタンが出ない', chatView.hideBtns === 0, { hideBtns: chatView.hideBtns });
 
 // 未読者一覧をクリック（confirm なし・API 呼び出しなし・トースト表示）
 const unreadClick = await page.evaluate(async () => {
@@ -108,6 +134,98 @@ check('未読者クリックは confirm を出さず、未読者一覧をトー�
   unreadClick.confirmCalls === 0 && unreadClick.toast !== null,
   { confirmCalls: unreadClick.confirmCalls, toast: unreadClick.toast });
 check('/chat/renotify へのリクエストは発生しない（API 廃止）', renotifyRequests.length === 0, renotifyRequests);
+
+// ===== サイドバーの目のマーク（非表示モード）を実マウスで検証 =====
+const centerOf = async (sel) => {
+  const el = await page.$(sel);
+  if (!el) return null;
+  const box = await el.boundingBox();
+  if (!box) return null;
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+};
+const mouseClickSel = async (sel) => {
+  const c = await centerOf(sel);
+  if (!c) return false;
+  await page.mouse.click(c.x, c.y);
+  return true;
+};
+// トーストがサイドバーフッターを覆うと実クリックがトーストに当たる（テスト中はトーストを消す）
+const clearToasts = () => page.evaluate(() => {
+  const c = document.getElementById('toast-container');
+  const footer = document.querySelector('.chat-sidebar-channels div.border-t');
+  const overlap = (() => {
+    if (!c || !footer) return null;
+    const a = c.getBoundingClientRect(), b = footer.getBoundingClientRect();
+    return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom);
+  })();
+  if (c) c.innerHTML = '';
+  return { overlap };
+});
+
+const eyeClicked = await mouseClickSel('#chat-btn-toggle-hide');
+await sleep(450);
+const afterEyeOn = await page.evaluate(() => ({
+  hideBtns: document.querySelectorAll('#chat-channels-list .chat-hide-btn').length,
+  pressed: document.querySelector('#chat-btn-toggle-hide')?.getAttribute('aria-pressed'),
+  visibleRows: [...document.querySelectorAll('#chat-channels-list [data-channel-id]')].length,
+  eyeInFooter: !!document.querySelector('.chat-sidebar-channels div.border-t .chat-hide-btn'),
+}));
+log('after-eye-on', afterEyeOn);
+check('目のマークを実クリックするとグループ名の横に目のマークの非表示ボタンが出る（フッターに非表示ボタンは出ない）',
+  eyeClicked === true && afterEyeOn.hideBtns > 0 && afterEyeOn.pressed === 'true' && afterEyeOn.eyeInFooter === false,
+  { eyeClicked, ...afterEyeOn });
+await page.screenshot({ path: 'scripts/output/chat-sidebar-eye-on.png' });
+
+const targetId = await page.evaluate(() => document.querySelector('#chat-channels-list .chat-hide-btn')?.getAttribute('data-hide-id') || null);
+const hideClicked = await mouseClickSel('#chat-channels-list .chat-hide-btn');
+await sleep(800);
+const afterHide = await page.evaluate((tid) => {
+  const rows = [...document.querySelectorAll('#chat-channels-list [data-channel-id]')];
+  const toasts = [...document.querySelectorAll('#toast-container div')].map((e) => e.textContent.replace(/\s+/g, ' ').trim()).filter((t) => t.includes('非表示'));
+  const toggle = document.querySelector('#chat-toggle-hidden');
+  return {
+    targetGone: tid !== null && !rows.some((r) => r.getAttribute('data-channel-id') === tid),
+    hiddenSection: !!toggle,
+    badgeInToggle: toggle ? toggle.querySelectorAll('.badge-count').length : -1,
+    toggleText: toggle ? toggle.textContent.replace(/\s+/g, ' ').trim() : null,
+    toast: toasts.length > 0 ? toasts[0].slice(0, 60) : null,
+    hideBtns: document.querySelectorAll('#chat-channels-list .chat-hide-btn').length,
+    pressed: document.querySelector('#chat-btn-toggle-hide')?.getAttribute('aria-pressed'),
+  };
+}, targetId);
+log('after-hide', afterHide);
+check('非表示ボタン（目のマーク）を実クリックするとそのグループだけ非表示になり、非表示セクションに件数バッジが出ない',
+  hideClicked === true && afterHide.targetGone && afterHide.hiddenSection && afterHide.badgeInToggle === 0 &&
+  afterHide.toast !== null && afterHide.toggleText === '非表示グループ',
+  { targetId, ...afterHide });
+
+const overlapInfo = await clearToasts();
+const eyeOffClicked = await mouseClickSel('#chat-btn-toggle-hide');
+await sleep(450);
+const afterEyeOff = await page.evaluate(() => ({
+  hideBtns: document.querySelectorAll('#chat-channels-list .chat-hide-btn').length,
+  pressed: document.querySelector('#chat-btn-toggle-hide')?.getAttribute('aria-pressed'),
+}));
+log('after-eye-off', { ...afterEyeOff, ...overlapInfo });
+check('目のマークを再度押すと非表示ボタンが消える（モード OFF）',
+  eyeOffClicked === true && afterEyeOff.hideBtns === 0 && afterEyeOff.pressed === 'false', { eyeOffClicked, ...afterEyeOff, ...overlapInfo });
+
+await clearToasts();
+const expandClicked = await mouseClickSel('#chat-toggle-hidden');
+await sleep(450);
+await clearToasts();
+const unhideClicked = await mouseClickSel('#chat-channels-list .chat-unhide-btn');
+await sleep(800);
+const restored = await page.evaluate((tid) => ({
+  targetBack: [...document.querySelectorAll('#chat-channels-list [data-channel-id]')].some((r) => r.getAttribute('data-channel-id') === tid),
+  sectionGone: document.getElementById('chat-toggle-hidden') === null,
+}), targetId);
+log('restored', restored);
+check('非表示セクションの目のマーク（再表示ボタン）で元に戻せる', expandClicked === true && unhideClicked === true &&
+  restored.targetBack === true && restored.sectionGone === true, { targetId, ...restored });
+
+await page.screenshot({ path: 'scripts/output/chat-sidebar-eye.png' });
+
 
 // ===== 未読・既読の整合性（投稿直後に「全員既読」化してしまうバグ）の検証 =====
 const chatSnapshot = () => page.evaluate(() => {

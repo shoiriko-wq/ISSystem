@@ -212,6 +212,53 @@ describe('Facility Reservation API (/api/facilities)', () => {
       expect(after.body.facilities.some((f) => f.id === target.id)).toBe(false);
     });
 
+    it('PUT /api/facilities/order - 並び順を変更でき、一覧へ反映されること', async () => {
+      const list = await request(app).get('/api/facilities').set('Authorization', bearer(token));
+      const ids = list.body.facilities.map((f) => String(f.id));
+      const swapped = [ids[1], ids[0], ...ids.slice(2)];
+
+      const put = await request(app)
+        .put('/api/facilities/order')
+        .set('Authorization', bearer(token))
+        .send({ ids: swapped });
+      expect(put.statusCode).toBe(200);
+      expect(put.body.success).toBe(true);
+      expect(put.body.facilities.map((f) => String(f.id))).toEqual(swapped);
+
+      const after = await request(app).get('/api/facilities').set('Authorization', bearer(token));
+      expect(after.body.facilities.map((f) => String(f.id))).toEqual(swapped);
+
+      // 基準順へ戻す (他テスト・実データを汚さない)
+      const restore = await request(app)
+        .put('/api/facilities/order')
+        .set('Authorization', bearer(token))
+        .send({ ids });
+      expect(restore.statusCode).toBe(200);
+    });
+
+    it('PUT /api/facilities/order - 未知 ID は 404・重複は 400・空は 400', async () => {
+      const list = await request(app).get('/api/facilities').set('Authorization', bearer(token));
+      const ids = list.body.facilities.map((f) => String(f.id));
+
+      const unknown = await request(app)
+        .put('/api/facilities/order')
+        .set('Authorization', bearer(token))
+        .send({ ids: [...ids.slice(1), 'fac_not_exist'] });
+      expect(unknown.statusCode).toBe(404);
+
+      const dup = await request(app)
+        .put('/api/facilities/order')
+        .set('Authorization', bearer(token))
+        .send({ ids: [...ids.slice(0, -1), ids[0]] });
+      expect(dup.statusCode).toBe(400);
+
+      const empty = await request(app)
+        .put('/api/facilities/order')
+        .set('Authorization', bearer(token))
+        .send({ ids: [] });
+      expect(empty.statusCode).toBe(400);
+    });
+
     it('DELETE /api/facilities/:id - 存在しない施設は 404', async () => {
       const res = await request(app)
         .delete('/api/facilities/does-not-exist')

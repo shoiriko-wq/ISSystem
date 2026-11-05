@@ -222,9 +222,9 @@ function renderSeatingGrid() {
         `);
       } else {
         htmlCells.push(`
-          <div class="seat-card p-3 rounded-xl border border-dashed border-divider bg-main hover-border-strong transition-all cursor-pointer flex items-center justify-center h-28 text-faint hover-text-soft text-xs font-mono" data-row="${r}" data-col="${c}">
+          <div class="seat-card p-3 rounded-xl border border-dashed border-divider bg-main hover-border-strong transition-all cursor-pointer flex items-center justify-center h-28 text-soft hover-text-main text-xs font-mono" data-row="${r}" data-col="${c}">
             <div class="text-center">
-              <i data-lucide="plus" class="w-4 h-4 mx-auto mb-1 opacity-50"></i>
+              <i data-lucide="plus" class="w-4 h-4 mx-auto mb-1 opacity-60"></i>
               <span>空席 (${r}-${c})</span>
             </div>
           </div>

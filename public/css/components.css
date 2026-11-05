@@ -160,6 +160,16 @@
   border-color: var(--border-color);
 }
 
+.icon-btn[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.icon-btn[disabled]:hover {
+  color: var(--text-muted);
+  background-color: transparent;
+  border-color: transparent;
+}
+
 /* 3. Form Inputs & Controls */
 .input-field {
   width: 100%;
@@ -440,6 +450,102 @@
   padding: 0;
 }
 
+/* ===== 職員掲示板ヘッダーのコントロール統一 =====
+   検索・日付ナビ（‹ 日付 ›）・本日・キー操作・新規投稿を 2.4rem 高・0.875rem 文字に揃え、
+   ヘッダー内で見た目の大きさがばらつかないようにする。 */
+#view-bulletin #bulletin-search-input {
+  height: 2.4rem;
+  padding: 0 0.6rem 0 2.1rem;
+  font-size: 1.02rem;
+}
+
+#view-bulletin #bulletin-day-group {
+  height: 2.4rem;
+}
+
+#view-bulletin #bulletin-day-prev,
+#view-bulletin #bulletin-day-next,
+#view-bulletin #bulletin-keys-toggle {
+  width: 2.4rem;
+  height: 2.4rem;
+  padding: 0;
+}
+
+#view-bulletin #bulletin-day-current.day-readout {
+  height: 2.4rem;
+  width: 5.4rem;
+  font-size: 1.02rem;
+}
+
+#view-bulletin #bulletin-btn-today,
+#view-bulletin #bulletin-btn-create {
+  height: 2.4rem;
+  padding: 0 0.8rem;
+  font-size: 1.02rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* ===== 施設物品予約ヘッダーのコントロール統一（掲示板と同じ 2.4rem 高・0.875rem 文字） ===== */
+#view-facility #facility-day-group {
+  height: 2.4rem;
+}
+
+#view-facility #facility-prev-day,
+#view-facility #facility-next-day {
+  width: 2.4rem;
+  height: 2.4rem;
+  padding: 0;
+}
+
+#view-facility .day-date-input {
+  height: 2.4rem;
+  width: 7rem;
+  padding: 0 0.3rem;
+  font-size: 1.02rem;
+  font-weight: 700;
+  background-color: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-main);
+}
+#view-facility .day-date-input::-webkit-calendar-picker-indicator {
+  font-size: 1.02rem;
+}
+
+#view-facility #facility-btn-today,
+#view-facility #facility-btn-create,
+#view-facility #facility-btn-manage {
+  height: 2.4rem;
+  padding: 0 0.8rem;
+  font-size: 0.875rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* ===== メールヘッダーのコントロール統一（職員掲示板・施設物品予約と同じ 2.4rem 高・0.875rem 文字） ===== */
+#view-mail #mail-btn-settings,
+#view-mail #mail-btn-refresh {
+  height: 2.4rem;
+}
+
+#view-mail #mail-btn-settings {
+  padding: 0 0.8rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* 再読み込みは内容に依存しない固定サイズの正方形（掲示板のキー操作ボタンと同じ寸法） */
+#view-mail #mail-btn-refresh {
+  width: 2.4rem;
+  padding: 0;
+}
+
 /* 8.x スケジュール月ナビ（‹ [年月] › をグリッド中心直上に隣接配置。ラベルは年月选择メニューを開く） */
 .sched-month-label-btn {
   font-weight: 700;
@@ -451,14 +557,20 @@
   border-color: var(--border-strong);
 }
 
-/* 年月选择メニュー（ラベル直下、中央に開く。年 ‹ › と12ヶ月ボタン） */
+/* 年月选择メニュー（ラベル直下、中央に開くオーバーレイ。年 ‹ › と12ヶ月ボタン）
+   ラベル行（relative flex）の直下に重ねて出す。フローに出すと Grid が押し下げられ、
+   ユーザのクリックがグリッド側に落ちて外側クリック扱いで閉じ、機能が効かない。 */
 .sched-month-menu {
-  width: min(320px, 100%);
-  margin: 0.45rem auto 0.75rem;
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(320px, 92vw);
+  z-index: 60;
   padding: 0.6rem 0.7rem;
-  border: 1px solid var(--border-main);
+  border: var(--border-width) solid var(--border-strong);
   border-radius: 0.75rem;
-  background-color: var(--bg-card);
+  background-color: var(--bg-surface-strong);
   box-shadow: 0 10px 20px -6px var(--shadow-color);
 }
 .sched-month-item {
@@ -490,19 +602,19 @@
 
 .mini-cal-wd {
   text-align: center;
-  font-size: 0.62rem;
+  font-size: 0.78rem;
   color: var(--text-muted);
   padding: 0.15rem 0;
 }
 
 .mini-cal-day {
   position: relative;
-  min-height: 1.9rem;
+  min-height: 2.3rem;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 0.4rem;
-  font-size: 0.72rem;
+  font-size: 0.875rem;
   color: var(--text-soft);
   border: 1px solid transparent;
   background-color: transparent;
@@ -554,7 +666,7 @@
   border: 1px solid var(--border-color);
   background-color: var(--bg-surface-strong);
   color: var(--text-soft);
-  font-size: 0.66rem;
+  font-size: 0.78rem;
   font-family: ui-monospace, monospace;
 }
 
@@ -582,9 +694,9 @@
   align-items: center;
   gap: 0.35rem;
   width: 100%;
-  min-height: 2.1rem;
-  padding: 0.5rem 0.45rem 0.5rem 1.25rem;
-  border-bottom: 1px solid var(--border-divider);
+  min-height: 2.25rem;
+  padding: 0.35rem 0.45rem 0.35rem 1.25rem;
+  border-bottom: var(--border-width) solid var(--border-divider);
   border-radius: 0.5rem;
   background-color: var(--bg-card);
   cursor: pointer;
@@ -601,14 +713,15 @@
   box-shadow: inset 3px 0 0 var(--accent-primary);
 }
 
-/* タイトルは常に1行。長いタイトルは右端バッチの下に潜って省略表示される（右端の残余はシグニファイア分だけ） */
+/* タイトルは常に1行。長いタイトルは右端バッチの下に潜って省略表示される（右端の残余はシグニファイア分だけ）。
+   行高 40px 以内に収めるため 0.95rem（readability の 0.9rem 下限は維持）で 1 行表示。 */
 .bulletin-row-title {
   flex: 1 1 0%;
   min-width: 0;
   margin: 0;
-  font-size: 0.78rem;
+  font-size: 0.95rem;
   font-weight: 600;
-  line-height: 1.25;
+  line-height: 1.4;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -634,7 +747,7 @@
   transform: translateY(-50%);
   padding: 0.15rem 0.4rem;
   border-radius: 9999px;
-  font-size: 0.75rem;
+  font-size: 0.875rem;
   font-weight: 700;
   line-height: 1.3;
   color: var(--danger-strong);
@@ -651,7 +764,7 @@
   gap: 0.5rem;
   margin-bottom: 0.55rem;
   padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--border-divider);
+  border-bottom: var(--border-width) solid var(--border-divider);
 }
 .pane-title {
   flex: 1 1 auto;
@@ -671,6 +784,26 @@
 }
 .pane-badges > button,
 .pane-badges > a { flex-shrink: 0; }
+
+/* 右ペインタイトル行の投稿者（アバター＋投稿者名。タイトルが flex:1 で残りを埋めるため右寄せになる。
+   狭いペインでは投稿者名が ellipsis で縮み、ヘッダー折返し（flex-wrap）で「詳細」ボタンが下へ回る） */
+.pane-author {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 1;
+  min-width: 0;
+  margin-left: auto;
+}
+.pane-author-name {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-soft);
+  white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* 右ペイン全文コンテナ（flex column: ヘッダー・本文・添付・コメントが縦に並ぶ。
    pre-wrap は本文 pre 要素側に効かせる。コンテナ側で pre-wrap を効かせると
@@ -719,25 +852,143 @@
   border-color: var(--accent-border);
 }
 
+.dash-news-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
 .dash-news-title {
-  margin: 0 0 0.35rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
   font-size: 1rem;
   font-weight: 700;
   line-height: 1.4;
   color: var(--text-main);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .dash-news-author {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  margin-bottom: 0.4rem;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .dash-news-author-name {
   font-size: 0.875rem;
   font-weight: 600;
   color: var(--text-soft);
+}
+
+/* ===== ダッシュボード「本日の施設物品予約」 =====
+   ラベル・メタ 0.875rem、件名 1rem に統一。行は button でキーボード操作でき、
+   クリック/Enter で施設タブ（本日）のタイムラインを開く。 */
+.dash-facility-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.dash-facility-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-radius: 0.5rem;
+  background-color: var(--bg-surface-strong);
+  border: 1px solid var(--border-divider);
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+
+.dash-facility-item:hover,
+.dash-facility-item:focus-visible {
+  border-color: var(--accent-border);
+}
+
+.dash-facility-item:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.dash-facility-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+
+.dash-facility-fac {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.35rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  background-color: var(--bg-success-inset);
+  border: 1px solid var(--border-success-soft);
+  color: var(--text-success);
+}
+
+.dash-facility-time {
+  flex: 0 0 auto;
+  font-size: 0.875rem;
+  color: var(--text-soft);
+}
+
+.dash-facility-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.dash-facility-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-main);
+}
+
+.dash-facility-author {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+.dash-facility-author-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-soft);
+}
+
+.dash-facility-empty {
+  padding: 0.35rem 0.2rem;
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.dash-facility-count {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-muted);
 }
 
 .dash-news-body {
@@ -823,13 +1074,13 @@
 .bulletin-comments {
   margin-top: 0.9rem;
   padding-top: 0.6rem;
-  border-top: 1px solid var(--border-divider);
+  border-top: var(--border-width) solid var(--border-divider);
 }
 .comment-heading {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  font-size: 11px;
+  font-size: 0.875rem;
   font-weight: 700;
   color: var(--text-soft);
   margin-bottom: 0.4rem;
@@ -844,7 +1095,7 @@
 }
 .comment-item {
   background-color: var(--bg-surface-strong);
-  border: 1px solid var(--border-divider);
+  border: var(--border-width) solid var(--border-divider);
   border-radius: 0.5rem;
   padding: 0.45rem 0.6rem;
 }
@@ -852,7 +1103,7 @@
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  font-size: 10px;
+  font-size: 0.875rem;
   color: var(--text-muted);
   margin-bottom: 0.2rem;
 }
@@ -860,14 +1111,14 @@
 .comment-time { font-family: var(--font-mono, monospace); }
 .comment-body {
   margin: 0;
-  font-size: 11px;
-  line-height: 1.55;
+  font-size: 1rem;
+  line-height: 1.6;
   color: var(--text-main);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
-.comment-empty { font-size: 11px; color: var(--text-faint); margin: 0 0 0.4rem; }
+.comment-empty { font-size: 0.875rem; color: var(--text-faint); margin: 0 0 0.4rem; }
 .comment-form {
   display: flex;
   flex-direction: column;
@@ -895,7 +1146,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.4rem;
-  font-size: 11px;
+  font-size: 0.875rem;
   font-weight: 700;
   color: var(--text-soft);
   margin-bottom: 0.35rem;
@@ -934,10 +1185,10 @@
   border-style: solid;
 }
 
-/* 非選択: 破線枠・薄色・通常字（選択中と明確に区別） */
+/* 非選択: 破線枠・薄色・通常字（選択中と明確に区別、文字コントラストは 4.5:1 を維持） */
 .sched-cat-chip-unselected {
   border-style: dashed;
-  opacity: 0.62;
+  opacity: 0.82;
   font-weight: 500;
 }
 

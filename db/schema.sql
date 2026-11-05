@@ -191,8 +191,11 @@ CREATE INDEX IF NOT EXISTS idx_seating_status ON seating_status(current_status);
 CREATE TABLE IF NOT EXISTS resources (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  category TEXT NOT NULL DEFAULT 'ROOM'
+  category TEXT NOT NULL DEFAULT 'ROOM',
+  sort_order INTEGER
 );
+-- 表示順 (教務部がマスタ管理で ▲▼ 入れ替え。sort_order 未設定 (NULL) は category, name 順で末尾扱い)
+ALTER TABLE resources ADD COLUMN IF NOT EXISTS sort_order INTEGER;
 
 -- 8. 施設・備品予約記録 (reservations)
 CREATE TABLE IF NOT EXISTS reservations (
