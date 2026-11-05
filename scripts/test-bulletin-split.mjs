@@ -3,7 +3,8 @@
  *
  * 検証項目:
  *  1. 日付選択で左列にタイトルが出右ペインに全文が出る（選択行 = 右ペインの表示）
- *  2. ↑/↓ で選択行が移動し、右ペイン全文が連動。選択行の未読バッジが消える
+ *  2. ↑/↓ で選択枠(選択行)だけが移動し、左列全体は動かない。右ペイン全文は連動してフェードイン程度
+ *     （位置移動・フラッシュなし）。選択行の未読バッジが消える
  *  3. Enter で右ペインへフォーカス
  *  4. ←/→ と ‹ › ボタンは前日/翌日（1日分）ザッピング
  *  5. 中心日は ‹ › の間の固定幅ボタン（‹ [日付] › が同一グループで隣接）。日付クリックでミニカレンダーが
@@ -63,8 +64,23 @@ async function setup(args = []) {
   await sleep(1000);
   await page.evaluate(() => document.querySelector('a[data-tab="bulletin"]').click());
   await sleep(900);
+  page.__token = await page.evaluate(() => localStorage.getItem('is_system_jwt_token_v251'));
+  page.__userId = await page.evaluate(() => (JSON.parse(localStorage.getItem('is_system_user_info_v251') || 'null') || {}).id);
   return { browser, page };
 }
+
+/** ページ内で API を叩く（そのページのログイントークンを使う。投稿作成・削除検証用） */
+const apiFetch = (page, method, path, body) => page.evaluate(async (tok, m, p, b) => {
+  const res = await fetch(`/api${p}`, {
+    method: m,
+    headers: { 'Content-Type': 'application/json', Authorization: tok ? `Bearer ${tok}` : '' },
+    body: b ? JSON.stringify(b) : undefined,
+  });
+  const text = await res.text();
+  let json = null;
+  try { json = text ? JSON.parse(text) : null; } catch (e) { /* 非 JSON 応答 */ }
+  return { status: res.status, json };
+}, page.__token, method, path, body);
 
 /** 左列・右ペイン・日付チップの状態スナップショット */
 const snapshot = (page) => page.evaluate(() => {
@@ -91,6 +107,10 @@ const snapshot = (page) => page.evaluate(() => {
     paneOverflowX: body ? body.scrollWidth - body.clientWidth : null,
     paneAnimations: pane.getAnimations().length,
     listAnimations: listEl.getAnimations().length,
+    activeRowAnimations: active
+      ? document.getAnimations().filter((a) => a.effect && a.effect.target === active &&
+          a.effect.getKeyframes().some((f) => /translateY\(-?\d+(?:\.\d+)?px\)/.test(f.transform || ''))).length
+      : 0,
     paneFocused: document.activeElement === pane,
     centerDate: readout ? readout.dataset.day : null,
     readoutW: readout ? Math.round(readout.getBoundingClientRect().width) : null,
@@ -110,6 +130,8 @@ const snapshot = (page) => page.evaluate(() => {
       .slice(0, 6)
       .map((el) => `${el.tagName}.${(el.className || '').toString().slice(0, 42)} w=${Math.round(el.getBoundingClientRect().width)}`),
     footerButtons: [...pane.querySelectorAll('button')].map((b) => b.textContent.trim()),
+    rowDeleteButtons: rows.filter((r) => r.querySelector('button')).length,
+    paneDeleteButtons: [...pane.querySelectorAll('button')].filter((b) => (b.textContent || '').includes('削除')).length,
     paneTab: pane.getAttribute('tabindex'),
     paneAriaLive: pane.getAttribute('aria-live'),
     paneHeaderText: (() => {
@@ -212,6 +234,10 @@ check('右ペインヘッダーに投稿日時・掲示期間の表記がない'
   !/\d{4}\/\d{2}\/\d{2}/.test(snap1.paneHeaderText || '') && !(snap1.paneHeaderText || '').includes('掲示期間'),
   { paneHeaderText: snap1.paneHeaderText });
 check('全文開きボタンは「詳細」にリネーム（右ペインヘッダーの右端）', (snap1.detailBtnText || '').includes('詳細'), { detailBtnText: snap1.detailBtnText });
+check('左列タイトル行に削除ボタンがない（削除は詳細モーダル内のみ）',
+  snap1.rows > 0 && snap1.rowDeleteButtons === 0, { rowDeleteButtons: snap1.rowDeleteButtons, rows: snap1.rows });
+check('右ペイン（ヘッダー・本文）に削除ボタンがない',
+  snap1.paneDeleteButtons === 0, { paneDeleteButtons: snap1.paneDeleteButtons, footerButtons: snap1.footerButtons });
 
 // 長いタイトルは1行のまま未読バッチの下に潜って省略される（合成行で寸法を検証）
 const longRow = await page.evaluate(() => {
@@ -269,19 +295,45 @@ const rowIds = await page.evaluate(() =>
   [...document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]')].map((r) => r.getAttribute('data-bulletin-toggle')));
 await page.evaluate(() => document.querySelector('#bulletin-list-container [data-bulletin-toggle]').focus());
 await page.keyboard.press('ArrowDown');
-await sleep(120);
+await sleep(5);   // press 直後：右ペインのフェード(150ms)が生きていないと計測できない
 const snapDown = await snapshot(page);
 log('after-ArrowDown', snapDown);
 log('rowIds', rowIds);
 check('↑/↓ で選択行が移動し右ペイン全文が連動', snapDown.activeIdx === 1 && snapDown.paneTitle === snapDown.activeTitle, { activeIdx: snapDown.activeIdx, paneTitle: snapDown.paneTitle });
-check('選択切替で左列・右ペインが 1 回ずつスライド（WAAPI）', snapDown.listAnimations === 1 && snapDown.paneAnimations === 1, { listAnimations: snapDown.listAnimations, paneAnimations: snapDown.paneAnimations });
-check('選択行の未読バッジが消える', snap1.unread - snapDown.unread === 1, { before: snap1.unread, after: snapDown.unread });
+check('選択切替は左列全体を動かさず右ペインはフェード1回',
+  snapDown.listAnimations === 0 && snapDown.paneAnimations === 1,
+  { listAnimations: snapDown.listAnimations, paneAnimations: snapDown.paneAnimations });
 
+// 選択枠の移動は translateY のスライドだけ（上移動なら下から滑り込み、最終位置で0・左列全体は動かない）
 await page.keyboard.press('ArrowUp');
-await sleep(120);
+await sleep(5);
 const snapUp = await snapshot(page);
+const rowAnim = await page.evaluate(() => {
+  const active = document.querySelector('#bulletin-list-container .bulletin-title-row.active');
+  const anims = document.getAnimations().filter((a) =>
+    a.effect && a.effect.target === active &&
+    a.effect.getKeyframes().some((f) => /translateY\(-?\d+(?:\.\d+)?px\)/.test(f.transform || '')));
+  if (!anims.length) return null;
+  const tx = anims[0].effect.getKeyframes().map((t) => {
+    const m = /translateY\((-?\d+(?:\.\d+)?)px\)/.exec(t.transform);
+    return m ? parseFloat(m[1]) : 0;
+  });
+  return {
+    start: tx[0],
+    end: tx[tx.length - 1],
+    listElTransform: (() => {
+      const listAnims = document.getElementById('bulletin-list-container').getAnimations()
+        .filter((a) => !(window.CSSTransition && a instanceof window.CSSTransition));
+      return listAnims.length === 0;
+    })(),
+  };
+});
 log('after-ArrowUp', snapUp);
+log('active-row-anim', rowAnim);
 check('↑ で先頭行へ戻り右ペインも連動', snapUp.activeIdx === 0 && snapUp.paneTitle === snapUp.activeTitle, { activeIdx: snapUp.activeIdx, paneTitle: snapUp.paneTitle });
+check('選択枠は translateY スライドで移動（上移動は下から滑り込み、終点0・左列全体は動かない）',
+  rowAnim && rowAnim.start > 0 && rowAnim.end === 0 && rowAnim.listElTransform === true, rowAnim);
+check('選択行の未読バッジが消える', snap1.unread - snapDown.unread === 1, { before: snap1.unread, after: snapDown.unread });
 
 // Enter → 右ペインへフォーカス
 await page.keyboard.press('Enter');
@@ -396,7 +448,11 @@ check('‹ › は同じ行に隣接して並び、連打できる', posDesktop.
   { prevX: posDesktop.prevX, prevY: posDesktop.prevY, nextX: posDesktop.nextX, nextY: posDesktop.nextY });
 
 // 右ペインヘッダーの「詳細」ボタン → 詳細モーダル（読者向けの情報を全部載せる）
-const detailModal = await page.evaluate(() => {
+// 直前の long zapping で中心日が動いているため本日へ戻し、右ペインに選択記事がある状態で開く
+await page.evaluate(() => document.getElementById('bulletin-btn-today').click());
+await sleep(500);
+
+const detailModal = await page.evaluate(async (myId) => {
   const b = document.querySelector('#bulletin-detail-pane [data-bulletin-detail]');
   if (!b) return { open: 'no-button' };
   b.click();
@@ -405,7 +461,15 @@ const detailModal = await page.evaluate(() => {
   const content = document.getElementById('detail-bulletin-content');
   const attach = document.getElementById('detail-bulletin-attachments');
   const title = document.getElementById('detail-bulletin-title');
+  const footer = document.getElementById('detail-bulletin-actions');
   const metaText = (meta ? meta.textContent : '').replace(/\s+/g, ' ');
+  const day = document.getElementById('bulletin-day-current').dataset.day;
+  const tok = localStorage.getItem('is_system_jwt_token_v251');
+  const res = await fetch(`/api/bulletins?postedDay=${day}`, { headers: { Authorization: `Bearer ${tok}` } });
+  const json = await res.json();
+  const items = json.bulletins || json.data || [];
+  const openTitle = (title ? title.textContent : '').trim();
+  const item = items.find((i) => String(i.title).trim() === openTitle) || null;
   return {
     open: !!(m && !m.classList.contains('hidden') && m.getAttribute('aria-hidden') === 'false'),
     modalTitle: title ? title.textContent.trim() : null,
@@ -416,8 +480,11 @@ const detailModal = await page.evaluate(() => {
     hasAuthor: metaText.includes('投稿者'),
     contentLen: content ? content.textContent.trim().length : 0,
     attachText: attach ? attach.textContent.replace(/\s+/g, ' ').trim().slice(0, 40) : null,
+    isAuthor: item === null ? null : String(item.authorId) === String(myId),
+    hasDelete: !!footer.querySelector('#btn-detail-delete'),
+    footerButtons: [...footer.querySelectorAll('button')].map((x) => x.textContent.replace(/\s+/g, ' ').trim()),
   };
-});
+}, page.__userId);
 log('detail-modal', detailModal);
 check('「詳細」ボタンで詳細モーダルが開く（aria-hidden=false）', detailModal.open === true, detailModal.open);
 check('詳細モーダルに投稿日時・掲示期間・投稿者・本文・添付の情報が揃う',
@@ -425,6 +492,9 @@ check('詳細モーダルに投稿日時・掲示期間・投稿者・本文・�
     && detailModal.contentLen > 0 && (detailModal.attachText || '').includes('添付'),
   { hasDate: detailModal.hasDate, hasTime: detailModal.hasTime, hasPeriod: detailModal.hasPeriod,
     hasAuthor: detailModal.hasAuthor, contentLen: detailModal.contentLen, attachText: detailModal.attachText });
+check('他人の投稿の詳細モーダルに「削除」が出ない（フッターは 補足・コメント/閉じる の2つ）',
+  detailModal.isAuthor === false && detailModal.hasDelete === false && detailModal.footerButtons.length === 2,
+  { isAuthor: detailModal.isAuthor, hasDelete: detailModal.hasDelete, footerButtons: detailModal.footerButtons });
 
 /* ESC で閉じ、aria-hidden が同期すること（閉じた内容を支援技術に渡さない） */
 await page.keyboard.press('Escape');
@@ -435,6 +505,88 @@ const modalClosed = await page.evaluate(() => {
 });
 log('modal-closed-via-ESC', modalClosed);
 check('ESC で閉じ aria-hidden も同期', modalClosed === true, modalClosed);
+
+// 自分の投稿（投稿者 = ログインユーザー）の詳細モーダルにだけ「削除」が出る
+const authorModal = await page.evaluate(async (myId) => {
+  const day = document.getElementById('bulletin-day-current').dataset.day;
+  const tok = localStorage.getItem('is_system_jwt_token_v251');
+  const res = await fetch(`/api/bulletins?postedDay=${day}`, { headers: { Authorization: `Bearer ${tok}` } });
+  const json = await res.json();
+  const items = json.bulletins || json.data || [];
+  const rows = [...document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]')];
+  const rowFor = (t) => rows.find((r) => r.querySelector('.bulletin-row-title').textContent.trim() === String(t).trim());
+  const mine = items.map((i) => ({ i, r: rowFor(i.title) })).filter((x) => String(x.i.authorId) === String(myId) && x.r);
+  if (!mine.length) return { found: false };
+  mine[0].r.click();
+  const b = document.querySelector('#bulletin-detail-pane [data-bulletin-detail]');
+  if (!b) return { found: true, open: false };
+  b.click();
+  const footer = document.getElementById('detail-bulletin-actions');
+  const del = footer.querySelector('#btn-detail-delete');
+  return {
+    found: true,
+    open: !document.getElementById('bulletin-detail-modal').classList.contains('hidden'),
+    mineTitle: String(mine[0].i.title).trim().slice(0, 24),
+    hasDelete: !!del,
+    deleteLabel: del ? del.textContent.replace(/\s+/g, ' ').trim() : null,
+    rowDeleteButtons: rows.filter((r) => r.querySelector('button')).length,
+  };
+}, page.__userId);
+await sleep(300);
+log('author-modal', authorModal);
+check('自分の投稿の詳細モーダルにだけ「削除」が出る（モーダル内・投稿者のみ）',
+  authorModal.found === true && authorModal.open === true && authorModal.hasDelete === true
+    && (authorModal.deleteLabel || '').includes('削除') && authorModal.rowDeleteButtons === 0,
+  authorModal);
+
+/* 詳細モーダルの「削除」で自分の投稿が消える E2E（confirm は受理。作った投稿は削除して元へ戻す） */
+const created = await apiFetch(page, 'POST', '/bulletins', {
+  title: 'UI検証削除用掲示',
+  content: '削除ボタン検証用に作成した掲示（検証後に削除される）。',
+  author_id: page.__userId,
+});
+const createdId = (created.json && created.json.data && created.json.data.id)
+  || (created.json && created.json.bulletin && created.json.bulletin.id) || null;
+await page.evaluate(() => document.getElementById('bulletin-btn-today').click());
+await sleep(650);
+const createdRow = await page.evaluate((t) => {
+  const rows = [...document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]')];
+  const row = rows.find((r) => r.querySelector('.bulletin-row-title').textContent.trim() === t);
+  if (row) row.click();
+  return { rowFound: !!row, rows: rows.length, paneTitle: document.querySelector('#bulletin-detail-pane h3')?.textContent.trim() };
+}, 'UI検証削除用掲示');
+log('created-post', { createdId, rowFound: createdRow.rowFound, rows: createdRow.rows });
+check('自分の新投稿が左列に並ぶ（削除 E2E の準備）', Boolean(createdId) && createdRow.rowFound === true,
+  { createdId, rowFound: createdRow.rowFound, rows: createdRow.rows });
+
+page.on('dialog', (d) => d.accept());   // window.confirm を受理する
+const deleteUi = await page.evaluate(() => {
+  const b = document.querySelector('#bulletin-detail-pane [data-bulletin-detail]');
+  if (!b) return { modal: false, hasDelete: false };
+  b.click();
+  const del = document.getElementById('btn-detail-delete');
+  return { modal: !document.getElementById('bulletin-detail-modal').classList.contains('hidden'), hasDelete: !!del };
+});
+await page.evaluate(() => { const d = document.getElementById('btn-detail-delete'); if (d) d.click(); });
+await sleep(900);
+const afterDelete = await snapshot(page);
+const toasts = await page.evaluate(() => [...document.querySelectorAll('#toast-container .toast')]
+  .map((t) => t.textContent.replace(/\s+/g, ' ').trim()));
+const apiGone = await apiFetch(page, 'GET', `/bulletins/${createdId}`);
+log('after-delete', { modal: deleteUi.modal, hasDelete: deleteUi.hasDelete, rows: afterDelete.rows, toasts, apiStatus: apiGone.status });
+check('詳細モーダルの「削除」で自分の掲示が消える（トースト・行数・API が全て消えた状態）',
+  deleteUi.modal === true && deleteUi.hasDelete === true && createdRow.rows - afterDelete.rows === 1
+    && toasts.some((t) => t.includes('削除しました')) && apiGone.status === 404,
+  { hasDelete: deleteUi.hasDelete, rowsBefore: createdRow.rows, rowsAfter: afterDelete.rows,
+    toasts, apiStatus: apiGone.status });
+
+// サーバー側でも投稿者以外は削除できない（UI は出さないだけでなく API も 403 で拒否。他人の投稿は残る）
+const otherDelete = await apiFetch(page, 'DELETE', '/bulletins/post_2');
+const otherStill = await apiFetch(page, 'GET', '/bulletins/post_2');
+log('server-authority', { status: otherDelete.status, message: otherDelete.json?.message, post2Status: otherStill.status });
+check('他人の投稿の DELETE は 403 で拒否され投稿は残る（削除権限は投稿者本人）',
+  otherDelete.status === 403 && (otherDelete.json?.message || '').includes('投稿者') && otherStill.status === 200,
+  { status: otherDelete.status, message: otherDelete.json?.message, post2Status: otherStill.status });
 
 // モバイル（縦 stacking・横スクロールなし）
 await page.setViewport({ width: 390, height: 844 });

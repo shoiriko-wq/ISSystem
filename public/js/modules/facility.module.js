@@ -266,6 +266,8 @@ export function initFacilityModule() {
   enableWheelHorizontalScroll(document.querySelector('.timeline-scroll-container'));
   // マスタ管理モーダル (教務部) を初期生成し追加フォームを紐付ける
   ensureFacilityMasterDom();
+  // 予約詳細モーダル (投稿者本人に変更・削除メニュー) を初期生成
+  ensureReservationDetailDom();
   document.getElementById('facility-master-add-form')?.addEventListener('submit', submitFacilityMasterAdd);
   refreshLucideIcons();
   if (state.currentUser && state.authToken) {
@@ -292,6 +294,7 @@ function bindEvents() {
   document.getElementById('facility-btn-create')?.addEventListener('click', () => {
     const dateInput = document.getElementById('facility-date-input');
     if (dateInput) dateInput.value = selectedDate;
+    editingReservationId = null;
     openModal('facility-modal');
   });
 
@@ -512,6 +515,7 @@ function renderMatrix() {
       if (endInput) endInput.value = formatMinutesToTime(endClamped);
       if (dateInput) dateInput.value = selectedDate;
 
+      editingReservationId = null;
       openModal('facility-modal');
     });
   });
@@ -520,27 +524,172 @@ function renderMatrix() {
 }
 
 
+/** 投稿者本人判定 (帯の予約者 == 現ユーザー) */
+function isReservationAuthor(res) {
+  const cu = state.currentUser;
+  if (!cu || !res) return false;
+  const myId = String(cu.id || cu._id || cu.user_id || '');
+  const ownerId = String(res.userId || '');
+  return Boolean(myId && ownerId && myId === ownerId);
+}
+
+/** モーダルの1項目へ文字列を設定する */
+function setDetailField(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+
+/**
+ * 帯クリック → 予約詳細モーダルを開く (投稿者本人にのみ 変更・削除 メニューを表示)
+ * @param {string} resId
+ */
 function openReservationDetail(resId) {
-  const res = reservationsCache.find(r => String(r.id) === String(resId));
+  const res = reservationsCache.find((r) => String(r.id) === String(resId));
   if (!res) return;
 
-  const fac = facilities.find(f => f.id === res.facilityId || f.name === res.facilityName);
+  ensureReservationDetailDom();
+  detailRes = res;
 
-  const confirmDelete = confirm(`【施設予約詳細】\n施設: ${fac ? fac.name : res.facilityId}\n時間: ${res.timeRangeStr || '指定なし'}\n目的: ${res.purpose}\n予約者: ${res.userName}\n\nこの予約をキャンセル・削除しますか？`);
+  const fac = facilities.find((f) => f.id === res.facilityId || f.name === res.facilityName);
+  setDetailField('facility-detail-facility', fac ? fac.name : (res.facilityName || res.facilityId || '施設'));
+  setDetailField('facility-detail-date', selectedDate);
+  setDetailField('facility-detail-time', res.timeRangeStr || '指定なし');
+  setDetailField('facility-detail-purpose', res.purpose || '施設利用');
 
-  if (confirmDelete) {
-    apiDelete(`/facilities/reservations/${resId}`)
-      .then(() => {
-        showToast('予約をキャンセルしました', 'success');
-        loadReservations();
-      })
-      .catch((err) => {
-        console.warn('[Facility] キャンセルAPI失敗:', err.message);
-        reservationsCache = reservationsCache.filter(r => String(r.id) !== String(resId));
-        showToast('予約をキャンセルしました', 'info');
-        renderMatrix();
-      });
+  const posterEl = document.getElementById('facility-detail-poster');
+  if (posterEl) {
+    posterEl.innerHTML = userAvatarHtml({ name: res.userName, avatarUrl: res.avatarUrl, size: 'xs' })
+      + `<span>${escapeHTML(res.userName || '教員')}</span>`;
   }
+
+  const isAuthor = isReservationAuthor(res);
+  document.getElementById('facility-detail-menu')?.classList.toggle('hidden', !isAuthor);
+  document.getElementById('facility-detail-notice')?.classList.toggle('hidden', isAuthor);
+
+  openModal('facility-detail-modal');
+  refreshLucideIcons();
+}
+
+/** 詳細モーダルで開いている予約 */
+let detailRes = null;
+/** 編集中の予約ID (変更送信時は PUT で更新する) */
+let editingReservationId = null;
+
+/**
+ * 予約詳細モーダル DOM (初回のみ生成)。投稿者本人にのみ 変更・削除 メニューを出す。
+ */
+function ensureReservationDetailDom() {
+  if (document.getElementById('facility-detail-modal')) return;
+  const container = document.getElementById('modal-container') || document.body;
+
+  container.insertAdjacentHTML('beforeend', `
+    <div id="facility-detail-modal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 class="modal-title"><i data-lucide="calendar-check" class="w-5 h-5 text-success"></i> 予約詳細</h3>
+          <button type="button" class="modal-close modal-close-x" id="facility-detail-close" aria-label="閉じる" title="閉じる">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="space-y-2 text-xs">
+            <div class="flex justify-between gap-3 border-b border-divider pb-2">
+              <span class="text-muted shrink-0">施設・備品</span>
+              <span class="font-bold text-main text-right" id="facility-detail-facility"></span>
+            </div>
+            <div class="flex justify-between gap-3 border-b border-divider pb-2">
+              <span class="text-muted shrink-0">利用日</span>
+              <span class="font-bold text-main font-mono text-right" id="facility-detail-date"></span>
+            </div>
+            <div class="flex justify-between gap-3 border-b border-divider pb-2">
+              <span class="text-muted shrink-0">時間帯</span>
+              <span class="font-bold text-main font-mono text-right" id="facility-detail-time"></span>
+            </div>
+            <div class="flex justify-between gap-3 border-b border-divider pb-2">
+              <span class="text-muted shrink-0">利用目的</span>
+              <span class="font-bold text-main text-right" id="facility-detail-purpose"></span>
+            </div>
+            <div class="flex justify-between gap-3 items-center">
+              <span class="text-muted shrink-0">予約者</span>
+              <span class="text-main flex items-center gap-1.5 justify-end" id="facility-detail-poster"></span>
+            </div>
+          </div>
+
+          <!-- 投稿者本人にのみ表示する変更・削除メニュー -->
+          <div id="facility-detail-menu" class="hidden mt-3 p-3 rounded-xl border border-divider bg-inset">
+            <div class="text-[11px] font-bold text-soft mb-2 flex items-center gap-1.5">
+              <i data-lucide="wrench" class="w-3.5 h-3.5 text-accent"></i> 予約者メニュー
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" id="facility-detail-edit" class="btn-secondary py-1.5 px-3 text-xs font-bold flex items-center gap-1.5">
+                <i data-lucide="pen-line" class="w-3.5 h-3.5"></i> 変更
+              </button>
+              <button type="button" id="facility-detail-delete" class="btn-danger py-1.5 px-3 text-xs font-bold flex items-center gap-1.5">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> 削除
+              </button>
+            </div>
+          </div>
+          <p id="facility-detail-notice" class="text-[11px] text-muted mt-3">
+            変更・削除は予約を投稿した本人のみ利用できます。
+          </p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="facility-detail-dismiss" class="modal-close btn-secondary py-2 px-4 text-xs">閉じる</button>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const closeFn = () => closeModal('facility-detail-modal');
+  document.getElementById('facility-detail-close')?.addEventListener('click', closeFn);
+  document.getElementById('facility-detail-dismiss')?.addEventListener('click', closeFn);
+  document.getElementById('facility-detail-edit')?.addEventListener('click', startEditFromDetail);
+  document.getElementById('facility-detail-delete')?.addEventListener('click', deleteFromDetail);
+}
+
+/**
+ * 変更メニュー → 予約フォームへ既存内容を入力して開く (送信で PUT 更新)
+ */
+function startEditFromDetail() {
+  const res = detailRes;
+  if (!res) return;
+  closeModal('facility-detail-modal');
+
+  const selectFac = document.getElementById('facility-select');
+  const startInput = document.getElementById('facility-start-time');
+  const endInput = document.getElementById('facility-end-time');
+  const dateInput = document.getElementById('facility-date-input');
+  const purposeInput = document.getElementById('facility-purpose-input');
+
+  if (selectFac && res.facilityId) selectFac.value = res.facilityId;
+  if (dateInput) dateInput.value = selectedDate;
+  if (startInput) startInput.value = formatMinutesToTime(res.startMin);
+  if (endInput) endInput.value = formatMinutesToTime(res.endMin);
+  if (purposeInput) purposeInput.value = res.purpose || '';
+
+  editingReservationId = String(res.id);
+  openModal('facility-modal');
+  refreshLucideIcons();
+  showToast('予約内容を編集できます。内容を確認して「予約を確定する」で更新してください。', 'info');
+}
+
+/**
+ * 削除メニュー → DELETE 呼び出し後にタイムラインを再読込
+ */
+function deleteFromDetail() {
+  const res = detailRes;
+  if (!res) return;
+  closeModal('facility-detail-modal');
+
+  apiDelete(`/facilities/reservations/${res.id}`)
+    .then(() => {
+      showToast('予約をキャンセルしました', 'success');
+      loadReservations();
+    })
+    .catch((err) => {
+      console.warn('[Facility] キャンセルAPI失敗:', err.message);
+      showToast(err.message || '予約をキャンセルできませんでした', 'error');
+    });
 }
 
 async function handleCreateReservation(e) {
@@ -581,7 +730,13 @@ async function handleCreateReservation(e) {
   };
 
   try {
-    await apiPost('/facilities/reservations', payload);
+    if (editingReservationId) {
+      await apiPut(`/facilities/reservations/${editingReservationId}`, payload);
+      showToast('予約を更新しました', 'success');
+    } else {
+      await apiPost('/facilities/reservations', payload);
+    }
+    editingReservationId = null;
     closeModal('facility-modal');
     document.getElementById('facility-form')?.reset();
     

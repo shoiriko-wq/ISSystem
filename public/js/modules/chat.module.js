@@ -313,7 +313,14 @@ export async function initChatModule() {
 
   loadHiddenChannels();
   bindEvents();
-  await loadChannels();
+
+  // 未ログイン (ログイン画面表示中) に認証必須APIを叩かない。
+  // チャンネル一覧は switchTab → loadActiveTabData('chat') → loadChannels で取得する。
+  if (state.currentUser && state.authToken) {
+    await loadChannels();
+  }
+
+  // socketリスナーは未接続時でも pending キューに登録され、connect 時に貼り付けられる
   setupSocketListeners();
 
   if (state.currentUser && state.authToken) {
@@ -356,7 +363,10 @@ function bindEvents() {
 /**
  * チャンネル一覧のロード
  */
-async function loadChannels() {
+export async function loadChannels() {
+  // 非表示設定はユーザー個別 (id / staff_code キー) のため、ログイン後キーで再読み込みする
+  loadHiddenChannels();
+
   try {
     const res = await apiGet('/chat/channels');
     const list = res.channels || res.data || (Array.isArray(res) ? res : []);

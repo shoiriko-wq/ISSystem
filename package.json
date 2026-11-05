@@ -23,7 +23,8 @@
     "test:ui:bulletin": "node scripts/test-bulletin-split.mjs",
     "test:ui:chat": "node scripts/test-chat-unread.mjs",
     "test:ui:facility": "node scripts/test-facility-master.mjs",
-    "test:ui:all": "npm run test:ui:modal && npm run test:ui:frames && npm run test:ui:audit && npm run test:ui:scan && npm run test:ui:header-search && npm run test:ui:header-frames && npm run test:ui:nav && npm run test:ui:bulletin && npm run test:ui:chat && npm run test:ui:facility && npm run test:ui:timeline",
+    "test:ui:mail": "node scripts/test-mail-setup.mjs",
+    "test:ui:all": "npm run test:ui:modal && npm run test:ui:frames && npm run test:ui:audit && npm run test:ui:scan && npm run test:ui:header-search && npm run test:ui:header-frames && npm run test:ui:nav && npm run test:ui:bulletin && npm run test:ui:chat && npm run test:ui:facility && npm run test:ui:timeline && npm run test:ui:mail",
     "test:ui:timeline": "node scripts/test-facility-timeline.mjs",
     "db:tables": "node scripts/list-tables.js"
   },

@@ -46,6 +46,34 @@ function isKyomu(user) {
   return user.is_kyomu === true || String(user.role || '').toUpperCase() === 'KYOMU' || String(user.role || '').toUpperCase() === 'ADMIN';
 }
 
+/** 考査使用教室の初期設定（デフォルト）。これ以外の教室名は登録不可 */
+export const DEFAULT_EXAM_ROOM_NAMES = [
+  '1-1', '1-2', '1-3', '1-4', '1-5', '1-6', '1-7',
+  '2-1', '2-2', '2-3', '2-4', '2-5', '2-6', '2-7',
+  '3-1', '3-2', '3-3', '3-4', '3-5', '3-6', '3-7', '3-8',
+  '227', '212', '312', '405', '多目的',
+];
+
+function isDefaultExamRoomName(name) {
+  return DEFAULT_EXAM_ROOM_NAMES.includes(String(name || '').trim());
+}
+
+/** 初期設定の教室行（クラス名教室は該当学年対象・定員40、特別教室は全学年対象） */
+function defaultExamRoomRows(examMasterId) {
+  return DEFAULT_EXAM_ROOM_NAMES.map((name) => {
+    const m = /^([123])-(\d)$/.exec(name);
+    const id = m ? `eroom_${m[1]}_${m[2]}` : /^\d+$/.test(name) ? `eroom_${name}` : 'eroom_multi';
+    return {
+      id,
+      exam_master_id: examMasterId,
+      name,
+      room_type: m ? 'CLASS' : 'SPECIAL',
+      capacity: m ? 40 : null,
+      grades: m ? [Number(m[1])] : [],
+    };
+  });
+}
+
 function ensureKyomu(user) {
   if (!isKyomu(user)) {
     const err = new Error('この操作には教務権限が必要です。');
@@ -1812,6 +1840,11 @@ export const examService = {
         err.statusCode = 400;
         throw err;
       }
+      if (!isDefaultExamRoomName(room.name)) {
+        const err = new Error(`教室名は「${DEFAULT_EXAM_ROOM_NAMES.join('・')}」の範囲内で指定してください。`);
+        err.statusCode = 400;
+        throw err;
+      }
       saved.push(
         await examModel.upsertRoom({
           ...room,
@@ -1830,12 +1863,24 @@ export const examService = {
 
   async deleteRoom(examMasterId, roomId, user) {
     ensureKyomu(user);
+    const rooms = await examModel.listRooms(examMasterId);
+    const target = rooms.find((r) => String(r.id) === String(roomId));
+    if (target && isDefaultExamRoomName(target.name)) {
+      const err = new Error(`初期設定の教室「${target.name}」は削除できません。`);
+      err.statusCode = 409;
+      throw err;
+    }
     await examModel.deleteRoom(roomId);
     return { ok: true };
   },
 
   async getRooms(examMasterId, user) {
-    const rooms = await examModel.listRooms(examMasterId);
+    let rooms = await examModel.listRooms(examMasterId);
+    if (rooms.length === 0) {
+      // 初期設定の教室（22クラス教室＋5特別教室）を自動補完する
+      await examModel.saveRoomsBulk(examMasterId, defaultExamRoomRows(examMasterId), null);
+      rooms = await examModel.listRooms(examMasterId);
+    }
     const rules = await getRoomRulesNormalized(examMasterId);
     const isTeacher = !isKyomu(user);
     const grade = Number(user.grade) || 0;

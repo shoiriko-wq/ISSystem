@@ -49,6 +49,9 @@ function mapPost(row) {
   const displayEnd = normalizeDateOnly(row.displayEnd || row.display_end_date);
   return {
     ...row,
+    // 投稿者ID (削除権限の判定に使う。SQL の alias は小文字化されるため両形を確保)
+    authorId: row.authorId || row.authorid || row.author_id,
+    author_id: row.author_id || row.authorId || row.authorid,
     postedAt,
     posted_at: postedAt,
     updatedAt,
@@ -152,6 +155,7 @@ export const bulletinModel = {
           p.id,
           p.title,
           p.content,
+          p.author_id as authorId,
           p.display_start_date,
           p.display_end_date,
           p.is_deleted,

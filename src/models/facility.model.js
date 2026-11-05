@@ -210,6 +210,12 @@ export const facilityModel = {
       }
     } else if (arg1 && isDateLike(arg1)) {
       date = arg1;
+    } else if (!arg1 && arg2) {
+      // ★ (null, date) 形式 (getDailyOverview 呼び出し) を必ず日付として扱う。
+      //   旧実装は arg1 が falsy のとき facilityId へ代入して date を捨て、
+      //   日付フィルタが効かず全日分の予約がタイムラインに並んでいた。
+      date = isDateLike(arg2) ? arg2 : null;
+      facilityId = isDateLike(arg2) ? null : String(arg2);
     } else {
       facilityId = arg1 || null;
     }
@@ -422,6 +428,39 @@ export const facilityModel = {
     return row ? { ...row, purpose: row.title } : null;
   },
 
+  /**
+   * 予約内容の更新 (施設・日時・目的)。自分自身の予約との重複は除外して照会する
+   * @param {string} id
+   * @param {Object} data - { resource_id/facility_id, target_date, start_time, end_time, title }
+   */
+  async updateReservation(id, data = {}) {
+    const fId = resourceIdOf(data);
+    const targetDate =
+      normalizeDate(data.target_date || data.targetDate) || dateOfRange(data.start_time) || todayJst();
+    const startTime = toDateTime(targetDate, data.start_time || data.startTime || '08:00');
+    const endTime = toDateTime(targetDate, data.end_time || data.endTime || '09:00');
+    const title = data.title || data.purpose || '施設利用';
+
+    if (fId) {
+      const overlap = await this.checkOverlap(fId, targetDate, startTime, endTime, String(id));
+      if (overlap) {
+        const conflict = new Error(`指定された時間帯は既存の予約「${overlap.title}」と時間帯が重複しています。`);
+        conflict.statusCode = 409;
+        throw conflict;
+      }
+    }
+
+    const res = await query(
+      `UPDATE reservations
+       SET resource_id = COALESCE($2, resource_id), facility_id = COALESCE($3, facility_id),
+           title = $4, target_date = $5, start_time = $6, end_time = $7
+       WHERE id = $1 RETURNING *`,
+      [String(id), fId, fId, title, targetDate, startTime, endTime]
+    );
+    const row = res.rows[0] || null;
+    return row ? { ...row, purpose: row.title } : null;
+  },
+
   // ================= 編集排他ロック (editing_locks) =================
 
   /**
@@ -530,6 +569,7 @@ export const getDailyOverview = (...args) => facilityModel.getDailyOverview(...a
 export const createReservation = (...args) => facilityModel.createReservation(...args);
 export const findReservationById = (...args) => facilityModel.findReservationById(...args);
 export const cancelReservation = (...args) => facilityModel.cancelReservation(...args);
+export const updateReservation = (...args) => facilityModel.updateReservation(...args);
 export const checkOverlap = (...args) => facilityModel.checkOverlap(...args);
 export const acquireEditingLock = (...args) => facilityModel.acquireEditingLock(...args);
 export const touchEditingLock = (...args) => facilityModel.touchEditingLock(...args);

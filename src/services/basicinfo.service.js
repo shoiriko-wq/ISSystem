@@ -15,6 +15,18 @@ const KINDS = {
   room: { label: '教室', resource: 'basic_room' },
 };
 
+/** 初期設定（デフォルト）のクラス・コース名。これ以外の名称は登録・改名不可 */
+export const DEFAULT_CLASS_NAMES = [
+  '1-1', '1-2', '1-3', '1-4', '1-5', '1-6', '1-7',
+  '2-1', '2-2', '2-3', '2-4文', '2-4理', '2-5', '2-6看', '2-6文', '2-7',
+  '3-1総', '3-1人', '3-2', '3-3', '3-4人', '3-4数', '3-5', '3-6数', '3-6環',
+  '3-7看', '3-7総', '3-7人', '3-8総', '3-8人',
+];
+
+function isDefaultClassName(name) {
+  return DEFAULT_CLASS_NAMES.includes(String(name || '').trim());
+}
+
 function isKyomu(user) {
   const role = String(user?.role || '').toUpperCase();
   return user?.is_kyomu === true || role === 'KYOMU' || role === 'ADMIN';
@@ -196,6 +208,9 @@ export const basicinfoService = {
       delete p.class_course_ids;
     }
     if (kind === 'class') await checkClassNameDup(p.grade, p.name);
+    if (kind === 'class' && !DEFAULT_CLASS_NAMES.includes(String(p.name).trim())) {
+      throw new ApiError(400, `クラス・コース名は「${DEFAULT_CLASS_NAMES.join('・')}」の範囲内で指定してください。`);
+    }
     if (kind === 'room') await checkRoomNameDup(p.name);
 
     let created = null;
@@ -245,6 +260,9 @@ export const basicinfoService = {
     if (kind === 'class' && partial.name) {
       const row = (await basicinfoModel.listClasses()).find((c) => String(c.id) === String(id));
       if (!row) throw new ApiError(404, `対象の${KINDS[kind].label}が見つかりません。`);
+      if (!DEFAULT_CLASS_NAMES.includes(partial.name)) {
+        throw new ApiError(400, `クラス・コース名は「${DEFAULT_CLASS_NAMES.join('・')}」の範囲内で指定してください。`);
+      }
       await checkClassNameDup(partial.grade !== undefined ? Number(partial.grade) : row.grade, partial.name, id);
     }
     if (kind === 'room' && partial.name) await checkRoomNameDup(partial.name, id);
@@ -278,6 +296,10 @@ export const basicinfoService = {
     const label = KINDS[kind].label;
 
     if (kind === 'class') {
+      const row = (await basicinfoModel.listClasses()).find((c) => String(c.id) === String(id));
+      if (row && isDefaultClassName(row.name)) {
+        throw new ApiError(409, `初期設定のクラス・コース「${row.name}」は削除できません。`);
+      }
       const counts = await basicinfoModel.classUsage(id);
       if (counts.total > 0) {
         throw new ApiError(409, `このクラスは考査データ${usageMessage('class', counts)}で使用されているため削除できません。`);

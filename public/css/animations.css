@@ -173,8 +173,9 @@
 /* ==========================================================================
    6. Entrance choreography - staggered reveal of every view & list
    ========================================================================== */
+/* 掲示板左列は選択枠のFLIP移動だけを使う（列表 entrance のスライド・フラッシュなし） */
 :is(.tab-view.active, .dashboard-grid, .grid-2col, .grid-3col, .seating-grid-container,
-    #bulletin-list-container, #approval-list-container, #news-list-container,
+    #approval-list-container, #news-list-container,
     #sched-list-container, #chat-messages-container, #chat-members-container, tbody) > * {
   animation: cardEnter 0.42s var(--ease-spring) both;
   animation-delay: calc(var(--stagger-index, 0) * 45ms);
@@ -208,17 +209,18 @@
     #bulletin-list-container, #approval-list-container, #news-list-container,
     #sched-list-container, #chat-messages-container, #chat-members-container, tbody) > :nth-child(n+9) { --stagger-index: 8; }
 
-/* List rows slide in from the left, cards pop upward */
-:is(#bulletin-list-container, #approval-list-container, #news-list-container,
+/* List rows slide in from the left, cards pop upward.
+   掲示板左列は選択枠のFLIP移動だけを使う（列表全体のスライド・フラッシュはしない） */
+:is(#approval-list-container, #news-list-container,
     #sched-list-container, #chat-messages-container, #chat-members-container,
     tbody) > * {
   animation-name: rowIn;
   animation-duration: 0.34s;
 }
 
-/* 右ペイン（全文）も入口スタガースライド。選択切替の方向スライドは WAAPI（animateShift）側 */
+/* 右ペイン（全文）は位置を動かさない。フェードインは WAAPI（animateShift）側の1回だけ行い、
+   子要素の entrance スライドは付けらない（全体をフラッシュ・移動させない） */
 #bulletin-detail-pane > * {
-  animation: cardEnter 0.42s var(--ease-spring) both;
   --stagger-index: 0;
 }
 

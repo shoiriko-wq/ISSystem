@@ -103,13 +103,43 @@ export const facilityController = {
   },
 
   /**
+   * 予約内容の変更 (PUT /api/facilities/reservations/:reservationId)
+   * 投稿者（予約者）本人または教務部のみ
+   */
+  async updateReservation(req, res) {
+    try {
+      const user = req.user || { name: '教員' };
+      const { reservationId } = req.params;
+      const updated = await facilityService.updateReservation(reservationId, req.body || {}, user);
+
+      const io = req.app ? req.app.get('io') : null;
+      if (io) {
+        io.emit('facility:reservation_changed', { action: 'update', reservation: updated, userId: user.id || user._id, userName: user.name || '教員' });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: '予約を更新しました。',
+        reservation: updated,
+        data: updated
+      });
+    } catch (err) {
+      const status = err.statusCode >= 400 && err.statusCode < 600 ? err.statusCode : 400;
+      return res.status(status).json({
+        success: false,
+        message: err.message || '予約の更新に失敗しました。'
+      });
+    }
+  },
+
+  /**
    * 予約キャンセル (DELETE /api/facilities/reservations/:reservationId)
    */
   async cancelReservation(req, res) {
     try {
       const user = req.user || { name: '教員' };
       const { reservationId } = req.params;
-      await facilityModel.cancelReservation(reservationId);
+      await facilityService.cancelReservation(reservationId, user);
 
       const io = req.app ? req.app.get('io') : null;
       if (io) {
@@ -121,7 +151,8 @@ export const facilityController = {
         message: '予約をキャンセルしました。'
       });
     } catch (err) {
-      return res.status(400).json({
+      const status = err.statusCode >= 400 && err.statusCode < 600 ? err.statusCode : 400;
+      return res.status(status).json({
         success: false,
         message: err.message || '予約のキャンセルに失敗しました。'
       });

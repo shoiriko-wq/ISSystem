@@ -18,6 +18,69 @@ import { state } from '../state.js';
 
 import { loadAbsenceSummary, openAbsenceModal } from './absence.module.js';
 
+/**
+ * JST の時刻帯 (5段階) と季節 (6区分) を返す
+ * @param {Date} now
+ */
+function dashTimeAndSeason(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Tokyo', month: '2-digit', hour: '2-digit',
+  }).formatToParts(now);
+  const pick = (t) => parseInt(parts.find((p) => p.type === t)?.value || '0', 10);
+  const hour = pick('hour');
+  const month = pick('month');
+
+  const slot = hour < 5 ? 'NIGHT' : hour < 11 ? 'MORNING' : hour < 13 ? 'NOON'
+    : hour < 18 ? 'AFTERNOON' : hour < 22 ? 'EVENING' : 'NIGHT';
+
+  const season = (month >= 3 && month <= 5) ? 'SPRING'
+    : month === 6 ? 'RAIN'
+    : month === 7 ? 'EARLY_SUMMER'
+    : (month >= 8 && month <= 9) ? 'SUMMER'
+    : (month >= 10 && month <= 12) ? 'AUTUMN'
+    : 'WINTER';
+
+  return { slot, season };
+}
+
+/** 時刻帯別の労い・確認案内 */
+const DASH_TIME_CLAUSES = {
+  MORNING: '朝の時間帯です。午前の予定と新着掲示を先に確認してください。',
+  NOON: '昼休み前後の時間帯です。午後の予定と緊急連絡を優先して確認してください。',
+  AFTERNOON: '午後の授業・部活動の時間帯です。施設予約と承認依頼を確認してください。',
+  EVENING: '夕方以降の時間帯です。未処理の承認依頼と当日の記録を今日中に済ませてください。',
+  NIGHT: '深夜の時間帯です。緊急連絡以外は翌日の確認で十分です。早めに区切ってください。',
+};
+
+/** 季節別の状況案内 */
+const DASH_SEASON_CLAUSES = {
+  SPRING: '新年度・新学期の切り替わり期です。',
+  RAIN: '梅雨時期につき体育施設と雨天対応の予約が増えています。',
+  EARLY_SUMMER: '考査前につき試験・成績入力が集中しています。',
+  SUMMER: '夏季休業・補充授業の時期です。',
+  AUTUMN: '文化祭・体育祭の季節で施設予約が混み合っています。',
+  WINTER: '期末考査・冬季休業の時期です。',
+};
+
+/**
+ * 挨拶文を時刻・季節に応じて描画する (#dash-greeting)
+ * @param {Date} now
+ */
+function renderDashGreeting(now = new Date()) {
+  const nameEl = document.getElementById('dash-user-name');
+  if (!nameEl) return;
+
+  const { slot, season } = dashTimeAndSeason(now);
+  const cu = state.currentUser;
+  const name = cu?.name ? String(cu.name) : '先生';
+  nameEl.textContent = `${name} 先生`;
+
+  const h2 = document.getElementById('dash-greeting');
+  if (h2) {
+    h2.innerHTML = `お疲れ様です、<span id="dash-user-name" class="text-primary font-bold">${escapeHTML(name)} 先生</span> ${DASH_TIME_CLAUSES[slot]} ${DASH_SEASON_CLAUSES[season]}`;
+  }
+}
+
 
 
 /**
@@ -52,7 +115,7 @@ export function initDashboardModule() {
 
           </div>
 
-          <h2 class="text-xl font-bold text-main mb-1">お疲れ様です、<span id="dash-user-name">先生</span></h2>
+          <h2 class="text-xl font-bold text-main mb-1" id="dash-greeting">お疲れ様です、<span id="dash-user-name" class="text-primary font-bold">先生</span></h2>
 
           <p class="text-xs text-soft leading-relaxed">
 
@@ -82,46 +145,36 @@ export function initDashboardModule() {
 
 
 
-      <!-- 本日の 年休等・出張 (人数サマリー、クリックで登録モーダル) -->
+      <!-- 本日の 年休等・出張 (区分別人数 + 記入ボタンから登録モーダルを開く) -->
 
       <div class="card card--framed p-4 flex flex-col justify-between">
 
-        <div class="flex items-center justify-between text-xs text-muted mb-2">
+        <div class="flex items-center justify-between text-sm text-muted mb-2">
 
-          <span class="font-bold text-main">職員室 年休等・出張</span>
+          <span class="font-bold text-main">年休等・出張</span>
 
           <i data-lucide="calendar-x-2" class="w-4 h-4 text-danger"></i>
 
         </div>
 
-        <div class="grid grid-cols-2 gap-2 text-center my-1">
-
-          <div id="dash-tile-leave" class="p-2 rounded-lg bg-danger-soft border border-danger-soft cursor-pointer hover-border-danger transition-all">
-
-            <span class="text-2xl font-black text-danger" id="dash-absence-leave">0</span>
-
-            <span class="block text-[10px] text-muted">年休等（欠席）</span>
-
+        <!-- 区分別人数 (absence.module.js の renderAbsenceCounts が数値を流し込む) -->
+        <div class="flex items-center justify-center gap-5 mb-3">
+          <div class="flex items-center gap-1.5" title="本日年休等（年休・半日休・早退・遅刻・欠席）の人数">
+            <i data-lucide="bed-double" class="w-4 h-4 text-info shrink-0"></i>
+            <span class="text-sm text-soft">年休等</span>
+            <span id="dash-absence-leave" class="text-lg font-bold text-info">0名</span>
           </div>
-
-          <div id="dash-tile-trip" class="p-2 rounded-lg bg-warning-soft border border-warning-soft cursor-pointer hover-border-warning transition-all">
-
-            <span class="text-2xl font-black text-warning" id="dash-absence-trip">0</span>
-
-            <span class="block text-[10px] text-muted">出張</span>
-
+          <div class="flex items-center gap-1.5" title="本日出張（校外・校内研修）の人数">
+            <i data-lucide="briefcase" class="w-4 h-4 text-success shrink-0"></i>
+            <span class="text-sm text-soft">出張</span>
+            <span id="dash-absence-trip" class="text-lg font-bold text-success">0名</span>
           </div>
-
         </div>
 
-        <div class="flex items-center justify-between gap-2 mt-1">
-
-          <span class="text-[10px] text-muted font-mono" id="dash-absence-updated">登録: --</span>
-
-          <button id="dash-btn-absence" class="text-[11px] text-accent hover-text-accent-strong font-semibold flex items-center gap-1">
-            <i data-lucide="pen-line" class="w-3 h-3"></i> 記入する
-          </button>
-        </div>
+        <button id="dash-btn-absence" class="btn-primary w-full flex items-center justify-center gap-1.5 py-2 px-3 text-sm font-bold"
+                title="年休等・出張を記入する">
+          <i data-lucide="pen-line" class="w-4 h-4"></i> <span class="pt-0.5">記入する</span>
+        </button>
       </div>
 
 
@@ -188,17 +241,17 @@ export function initDashboardModule() {
 
             <h3 class="font-bold text-sm text-main flex items-center gap-2">
 
-              <i data-lucide="megaphone" class="w-4 h-4 text-accent"></i> 最近の連絡
+              <i data-lucide="megaphone" class="w-4 h-4 text-accent"></i> 本日の連絡
 
             </h3>
 
-            <span class="text-[11px] text-muted">全校教職員対象</span>
+            <span class="text-sm text-muted">全校教職員対象</span>
 
           </div>
 
-          <div id="dash-pinned-bulletins" class="space-y-3">
+          <div id="dash-pinned-bulletins" class="dash-news-list">
 
-            <div class="text-xs text-muted py-4 text-center">読み込み中...</div>
+            <div class="text-sm text-muted py-4 text-center">読み込み中...</div>
 
           </div>
 
@@ -308,6 +361,16 @@ export function initDashboardModule() {
 
   }
 
+  // 1分ごとに挨拶文を再評価 (時刻帯・季節の変化を反映)
+
+  setInterval(() => {
+
+    renderDashGreeting();
+
+    refreshLucideIcons();
+
+  }, 60 * 1000);
+
 }
 
 
@@ -324,7 +387,7 @@ function bindDashboardEvents() {
 
   document.getElementById('dash-btn-chat')?.addEventListener('click', () => switchTab('chat'));
 
-  // 年休等・出張タイル (dash-tile-leave / dash-tile-trip) と記入ボタン (dash-btn-absence) は absence.module.js でバインド
+  // 年休等・出張の記入ボタン (dash-btn-absence) は absence.module.js でバインド
 
   document.getElementById('dash-btn-approval')?.addEventListener('click', () => switchTab('approval'));
 
@@ -356,48 +419,58 @@ export async function loadDashboardData() {
 
   }
 
+  // 時刻と季節に合わせた挨拶を再生成 (深夜・朝・夕方、季節ごとの状況案内)
+
+  renderDashGreeting();
+
 
 
   // 1. 重要掲示の取得
 
   try {
 
-    const res = await apiGet('/bulletins', { limit: 5 });
+    const res = await apiGet('/bulletins', { limit: 100 });
 
     const bulletins = res.bulletins || (Array.isArray(res) ? res : []);
 
     const listEl = document.getElementById('dash-pinned-bulletins');
 
-    
+    // 対象日（掲示期間 display_start_date〜display_end_date）が今日の記事のみ
+    const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+    const todays = bulletins.filter((b) => {
+      const start = b.display_start_date || b.displayStart || b.start_date || b.startDate;
+      const end = b.display_end_date || b.displayEnd || b.end_date || b.endDate;
+      if (start && end) return start <= today && today <= end;
+      if (start) return start === today;
+      if (end) return end === today;
+      return false;
+    });
 
-    if (listEl && Array.isArray(bulletins) && bulletins.length > 0) {
+    if (listEl && todays.length > 0) {
 
-      listEl.innerHTML = bulletins.map(b => `
+      listEl.innerHTML = todays.map((b) => {
 
-        <div class="p-3 rounded-lg bg-surface-strong border border-divider hover-border-accent transition-colors cursor-pointer">
+        const author = {
+          name: b.authorName || b.author_name || '教員',
+          avatarUrl: b.authorAvatar || b.author_avatar || null,
+        };
 
-          <div class="flex items-center justify-between text-[11px] mb-1">
-
-            <span class="badge">${formatDate(b.postedAt || b.posted_at || b.createdAt || b.created_at)}</span>
-
-            <div class="flex items-center gap-1.5 text-muted font-mono">
-              ${userAvatarHtml({ name: b.authorName || '教員', avatarUrl: b.authorAvatar || b.author_avatar || null, size: 'xs' })}
-              <span>${formatDate(b.createdAt || b.created_at)} (${escapeHTML(b.authorName || '教員')})</span>
+        return `
+          <div class="dash-news-item">
+            <h4 class="dash-news-title">${escapeHTML(b.title || '')}</h4>
+            <div class="dash-news-author">
+              ${userAvatarHtml({ ...author, size: 'xs' })}
+              <span class="dash-news-author-name">${escapeHTML(author.name)} 教員</span>
             </div>
-
+            <p class="dash-news-body">${escapeHTML(b.content || '')}</p>
           </div>
+        `;
 
-          <h4 class="font-bold text-xs text-main mb-1">${escapeHTML(b.title)}</h4>
-
-          <p class="text-[11px] text-muted line-clamp-2">${escapeHTML(b.content)}</p>
-
-        </div>
-
-      `).join('');
+      }).join('');
 
     } else if (listEl) {
 
-      listEl.innerHTML = '<p class="text-xs text-muted text-center py-2">最近の連絡はありません。</p>';
+      listEl.innerHTML = '<p class="text-sm text-muted text-center py-2">本日の連絡はありません。</p>';
 
     }
 

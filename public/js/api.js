@@ -56,9 +56,13 @@ export async function apiFetch(endpoint, options = {}) {
         throw new Error(errorData.message || errorData.error || 'この操作を行う権限がありません。');
       }
 
-      // 401 はセッション切れとして処理
-      console.warn('[API] 認証セッションが無効です。再ログインが必要です。');
-      setUserSession(null, null);
+      // 401 はセッション切れとして処理する。
+      // トークンが存在した場合のみセッションを破棄する（未ログイン時の 401 は「セッション切れ」ではないため、
+      // 警告ログとログアウト処理 (localStorage 削除) を行わない）
+      if (state.authToken) {
+        console.warn('[API] 認証セッションが無効です。再ログインが必要です。');
+        setUserSession(null, null);
+      }
       throw new Error(errorData.message || errorData.error || 'UNAUTHORIZED_OR_FORBIDDEN');
     }
 

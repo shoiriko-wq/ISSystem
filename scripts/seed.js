@@ -71,19 +71,31 @@ const dummySeating = [
   { id: 'seat_5', user_id: 't-takahashi', desk_number: 'B-02', group_zone: 'g1', current_status: 'LEAVE', status_note: '年休' }
 ];
 
-// 7. 施設・備品マスター
+// 7. 施設・備品マスター（初期設定＝施設予約のデフォルト施設名）
 const dummyResources = [
-  { id: '1', name: '第一会議室', category: 'ROOM' },
-  { id: '2', name: '第二会議室', category: 'ROOM' },
-  { id: '3', name: '体育館', category: 'ROOM' },
-  { id: '4', name: 'プロジェクターA', category: 'EQUIPMENT' },
-  { id: '5', name: '校外研修用マイクロバス', category: 'EQUIPMENT' }
+  { id: 'fac_1', name: '学文館会議室', category: 'ROOM' },
+  { id: 'fac_2', name: '西会議室', category: 'ROOM' },
+  { id: 'fac_3', name: '東会議室', category: 'ROOM' },
+  { id: 'fac_4', name: '応接室', category: 'ROOM' },
+  { id: 'fac_5', name: '図書室', category: 'ROOM' },
+  { id: 'fac_6', name: '食堂', category: 'ROOM' },
+  { id: 'fac_7', name: '多目的教室', category: 'ROOM' },
+  { id: 'fac_8', name: '４０５教室（西社会科教室）', category: 'SPECIAL' },
+  { id: 'fac_9', name: '４０９教室（東社会科教室）', category: 'SPECIAL' },
+  { id: 'fac_10', name: '２１２教室', category: 'SPECIAL' },
+  { id: 'fac_11', name: '３１２教室', category: 'SPECIAL' },
+  { id: 'fac_12', name: '２２７教室', category: 'SPECIAL' },
+  { id: 'fac_13', name: '２２８教室（ＤＸルーム）', category: 'SPECIAL' },
+  { id: 'fac_14', name: '視聴覚教室', category: 'SPECIAL' },
+  { id: 'fac_15', name: '化学教室', category: 'SPECIAL' },
+  { id: 'fac_16', name: '生物教室', category: 'SPECIAL' },
+  { id: 'fac_17', name: '地学教室', category: 'SPECIAL' }
 ];
 
 // 8. 施設予約
 const dummyReservations = [
-  { id: 'resv_1', facility_id: '1', resource_id: '1', user_id: 'kyomu01', user_name: '教務 主任', title: '教務部定例会議', target_date: '2026-10-15', start_time: '2026-10-15 16:30:00', end_time: '2026-10-15 17:30:00', is_cancelled: false },
-  { id: 'resv_2', facility_id: '4', resource_id: '4', user_id: 't-sato', user_name: '佐藤 先生', title: '進路説明会プレゼン', target_date: '2026-10-16', start_time: '2026-10-16 13:00:00', end_time: '2026-10-16 15:00:00', is_cancelled: false }
+  { id: 'resv_1', facility_id: 'fac_1', resource_id: 'fac_1', user_id: 'kyomu01', user_name: '教務 主任', title: '教務部定例会議', target_date: '2026-10-15', start_time: '2026-10-15 16:30:00', end_time: '2026-10-15 17:30:00', is_cancelled: false },
+  { id: 'resv_2', facility_id: 'fac_14', resource_id: 'fac_14', user_id: 't-sato', user_name: '佐藤 先生', title: '進路説明会プレゼン', target_date: '2026-10-16', start_time: '2026-10-16 13:00:00', end_time: '2026-10-16 15:00:00', is_cancelled: false }
 ];
 
 // 8b. 決裁・申請ワークフロー
@@ -121,20 +133,48 @@ const dummyScheduleCategoryMap = [
 
 // 10. クラス・科目マスタ
 const dummyClasses = [
-  { id: '1-1', grade: 1, class_num: 1, name: '1年1組' },
-  { id: '1-2', grade: 1, class_num: 2, name: '1年2組' },
-  { id: '2-1', grade: 2, class_num: 1, name: '2年1組' },
-  { id: '2-2', grade: 2, class_num: 2, name: '2年2組' },
-  { id: '3-1', grade: 3, class_num: 1, name: '3年1組' },
-  { id: '3-2', grade: 3, class_num: 2, name: '3年2組' }
+  { id: '1-1', grade: 1, class_num: 1, name: '1-1' },
+  { id: '1-2', grade: 1, class_num: 2, name: '1-2' },
+  { id: '1-3', grade: 1, class_num: 3, name: '1-3' },
+  { id: '1-4', grade: 1, class_num: 4, name: '1-4' },
+  { id: '1-5', grade: 1, class_num: 5, name: '1-5' },
+  { id: '1-6', grade: 1, class_num: 6, name: '1-6' },
+  { id: '1-7', grade: 1, class_num: 7, name: '1-7' },
+  { id: '2-1', grade: 2, class_num: 1, name: '2-1' },
+  { id: '2-2', grade: 2, class_num: 2, name: '2-2' },
+  { id: '2-3', grade: 2, class_num: 3, name: '2-3' },
+  { id: '2-4a', grade: 2, class_num: 4, name: '2-4文' },
+  { id: '2-4r', grade: 2, class_num: 4, name: '2-4理' },
+  { id: '2-5', grade: 2, class_num: 5, name: '2-5' },
+  { id: '2-6k', grade: 2, class_num: 6, name: '2-6看' },
+  { id: '2-6a', grade: 2, class_num: 6, name: '2-6文' },
+  { id: '2-7', grade: 2, class_num: 7, name: '2-7' },
+  { id: '3-1s', grade: 3, class_num: 1, name: '3-1総' },
+  { id: '3-1h', grade: 3, class_num: 1, name: '3-1人' },
+  { id: '3-2', grade: 3, class_num: 2, name: '3-2' },
+  { id: '3-3', grade: 3, class_num: 3, name: '3-3' },
+  { id: '3-4h', grade: 3, class_num: 4, name: '3-4人' },
+  { id: '3-4s', grade: 3, class_num: 4, name: '3-4数' },
+  { id: '3-5', grade: 3, class_num: 5, name: '3-5' },
+  { id: '3-6s', grade: 3, class_num: 6, name: '3-6数' },
+  { id: '3-6w', grade: 3, class_num: 6, name: '3-6環' },
+  { id: '3-7k', grade: 3, class_num: 7, name: '3-7看' },
+  { id: '3-7s', grade: 3, class_num: 7, name: '3-7総' },
+  { id: '3-7h', grade: 3, class_num: 7, name: '3-7人' },
+  { id: '3-8s', grade: 3, class_num: 8, name: '3-8総' },
+  { id: '3-8h', grade: 3, class_num: 8, name: '3-8人' }
 ];
 
 const dummySubjects = [
   { id: 'ko01', name: '国語' },
-  { id: 'ko02', name: '数学' },
-  { id: 'ko03', name: '英語' },
+  { id: 'ko02', name: '地歴公民' },
+  { id: 'ko03', name: '数学' },
   { id: 'ko04', name: '理科' },
-  { id: 'ko05', name: '社会' }
+  { id: 'ko05', name: '保健体育' },
+  { id: 'ko06', name: '芸術' },
+  { id: 'ko07', name: '外国語' },
+  { id: 'ko08', name: '家庭' },
+  { id: 'ko09', name: '情報' }
 ];
 
 // 11. 考査マスター
@@ -143,7 +183,17 @@ const dummyExamMasters = [
 ];
 
 // 12. 科目担当教員マッピング
-const subjectTeachers = { ko01: 'kyomu01', ko02: 't-sato', ko03: 't-tanaka', ko04: 't-suzuki', ko05: 't-takahashi' };
+const subjectTeachers = {
+  ko01: 'kyomu01',
+  ko02: 't-sato',
+  ko03: 't-tanaka',
+  ko04: 't-suzuki',
+  ko05: 't-takahashi',
+  ko06: 't-tanaka',
+  ko07: 't-suzuki',
+  ko08: 't-takahashi',
+  ko09: 't-sato'
+};
 
 // 13. 監督除外・配慮教員
 const dummyExamExemptions = [

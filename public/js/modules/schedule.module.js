@@ -1103,8 +1103,8 @@ export async function initScheduleModule() {
   const catAddForm = document.getElementById('sched-cat-add-form');
   if (catAddForm) catAddForm.addEventListener('submit', submitCategoryAddForm);
 
-  await loadCategories(true);
-  await loadSchedules();
+  // カテゴリ・行事の取得は行わない (未ログイン時に認証必須APIを叩かない)。
+  // switchTab → loadSchedules が loadCategories(true) を内包して取得する。
 }
 
 

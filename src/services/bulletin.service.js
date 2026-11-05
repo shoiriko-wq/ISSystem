@@ -614,6 +614,13 @@ export const bulletinService = {
       throw new ApiError(404, '対象の投稿が見つかりません。');
     }
 
+    // 削除できるのは投稿者本人だけ（UI の「削除」ボタンも投稿者にだけ表示される）。他人の投稿の削除は 403 で拒否
+    const myId = String(user.id || user.staff_code || '');
+    const authorId = String(bulletin.authorId || bulletin.author_id || '');
+    if (!myId || !authorId || myId !== authorId) {
+      throw new ApiError(403, '掲示を削除できるのは投稿者本人だけです。');
+    }
+
     if (typeof bulletinModel.delete === 'function') {
       await bulletinModel.delete(postId);
     }

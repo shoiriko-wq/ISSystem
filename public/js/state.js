@@ -20,8 +20,7 @@ export const state = {
   unreadCounts: {
     bulletin: 0,
     chat: 0
-  },
-  globalSearchQuery: ''
+  }
 };
 
 // ステート変更リスナー群

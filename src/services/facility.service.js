@@ -22,6 +22,49 @@ export const FACILITY_CATEGORY_LABELS = {
 
 const CATEGORY_KEYS = Object.keys(FACILITY_CATEGORY_LABELS);
 
+/** 施設予約の施設名（初期設定・デフォルト）。これ以外の名前は登録不可 */
+export const DEFAULT_FACILITY_NAMES = [
+  '学文館会議室',
+  '西会議室',
+  '東会議室',
+  '応接室',
+  '図書室',
+  '食堂',
+  '多目的教室',
+  '４０５教室（西社会科教室）',
+  '４０９教室（東社会科教室）',
+  '２１２教室',
+  '３１２教室',
+  '２２７教室',
+  '２２８教室（ＤＸルーム）',
+  '視聴覚教室',
+  '化学教室',
+  '生物教室',
+  '地学教室',
+];
+
+/** 初期設定の施設行 (ascii ID + カテゴリ: 7件=ROOM, 10件=SPECIAL) */
+export const DEFAULT_FACILITY_ROWS = DEFAULT_FACILITY_NAMES.map((name, i) => ({
+  id: `fac_${i + 1}`,
+  name,
+  category: i < 7 ? 'ROOM' : 'SPECIAL',
+}));
+
+function isDefaultFacilityName(name) {
+  return DEFAULT_FACILITY_NAMES.includes(String(name || '').trim());
+}
+
+/** 未登録の初期設定施設を自動補完する (一覧取得時に呼び出し) */
+async function ensureDefaultFacilities() {
+  const list = await facilityModel.listFacilities();
+  const existing = new Set(list.map((f) => String(f.name)));
+  for (const r of DEFAULT_FACILITY_ROWS) {
+    if (!existing.has(r.name)) {
+      await facilityModel.createFacility({ id: r.id, name: r.name, category: r.category });
+    }
+  }
+}
+
 /** 教務主任権限 (KYOMU / ADMIN / is_kyomu) の判定 */
 function isKyomu(user) {
   if (!user) return false;
@@ -108,6 +151,7 @@ export const facilityService = {
    * 全施設・備品マスター一覧の取得
    */
   async getAllFacilities() {
+    await ensureDefaultFacilities();
     return await facilityModel.listFacilities();
   },
 
@@ -116,6 +160,7 @@ export const facilityService = {
    * active = 有効予約件数 (削除ガードの基準), total = キャンセル履歴含む全件数
    */
   async listFacilitiesWithUsage() {
+    await ensureDefaultFacilities();
     const facilities = await facilityModel.listFacilities();
     const withUsage = await Promise.all(
       facilities.map(async (fac) => {
@@ -139,6 +184,10 @@ export const facilityService = {
     ensureKyomu(user);
     const name = normalizeFacilityName(payload.name);
     const category = normalizeFacilityCategory(payload.category || 'ROOM');
+
+    if (!isDefaultFacilityName(name)) {
+      throw new ApiError(400, `施設名は「${DEFAULT_FACILITY_NAMES.join('・')}」の範囲内で指定してください。`);
+    }
 
     const existing = await facilityModel.listFacilities();
     ensureNameAvailable(existing, name);
@@ -176,6 +225,9 @@ export const facilityService = {
       payload.category !== undefined ? normalizeFacilityCategory(payload.category) : undefined;
 
     if (name) {
+      if (!isDefaultFacilityName(name)) {
+        throw new ApiError(400, `施設名は「${DEFAULT_FACILITY_NAMES.join('・')}」の範囲内で指定してください。`);
+      }
       const existing = await facilityModel.listFacilities();
       ensureNameAvailable(existing, name, id);
     }
@@ -212,6 +264,10 @@ export const facilityService = {
     const target = await facilityModel.findFacilityById(id);
     if (!target) {
       throw new ApiError(404, '施設・備品が見つかりません。');
+    }
+
+    if (isDefaultFacilityName(target.name)) {
+      throw new ApiError(409, `初期設定の施設「${target.name}」は削除できません。`);
     }
 
     const counts = await facilityModel.countReservations(id);
@@ -381,12 +437,67 @@ export const facilityService = {
    * @param {string} reservationId
    * @param {Object} user - { id, role, is_kyomu }
    */
+  /**
+   * 予約の変更 (予約者本人または教務部のみ)。時間帯重複は自己予約を除外して照会
+   * @param {string} reservationId
+   * @param {Object} payload
+   * @param {Object} user - { id, role, is_kyomu }
+   */
+  async updateReservation(reservationId, payload, user) {
+    if (!reservationId) {
+      throw new ApiError(400, '予約IDが指定されていません。');
+    }
+
+    const target = await facilityModel.findReservationById(reservationId);
+    if (!target) {
+      throw new ApiError(404, '対象の予約が見つかりません。');
+    }
+    if (Number(target.is_cancelled) === 1) {
+      throw new ApiError(410, 'キャンセル済みの予約は変更できません。');
+    }
+
+    // ★ 投稿者（予約者）本人か教務部のみ変更できる
+    const isOwner = String(target.user_id) === String(user.id || user._id);
+    if (!isOwner && !isKyomu(user)) {
+      throw new ApiError(403, '予約の変更・削除は予約を投稿した本人（教務部を含む）のみ利用できます。');
+    }
+
+    const updated = await facilityModel.updateReservation(reservationId, payload || {});
+    if (!updated) {
+      throw new ApiError(404, '対象の予約が見つかりません。');
+    }
+
+    await auditModel.logAction({
+      userId: user.id || user._id,
+      action: 'UPDATE_RESERVATION',
+      targetEntity: 'RESERVATION',
+      targetId: reservationId,
+      changesJson: JSON.stringify({
+        title: updated.title,
+        target_date: updated.target_date,
+        start_time: updated.start_time,
+        end_time: updated.end_time,
+      }),
+    });
+
+    return updated;
+  },
+
   async cancelReservation(reservationId, user) {
     if (!reservationId) {
       throw new ApiError(400, '予約IDが指定されていません。');
     }
 
-    // キャンセル権限の照会・検証はモデル側および呼び出し元で判定
+    // ★ 投稿者（予約者）本人か教務部のみ削除できる
+    const target = await facilityModel.findReservationById(reservationId);
+    if (!target) {
+      throw new ApiError(404, '対象の予約が見つかりません。');
+    }
+    const isOwner = String(target.user_id) === String(user.id || user._id);
+    if (!isOwner && !isKyomu(user)) {
+      throw new ApiError(403, '予約の変更・削除は予約を投稿した本人（教務部を含む）のみ利用できます。');
+    }
+
     await facilityModel.cancelReservation(reservationId, user.id);
 
     // 監査ログの記録

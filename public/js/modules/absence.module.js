@@ -83,9 +83,7 @@ export function initAbsenceModule() {
     }
   });
 
-  // ダッシュボードの人数タイル・記入ボタン
-  document.getElementById('dash-tile-leave')?.addEventListener('click', () => openAbsenceModal('LEAVE'));
-  document.getElementById('dash-tile-trip')?.addEventListener('click', () => openAbsenceModal('TRIP'));
+  // ダッシュボードの記入ボタン（人数・登録件の表示は撤去済み。記入するボタンだけから登録モーダルを開く）
   document.getElementById('dash-btn-absence')?.addEventListener('click', () => openAbsenceModal('ALL'));
 }
 
@@ -109,7 +107,6 @@ export async function loadAbsenceSummary(targetDate = null) {
       can_record: data.can_record === true,
     };
 
-    renderAbsenceDashboardCard();
     renderAbsenceCounts();
     renderAbsenceList();
 
@@ -118,33 +115,11 @@ export async function loadAbsenceSummary(targetDate = null) {
       teachersLoaded = true;
     }
   } catch (err) {
-    const leaveEl = document.getElementById('dash-absence-leave');
-    const tripEl = document.getElementById('dash-absence-trip');
-    if (leaveEl) leaveEl.textContent = '--';
-    if (tripEl) tripEl.textContent = '--';
     const list = document.getElementById('absence-list');
     if (list) {
       list.innerHTML = `<div class="text-center py-6 text-xs text-danger">年休等・出張データの取得に失敗しました。</div>`;
       refreshLucideIcons();
     }
-  }
-}
-
-/**
- * ダッシュボードの人数タイル描画
- */
-function renderAbsenceDashboardCard() {
-  if (!latestSummary) return;
-  const counts = latestSummary.counts;
-
-  const leaveEl = document.getElementById('dash-absence-leave');
-  const tripEl = document.getElementById('dash-absence-trip');
-  if (leaveEl) leaveEl.textContent = String(counts.LEAVE ?? 0);
-  if (tripEl) tripEl.textContent = String(counts.TRIP ?? 0);
-
-  const updatedEl = document.getElementById('dash-absence-updated');
-  if (updatedEl) {
-    updatedEl.textContent = `${latestSummary.date} 登録 ${latestSummary.records.length} 件`;
   }
 }
 
@@ -159,6 +134,12 @@ function renderAbsenceCounts() {
   const tripCountEl = document.getElementById('absence-count-trip');
   if (leaveCountEl) leaveCountEl.textContent = String(counts.LEAVE ?? 0);
   if (tripCountEl) tripCountEl.textContent = String(counts.TRIP ?? 0);
+
+  // ダッシュボードの区分別人数表示
+  const dashLeaveEl = document.getElementById('dash-absence-leave');
+  const dashTripEl = document.getElementById('dash-absence-trip');
+  if (dashLeaveEl) dashLeaveEl.textContent = `${counts.LEAVE ?? 0}名`;
+  if (dashTripEl) dashTripEl.textContent = `${counts.TRIP ?? 0}名`;
 
   const noteEl = document.getElementById('absence-permission-note');
   if (noteEl) {

@@ -12,10 +12,11 @@ import { socketClient } from './socket.js';
 import { initDashboardModule, loadDashboardData, fetchWeatherData } from './modules/dashboard.module.js';
 import { initSeatingModule, loadSeatingData } from './modules/seating.module.js';
 import { initBulletinModule, loadBulletins } from './modules/bulletin.module.js';
-import { initChatModule, loadMessages } from './modules/chat.module.js';
+import { initChatModule, loadChannels, loadMessages } from './modules/chat.module.js';
 import { initFacilityModule, loadReservations } from './modules/facility.module.js';
 import { initScheduleModule, loadSchedules } from './modules/schedule.module.js';
 import { initApprovalModule, loadApprovals } from './modules/approval.module.js';
+import { initMailModule, loadMailData } from './modules/mail.module.js';
 import { initAbsenceModule, loadAbsenceSummary } from './modules/absence.module.js';
 import { initExamModule, loadExamData } from './modules/exam/exam.module.js';
 import { initSubjectsModule, loadSubjects, renderSubjectPicker, renderSubjectPickerAsync, readSubjectPicker, subjectChipsHtml, openSubjectAdmin, isKyomuUser, setUserSubjects } from './modules/subjects.module.js';
@@ -39,7 +40,12 @@ export async function loadActiveTabData(tabName = state.currentTab) {
       await loadSeatingData();
       break;
     case 'chat':
+      // ログイン画面の初期化ではチャンネル一覧を取得しないため、ここで取得する
+      await loadChannels();
       await loadMessages();
+      break;
+    case 'mail':
+      await loadMailData();
       break;
     case 'facility':
       await loadReservations();
@@ -1024,9 +1030,13 @@ async function loadUsersList() {
 }
 
 // アプリ起動エントリーポイント
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   // 1. 基礎UIモジュールの起動
   startClockWidget();
+  // 天気情報枠（ヘッダーの独立枠）をクリックしたら天気詳細モーダルを開く
+  document.getElementById('weather-widget-btn')?.addEventListener('click', () => {
+    openModal('weather-detail-modal');
+  });
   initModalListeners();
   initThemeManager();
   initNotificationCenter();
@@ -1035,16 +1045,18 @@ document.addEventListener('DOMContentLoaded', () => {
   initEventsAndListeners();
 
   // 3. 各機能UIモジュールの「構造DOM初期化」のみ実行（APIリクエストは発行しない）
-  initDashboardModule();
-  initSeatingModule();
-  initBulletinModule();
-  initChatModule();
-  initFacilityModule();
-  initScheduleModule();
-  initApprovalModule();
-  initAbsenceModule();
-  // 教科マスタ・担当教科モジュール (DOM生成と教科マスタ読み込み)
-  initSubjectsModule();
+  //    データ取得は各モジュール内のセッション判定に委譲し、未ログイン時は発火しない
+  await initDashboardModule();
+  await initSeatingModule();
+  await initBulletinModule();
+  await initChatModule();
+  await initFacilityModule();
+  await initScheduleModule();
+  await initApprovalModule();
+  await initMailModule();
+  await initAbsenceModule();
+  // 教科マスタ・担当教科モジュール (DOM生成のみ。マスタ読み込みはログイン後)
+  await initSubjectsModule();
   // 定期考査モジュールは renderAuthScreen (ログイン時のロール判定込み) で初期化される
 
 
@@ -1053,6 +1065,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 5. 有効なセッション（ログイン保持）が存在する場合のみ実データをロード
   if (state.currentUser && state.authToken) {
+    // 教科マスタは担当教科ピッカー/チップ専用 (タブを持たない) ためここで読む
+    await loadSubjects(true);
     switchTab(state.currentTab || 'dashboard');
   }
 

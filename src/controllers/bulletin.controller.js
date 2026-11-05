@@ -382,7 +382,9 @@ export const bulletinController = {
         message: result ? result.message : '削除しました。',
       });
     } catch (error) {
-      return res.status(400).json({
+      // 権限不足 (403) などをそのまま透過する (api.js は 403 を「権限不足」としてセッション維持で表示する)
+      const status = error.statusCode >= 400 && error.statusCode < 600 ? error.statusCode : 400;
+      return res.status(status).json({
         success: false,
         message: error.message || '削除に失敗しました。'
       });

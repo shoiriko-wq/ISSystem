@@ -299,7 +299,9 @@ export async function initSubjectsModule() {
   ensureSubjectAdminDom();
   const addForm = document.getElementById('subject-add-form');
   if (addForm) addForm.addEventListener('submit', submitSubjectAddForm);
-  await loadSubjects(true);
+
+  // 教科マスタの取得は行わない (未ログイン時に認証必須APIを叩かない)。
+  // ログイン後 (main.js の handleLoginClick / DOMContentLoaded) で loadSubjects(true) が読む。
   refreshLucideIcons();
 }
 

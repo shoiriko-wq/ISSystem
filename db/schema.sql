@@ -456,11 +456,23 @@ ON CONFLICT DO NOTHING;
 
 INSERT INTO resources (id, name, category)
 VALUES
-  ('1', '第一会議室', 'ROOM'),
-  ('2', '第二会議室', 'ROOM'),
-  ('3', '体育館', 'ROOM'),
-  ('4', 'プロジェクターA', 'EQUIPMENT'),
-  ('5', '校外研修用マイクロバス', 'EQUIPMENT')
+  ('fac_1', '学文館会議室', 'ROOM'),
+  ('fac_2', '西会議室', 'ROOM'),
+  ('fac_3', '東会議室', 'ROOM'),
+  ('fac_4', '応接室', 'ROOM'),
+  ('fac_5', '図書室', 'ROOM'),
+  ('fac_6', '食堂', 'ROOM'),
+  ('fac_7', '多目的教室', 'ROOM'),
+  ('fac_8', '４０５教室（西社会科教室）', 'SPECIAL'),
+  ('fac_9', '４０９教室（東社会科教室）', 'SPECIAL'),
+  ('fac_10', '２１２教室', 'SPECIAL'),
+  ('fac_11', '３１２教室', 'SPECIAL'),
+  ('fac_12', '２２７教室', 'SPECIAL'),
+  ('fac_13', '２２８教室（ＤＸルーム）', 'SPECIAL'),
+  ('fac_14', '視聴覚教室', 'SPECIAL'),
+  ('fac_15', '化学教室', 'SPECIAL'),
+  ('fac_16', '生物教室', 'SPECIAL'),
+  ('fac_17', '地学教室', 'SPECIAL')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO seating_status (id, user_id, desk_number, group_zone, current_status, status_note)
@@ -477,20 +489,9 @@ VALUES
   ('sch_103', '避難訓練', 'グラウンド避難', '2026-10-20', '14:25', '15:15', 'SCHOOL', 'kyomu01')
 ON CONFLICT DO NOTHING;
 
-INSERT INTO classes (id, grade, class_num, name)
-VALUES
-  ('1-1', 1, 1, '1年1組'),
-  ('1-2', 1, 2, '1年2組'),
-  ('2-1', 2, 1, '2年1組'),
-  ('3-1', 3, 1, '3年1組')
-ON CONFLICT DO NOTHING;
+-- クラス・コースの初期データは 19h セクション (初期設定30件) のみとする
 
-INSERT INTO subjects (id, name)
-VALUES
-  ('ko01', '国語'),
-  ('ko02', '数学'),
-  ('ko03', '英語')
-ON CONFLICT DO NOTHING;
+-- 教科マスタの初期データ (教務部が追加・改名・削除できる)
 
 -- 年休等・出張 欠席登録 (本日のデモデータ)
 INSERT INTO absence_records (id, user_id, record_date, record_type, reason, recorded_by, recorded_by_name)
@@ -867,20 +868,19 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS subjects TEXT NOT NULL DEFAULT '[]';
 INSERT INTO subjects (id, name, sort_order, color_key)
 VALUES
   ('ko01', '国語', 1, 'ACCENT'),
-  ('ko02', '数学', 2, 'SUCCESS'),
-  ('ko03', '英語', 3, 'INFO'),
-  ('ko04', '社会', 4, 'WARNING'),
-  ('ko05', '理科', 5, 'PURPLE'),
-  ('ko06', '音楽', 6, 'DANGER'),
-  ('ko07', '美術', 7, 'SLATE'),
-  ('ko08', '保健体育', 8, 'SLATE'),
-  ('ko09', '技術・家庭', 9, 'SLATE'),
-  ('ko10', '情報', 10, 'SLATE')
+  ('ko02', '地歴公民', 2, 'WARNING'),
+  ('ko03', '数学', 3, 'SUCCESS'),
+  ('ko04', '理科', 4, 'PURPLE'),
+  ('ko05', '保健体育', 5, 'SLATE'),
+  ('ko06', '芸術', 6, 'DANGER'),
+  ('ko07', '外国語', 7, 'INFO'),
+  ('ko08', '家庭', 8, 'SLATE'),
+  ('ko09', '情報', 9, 'SLATE')
 ON CONFLICT DO NOTHING;
 
 -- デモ教員の担当教科 (教務部が職員一覧から設定する想定の初期値)
-UPDATE users SET subjects = '["国語","社会"]' WHERE id = 't-tanaka' AND (subjects IS NULL OR subjects = '[]');
-UPDATE users SET subjects = '["数学","理科"]' WHERE id = 't-sato' AND (subjects IS NULL OR subjects = '[]');
+UPDATE users SET subjects = '["国語"]' WHERE id = 't-tanaka' AND (subjects IS NULL OR subjects = '[]');
+UPDATE users SET subjects = '["数学"]' WHERE id = 't-sato' AND (subjects IS NULL OR subjects = '[]');
 
 -- -------------------------------------------------------------
 -- 19. 定期考査 基本情報マスタ（クラス・コース・科目・教室）
@@ -990,15 +990,34 @@ INSERT INTO classes (id, grade, class_num, name, short_name, course_ids, is_acti
 VALUES
   ('1-1', 1, 1, '1-1', '1-1', '[]', true),
   ('1-2', 1, 2, '1-2', '1-2', '[]', true),
-  ('1-3r', 1, 3, '1-3理', '1-3理', '[]', true),
-  ('1-4a', 1, 4, '1-4文', '1-4文', '[]', true),
+  ('1-3', 1, 3, '1-3', '1-3', '[]', true),
+  ('1-4', 1, 4, '1-4', '1-4', '[]', true),
   ('1-5', 1, 5, '1-5', '1-5', '[]', true),
-  ('1-6k', 1, 6, '1-6看', '1-6看', '[]', true),
-  ('1-6h', 1, 7, '1-6保育', '1-6保育', '[]', true),
+  ('1-6', 1, 6, '1-6', '1-6', '[]', true),
+  ('1-7', 1, 7, '1-7', '1-7', '[]', true),
   ('2-1', 2, 1, '2-1', '2-1', '[]', true),
   ('2-2', 2, 2, '2-2', '2-2', '[]', true),
-  ('3-1r', 3, 1, '3-1理', '3-1理', '[]', true),
-  ('3-2a', 3, 2, '3-2文', '3-2文', '[]', true)
+  ('2-3', 2, 3, '2-3', '2-3', '[]', true),
+  ('2-4a', 2, 4, '2-4文', '2-4文', '[]', true),
+  ('2-4r', 2, 4, '2-4理', '2-4理', '[]', true),
+  ('2-5', 2, 5, '2-5', '2-5', '[]', true),
+  ('2-6k', 2, 6, '2-6看', '2-6看', '[]', true),
+  ('2-6a', 2, 6, '2-6文', '2-6文', '[]', true),
+  ('2-7', 2, 7, '2-7', '2-7', '[]', true),
+  ('3-1s', 3, 1, '3-1総', '3-1総', '[]', true),
+  ('3-1h', 3, 1, '3-1人', '3-1人', '[]', true),
+  ('3-2', 3, 2, '3-2', '3-2', '[]', true),
+  ('3-3', 3, 3, '3-3', '3-3', '[]', true),
+  ('3-4h', 3, 4, '3-4人', '3-4人', '[]', true),
+  ('3-4s', 3, 4, '3-4数', '3-4数', '[]', true),
+  ('3-5', 3, 5, '3-5', '3-5', '[]', true),
+  ('3-6s', 3, 6, '3-6数', '3-6数', '[]', true),
+  ('3-6w', 3, 6, '3-6環', '3-6環', '[]', true),
+  ('3-7k', 3, 7, '3-7看', '3-7看', '[]', true),
+  ('3-7s', 3, 7, '3-7総', '3-7総', '[]', true),
+  ('3-7h', 3, 7, '3-7人', '3-7人', '[]', true),
+  ('3-8s', 3, 8, '3-8総', '3-8総', '[]', true),
+  ('3-8h', 3, 8, '3-8人', '3-8人', '[]', true)
 ON CONFLICT (id) DO NOTHING;
 
 UPDATE classes SET short_name = COALESCE(short_name, name) WHERE short_name IS NULL;
@@ -1174,4 +1193,46 @@ ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS command_id TEXT;
 ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS block_shape_id TEXT;
 
 
+
+-- ==========================================
+-- 22. メール接続設定 (mail_accounts) ※ mail.model.js / mail.service.js が使用
+-- ※ パスワードは AES-256-GCM 暗号文 (iv:tag:base64) で保存し、平文では保存しない
+-- ==========================================
+CREATE TABLE IF NOT EXISTS mail_accounts (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL UNIQUE,
+  email_address TEXT NOT NULL,
+  password_enc TEXT NOT NULL,
+  imap_host TEXT,
+  imap_port INTEGER,
+  smtp_host TEXT,
+  smtp_port INTEGER,
+  status TEXT NOT NULL DEFAULT 'UNVERIFIED',
+  last_checked_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_mail_accounts_user ON mail_accounts(user_id);
+
+-- ==========================================
+-- 23. メッセージ受信箱 (mail_messages) — mail.model.js / mail.service.js 用
+-- 件名と日時を一覧化し、本文 (body) を詳細ペインへ表示する
+-- ==========================================
+CREATE TABLE IF NOT EXISTS mail_messages (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  sender_name TEXT NOT NULL,
+  sender_email TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  body TEXT NOT NULL,
+  is_read INTEGER DEFAULT 0,
+  received_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_mail_messages_user_time ON mail_messages(user_id, received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mail_messages_unread ON mail_messages(user_id, is_read);
 

@@ -5,6 +5,9 @@
 
 import { query } from '../../config/database.js';
 
+// メモリ上の編集ロックキャッシュ（getExpiredEditingLocks / releaseExpiredEditingLocks が参照）
+const mockLocks = new Map();
+
 export const auditModel = {
   /**
    * 監査ログの記録

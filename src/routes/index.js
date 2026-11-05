@@ -29,6 +29,7 @@ import approvalController from '../controllers/approval.controller.js';
 import seatingController from '../controllers/seating.controller.js';
 import examController from '../controllers/exam.controller.js';
 import newsController from '../controllers/news.controller.js';
+import mailController from '../controllers/mail.controller.js';
 import absenceController from '../controllers/absence.controller.js';
 import subjectController from '../controllers/subject.controller.js';
 import basicinfoController from '../controllers/basicinfo.controller.js';
@@ -100,6 +101,8 @@ router.post('/bulletins/:id/comments', authenticateToken, safe(bulletinControlle
 router.put('/bulletins/:id/read', authenticateToken, safe(bulletinController?.markAsRead));
 router.put('/bulletins/:id/approve', authenticateToken, safe(bulletinController?.digitallyApprove));
 router.post('/bulletins/:id/remind', authenticateToken, safe(bulletinController?.remindUnapprovedMembers));
+// 掲示の削除（service 側で投稿者本人のみ許可。UI の「削除」ボタンも投稿者にだけ表示される）
+router.delete('/bulletins/:id', authenticateToken, safe(bulletinController?.deleteBulletin));
 
 // ==========================================
 // 3. チャット & 協議室 API (/api/chat)
@@ -125,6 +128,7 @@ router.get('/facilities', authenticateToken, safe(facilityController?.getAllFaci
 router.get('/facilities/daily-overview', authenticateToken, safe(facilityController?.getDailyOverview));
 router.get('/facilities/:facilityId/reservations', authenticateToken, safe(facilityController?.getReservations));
 router.post('/facilities/reservations', authenticateToken, safe(facilityController?.createReservation));
+router.put('/facilities/reservations/:reservationId', authenticateToken, safe(facilityController?.updateReservation));
 router.delete('/facilities/reservations/:reservationId', authenticateToken, safe(facilityController?.cancelReservation));
 
 // 施設・備品マスタの追加・改名・削除（教務部 KYOMU / ADMIN のみ・削除は有効予約が残ると 409）
@@ -132,6 +136,16 @@ router.delete('/facilities/reservations/:reservationId', authenticateToken, safe
 router.post('/facilities', authenticateToken, requireKyomuRole, safe(facilityController?.createFacility));
 router.put('/facilities/:facilityId', authenticateToken, requireKyomuRole, safe(facilityController?.updateFacility));
 router.delete('/facilities/:facilityId', authenticateToken, requireKyomuRole, safe(facilityController?.deleteFacility));
+
+// メール接続設定 API (/api/mail)
+// 自分の設定のみ閲覧・変更・削除可 (初回は未設定 → UI でメールアドレスとパスワードを入力)
+router.get('/mail/account', authenticateToken, safe(mailController?.getAccount));
+router.post('/mail/account', authenticateToken, safe(mailController?.saveAccount));
+router.delete('/mail/account', authenticateToken, safe(mailController?.deleteAccount));
+
+// 受信箱 API (左：件名と日時、右：本文 / 既読記録)
+router.get('/mail/messages', authenticateToken, safe(mailController?.getInbox));
+router.post('/mail/messages/:id/read', authenticateToken, safe(mailController?.markMessageRead));
 
 // ==========================================
 // 5. 校内行事 & スケジュール API (/api/schedules)

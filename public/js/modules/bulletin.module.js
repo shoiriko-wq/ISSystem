@@ -92,7 +92,7 @@ export function initBulletinModule() {
         <h2 class="text-lg font-bold text-main flex items-center gap-2">
           <i data-lucide="megaphone" class="w-5 h-5 text-accent"></i> 職員連絡・掲示板
         </h2>
-        <p class="text-xs text-muted">校内の全体連絡・指示・緊急連絡を一元共有します。</p>
+        <p class="text-sm text-muted">校内の全体連絡・指示・緊急連絡を一元共有します。</p>
       </div>
       <div class="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
         <!-- ★ ‹ [日付] › を同一グループで隣接（一緒に折り返す。施設予約と同じ慣習）。
@@ -107,10 +107,10 @@ export function initBulletinModule() {
           <button type="button" id="bulletin-day-next" class="icon-btn icon-btn-fixed text-soft"
                   aria-label="翌日（→ キー）" title="翌日（→ キー）"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
         </div>
-        <button type="button" id="bulletin-btn-today" class="btn-secondary py-1.5 px-2.5 text-xs shrink-0" title="本日（T キー）">本日</button>
+        <button type="button" id="bulletin-btn-today" class="btn-secondary py-1.5 px-2.5 text-sm shrink-0" title="本日（T キー）">本日</button>
         <button type="button" id="bulletin-keys-toggle" class="icon-btn icon-btn-fixed border border-divider bg-surface shrink-0"
                 aria-expanded="false" aria-controls="bulletin-keys-pop" aria-label="キーボード操作の手引き" title="キー操作（? キー）"><i data-lucide="keyboard" class="w-4 h-4"></i></button>
-        <button type="button" id="bulletin-btn-create" class="btn-primary py-1.5 px-3 text-xs font-bold flex items-center gap-1.5 shrink-0">
+        <button type="button" id="bulletin-btn-create" class="btn-primary py-1.5 px-3 text-sm font-bold flex items-center gap-1.5 shrink-0">
           <i data-lucide="plus" class="w-4 h-4"></i> 新規投稿
         </button>
       </div>
@@ -120,7 +120,7 @@ export function initBulletinModule() {
     <div id="bulletin-mini-cal" class="hidden mt-2 mb-2 bg-surface-strong border border-divider rounded-xl p-3"></div>
 
     <!-- ★ キーボード操作の手引き（収納。キー操作ボタンで開閉。常時表示しない） -->
-    <div id="bulletin-keys-pop" class="hidden mt-2 mb-2 bg-surface-strong border border-divider rounded-xl p-2.5 text-[11px] text-soft flex flex-wrap gap-x-3 gap-y-1">
+    <div id="bulletin-keys-pop" class="hidden mt-2 mb-2 bg-surface-strong border border-divider rounded-xl p-2.5 text-sm text-soft flex flex-wrap gap-x-3 gap-y-1">
       <span><kbd class="kbd-key">↑</kbd><kbd class="kbd-key">↓</kbd> タイトル間移動（選択で既読・右ペイン連動）</span>
       <span><kbd class="kbd-key">Enter</kbd> 右ペインへフォーカス</span>
       <span><kbd class="kbd-key">←</kbd><kbd class="kbd-key">→</kbd> 前日・翌日（‹ › ボタン）</span>
@@ -132,7 +132,7 @@ export function initBulletinModule() {
     <!-- ★ 検索（小型。タイトル・本文をインクリメンタル検索） -->
     <div class="relative mt-3 mb-3 w-72 max-w-full">
       <i data-lucide="search" class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none"></i>
-      <input type="text" id="bulletin-search-input" class="input-field pl-8 pr-2 py-1 text-xs w-full" placeholder="タイトル・本文を検索" aria-label="掲示検索">
+      <input type="text" id="bulletin-search-input" class="input-field pl-8 pr-2 py-1 text-sm w-full" placeholder="タイトル・本文を検索" aria-label="掲示検索">
     </div>
 
     <!-- ★ 左右分割（左=タイトル列＋未読バッジ、右=選択記事の全文・コメント） -->
@@ -140,14 +140,14 @@ export function initBulletinModule() {
       <div class="bulletin-title-pane">
         <div class="pane-label">
           <span class="flex items-center gap-1.5"><i data-lucide="list" class="w-3.5 h-3.5 text-accent"></i> タイトル</span>
-          <span id="bulletin-title-count" class="text-[11px] text-muted">0 件</span>
+          <span id="bulletin-title-count" class="text-sm text-muted">0 件</span>
         </div>
         <div id="bulletin-list-container" class="bulletin-list-container" role="listbox" aria-label="掲示タイトル">
-          <div class="p-4 text-center text-xs text-muted">掲示板データを読み込み中...</div>
+          <div class="p-4 text-center text-sm text-muted">掲示板データを読み込み中...</div>
         </div>
       </div>
       <div id="bulletin-detail-pane" class="bulletin-detail-pane" tabindex="0" aria-live="polite" aria-label="掲示全文">
-        <div class="p-6 text-center text-xs text-muted">表示日の掲示全文を読み込み中...</div>
+        <div class="p-6 text-center text-sm text-muted">表示日の掲示全文を読み込み中...</div>
       </div>
     </div>
   `;
@@ -221,30 +221,19 @@ function bindEvents() {
   document.getElementById('bulletin-day-current')?.addEventListener('click', () => toggleMiniCalendar());
   document.getElementById('bulletin-keys-toggle')?.addEventListener('click', () => toggleKeysHelp());
 
-  // ★ 左列タイトル行（クリックで選択＝即既読化→右ペイン全文。行フォーカス時に削除ボタンが現れる）はリスト側で委譲
+  // ★ 左列タイトル行（クリックで選択＝即既読化→右ペイン全文。削除ボタンは置かない＝削除は詳細モーダル内・投稿者のみ）
   const listEl = document.getElementById('bulletin-list-container');
   if (listEl) {
     listEl.addEventListener('click', (e) => {
-      const del = e.target.closest('[data-bulletin-delete]');
-      if (del) {
-        e.stopPropagation();
-        deleteBulletinPost(del.getAttribute('data-bulletin-delete'));
-        return;
-      }
       const row = e.target.closest('[data-bulletin-toggle]');
       if (row) selectBulletin(row.getAttribute('data-bulletin-toggle'));
     });
   }
 
-  // ★ 右ペイン（「詳細」・「削除」・コメント送信）はペイン側で委譲
+  // ★ 右ペイン（「詳細」・コメント送信）はペイン側で委譲
   const paneEl = document.getElementById('bulletin-detail-pane');
   if (paneEl) {
     paneEl.addEventListener('click', (e) => {
-      const del = e.target.closest('[data-bulletin-delete]');
-      if (del) {
-        deleteBulletinPost(del.getAttribute('data-bulletin-delete'));
-        return;
-      }
       const detail = e.target.closest('[data-bulletin-detail]');
       if (detail) {
         openBulletinDetail(detail.getAttribute('data-bulletin-detail'));
@@ -409,24 +398,28 @@ function dayDiff(a, b) {
 }
 
 /**
- * 移動方向がわかるスライドアニメーション（中心日表示・左列・右ペイン）
- * 1日ずれは小さなナッジ、複数日ジャンプだけが少し大きく動く（1日移動が激しすぎないようにする）
+ * 移動方向がわかるスライドアニメーション
+ * 日付ザッピング(軸x)は中心日表示と左列を小刻みにナッジする。
+ * タイトル移動(軸y)は左列全体を動かさない — 選択枠(選択行)だけが移動する。
+ * 右ペインは常にフェードイン程度（全体をフラッシュ・移動させない）。
  * @param {number} dir 1=未来(右)/次(下) / -1=過去(左)/前(上) / 0=なし
  * @param {'x'|'y'} [axis] 軸。日付ザッピング='x'、タイトル移動='y'
  * @param {number} [days] 移動日数（絶対値）。未指定なら 1 日扱い
+ * @param {number|null} [prevTop] タイトル移動時の移動前選択行の top（選択枠のFLIP移動用）
  */
-function animateShift(dir, axis = 'x', days = 1) {
+function animateShift(dir, axis = 'x', days = 1, prevTop = null) {
   if (!dir || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
 
   const span = Math.max(1, Math.min(Math.abs(days) || 1, 7));
   const prop = axis === 'y' ? 'translateY' : 'translateX';
-  // 1日はずっと小さく、複数日ジャンプだけ大きく動く（中心日は ≤6px、内容は ≤12px）
-  const contentStep = axis === 'y' ? dir * 10 : dir * (3 + span * 2);
+  // 1日はずっと小さく、複数日ジャンプだけ大きく動く（中心日は ≤6px、左列は ≤12px、タイトル移動は左列を動かさない）
+  const contentStep = axis === 'y' ? 0 : dir * (3 + span * 2);
   const readoutStep = axis === 'x' ? dir * Math.min(3 + span, 6) : 0;
   const fade = 0.62;
   const opts = {
     duration: axis === 'y' ? 200 : 150,
-    easing: 'cubic-bezier(0.22, 1, 0.36, 1)'
+    easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    fill: 'both'
   };
 
   const slide = (el, offset) => {
@@ -438,8 +431,31 @@ function animateShift(dir, axis = 'x', days = 1) {
   };
 
   slide(document.getElementById('bulletin-day-current'), readoutStep);
+  // 左列全体はタイトル移動で動かない (axis 'y' では contentStep=0)。日付ザッピングの小ナッジだけ
   slide(document.getElementById('bulletin-list-container'), contentStep);
-  slide(document.getElementById('bulletin-detail-pane'), contentStep);
+
+  // 右ペインは位置を動かさない。フェードイン程度
+  const pane = document.getElementById('bulletin-detail-pane');
+  if (pane && typeof pane.animate === 'function') {
+    pane.animate([{ opacity: fade }, { opacity: 1 }], opts);
+  }
+
+  // タイトル移動は「選択枠が移動する」アニメーションだけ行う
+  if (axis === 'y' && prevTop !== null) {
+    const row = document.querySelector(`#bulletin-list-container [data-bulletin-toggle="${selectedId}"]`);
+    if (row && typeof row.animate === 'function') {
+      const delta = prevTop - row.getBoundingClientRect().top;
+      if (delta) {
+        row.animate(
+          [
+            { transform: `translateY(${delta}px)`, offset: 0 },
+            { transform: 'translateY(0)', offset: 1 }
+          ],
+          opts
+        );
+      }
+    }
+  }
 }
 
 /** 中心日読取（‹ › の間の固定幅ボタン。data-day に YYYY-MM-DD を保持。クリックでミニカレンダー開閉） */
@@ -575,7 +591,7 @@ function renderMiniCalendar() {
       </button>
       <span class="text-sm font-bold text-main">${y}年${m}月</span>
       <div class="flex items-center gap-1">
-        <button type="button" class="btn-secondary px-2 py-1 text-[10px]" data-cal-today>今日</button>
+        <button type="button" class="btn-secondary px-2 py-1 text-sm" data-cal-today>今日</button>
         <button type="button" class="icon-btn border border-divider bg-surface" data-cal-month="1" aria-label="次の月">
           <i data-lucide="chevron-right" class="w-4 h-4"></i>
         </button>
@@ -586,10 +602,10 @@ function renderMiniCalendar() {
     </div>
     <div class="mini-cal-grid">${cells.join('')}</div>
     <div class="flex items-center gap-2 mt-2">
-      <label for="bulletin-day-date" class="text-[10px] text-muted shrink-0">任意日へ</label>
-      <input type="date" id="bulletin-day-date" class="input-field py-1 px-2 text-xs" aria-label="投稿日" value="${anchor}">
+      <label for="bulletin-day-date" class="text-sm text-muted shrink-0">任意日へ</label>
+      <input type="date" id="bulletin-day-date" class="input-field py-1 px-2 text-sm" aria-label="投稿日" value="${anchor}">
     </div>
-    <p class="text-[10px] text-muted mt-2">● は投稿のある日です。日付をクリックでその日の記事を表示してカレンダーは閉じます。‹ › ボタンと ←/→ キーで前日・翌日（1日分）へ、‹ › の間の日付クリック（C キー）でこのカレンダーを開閉できます。</p>
+    <p class="text-sm text-muted mt-2">● は投稿のある日です。日付をクリックでその日の記事を表示してカレンダーは閉じます。‹ › ボタンと ←/→ キーで前日・翌日（1日分）へ、‹ › の間の日付クリック（C キー）でこのカレンダーを開閉できます。</p>
   `;
   refreshLucideIcons();
 }
@@ -651,6 +667,16 @@ function isUnreadBulletin(b) {
   return !b.isRead && b.ackStatus !== 'READ' && b.ackStatus !== 'APPROVED';
 }
 
+/**
+ * 掲示の投稿者がログインユーザー本人か（削除ボタンは投稿者本人にだけ表示する）
+ * @param {Object} b 掲示
+ */
+function isBulletinAuthor(b) {
+  const myId = String((state.currentUser && (state.currentUser.id || state.currentUser.staff_code)) || '');
+  const authorId = String((b && (b.authorId || b.author_id)) || '');
+  return Boolean(myId) && Boolean(authorId) && myId === authorId;
+}
+
 /** 掲示ID でキャッシュの掲示を探す */
 function findBulletin(id) {
   return bulletinsCache.find((b) => String(b.id) === String(id)) || null;
@@ -667,7 +693,7 @@ function paneBadgeHtml(b) {
 }
 
 /**
- * 左列タイトル行（1行・右端に未読バッジ、行頭シグニファイア › でクリック誘導。全文は右ペインに出す）
+ * 左列タイトル行（1行・右端に未読バッジ、行頭シグニファイア › でクリック誘導。全文は右ペインに出す。削除は詳細モーダル内のみ）
  * @param {Object} b
  * @param {boolean} selected 選択中（既読化済み・強調表示）か
  */
@@ -680,8 +706,6 @@ function titleRowHtml(b, selected) {
       <span class="bulletin-row-signifier" aria-hidden="true"><i data-lucide="chevron-right" class="w-3.5 h-3.5"></i></span>
       <span class="bulletin-row-title">${escapeHTML(String(b.title || ''))}</span>
       ${unread ? '<span class="bulletin-unread-badge" aria-hidden="true">未読</span>' : ''}
-      <span class="bulletin-row-delete"><button type="button" class="bulletin-row-delete-btn"
-                data-bulletin-delete="${b.id}" title="この掲示を削除">削除</button></span>
     </div>`;
 }
 
@@ -717,7 +741,7 @@ function renderRows() {
   if (countEl) countEl.textContent = `${filtered.length} 件`;
 
   if (filtered.length === 0) {
-    container.innerHTML = `<div class="p-5 text-center text-xs text-muted">
+    container.innerHTML = `<div class="p-5 text-center text-sm text-muted">
       <i data-lucide="calendar-off" class="w-6 h-6 mx-auto mb-2 opacity-60"></i>
       <div>この日の掲示連絡はありません。<kbd class="kbd-key">←</kbd><kbd class="kbd-key">→</kbd>・‹ › ボタンで前日・翌日、‹ › の間の日付クリック（<kbd class="kbd-key">C</kbd> キー）でカレンダーから任意日へ移動できます。</div>
     </div>`;
@@ -740,7 +764,7 @@ function renderDetailPane(b) {
   if (!pane) return;
 
   if (!b) {
-    pane.innerHTML = `<div class="p-6 text-center text-xs text-muted">
+    pane.innerHTML = `<div class="p-6 text-center text-sm text-muted">
       <i data-lucide="inbox" class="w-7 h-7 mx-auto mb-2 opacity-60"></i>
       <div>この日に掲示された連絡はありません。<kbd class="kbd-key">←</kbd><kbd class="kbd-key">→</kbd>・‹ › ボタンで前日・翌日へ移動できます。日付（‹ › の間）をクリックするとカレンダーが開きます。</div>
     </div>`;
@@ -756,13 +780,9 @@ function renderDetailPane(b) {
       <div class="pane-header">
         <h3 class="pane-title">${escapeHTML(String(b.title || ''))}</h3>
         <div class="pane-badges">${paneBadgeHtml(b)}</div>
-        <button type="button" class="btn-primary py-1 px-2.5 text-[11px] font-bold flex items-center gap-1 shrink-0"
+        <button type="button" class="btn-primary py-1 px-2.5 text-sm font-bold flex items-center gap-1 shrink-0"
                 data-bulletin-detail="${b.id}" title="投稿日時・掲示期間・添付をモーダルで開く">
           <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i> 詳細
-        </button>
-        <button type="button" class="btn-secondary py-1 px-2.5 text-[11px] font-bold flex items-center gap-1 shrink-0 text-danger"
-                data-bulletin-delete="${b.id}" title="この掲示を削除">
-          <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> 削除
         </button>
       </div>
       <pre class="pane-body-text">${escapeHTML(String(b.content || ''))}</pre>
@@ -771,9 +791,9 @@ function renderDetailPane(b) {
         <p class="comment-heading"><i data-lucide="message-square" class="w-3.5 h-3.5 text-accent"></i> 投稿者への補足・コメント (${comments.length})</p>
         ${comments.length > 0 ? `<ul class="comment-list">${comments.map(commentHtml).join('')}</ul>` : '<p class="comment-empty">まだコメントはありません。</p>'}
         <div class="comment-form">
-          <label for="bulletin-comment-input" class="text-[10px] text-muted shrink-0">補足・確認コメント</label>
-          <textarea id="bulletin-comment-input" rows="2" class="input-field w-full min-w-0 p-2 text-xs" placeholder="投稿者へ補足・確認コメントを書く" aria-label="補足・確認コメント"></textarea>
-          <button type="button" class="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1.5 shrink-0"
+          <label for="bulletin-comment-input" class="text-sm text-muted shrink-0">補足・確認コメント</label>
+          <textarea id="bulletin-comment-input" rows="2" class="input-field w-full min-w-0 p-2 text-sm" placeholder="投稿者へ補足・確認コメントを書く" aria-label="補足・確認コメント"></textarea>
+          <button type="button" class="btn-secondary py-1.5 px-3 text-sm flex items-center gap-1.5 shrink-0"
                   data-bulletin-comment="${b.id}"><i data-lucide="send" class="w-3.5 h-3.5"></i> 送信</button>
         </div>
       </div>
@@ -879,11 +899,17 @@ function selectBulletin(id, dir = 0) {
   const nextIdx = items.findIndex((b) => String(b.id) === key);
   const shift = dir || Math.sign(nextIdx - prevIdx) || 0;
 
+  // 移動前選択行の top を記録（renderRows で行が入れ替わる前に測り、選択枠のFLIP移動に使う）
+  const prevRow = prevIdx >= 0
+    ? document.querySelector(`#bulletin-list-container [data-bulletin-toggle="${selectedId}"]`)
+    : null;
+  const prevTop = prevRow ? prevRow.getBoundingClientRect().top : null;
+
   selectedId = key;
   markBulletinRead(key);          // 非同期 PUT（ローカル状態は即更新で未読バッジが消失）
   renderRows();
   renderDetailPane(item);
-  animateShift(shift, 'y');
+  animateShift(shift, 'y', 1, prevTop);
   focusSelectedRow();
   refreshLucideIcons();
   loadComments(key);
@@ -907,7 +933,7 @@ function focusDetailPane() {
 }
 
 /**
- * 掲示の削除（行フォーカス時の削除ボタン・右ペインヘッダーの「削除」から）
+ * 掲示の削除（詳細モーダル内の「削除」ボタンからのみ。投稿者本人にだけボタンが出る）
  * 確認後に DELETE /api/bulletins/:id。成功時はキャッシュから除き、次の行へ選択を進める
  * @param {string} id 掲示ID
  */
@@ -1004,15 +1030,17 @@ async function openBulletinDetail(id) {
     const atts = item.attachments || [];
     attachEl.innerHTML = atts.length > 0
       ? attachmentsHtml(atts)
-      : `<p class="text-[11px] text-muted">添付ファイルはありません。</p>`;
+      : `<p class="text-sm text-muted">添付ファイルはありません。</p>`;
   }
 
   if (actionsEl) {
+    // 削除は本文・掲示期間などを確認できる詳細モーダル内にだけ置く。投稿者本人以外には表示しない
     actionsEl.innerHTML = `
-      <button id="btn-detail-comment" class="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1.5 text-warning border-warning-soft">
+      <button id="btn-detail-comment" class="btn-secondary py-1.5 px-3 text-sm flex items-center gap-1.5 text-warning border-warning-soft">
         <i data-lucide="message-square" class="w-3.5 h-3.5"></i> 補足・コメント
       </button>
-      <button class="modal-close btn-secondary py-1.5 px-4 text-xs">閉じる</button>
+      ${isBulletinAuthor(item) ? `<button type="button" id="btn-detail-delete" class="btn-danger py-1.5 px-3 text-sm flex items-center gap-1.5 bg-danger-soft text-danger-strong border border-danger-soft" title="この掲示を削除（投稿者のみ）"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i> 削除</button>` : ''}
+      <button class="modal-close btn-secondary py-1.5 px-4 text-sm">閉じる</button>
     `;
 
     document.getElementById('btn-detail-comment')?.addEventListener('click', () => {
@@ -1020,6 +1048,11 @@ async function openBulletinDetail(id) {
       selectBulletin(id);
       focusDetailPane();
       showToast('右ペイン下のコメント欄から送信してください', 'info');
+    });
+
+    document.getElementById('btn-detail-delete')?.addEventListener('click', () => {
+      closeModal('bulletin-detail-modal');
+      deleteBulletinPost(id);
     });
   }
 
@@ -1150,7 +1183,7 @@ function renderSelectedFiles(files = []) {
   }
 
   listEl.innerHTML = files.map((f) => `
-    <li class="flex items-center gap-2 text-[11px] text-soft">
+    <li class="flex items-center gap-2 text-sm text-soft">
       <i data-lucide="paperclip" class="w-3 h-3 text-accent shrink-0"></i>
       <span class="truncate">${escapeHTML(f.name)}</span>
       <span class="text-muted shrink-0">${formatBytes(f.size)}</span>

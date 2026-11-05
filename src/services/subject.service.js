@@ -10,6 +10,23 @@ import { ApiError } from '../middlewares/error.middleware.js';
 
 const NAME_MAX = 20;
 
+/** 初期設定（デフォルト）の教科名。これ以外の教科名は登録・改名不可 */
+export const DEFAULT_SUBJECT_NAMES = [
+  '国語',
+  '地歴公民',
+  '数学',
+  '理科',
+  '保健体育',
+  '芸術',
+  '外国語',
+  '家庭',
+  '情報',
+];
+
+function isDefaultSubject(name) {
+  return DEFAULT_SUBJECT_NAMES.some((n) => String(n).toLowerCase() === String(name).toLowerCase());
+}
+
 function isKyomu(user) {
   if (!user) return false;
   const role = String(user.role || '').toUpperCase();
@@ -29,6 +46,9 @@ function normalizeName(raw) {
   }
   if (name.length > NAME_MAX) {
     throw new ApiError(400, `教科名は${NAME_MAX}文字以内で入力してください。`);
+  }
+  if (!isDefaultSubject(name)) {
+    throw new ApiError(400, `教科名は「${DEFAULT_SUBJECT_NAMES.join('・')}」の範囲内で指定してください。`);
   }
   return name;
 }
@@ -121,6 +141,9 @@ export const subjectService = {
     const target = list.find((s) => String(s.id) === String(id));
     if (!target) {
       throw new ApiError(404, '教科が見つかりません。');
+    }
+    if (isDefaultSubject(target.name)) {
+      throw new ApiError(409, `初期設定の教科「${target.name}」は削除できません。`);
     }
     if (Number(target.plan_count) > 0) {
       throw new ApiError(409, `教科「${target.name}」は考査計画で ${target.plan_count}件使用されているため削除できません。`);
