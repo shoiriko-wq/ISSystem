@@ -7,10 +7,23 @@
 import mailModel from '../models/mail.model.js';
 import auditModel from '../models/audit.model.js';
 import { ApiError } from '../middlewares/error.middleware.js';
+import { probeImap, probeSmtp, DEFAULT_TIMEOUT_MS } from './mail.transport.js';
+import config from '../../config/default.js';
 
 const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 const HOST_RE = /^[A-Za-z0-9.-]+$/;
 const MIN_PASSWORD = 5;
+
+/** .env に保存されたメールサーバー初期値（GitHub にはコミットしない秘匿情報） */
+function mailDefaults() {
+  const m = config.mail || {};
+  return {
+    imap_host: m.imapHost ?? null,
+    imap_port: m.imapPort ?? null,
+    smtp_host: m.smtpHost ?? null,
+    smtp_port: m.smtpPort ?? null,
+  };
+}
 
 /** メールアドレス検証 (小文字化・trim) */
 function normalizeEmail(raw) {
@@ -46,17 +59,19 @@ function normalizePort(raw, label) {
   return port;
 }
 
-/** DB 行を UI へ返す形へ正規化 (パスワードは一切返さない) */
+/** DB 行を UI へ返す形へ正規化 (パスワードは一切返さない。未設定時は .env の初期値を返す) */
 function toView(row, suggestedEmail = '') {
+  const d = mailDefaults();
   return {
     needs_setup: !row,
     email_address: row ? row.email_address : null,
     suggested_email: row ? row.email_address : suggestedEmail,
     status: row ? row.status : 'UNVERIFIED',
-    imap_host: row ? row.imap_host : null,
-    imap_port: row ? row.imap_port : null,
-    smtp_host: row ? row.smtp_host : null,
-    smtp_port: row ? row.smtp_port : null,
+    imap_host: row?.imap_host ?? d.imap_host,
+    imap_port: row?.imap_port ?? d.imap_port,
+    smtp_host: row?.smtp_host ?? d.smtp_host,
+    smtp_port: row?.smtp_port ?? d.smtp_port,
+    last_checked_at: row?.last_checked_at ?? null,
     updated_at: row ? row.updated_at : null,
   };
 }
@@ -73,6 +88,41 @@ function toMessageView(row) {
     received_at: row.received_at,
   };
 }
+
+/** 接続プローブ (テスト時に差し替え可能なシーム) */
+const probes = { imap: probeImap, smtp: probeSmtp };
+
+/**
+ * 接続プローブの差し替え (検証専用。引数が空なら実装へ戻す)
+ * @param {{imap?: Function, smtp?: Function}} overrides
+ */
+export function setProbeOverrides(overrides = {}) {
+  probes.imap = overrides.imap ?? probeImap;
+  probes.smtp = overrides.smtp ?? probeSmtp;
+}
+
+/** 接続設定から IMAP / SMTP をテストし status を決める */
+async function probeSettings({ email, password, imapHost, imapPort, smtpHost, smtpPort }) {
+  const timeoutMs = config.mail?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const imap = await probes.imap({
+    host: imapHost,
+    port: imapPort,
+    secure: Number(imapPort) === 993,
+    user: email,
+    password,
+    timeoutMs,
+  });
+  const smtp = await probes.smtp({
+    host: smtpHost,
+    port: smtpPort,
+    secure: Number(smtpPort) === 465,
+    user: email,
+    password,
+    timeoutMs,
+  });
+  return { imap, smtp, status: imap.ok && smtp.ok ? 'VERIFIED' : 'FAILED' };
+}
+
 
 /** 受信箱初期シード (設定保存直後に件名と日時が並ぶサンプルメッセージ) */
 function buildSeedMessages(userId) {
@@ -136,10 +186,11 @@ export const mailService = {
     const body = payload || {};
     const email = normalizeEmail(body.email_address ?? body.email);
     const password = normalizePassword(body.password);
-    const imapHost = normalizeHost(body.imap_host ?? body.imapHost, '受信サーバー (IMAP)');
-    const imapPort = normalizePort(body.imap_port ?? body.imapPort, '受信サーバー (IMAP)');
-    const smtpHost = normalizeHost(body.smtp_host ?? body.smtpHost, '送信サーバー (SMTP)');
-    const smtpPort = normalizePort(body.smtp_port ?? body.smtpPort, '送信サーバー (SMTP)');
+    const d = mailDefaults();
+    const imapHost = normalizeHost(body.imap_host ?? body.imapHost, '受信サーバー (IMAP)') ?? d.imap_host;
+    const imapPort = normalizePort(body.imap_port ?? body.imapPort, '受信サーバー (IMAP)') ?? d.imap_port;
+    const smtpHost = normalizeHost(body.smtp_host ?? body.smtpHost, '送信サーバー (SMTP)') ?? d.smtp_host;
+    const smtpPort = normalizePort(body.smtp_port ?? body.smtpPort, '送信サーバー (SMTP)') ?? d.smtp_port;
 
     const saved = await mailModel.upsertAccount({
       user_id: user.id,
@@ -234,6 +285,97 @@ export const mailService = {
       ...row,
       password: mailModel.decryptPassword(row.password_enc),
     };
+  },
+
+  /**
+   * 接続テスト (設定済みなら保存設定でテストし status を更新、未保存のフォーム値はテストのみ)
+   * POST /api/mail/test
+   */
+  async testConnection(payload, user) {
+    const body = payload || {};
+    const d = mailDefaults();
+    const wantsProbe = typeof body.password === 'string' && body.password.trim() !== '';
+
+    let email = null;
+    let password = null;
+    let row = null;
+    let imapHost = null;
+    let imapPort = null;
+    let smtpHost = null;
+    let smtpPort = null;
+
+    if (wantsProbe) {
+      // フォーム入力値でのプレテスト (DB へ書き込まず status も変更しない)
+      email = normalizeEmail(body.email_address ?? body.email);
+      password = normalizePassword(body.password);
+      imapHost = normalizeHost(body.imap_host ?? body.imapHost, '受信サーバー') ?? d.imap_host;
+      imapPort = normalizePort(body.imap_port ?? body.imapPort, '受信ポート') ?? d.imap_port;
+      smtpHost = normalizeHost(body.smtp_host ?? body.smtpHost, '送信サーバー') ?? d.smtp_host;
+      smtpPort = normalizePort(body.smtp_port ?? body.smtpPort, '送信ポート') ?? d.smtp_port;
+    } else {
+      row = await mailModel.getAccount(user.id);
+      if (!row) {
+        throw new ApiError(409, '接続テストの前にメールアドレスとパスワードを登録してください。');
+      }
+      password = mailModel.decryptPassword(row.password_enc);
+      if (!password) {
+        throw new ApiError(409, '登録済みパスワードを復号できません。再度入力して保存してください。');
+      }
+      email = row.email_address;
+      imapHost = row.imap_host ?? d.imap_host;
+      imapPort = row.imap_port ?? d.imap_port;
+      smtpHost = row.smtp_host ?? d.smtp_host;
+      smtpPort = row.smtp_port ?? d.smtp_port;
+    }
+
+    if (!imapHost || !imapPort) {
+      throw new ApiError(409, '受信サーバー (IMAP) が設定されていません。接続テストの前に設定してください。');
+    }
+    if (!smtpHost || !smtpPort) {
+      throw new ApiError(409, '送信サーバー (SMTP) が設定されていません。接続テストの前に設定してください。');
+    }
+
+    const { imap, smtp, status } = await probeSettings({
+      email,
+      password,
+      imapHost,
+      imapPort,
+      smtpHost,
+      smtpPort,
+    });
+
+    const result = {
+      status,
+      imap: { ok: imap.ok, message: imap.message },
+      smtp: { ok: smtp.ok, message: smtp.message },
+      checked_at: new Date().toISOString(),
+      email_address: email,
+      imap_host: imapHost,
+      imap_port: imapPort,
+      smtp_host: smtpHost,
+      smtp_port: smtpPort,
+    };
+
+    // 保存済み設定のテスト時のみ status を更新し監査ログへ残す
+    if (row) {
+      const updated = await mailModel.setStatus(user.id, status);
+      result.account = toView(updated);
+      await auditModel.logAction({
+        userId: user.id,
+        action: 'MAIL_CONNECTION_TEST',
+        targetEntity: 'MAIL_ACCOUNT',
+        targetId: row.id,
+        changesJson: JSON.stringify({
+          status,
+          imap_ok: imap.ok,
+          imap_message: imap.message,
+          smtp_ok: smtp.ok,
+          smtp_message: smtp.message,
+        }),
+      });
+    }
+
+    return result;
   },
 };
 

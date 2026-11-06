@@ -165,6 +165,22 @@ const snapshot = (page) => page.evaluate(() => {
       const h = pane.querySelector('.pane-header');
       return h ? (h.textContent || '').includes('未読') : false;
     })(),
+    /* コメント送信ボタン（入力欄幅いっぱいに伸ばさず右端に内容幅。ホバーリングのリングは
+       .bulletin-detail-body の padding 内側で描画される＝見切れない） */
+    sendBtnW: (() => {
+      const b = pane.querySelector('#bulletin-comment-send');
+      return b ? Math.round(b.getBoundingClientRect().width) : null;
+    })(),
+    sendBtnRightGap: (() => {
+      const b = pane.querySelector('#bulletin-comment-send');
+      const f = pane.querySelector('.comment-form');
+      if (!b || !f) return null;
+      return Math.round(f.getBoundingClientRect().right - b.getBoundingClientRect().right);
+    })(),
+    textareaW: (() => {
+      const t = pane.querySelector('#bulletin-comment-input');
+      return t ? Math.round(t.getBoundingClientRect().width) : null;
+    })(),
     /* 枠線の太さ（他の UI と共通の var(--border-width)=2px であることを検証） */
     borderStd: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--border-width')),
     paneBorderW: [getComputedStyle(pane).borderTopWidth, getComputedStyle(pane).borderRightWidth,
@@ -291,6 +307,100 @@ check('左列タイトル行に削除ボタンがない（削除は詳細モー�
   snap1.rows > 0 && snap1.rowDeleteButtons === 0, { rowDeleteButtons: snap1.rowDeleteButtons, rows: snap1.rows });
 check('右ペイン（ヘッダー・本文）に削除ボタンがない',
   snap1.paneDeleteButtons === 0, { paneDeleteButtons: snap1.paneDeleteButtons, footerButtons: snap1.footerButtons });
+
+/* ★ コメント送信ボタン：入力欄幅いっぱいに伸ばさない（column flex の stretch 対策）。
+   チャット送信ボタンと同一デザイン（btn-primary・42px 高・send アイコン・ラベル「送信」）で、
+   右端に内容幅として揃える。 */
+const sendStyle = await page.evaluate(() => {
+  const btn = document.getElementById('bulletin-comment-send');
+  const ta = document.getElementById('bulletin-comment-input');
+  const form = document.querySelector('.comment-form');
+  const chatSend = document.querySelector('#chat-send-form button[type="submit"]');
+  if (!btn || !ta || !form) return { missing: true };
+  const br = btn.getBoundingClientRect();
+  const cs = getComputedStyle(btn);
+  return {
+    cls: btn.className,
+    chatSendCls: chatSend ? chatSend.className : null,
+    w: Math.round(br.width), h: Math.round(br.height),
+    textareaW: Math.round(ta.getBoundingClientRect().width),
+    rightGap: Math.round(form.getBoundingClientRect().right - br.right),
+    isPrimary: btn.classList.contains('btn-primary'),
+    bg: cs.backgroundColor, color: cs.color, fontWeight: cs.fontWeight,
+    icon: Boolean(btn.querySelector('svg')),
+    label: btn.textContent.replace(/\s+/g, ' ').trim(),
+  };
+});
+log('comment-send', sendStyle);
+check('コメント送信は入力欄の幅いっぱいに広がらない（入力欄の 60% 以下・内容幅で右端揃え）',
+  sendStyle.w !== null && sendStyle.w <= sendStyle.textareaW * 0.6 && sendStyle.w <= 140 && sendStyle.rightGap <= 2,
+  { w: sendStyle.w, textareaW: sendStyle.textareaW, rightGap: sendStyle.rightGap });
+check('コメント送信は送信系ボタンの統一デザイン（btn-primary・42px 高・太字・白文字・send アイコン・ラベル「送信」）',
+  sendStyle.isPrimary && sendStyle.h >= 40 && sendStyle.h <= 46 && Number(sendStyle.fontWeight) >= 700
+    && sendStyle.icon && sendStyle.label === '送信' && sendStyle.color === 'rgb(255, 255, 255)',
+  { isPrimary: sendStyle.isPrimary, h: sendStyle.h, fontWeight: sendStyle.fontWeight, icon: sendStyle.icon,
+    label: sendStyle.label, color: sendStyle.color });
+check('コメント送信はチャット送信ボタンと同一のクラス設計（デザイン統一）',
+  sendStyle.cls === sendStyle.chatSendCls, { cls: sendStyle.cls, chatSendCls: sendStyle.chatSendCls });
+
+/* ★ ホバーリングで枠リング（box-shadow 0 0 0 4px）が見切れないか。
+   右ペイン本文コンテナはスクロールコンテナ（overflow-x hidden / overflow-y auto）で、
+   影は padding box の外側で clip される。実ホバー時の影と上昇（translateY）から、
+   上下左右にリング分の余白があることを実測する。 */
+const hoverRingRoom = async (selector) => {
+  await page.hover(selector);
+  await sleep(350);
+  const room = await page.evaluate((sel) => {
+    const btn = document.querySelector(sel);
+    if (!btn) return { missing: sel };
+    const cs = getComputedStyle(btn);
+    const shadows = cs.boxShadow.split(/,(?![^(]*\))/).map((s) => s.trim()).filter((p) => p !== 'none')
+      .map((p) => {
+        const n = (p.match(/-?\d+(?:\.\d+)?px/g) || []).map((v) => parseFloat(v.replace('px', '')));
+        return n[3] || 0;
+      });
+    const spread = Math.max(0, ...shadows);
+    const mt = cs.transform.match(/matrix\(([^)]*)\)/);
+    const lift = mt ? -(parseFloat(mt[1].split(',')[5]) || 0) : 0; // 上昇分（px）
+    const roomOf = (container) => {
+      const c = getComputedStyle(container);
+      const cr = container.getBoundingClientRect();
+      const padBox = {
+        top: cr.top + parseFloat(c.borderTopWidth), right: cr.right - parseFloat(c.borderRightWidth),
+        bottom: cr.bottom - parseFloat(c.borderBottomWidth), left: cr.left + parseFloat(c.borderLeftWidth),
+      };
+      const b = btn.getBoundingClientRect();
+      return {
+        top: Math.round(b.top - padBox.top - lift),
+        right: Math.round(padBox.right - b.right),
+        left: Math.round(b.left - padBox.left),
+        bottom: Math.round(padBox.bottom - b.bottom + lift),
+      };
+    };
+    return {
+      spread, lift, shadow: cs.boxShadow.slice(0, 60),
+      bodyRoom: roomOf(document.querySelector('#bulletin-detail-pane .bulletin-detail-body')),
+      paneRoom: roomOf(document.getElementById('bulletin-detail-pane')),
+    };
+  }, selector);
+  await page.mouse.move(2, 2); // ホバーを外す（後続の計測に影響させない）
+  await sleep(120);
+  return room;
+};
+const ringOk = (r) => Boolean(r && r.spread > 0)
+  && [r.bodyRoom, r.paneRoom].every((c) => c.top >= r.spread && c.right >= r.spread
+    && c.left >= r.spread && c.bottom >= r.spread);
+
+const detailRing = await hoverRingRoom('#bulletin-detail-pane [data-bulletin-detail]');
+log('detail-hover-ring', detailRing);
+check('「詳細」ボタンはホバリングで枠リングが見切れない（上下左右の余白がリング分以上）',
+  ringOk(detailRing), detailRing);
+const sendRing = await hoverRingRoom('#bulletin-comment-send');
+log('send-hover-ring', sendRing);
+check('コメント送信ボタンはホバリングで枠リングが見切れない（上下左右の余白がリング分以上）',
+  ringOk(sendRing), sendRing);
+
+
 
 // ★ 右ペインタイトル行の投稿者（アバターアイコン＋投稿者名、右寄せ）。行内の未読バッジは撤去済み
 check('右ペインタイトル行に投稿者名とアバターアイコンが表示されている',
@@ -644,8 +754,71 @@ const createdRow = await page.evaluate((t) => {
   return { rowFound: !!row, rows: rows.length, paneTitle: document.querySelector('#bulletin-detail-pane h3')?.textContent.trim() };
 }, 'UI検証削除用掲示');
 log('created-post', { createdId, rowFound: createdRow.rowFound, rows: createdRow.rows });
+
 check('自分の新投稿が左列に並ぶ（削除 E2E の準備）', Boolean(createdId) && createdRow.rowFound === true,
   { createdId, rowFound: createdRow.rowFound, rows: createdRow.rows });
+
+/* ★ コメント送信 E2E（右ペインのその場で送信：委譲で即ローカル描画 → 成功トースト → API 201 → 永続化）。
+   bulletin_comments に保存され、他行→自分の投稿へ選択し直す（＝まっさらな再取得）後も一覧に残ることを検証する。
+   コメントは上で作った投稿に付けるため、後の投稿削除で CASCADE され検証後に DB から消える。 */
+const postSeen = [];
+page.on('response', async (r) => {
+  if (r.url().includes('/comments')) {
+    let body = '';
+    try { body = (await r.text()).slice(0, 150); } catch (e) { /* ignore */ }
+    postSeen.push({ status: r.status(), body: body.replace(/\s+/g, ' ') });
+  }
+});
+const sendTarget = await page.evaluate(() => {
+  const b = document.getElementById('bulletin-comment-send');
+  const ta = document.getElementById('bulletin-comment-input');
+  if (!b || !ta) return { missing: true };
+  const before = document.querySelectorAll('.comment-list .comment-item').length;
+  ta.value = 'UI検証：送信ボタンからの補足コメント';
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  b.click();  // ペイン側の委譲（[data-bulletin-comment]）で送信される
+  const local = document.querySelectorAll('.comment-list .comment-item').length;
+  return { id: b.getAttribute('data-bulletin-comment'), before, local };
+});
+await sleep(900);
+const sendUi = await page.evaluate(() => ({
+  toasts: [...document.querySelectorAll('#toast-container .toast')].map((t) => t.textContent.replace(/\s+/g, ' ').trim()),
+  inputCleared: (document.getElementById('bulletin-comment-input')?.value || '') === '',
+  itemsAfter: document.querySelectorAll('.comment-list .comment-item').length,
+  heading: (document.querySelector('.comment-heading')?.textContent || '').replace(/\s+/g, ' ').trim(),
+  paneText: (document.querySelector('.comment-list')?.textContent || '').replace(/\s+/g, ' '),
+}));
+log('comment-post', postSeen);
+const detailAfter = await apiFetch(page, 'GET', `/bulletins/${sendTarget.id}`);
+const persisted = (detailAfter.json?.data?.comments || [])
+  .some((c) => String(c.comment_text || '').includes('UI検証：送信ボタンからの補足コメント'));
+/* 他行 → 自分の投稿へ選択し直す（loadComments は選択時に走る＝まっさらな再取得。ローコピーは破棄される） */
+const reselect = await page.evaluate(async (id) => {
+  window.__bulletinDebug = [];
+  const rows = [...document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]')];
+  const other = rows.find((r) => r.getAttribute('data-bulletin-toggle') !== String(id));
+  const mine = rows.find((r) => r.getAttribute('data-bulletin-toggle') === String(id));
+  if (other) other.click();
+  await new Promise((r) => setTimeout(r, 450));
+  if (mine) mine.click();
+  await new Promise((r) => setTimeout(r, 700));
+  return { items: document.querySelectorAll('.comment-list .comment-item').length, dbg: window.__bulletinDebug };
+}, sendTarget.id);
+log('comment-send-e2e', {
+  id: sendTarget.id, before: sendTarget.before, local: sendTarget.local, itemsAfter: sendUi.itemsAfter,
+  heading: sendUi.heading, reselect, detailStatus: detailAfter.status, persisted,
+});
+check('コメント送信ボタンで送信が走る（即ローカル描画・成功トースト・入力欄は再描画で空）',
+  sendTarget.local === sendTarget.before + 1
+    && sendUi.toasts.some((t) => t.includes('コメントを送信しました')) && sendUi.inputCleared,
+  { before: sendTarget.before, local: sendTarget.local, toasts: sendUi.toasts });
+check('コメントは永続化される（API 詳細の comments に返り、右ペインの件数 1 と本文表示・選択し直しても残る）',
+  detailAfter.status === 200 && persisted
+    && sendUi.itemsAfter === sendTarget.before + 1
+    && sendUi.paneText.includes('UI検証：送信ボタン')
+    && sendUi.heading.includes('(1)') && reselect.items === sendTarget.before + 1,
+  { before: sendTarget.before, itemsAfter: sendUi.itemsAfter, heading: sendUi.heading, reselect,
+    detailStatus: detailAfter.status, persisted });
 
 page.on('dialog', (d) => d.accept());   // window.confirm を受理する
 const deleteUi = await page.evaluate(() => {
@@ -653,7 +826,14 @@ const deleteUi = await page.evaluate(() => {
   if (!b) return { modal: false, hasDelete: false };
   b.click();
   const del = document.getElementById('btn-detail-delete');
-  return { modal: !document.getElementById('bulletin-detail-modal').classList.contains('hidden'), hasDelete: !!del };
+  return {
+    modal: !document.getElementById('bulletin-detail-modal').classList.contains('hidden'),
+    hasDelete: !!del,
+    actions: (document.getElementById('detail-bulletin-actions')?.textContent || '').replace(/\s+/g, ' ').trim(),
+    meta: (document.getElementById('detail-bulletin-meta')?.textContent || '').replace(/\s+/g, ' ').trim(),
+    storedUser: JSON.parse(localStorage.getItem('is_system_user_info_v251') || 'null'),
+    paneId: document.getElementById('bulletin-detail-pane')?.getAttribute('data-detail-post-id') || null,
+  };
 });
 await page.evaluate(() => { const d = document.getElementById('btn-detail-delete'); if (d) d.click(); });
 await sleep(900);
@@ -661,7 +841,9 @@ const afterDelete = await snapshot(page);
 const toasts = await page.evaluate(() => [...document.querySelectorAll('#toast-container .toast')]
   .map((t) => t.textContent.replace(/\s+/g, ' ').trim()));
 const apiGone = await apiFetch(page, 'GET', `/bulletins/${createdId}`);
-log('after-delete', { modal: deleteUi.modal, hasDelete: deleteUi.hasDelete, rows: afterDelete.rows, toasts, apiStatus: apiGone.status });
+log('after-delete', { modal: deleteUi.modal, hasDelete: deleteUi.hasDelete, rows: afterDelete.rows, toasts, apiStatus: apiGone.status,
+  uiUser: page.__userId, apiAuthor: apiGone.json?.data?.authorId ?? apiGone.json?.data?.author_id ?? null,
+  actions: deleteUi.actions, meta: deleteUi.meta, storedUser: deleteUi.storedUser, paneId: deleteUi.paneId });
 check('詳細モーダルの「削除」で自分の掲示が消える（トースト・行数・API が全て消えた状態）',
   deleteUi.modal === true && deleteUi.hasDelete === true && createdRow.rows - afterDelete.rows === 1
     && toasts.some((t) => t.includes('削除しました')) && apiGone.status === 404,
@@ -683,6 +865,9 @@ const m390 = await snapshot(page);
 log('mobile-390', m390);
 check('モバイル（390）は縦 stacking', m390.flexDir === 'column', m390.flexDir);
 check('モバイル（390）で横スクロールなし（ページ・右ペイン）', m390.pageOverflowX === 0 && m390.paneOverflowX === 0, { pageOverflowX: m390.pageOverflowX, paneOverflowX: m390.paneOverflowX });
+check('モバイル（390）でもコメント送信は入力欄幅いっぱいに広がらない（右端に内容幅）',
+  m390.sendBtnW !== null && m390.sendBtnW <= m390.textareaW && m390.sendBtnW <= 140 && m390.sendBtnRightGap <= 2,
+  { sendBtnW: m390.sendBtnW, textareaW: m390.textareaW, rightGap: m390.sendBtnRightGap });
 check('モバイル（390）の左列は全幅でタイトルが 1 行に絞られる', m390.titlePaneW >= m390.paneW && m390.rows > 0, { titlePaneW: m390.titlePaneW, paneW: m390.paneW });
 check('モバイル（390）でも ‹ › は同じ行に隣接（ツールバーが ‹ › を分けて折り返さない）',
   m390.prevY === m390.nextY && m390.nextX > m390.prevX, { prevX: m390.prevX, nextX: m390.nextX, prevY: m390.prevY, nextY: m390.nextY });
@@ -693,6 +878,9 @@ await sleep(300);
 const m320 = await snapshot(page);
 log('mobile-320', m320);
 check('モバイル（320）も縦 stacking・右ペイン内横スクロールなし', m320.flexDir === 'column' && m320.paneOverflowX === 0, { flexDir: m320.flexDir, paneOverflowX: m320.paneOverflowX });
+check('モバイル（320）でもコメント送信は入力欄幅いっぱいに広がらない（右端に内容幅）',
+  m320.sendBtnW !== null && m320.sendBtnW <= m320.textareaW && m320.sendBtnW <= 140 && m320.sendBtnRightGap <= 2,
+  { sendBtnW: m320.sendBtnW, textareaW: m320.textareaW, rightGap: m320.sendBtnRightGap });
 check('モバイル（320）でも ‹ › は同じ行に隣接', m320.prevY === m320.nextY && m320.nextX > m320.prevX,
   { prevX: m320.prevX, nextX: m320.nextX, prevY: m320.prevY, nextY: m320.nextY });
 // 320 の横オーバーフローが既存アプリ（ヘッダー等）由来かを確認（ダッシュボード基準値）

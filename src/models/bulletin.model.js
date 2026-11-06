@@ -47,6 +47,9 @@ function mapPost(row) {
   const updatedAt = toJstIso(row.updatedAt || row.updated_at || postedAt);
   const displayStart = normalizeDateOnly(row.displayStart || row.display_start_date);
   const displayEnd = normalizeDateOnly(row.displayEnd || row.display_end_date);
+  // 対象日 (掲示が日別表示で所属する日)。未設定の旧レコードは投稿日で補完する
+  const targetDate = normalizeDateOnly(row.targetDate || row.target_date)
+    || (postedAt ? String(postedAt).substring(0, 10) : null);
   return {
     ...row,
     // 投稿者ID (削除権限の判定に使う。SQL の alias は小文字化されるため両形を確保)
@@ -61,6 +64,11 @@ function mapPost(row) {
     displayEnd,
     display_start_date: displayStart,
     display_end_date: displayEnd,
+    // 対象日 (camel / snake 両形式で展開。日別表示の基準日)
+    targetDate,
+    target_date: targetDate,
+    targetDay: targetDate,
+    target_day: targetDate,
     targetScope: parseJson(row.target_scope, { grade: 'ALL', department: 'ALL' }),
     attachments: parseJson(row.attachments, []),
   };
@@ -198,6 +206,7 @@ export const bulletinModel = {
           p.attachments,
           p.display_start_date,
           p.display_end_date,
+          p.target_date,
           u.name as authorName,
           u.avatar_url as author_avatar,
           p.created_at as createdAt,
@@ -235,6 +244,13 @@ export const bulletinModel = {
       sql += ` AND (p.title LIKE ${ph()} OR p.content LIKE ${ph()})`;
       params.push(`%${filters.searchKey.trim()}%`);
     }
+
+      // 対象日 (掲示が日別表示で所属する日) による絞り込み。未設定レコードは投稿日を対象日として扱う
+      const targetDay = filters.targetDay || filters.target_day;
+      if (targetDay) {
+        params.push(String(targetDay).substring(0, 10));
+        sql += ` AND COALESCE(to_char(p.target_date, 'YYYY-MM-DD'), to_char(COALESCE(p.posted_at, p.created_at), 'YYYY-MM-DD')) = ${ph()}`;
+      }
 
       // 投稿日 (日ごと表示) による絞り込み
       const postedDay = filters.postedDay || filters.day || filters.posted_date;
@@ -312,13 +328,16 @@ export const bulletinModel = {
     const displayStart =
       normalizeDateOnly(postData.displayStart || postData.display_start || postData.display_start_date) || postedAt.substring(0, 10);
     const displayEnd = normalizeDateOnly(postData.displayEnd || postData.display_end || postData.display_end_date);
+    // 対象日 (未指定時は投稿日を対象日として既定化。日別表示の基準日)
+    const targetDate =
+      normalizeDateOnly(postData.targetDate || postData.target_date || postData.targetDateInput) || postedAt.substring(0, 10);
 
     try {
       const db = await getDb();
       await db.run(
-        `INSERT INTO posts (id, title, content, author_id, target_scope, attachments, display_start_date, display_end_date, is_deleted, posted_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-        [id, postData.title, postData.content, authorId, JSON.stringify(targetScope), JSON.stringify(attachments), displayStart, displayEnd, postedAt, createdAt, createdAt]
+        `INSERT INTO posts (id, title, content, author_id, target_scope, attachments, display_start_date, display_end_date, target_date, is_deleted, posted_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+        [id, postData.title, postData.content, authorId, JSON.stringify(targetScope), JSON.stringify(attachments), displayStart, displayEnd, targetDate, postedAt, createdAt, createdAt]
       );
 
       // 投稿作成時に添付ファイル (未紐付け) をこの投稿へ紐付ける
@@ -349,6 +368,11 @@ export const bulletinModel = {
       displayEnd,
       display_start_date: displayStart,
       display_end_date: displayEnd,
+      // 対象日 (camel / snake 両形式。日別表示の基準日)
+      targetDate,
+      target_date: targetDate,
+      targetDay: targetDate,
+      target_day: targetDate,
       targetScope,
       attachments
     };
@@ -398,6 +422,66 @@ export const bulletinModel = {
       return rows || [];
     } catch (err) {
       console.warn('[BulletinModel SQLite Warning] getAcknowledgements failed:', err.message);
+      return [];
+    }
+  },
+
+  /**
+   * コメントレコードの作成（投稿者への補足・確認コメント。永続化）
+   * @param {Object} row - { id, bulletin_id|post_id, author_id, author_name, comment_text, created_at }
+   */
+  async addComment(row) {
+    const db = await getDb();
+    const postId = row.bulletin_id || row.post_id;
+    const text = String(row.comment_text || '').trim();
+    const createdAt = row.created_at || nowIso();
+    const id = row.id || `cmt_${Date.now()}`;
+    await db.run(
+      `INSERT INTO bulletin_comments (id, post_id, author_id, author_name, comment_text, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [id, postId, row.author_id, row.author_name, text, createdAt]
+    );
+    console.log('[bulletin.addComment]', { id, postId, text: text.slice(0, 24), author_id: row.author_id });
+    await db.close();
+    return {
+      id,
+      post_id: postId,
+      bulletin_id: postId,
+      author_id: row.author_id,
+      author_name: row.author_name,
+      comment_text: text,
+      created_at: toJstIso(createdAt) || createdAt,
+    };
+  },
+
+  /**
+   * 該当投稿のコメント一覧（時刻昇順。投稿者名・アバターは users と JOIN して補正）
+   * @param {string} postId
+   */
+  async getComments(postId) {
+    try {
+      const db = await getDb();
+      const rows = await db.all(
+        `SELECT bc.*, u.name AS user_name, u.avatar_url AS user_avatar
+         FROM bulletin_comments bc
+         LEFT JOIN users u ON bc.author_id = u.id
+         WHERE bc.post_id = ?
+         ORDER BY bc.created_at ASC`,
+        [postId]
+      );
+      await db.close();
+      return (rows || []).map((r) => ({
+        id: r.id,
+        post_id: r.post_id,
+        bulletin_id: r.post_id,
+        author_id: r.author_id,
+        author_name: r.author_name || r.user_name || '教員',
+        author_avatar: r.user_avatar || null,
+        comment_text: r.comment_text,
+        created_at: toJstIso(r.created_at),
+      }));
+    } catch (err) {
+      console.warn('[BulletinModel SQLite Warning] getComments failed:', err.message);
       return [];
     }
   },

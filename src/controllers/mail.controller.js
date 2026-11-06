@@ -54,6 +54,23 @@ export const mailController = {
   },
 
   /**
+   * 接続テスト (POST /api/mail/test)
+   * body に password とフォーム値を送れば未保存設定をプレテスト、空なら保存済み設定でテストし status を更新
+   */
+  async testConnection(req, res, next) {
+    try {
+      const result = await mailService.testConnection(req.body || {}, req.user);
+      const message =
+        result.status === 'VERIFIED'
+          ? '接続テスト: IMAP / SMTP とも接続確認済み'
+          : '接続テスト: 接続失敗 (IMAP / SMTP)';
+      return res.status(200).json({ success: true, message, ...result });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
    * 受信箱の表示 (左：件名と日時、右：本文)
    * GET /api/mail/messages
    */

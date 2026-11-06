@@ -179,15 +179,15 @@ export function initFacilityModule() {
     <!-- タイムラインマトリクス表示エリア (時間帯バンド表示) -->
     <div class="card p-4 overflow-hidden mt-4">
       <div class="flex items-center justify-between mb-3 text-xs text-muted">
-        <span class="text-muted">バンドをクリック → 詳細 / キャンセル、空き帯域をクリック → 予約作成｜表にカーソルを置くとホイールで上下にスクロール（時間ヘッダー行は固定）</span>
+        <span class="text-muted">バンドをクリック → 詳細 / キャンセル、空き帯域をクリック → 予約作成｜表にカーソルを置くとホイールで上下にスクロール（時間ヘッダー行と施設名称列は固定）</span>
       </div>
       <!-- 表は4面の実枠で囲む（border + border-main は readability R2 が 2px 実枠として復元）-->
       <div class="timeline-scroll-container overflow-x-auto overflow-y-auto border border-main rounded-xl"
-           tabindex="0" role="region" aria-label="施設物品予約タイムライン（ホイール・矢印キーで上下にスクロール、時間ヘッダー行は固定）">
+           tabindex="0" role="region" aria-label="施設物品予約タイムライン（ホイール・矢印キーで上下にスクロール、時間ヘッダー行と施設名称列は固定）">
         <div class="min-w-[880px]">
-          <!-- 時間スケールヘッダー（グリッド線は本文行と共用し、ラベルは同一 % 位置に配置。縦スクロールでも sticky で固定） -->
+          <!-- 時間スケールヘッダー（グリッド線は本文行と共用し、ラベルは同一 % 位置に配置。縦スクロールではヘッダー行が sticky で固定、横向きスライドでは施設名称列が sticky で左端固定） -->
           <div id="facility-time-header" class="flex h-10 items-stretch bg-surface-strong text-xs text-soft font-mono sticky top-0 z-20">
-            <div class="w-40 shrink-0 border-r border-divider p-2 flex items-center font-bold text-soft font-sans">施設名称</div>
+            <div class="w-40 shrink-0 border-r border-divider p-2 flex items-center font-bold text-soft font-sans facility-name-cell">施設名称</div>
             <div class="flex-1 relative">
               ${gridLinesHtml()}
               ${timeScaleLabels}
@@ -265,7 +265,7 @@ export function initFacilityModule() {
   `;
 
   bindEvents();
-  // ホイールは表の縦スクロールに使う（ヘッダー行は sticky で固定。横スクロールバーは Drag/バー操作で動かす）
+  // ホイールは表の縦スクロールに使う（時間ヘッダー行と施設名称列は sticky で固定。横スクロールバーは Drag/バー操作で動かす）
   // マスタ管理モーダル (教務部) を初期生成し追加フォームを紐付ける
   ensureFacilityMasterDom();
   // 予約詳細モーダル (投稿者本人に変更・削除メニュー) を初期生成
@@ -477,7 +477,7 @@ function renderMatrix() {
 
     return `
       <div class="flex hover-surface-soft transition-colors" data-facility-row="${fac.id}">
-        <div class="w-40 shrink-0 p-3 font-bold text-main bg-surface-strong border-r border-divider flex items-center gap-2">
+        <div class="w-40 shrink-0 p-3 font-bold text-main bg-surface-strong border-r border-divider flex items-center gap-2 facility-name-cell">
           <i data-lucide="${getFacilityIcon(fac.category)}" class="w-4 h-4 text-success"></i>
           <span class="truncate">${escapeHTML(fac.name)}</span>
         </div>

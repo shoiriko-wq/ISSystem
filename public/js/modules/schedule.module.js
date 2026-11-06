@@ -233,11 +233,15 @@ function renderScheduleView() {
        </button>`
     : '';
 
+  const frameTitle = viewMode === 'calendar' ? 'カレンダー' : '1日一覧';
+
   container.innerHTML = `
-    <div class="card p-3 space-y-3">
+    <!-- 設定枠：表示モード・部署フィルタ・行事追加（カレンダー枠とは分離して 2px 実枠で囲む） -->
+    <div id="sched-settings-frame" class="card p-3 space-y-2" role="group" aria-label="表示設定">
       <div class="flex flex-wrap items-center gap-2">
-        <button type="button" id="sched-goto-today" class="btn-secondary px-2.5 py-1.5 text-xs rounded-lg" title="現在月に戻る">今月</button>
-        <div class="flex-1"></div>
+        <span class="flex items-center gap-1.5 text-xs font-bold text-main shrink-0">
+          <i data-lucide="filter" class="w-3.5 h-3.5 text-accent"></i> 表示設定
+        </span>
         <div class="flex rounded-lg border border-main overflow-hidden bg-surface" role="group" aria-label="表示モード">
           <button type="button" id="sched-mode-calendar" data-mode="calendar" class="sched-mode-btn px-2.5 py-1.5 text-xs font-semibold flex items-center gap-1">
             <i data-lucide="calendar" class="w-3.5 h-3.5"></i> カレンダー表示
@@ -246,14 +250,21 @@ function renderScheduleView() {
             <i data-lucide="rows-3" class="w-3.5 h-3.5"></i> 1日一覧表示
           </button>
         </div>
+        <div class="flex-1"></div>
         <button type="button" id="sched-add-btn" class="btn-primary px-2.5 py-1.5 text-xs rounded-lg flex items-center gap-1">
           <i data-lucide="plus" class="w-3.5 h-3.5"></i> 行事を追加
         </button>
         ${kyomuBtn}
       </div>
       <div id="sched-filter-chips" class="flex flex-wrap items-center gap-1.5"></div>
-      <div id="sched-view-area"></div>
       <div id="sched-summary" class="text-[11px] text-muted"></div>
+    </div>
+    <!-- カレンダー枠：年月ナビ（‹ [年月] ›）+ 日グリッド / 1日一覧 -->
+    <div id="sched-calendar-frame" class="card p-3" role="group" aria-label="スケジュールカレンダー">
+      <div class="flex items-center gap-1.5 text-xs font-bold text-main mb-2">
+        <i data-lucide="calendar" class="w-3.5 h-3.5 text-accent"></i> ${frameTitle}
+      </div>
+      <div id="sched-view-area"></div>
     </div>
   `;
 
@@ -641,11 +652,11 @@ function setMode(mode) {
   renderScheduleView();
 }
 
-/** ヘッダ操作（月ナビ・表示モード・行事追加・カテゴリ管理）。各行の + は bindViewEvents 側 */
+/** ヘッダ操作（月ナビ・表示モード・行事追加・カテゴリ管理）。各行の + は bindViewEvents 側
+ *  「今月」ボタンは撤廃（現在月へは年月选择メニューの「今月へ」で戻る） */
 function bindHeaderEvents() {
   const prev = document.getElementById('sched-prev-month');
   const next = document.getElementById('sched-next-month');
-  const today = document.getElementById('sched-goto-today');
   const calBtn = document.getElementById('sched-mode-calendar');
   const listBtn = document.getElementById('sched-mode-list');
   const addBtn = document.getElementById('sched-add-btn');
@@ -653,7 +664,6 @@ function bindHeaderEvents() {
 
   if (prev) prev.addEventListener('click', () => { currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1); loadSchedules(); });
   if (next) next.addEventListener('click', () => { currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1); loadSchedules(); });
-  if (today) today.addEventListener('click', () => { currentMonth = new Date(); currentMonth.setDate(1); loadSchedules(); });
   if (calBtn) calBtn.addEventListener('click', () => setMode('calendar'));
   if (listBtn) listBtn.addEventListener('click', () => setMode('list'));
   if (addBtn) addBtn.addEventListener('click', () => openScheduleForm(null));

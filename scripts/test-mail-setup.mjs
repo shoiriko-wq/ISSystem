@@ -5,11 +5,14 @@
  *  1. サイドメニューの順序が ダッシュボード / 職員掲示板 / 職員チャット / メール /
  *     スケジュール / 施設物品予約 / 簡易承認 / 座席表 / 定期考査 である
  *  2. メールタブの初回は設定フォームが表示され、メールアドレスはユーザー情報からプリフィルされる
+ *  2a. 上級設定（IMAP / SMTP）は .env の初期値（GitHub 非公開の秘匿情報）でプリフィルされる
  *  3. 不正メールアドレスの送信はエラートーストになり、フォームは残る
  *  4. 正常な設定保存で受信箱パネルへ切り替わり、ヘッダーにアドレスが表示される
  *  4a. ヘッダーデザインは職員掲示板・施設物品予約と同一（ツールバー面＋text-base タイトル＋w-4 アイコン、
  *      コントロール高さは 2.4rem に統一）。「はじめてご利用…暗号化して保存されます」の案内文は存在しない
- *  5. ページ再読み込み後も設定済み状態 (フォームは出ない) が続く
+ *  4a-test. ヘッダーの「接続テスト」で IMAP / SMTP を実接続テストし、結果パネルと status (接続失敗) が出る
+ *  4f-2. フォーム内の「接続テスト（保存前に試す）」は未保存の入力値でテストし、フォームは残る
+ *  5. ページ再読み込み後も設定済み状態 (フォームは出ない) が続き、テスト失敗状態も残る
  *  6. 「設定を削除」で初回フォームへ戻り、後続検証のため DB を未設定状態へ戻す
  * 実行: node scripts/test-mail-setup.mjs   （ISSystem サーバーが必要）
  *  options: UI_BASE  UI_USER  UI_PASS  CHROME_PATH
@@ -19,12 +22,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
+import config from '../config/default.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_DIR = path.join(ROOT, 'scripts', 'output');
 const BASE = process.env.UI_BASE || 'https://127.0.0.1:3443';
 const USER = process.env.UI_USER || 'T2026001';
 const PASS = process.env.UI_PASS || 'password123';
+
+// .env（Git にコミットしない秘匿情報）のメールサーバー初期値 == フォームのプリフィル期待値
+const MAIL_DEFAULTS = {
+  imapHost: config.mail.imapHost,
+  imapPort: config.mail.imapPort,
+  smtpHost: config.mail.smtpHost,
+  smtpPort: config.mail.smtpPort,
+};
 
 const EXPECTED_ORDER = [
   'ダッシュボード',
@@ -77,9 +89,16 @@ const snapshot = (page) => page.evaluate(() => {
     viewActive: view ? view.classList.contains('active') : null,
     hasForm: !!document.getElementById('mail-setup-form'),
     emailValue: document.getElementById('mail-setup-email')?.value || '',
+    imapHostValue: document.getElementById('mail-setup-imap-host')?.value || '',
+    imapPortValue: document.getElementById('mail-setup-imap-port')?.value || '',
+    smtpHostValue: document.getElementById('mail-setup-smtp-host')?.value || '',
+    smtpPortValue: document.getElementById('mail-setup-smtp-port')?.value || '',
     passwordField: !!document.getElementById('mail-setup-password'),
     hasInbox: !!document.getElementById('mail-inbox-list'),
     settingsBtn: (document.getElementById('mail-btn-settings')?.textContent || '').replace(/\s+/g, ' ').trim(),
+    testBtnText: (document.getElementById('mail-btn-test')?.textContent || '').replace(/\s+/g, ' ').trim(),
+    testResultText: (document.getElementById('mail-test-result')?.textContent || '').replace(/\s+/g, ' ').trim(),
+    formTestBtnText: (document.getElementById('mail-btn-test-form')?.textContent || '').replace(/\s+/g, ' ').trim(),
     listItems: items,
     detailSubject: (document.getElementById('mail-detail-subject')?.textContent || '').trim(),
     detailDatetime: (document.getElementById('mail-detail-datetime')?.textContent || '').trim(),
@@ -94,6 +113,7 @@ const snapshot = (page) => page.evaluate(() => {
       const rootFont = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
       const h2 = h.querySelector('h2');
       const sb = document.getElementById('mail-btn-settings');
+      const tb = document.getElementById('mail-btn-test');
       const rb = document.getElementById('mail-btn-refresh');
       const px = (el) => (el ? Math.round(parseFloat(getComputedStyle(el).height) * 10) / 10 : null);
       const wx = (el) => (el ? Math.round(parseFloat(getComputedStyle(el).width) * 10) / 10 : null);
@@ -105,6 +125,7 @@ const snapshot = (page) => page.evaluate(() => {
         h2Size: h2 ? Math.round(parseFloat(getComputedStyle(h2).fontSize) * 10) / 10 : null,
         iconClass: h2?.querySelector('i[data-lucide], svg')?.getAttribute('class') || '',
         settingsH: px(sb),
+        testH: px(tb),
         refreshH: px(rb),
         refreshW: wx(rb),
         targetH: Math.round(rootFont * 2.4 * 10) / 10,
@@ -141,6 +162,18 @@ const setup = await snapshot(page);
 check('メールタブ表示', setup.viewActive === true, setup.viewActive);
 check('初回は設定フォーム', setup.hasForm === true && setup.passwordField === true, { hasForm: setup.hasForm, passwordField: setup.passwordField });
 check('メールアドレスはユーザー情報からプリフィル', setup.emailValue.includes('@'), setup.emailValue);
+
+// 2a. IMAP / SMTP の初期値は .env（秘匿設定）から自動プリフィルされる
+check('IMAP/SMTP 初期値は .env の秘匿設定からプリフィル',
+  setup.imapHostValue === MAIL_DEFAULTS.imapHost &&
+  setup.imapPortValue === String(MAIL_DEFAULTS.imapPort) &&
+  setup.smtpHostValue === MAIL_DEFAULTS.smtpHost &&
+  setup.smtpPortValue === String(MAIL_DEFAULTS.smtpPort),
+  {
+    expected: MAIL_DEFAULTS,
+    imap: `${setup.imapHostValue}:${setup.imapPortValue}`,
+    smtp: `${setup.smtpHostValue}:${setup.smtpPortValue}`,
+  });
 
 // 2b. ヘッダーデザイン（職員掲示板・施設物品予約と同一のツールバー。card 枠ではない）
 const hi = setup.headerInfo;
@@ -193,12 +226,36 @@ check('ヘッダーにアドレス表示', configured.headerText.includes('tanak
 
 // 4a2. ヘッダーコントロール高さは掲示板・施設物品予約と同じ 2.4rem に統一
 const hc = configured.headerInfo;
-check('メール設定・再読み込みボタンは 2.4rem 高に統一（再読み込みは正方形）',
-  hc && hc.settingsH === hc.targetH && hc.refreshH === hc.targetH && hc.refreshW === hc.targetH,
-  { settingsH: hc?.settingsH, refreshH: hc?.refreshH, refreshW: hc?.refreshW, targetH: hc?.targetH });
+check('メール設定・接続テスト・再読み込みボタンは 2.4rem 高に統一（再読み込みは正方形）',
+  hc && hc.settingsH === hc.targetH && hc.testH === hc.targetH && hc.refreshH === hc.targetH && hc.refreshW === hc.targetH,
+  { settingsH: hc?.settingsH, testH: hc?.testH, refreshH: hc?.refreshH, refreshW: hc?.refreshW, targetH: hc?.targetH });
 check('設定済みヘッダーに受信箱案内文は出ない',
   !/はじめてご利用|暗号化して保存/.test(configured.fullViewText),
   { fullViewText: configured.fullViewText.slice(0, 120) });
+
+// 4a-test. ヘッダーの「接続テスト」→ IMAP / SMTP を実接続テスト（到達不能サーバーなので NG になる）
+check('ヘッダーに接続テストボタンがある', configured.testBtnText.includes('接続テスト'), configured.testBtnText);
+await page.click('#mail-btn-test');
+await sleep(600);
+const testingToast = await snapshot(page);
+check('接続テスト実行中の案内トースト', testingToast.toasts.some((t) => t.includes('接続テストを実行しています')), testingToast.toasts.slice(-2));
+await sleep(2000);
+const tested = await snapshot(page);
+check('接続テスト結果パネルに IMAP / SMTP が並ぶ',
+  tested.testResultText.includes('接続テスト結果') &&
+  tested.testResultText.includes('IMAP (受信)') &&
+  tested.testResultText.includes('SMTP (送信)'),
+  { testResultText: tested.testResultText.slice(0, 160) });
+check('到達不能サーバーのテストは IMAP / SMTP とも接続 NG',
+  tested.testResultText.includes('IMAP (受信): 接続 NG') && tested.testResultText.includes('SMTP (送信): 接続 NG'),
+  { testResultText: tested.testResultText.slice(0, 200) });
+check('テスト失敗でヘッダーの状態が接続失敗になりトーストが出る',
+  tested.headerText.includes('接続失敗') && tested.toasts.some((t) => t.includes('接続テスト: 接続失敗')),
+  { headerText: tested.headerText.slice(0, 110), toasts: tested.toasts.slice(-1) });
+// 設定を削除する前に受信箱表示と既読状態が続くことを確認する
+check('接続テスト後も受信箱と右本文が表示される',
+  tested.hasInbox === true && tested.listItems.length >= 3 && tested.detailBody.length > 40,
+  { items: tested.listItems.length, detail: tested.detailSubject });
 
 // 4b. 「メール設定」ボタン
 check('メール設定ボタンがある', configured.settingsBtn.includes('メール設定'), configured.settingsBtn);
@@ -234,6 +291,28 @@ await page.click('#mail-btn-settings');
 await sleep(600);
 const opened = await snapshot(page);
 check('メール設定ボタンでフォームを開く', opened.hasForm === true && opened.emailValue === 'tanaka.ui@issystem.example', { hasForm: opened.hasForm, emailValue: opened.emailValue });
+
+// 4f-2. フォーム内の「接続テスト（保存前に試す）」→ 未保存の入力値でテスト（DB の status は変わらない）
+check('フォーム内に接続テストボタンがある', opened.formTestBtnText.includes('接続テスト（保存前に試す）'), opened.formTestBtnText);
+await page.evaluate(() => {
+  document.getElementById('mail-setup-password').value = 'ui-secret-123';
+  document.getElementById('mail-setup-imap-host').value = 'imap.issystem.example';
+  document.getElementById('mail-setup-imap-port').value = '993';
+  document.getElementById('mail-setup-smtp-host').value = 'smtp.issystem.example';
+  document.getElementById('mail-setup-smtp-port').value = '465';
+});
+await page.click('#mail-btn-test-form');
+await sleep(2600);
+const formTested = await snapshot(page);
+check('フォーム値の接続テストで結果パネルが出る',
+  formTested.testResultText.includes('imap.issystem.example:993') &&
+  formTested.testResultText.includes('smtp.issystem.example:465') &&
+  formTested.testResultText.includes('IMAP (受信): 接続 NG'),
+  { testResultText: formTested.testResultText.slice(0, 200) });
+check('フォーム値テストではフォームが消えず、テスト中のトーストが出る',
+  formTested.hasForm === true && formTested.toasts.some((t) => t.includes('接続テスト')),
+  { hasForm: formTested.hasForm, toasts: formTested.toasts.slice(-1) });
+
 await page.click('#mail-btn-cancel-edit');
 await sleep(600);
 const back = await snapshot(page);
@@ -249,6 +328,9 @@ check('再読み込み後も設定済み', reloaded.hasInbox === true && reloade
 check('再読み込み後も左一覧と右本文',
   reloaded.listItems.length >= 3 && reloaded.detailSubject.length > 0 && reloaded.detailBody.length > 40,
   { titles: reloaded.listItems.map((i) => i.subject), detail: reloaded.detailSubject });
+check('接続テストの失敗状態 (status=FAILED) は再読み込み後もヘッダーに残る',
+  reloaded.headerText.includes('接続失敗') && reloaded.testResultText === '',
+  { headerText: reloaded.headerText.slice(0, 110), testResultText: reloaded.testResultText.slice(0, 60) });
 
 await page.screenshot({ path: path.join(OUT_DIR, 'mail-setup.png'), fullPage: false });
 
@@ -260,6 +342,14 @@ await sleep(1200);
 const reset = await snapshot(page);
 check('設定削除で初回フォームへ戻る', reset.hasForm === true && reset.hasInbox === false, { hasForm: reset.hasForm, hasInbox: reset.hasInbox });
 check('削除で未読バッジが消える', reset.unreadBadgeHidden === true, { badge: reset.unreadBadgeText, hidden: reset.unreadBadgeHidden });
+
+// 6b. 未設定状態での接続テストは「先に登録が必要」の警告トーストになる
+await page.click('#mail-btn-test');
+await sleep(600);
+const unsetting = await snapshot(page);
+check('未設定の接続テストは登録案内の警告トースト',
+  unsetting.toasts.some((t) => t.includes('接続テストの前にメールアドレスとパスワードを登録')),
+  { toasts: unsetting.toasts.slice(-1) });
 
 await browser.close();
 

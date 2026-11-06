@@ -47,6 +47,8 @@ export const bulletinController = {
         limit: limit ? parseInt(limit, 10) : null,
         // 投稿日（日ごと表示切替）— 'today' などの別名は JST の日付キーへ変換
         postedDay: normalizePostedDay(req.query.postedDay || req.query.posted_date || req.query.day),
+        // 対象日（掲示が日別表示で所属する日）
+        targetDay: normalizePostedDay(req.query.targetDay || req.query.target_day || req.query.target_date),
         // 投稿日の期間絞り込み（週間ウィンドウなど）
         startDate: req.query.startDate || req.query.start_date || req.query.start,
         endDate: req.query.endDate || req.query.end_date || req.query.end,

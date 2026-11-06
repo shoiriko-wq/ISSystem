@@ -11,6 +11,7 @@ describe('Bulletin API (/api/bulletins)', () => {
   let token;
   let bulletinId = null;
   let displayPostId = null;
+  let targetPostId = null;
 
   beforeAll(async () => {
     token = await loginToken(app);
@@ -109,6 +110,52 @@ describe('Bulletin API (/api/bulletins)', () => {
     ).toBe(true);
   });
 
+  it('POST /api/bulletins - 対象日を指定できること（日別表示は対象日に所属）', async () => {
+    const targetDay = '2027-01-09';
+    const res = await request(app)
+      .post('/api/bulletins')
+      .set('Authorization', bearer(token))
+      .send({
+        title: '対象日テスト掲示',
+        content: '対象日による日別表示の検証',
+        target_date: targetDay,
+      });
+    expect(res.statusCode).toBe(201);
+    targetPostId = pickId(res.body);
+    expect(res.body.data.target_date).toBe(targetDay);
+    expect(res.body.data.targetDate).toBe(targetDay);
+
+    // 対象日での絞り込みには含まれる（その日の掲示として扱われる）
+    const dayRes = await request(app)
+      .get('/api/bulletins')
+      .query({ target_day: targetDay })
+      .set('Authorization', bearer(token));
+    expect(dayRes.statusCode).toBe(200);
+    expect(dayRes.body.data.some((p) => p.id === targetPostId)).toBe(true);
+
+    // 本日の対象日での絞り込みには含まれない（投稿日が本日でも対象日は 2027-01-09）
+    const todayRes = await request(app)
+      .get('/api/bulletins')
+      .query({ target_day: 'today' })
+      .set('Authorization', bearer(token));
+    expect(todayRes.statusCode).toBe(200);
+    expect(todayRes.body.data.some((p) => p.id === targetPostId)).toBe(false);
+  });
+
+  it('POST /api/bulletins - 対象日未指定なら投稿日が対象日になること', async () => {
+    const res = await request(app)
+      .post('/api/bulletins')
+      .set('Authorization', bearer(token))
+      .send({ title: '対象日既定化テスト', content: '対象日未指定時の投稿日補完を検証' });
+    expect(res.statusCode).toBe(201);
+    const id = pickId(res.body);
+    expect(res.body.data.target_date).toBe(res.body.data.posted_day);
+
+    const detail = await request(app).get(`/api/bulletins/${id}`).set('Authorization', bearer(token));
+    expect(detail.statusCode).toBe(200);
+    expect(detail.body.data.target_date).toBe(res.body.data.posted_day);
+  });
+
   it('POST /api/bulletins - 件名・本文欠落は 400', async () => {
     const res = await request(app)
       .post('/api/bulletins')
@@ -125,6 +172,15 @@ describe('Bulletin API (/api/bulletins)', () => {
       .send({ comment: 'Jest確認コメント' });
     expect(res.statusCode).toBe(201);
     expect(res.body.success).toBe(true);
+  });
+
+  it('コメントは bulletin_comments に永続化され、詳細取得の comments に返ること', async () => {
+    const res = await request(app)
+      .get(`/api/bulletins/${bulletinId}`)
+      .set('Authorization', bearer(token));
+    expect(res.statusCode).toBe(200);
+    const found = (res.body.data.comments || []).some((c) => c.comment_text === 'Jest確認コメント');
+    expect(found).toBe(true);
   });
 
   it('PUT /api/bulletins/post_1/read - 既読状態を更新できること', async () => {

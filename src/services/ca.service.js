@@ -17,7 +17,7 @@ const __dirname = path.dirname(__filename);
 // プロジェクトルート（src/services → 2つ上）
 const ROOT = path.resolve(__dirname, '..', '..');
 
-export const CA_FILE_NAME = 'issystem-ca.pem';
+export const CA_FILE_NAME = 'issystem-ca.crt'; // PEM 内容・.crt 拡張（Windows ではダブルクリックで開ける）
 
 /** 証明書ファイルの絶対パス群を解決する */
 export function sslPaths() {
@@ -194,12 +194,12 @@ export function buildCaPage(ctx) {
     </ol>
     <h3>macOS（Safari・Chrome）</h3>
     <ol>
-      <li>ダウンロードした.pemを開き、キーチェーンで <code>常時信頼</code> に設定します。</li>
+      <li>ダウンロードした .crt を開き、キーチェーンで <code>常時信頼</code> に設定します。</li>
       <li><code>${escapeHtml(httpsUrl)}</code> を開きます。</li>
     </ol>
     <h3>Firefox</h3>
     <ol>
-      <li><code>設定 → 個人情報保護 → 証明書 → 信頼されたルート → 証明書をインポート</code> で.pemを選択し、<code>このCAによるWebサイトの信頼</code> を有効化します。</li>
+      <li><code>設定 → 個人情報保護 → 証明書 → 信頼されたルート → 証明書をインポート</code> で .crt を選択し、<code>このCAによるWebサイトの信頼</code> を有効化します。</li>
     </ol>
     <h3>Node.js（スクリプト・自動化・UIテスト）</h3>
     <ol>
@@ -208,7 +208,7 @@ export function buildCaPage(ctx) {
     </ol>
     <h3>Android / iPad（学校端末）</h3>
     <ol>
-      <li>ダウンロードした.pemを端末に保存し、<code>設定 → セキュリティ → 認証情報の削除とインストール</code>（Android）または構成ファイル（iPad）で信頼設定します。</li>
+      <li>ダウンロードした .crt を端末に保存し、<code>設定 → セキュリティ → 認証情報の削除とインストール</code>（Android）または構成ファイル（iPad）で信頼設定します。</li>
     </ol>
   </div>
 

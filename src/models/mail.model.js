@@ -96,6 +96,15 @@ export const mailModel = {
     return res.rows;
   },
 
+  /** 接続テスト結果の保存 (status + 最終確認時刻) */
+  async setStatus(userId, status) {
+    const res = await query(
+      `UPDATE mail_accounts SET status = ?, last_checked_at = CURRENT_TIMESTAMP WHERE user_id = ? RETURNING *`,
+      [String(status), String(userId)]
+    );
+    return res.rows[0] || null;
+  },
+
   /** 受信箱のメッセージ一覧 (新しい順) */
   async listMessages(userId, limit = 50) {
     const res = await query(

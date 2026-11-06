@@ -12,7 +12,7 @@ const router = Router();
 // GET /ca → CAダウンロード・設定ページ
 router.get('/', caController.showCaPage);
 
-// GET /ca/issystem-ca.pem → ルートCA証明書（公開情報）のダウンロード
-router.get(`/${CA_FILE_NAME}`, caController.downloadCaPem);
+// GET /ca/issystem-ca.crt → ルートCA証明書（公開情報・.crt）のダウンロード
+router.get(`/${CA_FILE_NAME}`, caController.downloadCa);
 
 export default router;

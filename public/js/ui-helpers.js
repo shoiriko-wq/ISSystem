@@ -371,23 +371,26 @@ export function startClockWidget() {
   const clockEl = document.getElementById('clock-widget');
   if (!clockEl) return;
 
-  // 表示形式: 2026-11-05(金)12:00:00 (JST基準)
-  const fmt = new Intl.DateTimeFormat('ja-JP', {
+  // 表示形式: 2026-11-06 Fri 00:00:00 (JST基準)
+  const fmt = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Tokyo',
+    weekday: 'short',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-    weekday: 'short',
     hour: '2-digit',
-    minute: '2-digit', second: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
     hourCycle: 'h23',
   });
 
   const update = () => {
     const parts = {};
     for (const p of fmt.formatToParts(new Date())) parts[p.type] = p.value;
-    const weekday = String(parts.weekday || '').replace(/[（）()]/g, '');
-    clockEl.textContent = `${parts.year}-${parts.month}-${parts.day}(${weekday})${parts.hour}:${parts.minute}:${parts.second}`;
+    // 省略形に付く "Sat." 等のピリオドは除いて表示する
+    const weekday = String(parts.weekday || '').replace(/[().]/g, '');
+    clockEl.textContent =
+      `${parts.year}/${parts.month}/${parts.day} ${weekday} ${parts.hour}:${parts.minute}:${parts.second}`;
   };
 
   update();

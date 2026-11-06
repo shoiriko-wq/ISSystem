@@ -12,6 +12,13 @@
  *  8. 投稿で既存メッセージが一斉に全員既読化しない（未読行は残る）
  *  9. 別メンバーが閲覧（chat:mark_as_read）すると未読が1名减算される
  * 10. ページリロード後の未読者数は既読ログ（サーバー）と一致する
+ * 11. 左下の目のマーク（非表示編集モード）は ON/OFF でアイコンと色が見た目に連動する
+ * 12. 発言行のメタ（アイコン・名前・年月日時間）は相手＝左からアイコン・名前・日時、
+ *     自分＝右からアイコン・名前・日時となり、年月日時間は名前と下揃え（単一行・サイズ維持）
+ * 13. 未読者・取り消しメニューは普段隠れ、コメント行へホバー（またはフォーカス）時だけ
+ *     吹き出しの下へプルダウン表示される（実マウスで押せる・レイアウトシフトなし）
+
+
  *
  * 実行: node scripts/test-chat-unread.mjs   （ISSystem サーバーが必要）
  *  options: UI_BASE=http://host:port  UI_USER=T2026001  UI_PASS=password123  CHROME_PATH=...
@@ -90,6 +97,10 @@ const chatView = await page.evaluate(() => {
     togglePressed: toggleHide ? toggleHide.getAttribute('aria-pressed') : null,
     toggleText: (toggleHide?.textContent || '').trim(),
     toggleHasEyeIcon: !!toggleHide?.querySelector('svg,i[data-lucide]'),
+    toggleInner: toggleHide ? toggleHide.innerHTML.replace(/\s+/g, ' ').trim() : null,
+    toggleBg: toggleHide ? getComputedStyle(toggleHide).backgroundColor : null,
+    toggleColor: toggleHide ? getComputedStyle(toggleHide).color : null,
+    toggleBorder: toggleHide ? getComputedStyle(toggleHide).borderTopColor : null,
     hideBtnsInFooter: !!footer?.querySelector('.chat-hide-btn'),
     hideBtns: document.querySelectorAll('#chat-channels-list .chat-hide-btn').length,
     toggleBadge: document.querySelectorAll('#chat-toggle-hidden .badge-count').length,
@@ -149,6 +160,14 @@ const mouseClickSel = async (sel) => {
   await page.mouse.click(c.x, c.y);
   return true;
 };
+// 目のマークの見た目を読む前にマウスをチャット本文へ退避させる。
+// hover による色変化（.btn-secondary:hover と readability.css の hover リング）が
+// モード連動の判定へ混ざると、OFF 復帰時に枠線色が初期値と一致しないため。
+const unhoverEye = async () => {
+  const c = await centerOf('#chat-messages-container');
+  if (c) await page.mouse.move(c.x, c.y, { steps: 2 });
+  await sleep(220);
+};
 // トーストがサイドバーフッターを覆うと実クリックがトーストに当たる（テスト中はトーストを消す）
 const clearToasts = () => page.evaluate(() => {
   const c = document.getElementById('toast-container');
@@ -160,6 +179,21 @@ const clearToasts = () => page.evaluate(() => {
   })();
   if (c) c.innerHTML = '';
   return { overlap };
+});
+
+// 目のマークボタンの見た目（アイコン markup と色）を読む。モード連動の検証用
+const eyeState = () => page.evaluate(() => {
+  const btn = document.querySelector('#chat-btn-toggle-hide');
+  const cs = btn ? getComputedStyle(btn) : null;
+  return {
+    pressed: btn ? btn.getAttribute('aria-pressed') : null,
+    inner: btn ? btn.innerHTML.replace(/\s+/g, ' ').trim() : null,
+    bg: cs ? cs.backgroundColor : null,
+    color: cs ? cs.color : null,
+    border: cs ? cs.borderTopColor : null,
+    shadow: cs ? cs.boxShadow : null,
+    hideBtns: document.querySelectorAll('#chat-channels-list .chat-hide-btn').length,
+  };
 });
 
 const eyeClicked = await mouseClickSel('#chat-btn-toggle-hide');
@@ -175,6 +209,15 @@ check('目のマークを実クリックするとグループ名の横に目の�
   eyeClicked === true && afterEyeOn.hideBtns > 0 && afterEyeOn.pressed === 'true' && afterEyeOn.eyeInFooter === false,
   { eyeClicked, ...afterEyeOn });
 await page.screenshot({ path: 'scripts/output/chat-sidebar-eye-on.png' });
+
+await unhoverEye();
+const eyeOnState = await eyeState();
+log('eye-on-state', eyeOnState);
+check('目のマーク ON ではアイコンが開いた目（eye）になり、背景・文字色・枠・影が警告色へ連動する',
+  eyeOnState.pressed === 'true' && eyeOnState.inner !== chatView.toggleInner &&
+  eyeOnState.bg !== chatView.toggleBg && eyeOnState.color !== chatView.toggleColor &&
+  eyeOnState.border !== chatView.toggleBorder && eyeOnState.shadow !== 'none',
+  { initial: { inner: chatView.toggleInner, bg: chatView.toggleBg, color: chatView.toggleColor, border: chatView.toggleBorder }, on: eyeOnState });
 
 const targetId = await page.evaluate(() => document.querySelector('#chat-channels-list .chat-hide-btn')?.getAttribute('data-hide-id') || null);
 const hideClicked = await mouseClickSel('#chat-channels-list .chat-hide-btn');
@@ -209,6 +252,15 @@ const afterEyeOff = await page.evaluate(() => ({
 log('after-eye-off', { ...afterEyeOff, ...overlapInfo });
 check('目のマークを再度押すと非表示ボタンが消える（モード OFF）',
   eyeOffClicked === true && afterEyeOff.hideBtns === 0 && afterEyeOff.pressed === 'false', { eyeOffClicked, ...afterEyeOff, ...overlapInfo });
+
+await unhoverEye();
+const eyeOffState = await eyeState();
+log('eye-off-state', eyeOffState);
+check('目のマーク OFF ではアイコンと色が初期状態へ戻り、見た目がモードに連動する',
+  eyeOffState.pressed === 'false' && eyeOffState.inner === chatView.toggleInner &&
+  eyeOffState.bg === chatView.toggleBg && eyeOffState.color === chatView.toggleColor &&
+  eyeOffState.border === chatView.toggleBorder,
+  { initial: { inner: chatView.toggleInner, bg: chatView.toggleBg, color: chatView.toggleColor, border: chatView.toggleBorder }, off: eyeOffState });
 
 await clearToasts();
 const expandClicked = await mouseClickSel('#chat-toggle-hidden');
@@ -391,6 +443,221 @@ const routeStatus = await fetch(`${BASE}/api/chat/renotify`, {
 }).then((r) => r.status);
 log('renotify-route-status', routeStatus);
 check('サーバーの /api/chat/renotify は 404（ルート廃止）', routeStatus === 404, routeStatus);
+
+// ===== メタ行（アイコン・名前・年月日時間）の並び順と下揃え =====
+// 相手の行: 左から アイコン → 名前 → 年月日時間
+// 自分の行: 右から アイコン → 名前 → 年月日時間
+// 年月日時間は名前の底辺と揃える（下揃え）。単一行表示とアバターサイズは維持する。
+const metaLayout = await page.evaluate(() => {
+  const rows = [...document.querySelectorAll('#chat-messages-container [data-msg-id]')];
+  const rectOf = (el) => {
+    const b = el.getBoundingClientRect();
+    return { left: b.left, right: b.right, top: b.top, bottom: b.bottom, width: b.width, height: b.height };
+  };
+  const parsed = rows.map((row) => {
+    const meta = row.firstElementChild;
+    if (!meta) return null;
+    const kids = [...meta.children];
+    const avatar = kids.find((k) => k.classList.contains('rounded-full'));
+    const name = kids.find((k) => k.tagName === 'SPAN' && k.classList.contains('font-bold'));
+    const time = kids.find((k) => k.tagName === 'SPAN' && k.classList.contains('font-mono'));
+    if (!avatar || !name || !time) return null;
+    const idx = kids.indexOf(avatar);
+    return {
+      own: idx === kids.length - 1,
+      avatarIsFirst: idx === 0,
+      avatarIsLast: idx === kids.length - 1,
+      kidCount: kids.length,
+      avatar: rectOf(avatar),
+      name: rectOf(name),
+      time: rectOf(time),
+      meta: rectOf(meta),
+    };
+  }).filter(Boolean);
+  return {
+    count: parsed.length,
+    own: parsed.find((p) => p.own) || null,
+    other: parsed.find((p) => !p.own) || null,
+  };
+});
+
+// 底辺（下）が揃っているか（1.5px 以内）
+const bottomsAligned = (p) =>
+  Math.abs(p.avatar.bottom - p.name.bottom) <= 1.5 &&
+  Math.abs(p.name.bottom - p.time.bottom) <= 1.5;
+// メタ行が単一行（子要素がメタ行の枠内に収まる）
+const singleRow = (p) =>
+  p.avatar.top >= p.meta.top - 1 && p.avatar.bottom <= p.meta.bottom + 1 &&
+  p.time.left >= p.meta.left - 1 && p.time.right <= p.meta.right + 1;
+
+log('meta-layout', { count: metaLayout.count, own: metaLayout.own, other: metaLayout.other });
+
+check('相手の発言行は左からアイコン・名前・年月日時間の順で、年月日時間は下揃え',
+  metaLayout.other !== null && metaLayout.other.avatarIsFirst &&
+  metaLayout.other.avatar.left < metaLayout.other.name.left &&
+  metaLayout.other.name.left < metaLayout.other.time.left &&
+  bottomsAligned(metaLayout.other) && singleRow(metaLayout.other),
+  metaLayout.other);
+
+check('自分の発言行は右からアイコン・名前・年月日時間の順で、年月日時間は下揃え',
+  metaLayout.own !== null && metaLayout.own.avatarIsLast &&
+  metaLayout.own.time.left < metaLayout.own.name.left &&
+  metaLayout.own.name.left < metaLayout.own.avatar.left &&
+  metaLayout.own.avatar.right > metaLayout.own.name.right &&
+  bottomsAligned(metaLayout.own) && singleRow(metaLayout.own),
+  metaLayout.own);
+
+await page.screenshot({ path: 'scripts/output/chat-meta-layout.png' });
+
+
+// ===== コメントホバー時の読み込みメニュー（未読者・取り消し）=====
+// 普段は隠し、コメント行へホバー時だけ吹き出しの下へプルダウンとして開くことを実マウスで検証する。
+// confirm はスタブ（取り消し実行を抑止し、呼び出し回数で実マウス到達を判定する）
+await page.evaluate(() => {
+  window.__confirmCalls = 0;
+  window.confirm = () => { window.__confirmCalls += 1; return false; };
+});
+
+const hoverTargets = await page.evaluate(() => {
+  const cont = document.getElementById('chat-messages-container');
+  const cr = cont.getBoundingClientRect();
+  const rows = [...document.querySelectorAll('#chat-messages-container [data-msg-id]')];
+  // 列表の表示領域内にあり、後ろに行が続く（＝メニューが重なる状況を作る）行を選ぶ
+  const inView = (row) => {
+    const b = row.querySelector('div.rounded-2xl');
+    if (!b) return false;
+    const r = b.getBoundingClientRect();
+    const cy = r.y + r.height / 2;
+    return cy > cr.top + 20 && cy < cr.bottom - 60 && row !== cont.lastElementChild;
+  };
+  const bubbleCenter = (row) => {
+    const r = row.querySelector('div.rounded-2xl').getBoundingClientRect();
+    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+  };
+  const own = rows.find((r) => r.getAttribute('data-own') === 'true' && r.querySelector('.chat-cancel-btn') && inView(r));
+  const other = rows.find((r) => r.getAttribute('data-own') === 'false' && r.querySelector('.btn-show-unreaders') && inView(r));
+  return {
+    ownId: own ? own.getAttribute('data-msg-id') : null,
+    ownCenter: own ? bubbleCenter(own) : null,
+    otherId: other ? other.getAttribute('data-msg-id') : null,
+    otherCenter: other ? bubbleCenter(other) : null,
+  };
+});
+
+const footerState = (rowId) => page.evaluate((rid) => {
+  const row = document.querySelector(`#chat-messages-container [data-msg-id="${rid}"]`);
+  const footer = row ? row.querySelector('[data-read-footer]') : null;
+  const cs = footer ? getComputedStyle(footer) : null;
+  const fr = footer ? footer.getBoundingClientRect() : null;
+  const bubble = row ? row.querySelector('div.rounded-2xl') : null;
+  const br = bubble ? bubble.getBoundingClientRect() : null;
+  const rd = (v) => Math.round(v * 100) / 100;
+  return {
+    opacity: cs ? cs.opacity : null,
+    visibility: cs ? cs.visibility : null,
+    footerTop: fr ? rd(fr.top) : null,
+    footerHeight: fr ? rd(fr.height) : null,
+    bubbleTop: br ? rd(br.top) : null,
+    bubbleBottom: br ? rd(br.bottom) : null,
+    bubbleLeft: br ? rd(br.left) : null,
+    bubbleRight: br ? rd(br.right) : null,
+    scroll: Math.round(document.getElementById('chat-messages-container').scrollTop),
+  };
+}, rowId);
+
+const moveAwayFromChat = async () => {
+  // フォーカス維持でメニューが開いたままになる（:focus-within）ので、計測前にフォーカスを外す
+  await page.evaluate(() => { if (document.activeElement) document.activeElement.blur(); });
+  const c = await centerOf('#chat-input-message');
+  if (c) await page.mouse.move(c.x, c.y, { steps: 2 });
+  await sleep(320);
+};
+
+// 1) 普段は隠れている
+await moveAwayFromChat();
+const hiddenOwn = await footerState(hoverTargets.ownId);
+const hiddenOther = await footerState(hoverTargets.otherId);
+log('footer-hidden', { hiddenOwn, hiddenOther });
+check('普段は未読者・取り消しメニューが隠れている（ホバー前は非表示）',
+  hiddenOwn.visibility === 'hidden' && hiddenOwn.opacity === '0' &&
+  hiddenOther.visibility === 'hidden' && hiddenOther.opacity === '0',
+  { hiddenOwn, hiddenOther });
+
+// 2) 自分のコメントへホバー → プルダウンが吹き出しの下へ開き、取り消しを実マウスで押せる
+await clearToasts();
+await page.mouse.move(hoverTargets.ownCenter.x, hoverTargets.ownCenter.y, { steps: 3 });
+await sleep(320);
+const shownOwn = await footerState(hoverTargets.ownId);
+// ホバー中のボタン中心座標を実測し、そこにマウスをクリックして到達確認する
+const ownClick = await page.evaluate((rid) => {
+  const row = document.querySelector(`#chat-messages-container [data-msg-id="${rid}"]`);
+  const btn = row.querySelector('.chat-cancel-btn');
+  const br = btn.getBoundingClientRect();
+  const cx = Math.round(br.x + br.width / 2), cy = Math.round(br.y + br.height / 2);
+  const pt = document.elementFromPoint(cx, cy);
+  return { cx, cy, hit: pt ? `${pt.tagName}[${pt.className}]` : null };
+}, hoverTargets.ownId);
+log('own-hit', ownClick);
+await page.mouse.click(ownClick.cx, ownClick.cy);
+await sleep(350);
+const confirmCalls = await page.evaluate(() => window.__confirmCalls);
+log('own-hover', { shownOwn, ownClick, confirmCalls });
+check('自分のコメントへホバーすると未読・取り消しメニューがプルダウン表示され、取り消しを実マウスで押せる',
+  shownOwn.visibility === 'visible' && shownOwn.opacity === '1' &&
+  shownOwn.footerHeight > 0 && shownOwn.footerTop >= shownOwn.bubbleBottom &&
+  ownClick.hit === 'BUTTON[chat-cancel-btn text-danger hover-text-danger-strong flex items-center gap-1]' &&
+  confirmCalls >= 1,
+  { shownOwn, ownClick, confirmCalls });
+
+// 3) ホバーを離すと再び隠れ、吹き出し位置・列表のスクロールは動かない（レイアウトシフトなし）
+await moveAwayFromChat();
+const rehiddenOwn = await footerState(hoverTargets.ownId);
+log('own-rehidden', { before: hiddenOwn, after: rehiddenOwn });
+check('ホバーを離すとメニューが再び隠れ、吹き出し位置・列表のスクロールは動かない',
+  rehiddenOwn.visibility === 'hidden' && rehiddenOwn.opacity === '0' &&
+  rehiddenOwn.bubbleTop === hiddenOwn.bubbleTop &&
+  rehiddenOwn.bubbleLeft === hiddenOwn.bubbleLeft &&
+  rehiddenOwn.bubbleRight === hiddenOwn.bubbleRight &&
+  rehiddenOwn.scroll === hiddenOwn.scroll,
+  { before: hiddenOwn, after: rehiddenOwn });
+
+// 4) 相手のコメントへホバー → 未読者メニューから実マウスで未読者一覧を出す
+await clearToasts();
+await page.mouse.move(hoverTargets.otherCenter.x, hoverTargets.otherCenter.y, { steps: 3 });
+await sleep(320);
+const shownOther = await footerState(hoverTargets.otherId);
+const otherClick = await page.evaluate((rid) => {
+  const row = document.querySelector(`#chat-messages-container [data-msg-id="${rid}"]`);
+  const btn = row.querySelector('.btn-show-unreaders');
+  const br = btn.getBoundingClientRect();
+  const cx = Math.round(br.x + br.width / 2), cy = Math.round(br.y + br.height / 2);
+  const pt = document.elementFromPoint(cx, cy);
+  return { cx, cy, hit: pt ? `${pt.tagName}[${pt.className}]` : null };
+}, hoverTargets.otherId);
+log('other-hit', otherClick);
+await page.mouse.click(otherClick.cx, otherClick.cy);
+await sleep(420);
+const otherToast = await page.evaluate(() => {
+  const toasts = [...document.querySelectorAll('#toast-container div')]
+    .map((e) => e.textContent.replace(/\s+/g, ' ').trim())
+    .filter((t) => t.includes('未読者'));
+  return toasts.length > 0 ? toasts[0].slice(0, 90) : null;
+});
+log('other-hover', { shownOther, otherClick, otherToast });
+check('相手のコメントへホバーすると未読者メニューがプルダウン表示され、実マウスで未読者一覧が出る',
+  shownOther.visibility === 'visible' && shownOther.opacity === '1' &&
+  shownOther.footerHeight > 0 && shownOther.footerTop >= shownOther.bubbleBottom &&
+  otherClick.hit === 'BUTTON[btn-show-unreaders hover:underline text-warning flex items-center gap-1]' &&
+  otherToast !== null && otherToast.includes('未読者（'),
+  { shownOther, otherClick, otherToast });
+
+// ホバー中の見た目を確認するスクリーンショット（自分の行をホバー）
+await clearToasts();
+await page.mouse.move(hoverTargets.ownCenter.x, hoverTargets.ownCenter.y, { steps: 3 });
+await sleep(320);
+await page.screenshot({ path: 'scripts/output/chat-hover-menu.png' });
+await moveAwayFromChat();
+
 
 await browser.close();
 

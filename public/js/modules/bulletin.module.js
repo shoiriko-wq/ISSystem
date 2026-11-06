@@ -338,6 +338,13 @@ function toJstDay(iso) {
   return new Date(d.getTime() + 9 * 3600000).toISOString().split('T')[0];
 }
 
+/** 掲示の「対象日」キー (YYYY-MM-DD)。対象日未設定の旧レコードは投稿日で補完する */
+function targetDayOf(b) {
+  const raw = String(b.targetDate || b.target_date || b.targetDay || b.target_day || '').substring(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  return toJstDay(b.postedAt || b.posted_at || b.createdAt || b.created_at);
+}
+
 /** JST 基準の今日キーから offset 日分のキー */
 function dayKey(offset = 0) {
   const d = new Date(Date.now() + 9 * 3600000);
@@ -358,20 +365,19 @@ function weekdayLabel(key) {
   return WEEKDAY_LABELS[new Date(Date.UTC(p[0], p[1] - 1, p[2])).getUTCDay()];
 }
 
-/** キャッシュから日別件数を算出 */
+/** キャッシュから対象日別の件数を算出（ミニカレンダーの打点） */
 function dayCounts() {
   const map = new Map();
   bulletinsCache.forEach((b) => {
-    const k = toJstDay(b.postedAt || b.posted_at || b.createdAt || b.created_at);
+    const k = targetDayOf(b);
     if (k) map.set(k, (map.get(k) || 0) + 1);
   });
   return map;
 }
 
-/** 投稿日が中心日と一致するか */
+/** 対象日が中心日と一致するか（対象日未設定のレコードは投稿日で判定） */
 function matchesDay(b) {
-  const posted = toJstDay(b.postedAt || b.posted_at || b.createdAt || b.created_at);
-  return posted === (currentDayDate || dayKey(0));
+  return targetDayOf(b) === (currentDayDate || dayKey(0));
 }
 
 /** 2つの YYYY-MM-DD キーの日数差 (b - a) */
@@ -559,7 +565,7 @@ function renderMiniCalendar() {
       n > 0 ? 'mini-cal-has' : '',
     ].filter(Boolean).join(' ');
     cells.push(`<button type="button" class="${cls}" data-cal-date="${key}"
-                 aria-label="${key} ${weekdayLabel(key)} 投稿 ${n} 件">
+                 aria-label="${key} ${weekdayLabel(key)} 対象日 ${n} 件">
                  <span class="mini-cal-num">${d}</span>
                  ${n > 0 ? '<span class="mini-cal-dot"></span>' : ''}
                </button>`);
@@ -579,7 +585,7 @@ function renderMiniCalendar() {
       ${WEEKDAY_LABELS.map((w) => `<span class="mini-cal-wd">${w}</span>`).join('')}
     </div>
     <div class="mini-cal-grid">${cells.join('')}</div>
-    <p class="text-sm text-muted mt-2">● は投稿のある日です。日付をクリックでその日の記事を表示してカレンダーは閉じます。‹ › ボタンと ←/→ キーで前日・翌日（1日分）へ、‹ › の間の日付クリック（<kbd class="kbd-key">C</kbd> キー）でこのカレンダーを開閉できます。本日へは ‹ › の間の「本日」ボタンと T キーで戻ります。</p>
+    <p class="text-sm text-muted mt-2">● は対象日に掲示のある日です。日付をクリックでその日の記事を表示してカレンダーは閉じます。‹ › ボタンと ←/→ キーで前日・翌日（1日分）へ、‹ › の間の日付クリック（<kbd class="kbd-key">C</kbd> キー）でこのカレンダーを開閉できます。本日へは ‹ › の間の「本日」ボタンと T キーで戻ります。</p>
   `;
   refreshLucideIcons();
 }
@@ -783,9 +789,14 @@ function renderDetailPane(b) {
         ${comments.length > 0 ? `<ul class="comment-list">${comments.map(commentHtml).join('')}</ul>` : '<p class="comment-empty">まだコメントはありません。</p>'}
         <div class="comment-form">
           <label for="bulletin-comment-input" class="text-sm text-muted shrink-0">補足・確認コメント</label>
-          <textarea id="bulletin-comment-input" rows="2" class="input-field w-full min-w-0 p-2 text-sm" placeholder="投稿者へ補足・確認コメントを書く" aria-label="補足・確認コメント"></textarea>
-          <button type="button" class="btn-secondary py-1.5 px-3 text-sm flex items-center gap-1.5 shrink-0"
-                  data-bulletin-comment="${b.id}"><i data-lucide="send" class="w-3.5 h-3.5"></i> 送信</button>
+          <!-- チャット送信フォームと同一レイアウト（入力欄 flex-1／送信ボタンは内容幅で下端揃え） -->
+          <div class="comment-form-row">
+            <div class="flex-1">
+              <textarea id="bulletin-comment-input" rows="2" class="input-field w-full min-w-0 p-2 text-sm" placeholder="投稿者へ補足・確認コメントを書く" aria-label="補足・確認コメント"></textarea>
+            </div>
+            <button type="button" id="bulletin-comment-send" class="btn-primary py-2 px-4 h-[42px] font-bold text-xs flex items-center justify-center gap-1.5 flex-shrink-0"
+                    data-bulletin-comment="${b.id}"><i data-lucide="send" class="w-4 h-4"></i> 送信</button>
+          </div>
         </div>
       </div>
     </div>`;
@@ -826,8 +837,22 @@ async function loadComments(id) {
         commentText: String(a.comment).trim(),
         createdAt: a.acknowledged_at || a.acknowledgedAt || null,
       }));
+    // サーバー永続化コメント（bulletin_comments）。ack コメントと時刻昇順で併せる
+    const postedComments = (detail.comments || [])
+      .filter((c) => String(c.comment_text || c.commentText || c.comment || '').trim())
+      .map((c) => ({
+        authorName: c.author_name || c.authorName || c.user_name || c.userName || c.name || '教員',
+        avatarUrl: c.author_avatar || c.avatar_url || c.avatarUrl || null,
+        commentText: String(c.comment_text || c.commentText || c.comment).trim(),
+        createdAt: c.created_at || c.createdAt || null,
+      }));
+    const merged = [...apiComments, ...postedComments]
+      .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
     const mine = (commentsById.get(key) || []).filter((c) => c.mine);
-    commentsById.set(key, [...apiComments, ...mine]);
+    commentsById.set(key, [...merged, ...mine]);
+    if (window.__bulletinDebug) {
+      window.__bulletinDebug.push({ key, serverKeys: (detail.comments || []).length, acks: acks.length, merged: merged.length, paneSel: String(selectedId) === key });
+    }
   } catch (e) {
     /* オフライン時はローカル送信分だけ残す */
   }
@@ -1010,6 +1035,7 @@ async function openBulletinDetail(id) {
     metaEl.innerHTML = `
       <span class="flex items-center gap-1.5">${paneBadgeHtml(item)}</span>
       <span class="flex items-center gap-1.5">投稿者: ${userAvatarHtml({ name: author, avatarUrl: avatar, size: 'xs' })}${escapeHTML(author)}</span>
+      <span>対象日: <strong class="text-main">${formatDate(targetDayOf(item), false)}</strong></span>
       <span>投稿日時: <strong class="text-main">${formatDate(item.postedAt || item.posted_at || item.createdAt || item.created_at)}</strong></span>
       ${displayPeriodLabel(item) ? `<span>掲示期間: <strong class="text-main">${displayPeriodLabel(item)}</strong></span>` : '<span>掲示期間: <strong class="text-main">指定なし</strong></span>'}
     `;
@@ -1153,8 +1179,8 @@ async function handleCreateBulletin(e) {
   if (fileInput) fileInput.value = '';
   renderSelectedFiles([]);
 
-  // 新規投稿は左列に出るように中心日を投稿日へ寄せる
-  currentDayDate = toJstDay(postedAt) || currentDayDate;
+  // 新規投稿は左列に出るように中心日を「対象日」へ寄せる（対象日未設定なら投稿日）
+  currentDayDate = targetDate || toJstDay(postedAt) || currentDayDate;
   calendarAnchor = currentDayDate;
   updateDayReadout();
   loadBulletins();

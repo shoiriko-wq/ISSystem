@@ -67,6 +67,11 @@ ALTER TABLE posts ADD COLUMN IF NOT EXISTS posted_at TIMESTAMP DEFAULT CURRENT_T
 -- 掲示期間（掲示開始日・掲示終了日とも任意。未設定時は投稿日が掲示開始日、終了日未設定は「期間限定の掲示ではない」）
 ALTER TABLE posts ADD COLUMN IF NOT EXISTS display_start_date DATE;
 ALTER TABLE posts ADD COLUMN IF NOT EXISTS display_end_date DATE;
+-- 対象日（掲示が日別表示で所属する日。投稿フォームの「対象日」を保存する）
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS target_date DATE;
+-- 既存レコードの冪等バックフィル：対象日未設定の投稿は投稿日を対象日へ補完（TIMESTAMP の壁時計を DATE へキャスト）
+UPDATE posts SET target_date = CAST(to_char(COALESCE(posted_at, created_at), 'YYYY-MM-DD') AS DATE)
+WHERE target_date IS NULL;
 -- 区分・優先度は撤廃（カテゴリフィルタの廃止に伴いカラムを削除）
 ALTER TABLE posts DROP COLUMN IF EXISTS post_type;
 ALTER TABLE posts DROP COLUMN IF EXISTS priority;
@@ -82,6 +87,7 @@ CREATE INDEX IF NOT EXISTS idx_posts_deleted ON posts(is_deleted);
 CREATE INDEX IF NOT EXISTS idx_posts_author ON posts(author_id);
 CREATE INDEX IF NOT EXISTS idx_posts_deleted ON posts(is_deleted);
 CREATE INDEX IF NOT EXISTS idx_posts_posted_at ON posts(posted_at);
+CREATE INDEX IF NOT EXISTS idx_posts_target_date ON posts(target_date);
 CREATE INDEX IF NOT EXISTS idx_posts_display_start ON posts(display_start_date);
 CREATE INDEX IF NOT EXISTS idx_posts_display_end ON posts(display_end_date);
 
@@ -99,6 +105,21 @@ CREATE TABLE IF NOT EXISTS bulletin_attachments (
 );
 CREATE INDEX IF NOT EXISTS idx_attachment_post ON bulletin_attachments(post_id);
 CREATE INDEX IF NOT EXISTS idx_attachment_uploader ON bulletin_attachments(uploaded_by);
+
+-- 3c. 掲示板コメント (bulletin_comments)
+-- 投稿者への補足・確認コメント。右ペインでその場で送信し、永続化して詳細取得で返す。
+-- 投稿者名は users と JOIN して補正するため author_name は自己完結の履歴値、FK は投稿のみ（作者削除でコメントは残す）。
+CREATE TABLE IF NOT EXISTS bulletin_comments (
+  id TEXT PRIMARY KEY,
+  post_id TEXT NOT NULL,
+  author_id TEXT NOT NULL,
+  author_name TEXT NOT NULL,
+  comment_text TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_bulletin_comment_post ON bulletin_comments(post_id);
+CREATE INDEX IF NOT EXISTS idx_bulletin_comment_author ON bulletin_comments(author_id);
 
 -- 3. 回覧板承認・既読ログ (post_acknowledgements)
 CREATE TABLE IF NOT EXISTS post_acknowledgements (

@@ -1,14 +1,19 @@
 /**
  * スケジュール月ナビ（年月ラベル）の位置・アクセシビリティ監査
  *
- * 目的: 年月表示が日のグリッド（7列）の中央直上にあることを実ブラウザで検証する。
+ * 目的: 年月表示が日のグリッド（7列）の中央直上にあること、設定枠とカレンダー枠が
+ *       分離され各自 2px 実枠で囲まれていることを実ブラウザで検証する。
  * 経緯: 年月は ‹ › の間にあったがツールバー左端に寄せられており、日グリッドの中央から
  *       大きく左へ外れて位置が悪かった。月ナビ行をカレンダー本体の最上段へ移し、
  *       ‹ [年月] › を対称配置（同じ 32px ボタン + flex-1 text-center）にして中心を揃える。
+ *       さらに設定部分（表示モード・部署フィルタ・行事追加）と年月込みのカレンダー部分を
+ *       分離してそれぞれ枠で囲み、左上の「今月」ボタンは撤廃した
+ *       （現在月へは年月选择メニュー内の「今月へ」で戻る）。
  * 検証: 1) ラベルが #sched-view-area 内（グリッドの直上） 2) ラベル中心 x = グリッド中心 x（±3px）
  *       3) ‹ › が左右対称（中心距離差 ±3px） 4) 見出し + aria-live、矢印に aria-label
- *       5) 今月・‹ › で月が切り替わる（機能回帰なし） 6) 1日一覧でも中央直上
+ *       5) ‹ › とメニュー「今月へ」で月が切り替わる（機能回帰なし） 6) 1日一覧でも中央直上
  *       7) 狭幅 (720px) でも中央直上 8) console/pagejs error なし
+ *       9) 設定枠・カレンダー枠の分離と 2px 枠線 10) 左上「今月」ボタンの撤廃
  *
  * 実行: node scripts/test-schedule-month-nav.mjs   （ISSystem サーバーが必要）
  *  options: UI_BASE=http://host:port  UI_USER=T2026001  UI_PASS=password123  CHROME_PATH=...
@@ -82,8 +87,9 @@ const measure = () => page.evaluate(() => {
     listCenter: list ? center(list) : null,
     areaCenter: area ? center(area) : null,
     listTop: list ? Math.round(list.getBoundingClientRect().top) : null,
-    todayInArea: !!document.getElementById('sched-goto-today') && document.getElementById('sched-goto-today').closest('#sched-view-area') !== null,
     todayExists: !!document.getElementById('sched-goto-today'),
+    todayInCalFrame: (() => { const f = document.getElementById('sched-calendar-frame'); const b = document.getElementById('sched-goto-today'); return f && b ? f.contains(b) : false; })(),
+    listInCalFrame: (() => { const f = document.getElementById('sched-calendar-frame'); const l = document.getElementById('sched-list-container'); return f && l ? f.contains(l) : null; })(),
     labelFocusable: label ? label.tabIndex >= 0 : null,
     labelBtnExists: !!document.getElementById('sched-month-menu-btn'),
     labelBtnHasPopup: document.getElementById('sched-month-menu-btn') ? document.getElementById('sched-month-menu-btn').getAttribute('aria-haspopup') : null,
@@ -112,8 +118,47 @@ check('年月ラベルは見出し（h3）で aria-live=polite（月替えを読
 check('‹ › は type=button + aria-label（前月・次月）を持つ',
   cal.prevType === 'button' && cal.nextType === 'button' && cal.prevAria && cal.nextAria,
   { prevType: cal.prevType, prevAria: cal.prevAria, nextType: cal.nextType, nextAria: cal.nextAria });
-check('「今月」ボタンはツールバー側にある（月ナビ行の対称性を壊さない）',
-  cal.todayExists && !cal.todayInArea, { todayExists: cal.todayExists, todayInArea: cal.todayInArea });
+check('左上の「今月」ボタンは撤廃されている（ツールバーにもカレンダー枠にも存在しない）',
+  !cal.todayExists && !cal.todayInCalFrame, { todayExists: cal.todayExists, todayInCalFrame: cal.todayInCalFrame });
+
+// ★ 設定枠とカレンダー枠の分離：それぞれ 2px 実枠、内容の帰属が混ざらない
+const frames = await page.evaluate(() => {
+  const settings = document.getElementById('sched-settings-frame');
+  const calFrame = document.getElementById('sched-calendar-frame');
+  const bw = (el) => (el ? Math.round(parseFloat(getComputedStyle(el).borderTopWidth)) : null);
+  const inF = (el, sel) => (el ? el.querySelector(sel) !== null : false);
+  return {
+    settingsExists: !!settings,
+    calFrameExists: !!calFrame,
+    settingsBorder: bw(settings),
+    calFrameBorder: bw(calFrame),
+    siblings: !!settings && !!calFrame && settings.parentElement === calFrame.parentElement,
+    settingsHasTitle: settings ? settings.innerText.includes('表示設定') : false,
+    calHasTitle: calFrame ? /カレンダー|1日一覧/.test(calFrame.innerText) : false,
+    settingsHasMode: inF(settings, '#sched-mode-calendar'),
+    settingsHasChips: inF(settings, '#sched-filter-chips'),
+    settingsHasAdd: inF(settings, '#sched-add-btn'),
+    settingsHasSummary: inF(settings, '#sched-summary'),
+    calHasLabel: inF(calFrame, '#sched-month-label'),
+    calHasGrid: inF(calFrame, '#sched-view-area .grid.grid-cols-7'),
+    settingsHasGrid: inF(settings, '.grid.grid-cols-7'),
+    calHasMode: inF(calFrame, '#sched-mode-calendar'),
+    calHasChips: inF(calFrame, '.sched-cat-chip'),
+    noOverlap: !!settings && !!calFrame && !settings.contains(calFrame) && !calFrame.contains(settings),
+  };
+});
+log('section-frames', frames);
+check('設定枠とカレンダー枠が分離され、それぞれ 2px 実枠（.card）で囲まれ兄弟要素',
+  frames.settingsExists && frames.calFrameExists && frames.settingsBorder >= 2 && frames.calFrameBorder >= 2
+    && frames.siblings && frames.noOverlap,
+  { settingsBorder: frames.settingsBorder, calFrameBorder: frames.calFrameBorder, siblings: frames.siblings, noOverlap: frames.noOverlap });
+check('設定枠に表示モード・部署チップ・行事追加・サマリーが入る（カレンダー枠に混入しない）',
+  frames.settingsHasTitle && frames.settingsHasMode && frames.settingsHasChips && frames.settingsHasAdd
+    && frames.settingsHasSummary && !frames.calHasMode && !frames.calHasChips,
+  { settingsHasTitle: frames.settingsHasTitle, settingsHasMode: frames.settingsHasMode, calHasMode: frames.calHasMode, calHasChips: frames.calHasChips });
+check('カレンダー枠に年月ラベルと日グリッドが入る（設定枠にグリッドはない）',
+  frames.calHasTitle && frames.calHasLabel && frames.calHasGrid && !frames.settingsHasGrid,
+  { calHasTitle: frames.calHasTitle, calHasLabel: frames.calHasLabel, calHasGrid: frames.calHasGrid, settingsHasGrid: frames.settingsHasGrid });
 
 // 機能回帰: 月替え・今月
 const months = await page.evaluate(async () => {
@@ -123,12 +168,17 @@ const months = await page.evaluate(async () => {
   seq.push(await click('sched-next-month').then(read));
   seq.push(await click('sched-prev-month').then(read));
   seq.push(await click('sched-prev-month').then(read));
-  seq.push(await click('sched-goto-today').then(read));
+  // 「今月」ボタンは撤廃 → 年月选择メニューの「今月へ」で現在月へ戻る
+  await click('sched-month-menu-btn');
+  const t = document.querySelector('#sched-month-menu [data-menu-today]');
+  if (t) t.click();
+  await new Promise((r) => setTimeout(r, 400));
+  seq.push(read());
   return seq;
 });
 log('month-switch-seq', months);
 const parse = (s) => { const m = s.match(/(\d+)年(\d+)月/); return m ? Number(m[1]) * 12 + Number(m[2]) : null; };
-check('‹ › で月が 1ずつ切り替わり、今月で現在月に戻る',
+check('‹ › で月が 1ずつ切り替わり、年月选择メニューの「今月へ」で現在月に戻る',
   parse(months[1]) === parse(months[0]) + 1 && parse(months[2]) === parse(months[1]) - 1
     && parse(months[3]) === parse(months[2]) - 1 && parse(months[4]) >= parse(months[3]),
   { seq: months, idx: months.map(parse) });
@@ -214,6 +264,8 @@ log('list-nav', { labelCenter: lst.labelCenter, listCenter: lst.listCenter, area
 check('1日一覧モードでもラベル中心は表示部の中心 x と一致（±3px）',
   Math.abs(lst.labelCenter - (lst.listCenter !== null ? lst.listCenter : lst.areaCenter)) <= 3 && lst.labelInArea,
   { labelCenter: lst.labelCenter, listCenter: lst.listCenter, areaCenter: lst.areaCenter, labelInArea: lst.labelInArea });
+check('1日一覧モードでは一覧容器がカレンダー枠内に入り、表示モードボタンは設定枠に残る',
+  lst.listInCalFrame === true && lst.labelInArea, { listInCalFrame: lst.listInCalFrame, labelInArea: lst.labelInArea });
 
 // ★ 键盘操作：ラベル Enter で開く→月ボタン間を ←→ で移動→Enter で决定→Esc で閉じラベルへ
 const kb = await page.evaluate(async () => {
@@ -255,10 +307,15 @@ const kb = await page.evaluate(async () => {
   out.focusAfterEsc = document.activeElement.id;
   out.expandedAfterEsc = document.getElementById('sched-month-menu-btn').getAttribute('aria-expanded');
 
-  document.getElementById('sched-goto-today').click();
+  // 現在月へは年月选择メニューの「今月へ」で戻る（ツールバーの「今月」は撤廃）
+  labelBtn.click();
+  await sleep(300);
+  const tBtn = document.querySelector('#sched-month-menu [data-menu-today]');
+  if (tBtn) tBtn.click();
   await sleep(400);
   out.restored = parse(read());
   out.restoredBase = base;
+  out.toolbarToday = !!document.getElementById('sched-goto-today');
   return out;
 });
 log('menu-keyboard', kb);
@@ -272,6 +329,8 @@ check('键盘: Enter相当で月を决定しラベルが更新・閉じ・フォ
 check('键盘: Esc でメニューが閉じ aria-expanded=false・フォーカスがラベルへ戻る',
   kb.reopened && kb.closedByEsc && kb.expandedAfterEsc === 'false' && kb.focusAfterEsc === 'sched-month-menu-btn',
   { reopened: kb.reopened, closedByEsc: kb.closedByEsc, expanded: kb.expandedAfterEsc, focus: kb.focusAfterEsc });
+check('键盘操作後もメニューの「今月へ」で現在月へ戻る（ツールバーに「今月」ボタンは無い）',
+  kb.restored === kb.base && !kb.toolbarToday, { restored: kb.restored, base: kb.base, toolbarToday: kb.toolbarToday });
 
 // ★ メニュー外クリックで閉じる（フォーカスはラベルにとどめる）
 const outside = await page.evaluate(async () => {

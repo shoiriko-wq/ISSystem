@@ -45,10 +45,10 @@ export const caController = {
   },
 
   /**
-   * ルートCA証明書（.pem）のダウンロード
-   * GET /ca/issystem-ca.pem
+   * ルートCA証明書（.crt / PEM 内容）のダウンロード
+   * GET /ca/issystem-ca.crt
    */
-  downloadCaPem(req, res, next) {
+  downloadCa(req, res, next) {
     const paths = sslPaths();
     if (!fs.existsSync(paths.ca)) {
       return res.status(404).json({
@@ -62,7 +62,7 @@ export const caController = {
       {
         setHeaders: (r) => {
           r.setHeader('Cache-Control', 'no-store');
-          r.setHeader('Content-Type', 'application/x-pem-file');
+          r.setHeader('Content-Type', 'application/x-x509-ca-cert');
           r.setHeader('X-Content-Type-Options', 'nosniff');
         },
       },

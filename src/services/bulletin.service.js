@@ -93,6 +93,8 @@ async function attachAttachments(items, model = bulletinModel) {
 
     const postedAt = item.postedAt || item.posted_at || item.createdAt || item.created_at;
     const postedDay = String(postedAt).substring(0, 10);
+    // 対象日 (未設定のレコードは投稿日を対象日として扱う)
+    const targetDay = String(item.targetDate || item.target_date || postedDay).substring(0, 10) || null;
 
     return {
       ...item,
@@ -100,6 +102,10 @@ async function attachAttachments(items, model = bulletinModel) {
       posted_at: postedAt,
       postedDay,
       posted_day: postedDay,
+      targetDate: targetDay,
+      target_date: targetDay,
+      targetDay,
+      target_day: targetDay,
       attachments: merged,
     };
   });
@@ -146,6 +152,8 @@ export const bulletinService = {
         ackStatus: item.ackStatus || item.ack_status || (item.is_acknowledged ? 'APPROVED' : 'UNREAD'),
         is_acknowledged: item.ackStatus === 'APPROVED' || item.is_acknowledged === true,
         targetScope: item.targetScope || { grade: 'ALL', department: 'ALL' },
+        targetDate: item.targetDate || item.target_date || null,
+        target_date: item.targetDate || item.target_date || null,
         attachments: item.attachments || []
       };
     });
@@ -267,6 +275,9 @@ export const bulletinService = {
       throw new ApiError(400, '掲示終了日は掲示開始日以降の日付で指定してください。');
     }
 
+    // 対象日（掲示が日別表示で所属する日。未指定時はモデルが投稿日へ補完する）
+    const targetDate = safeDisplayDate(postData.targetDate || postData.target_date || postData.targetDateInput);
+
     const userId = authorUser.id || postData.authorId || postData.author_id || 'kyomu01';
     const userName = authorUser.name || postData.authorName || postData.author_name || '教務 主任';
 
@@ -283,6 +294,9 @@ export const bulletinService = {
       displayEnd,
       display_start_date: displayStart,
       display_end_date: displayEnd,
+      // 対象日 (camel / snake 両形式で展開)
+      targetDate,
+      target_date: targetDate,
       // 投稿日時（編集日時とは別）と添付ファイル ID 群
       postedAt: postData.postedAt || postData.posted_at || postData.postedAtInput || null,
       posted_at: postData.postedAt || postData.posted_at || postData.postedAtInput || null,
@@ -311,6 +325,8 @@ export const bulletinService = {
 
     const createdAt = created.createdAt || created.created_at || new Date().toISOString();
     const postedAt = created.postedAt || created.posted_at || normalizedPost.postedAt || createdAt;
+    // 対象日 (モデル既定値を camel / snake 両形式で返却。未指定なら投稿日)
+    const targetDay = created.targetDate || targetDate || String(postedAt).substring(0, 10) || null;
 
     let attachmentMeta = [];
     try {
@@ -337,6 +353,10 @@ export const bulletinService = {
       displayEnd: created.displayEnd || displayEnd || null,
       display_start_date: created.displayStart || displayStart || null,
       display_end_date: created.displayEnd || displayEnd || null,
+      targetDate: targetDay,
+      target_date: targetDay,
+      targetDay,
+      target_day: targetDay,
       attachments: attachmentMeta
     };
   },
@@ -506,6 +526,7 @@ export const bulletinService = {
       postedAt: fields.postedAt || fields.posted_at || fields.postedAtInput,
       displayStart: fields.displayStart || fields.display_start || fields.display_start_date,
       displayEnd: fields.displayEnd || fields.display_end || fields.display_end_date,
+      targetDate: fields.targetDate || fields.target_date || fields.targetDateInput,
       targetScope: fields.targetScope ? safeParseScope(fields.targetScope) : undefined,
       attachments: [],
     };

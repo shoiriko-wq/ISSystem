@@ -125,6 +125,94 @@ check('枠にフォーカスして矢印キーで縦スクロールでき、焦�
   kbScroll.focused === true && kbScroll.scrollTop > 0 && parseFloat(kbScroll.outlineW) >= 1
   && kbScroll.headerTopDelta >= 0 && kbScroll.headerTopDelta <= 3, kbScroll);
 
+// --- 横向きにスライドした際、施設名称列が左端に固定される（時間トラックだけが滑る）検証 ---
+// 狭幅（720px = min-w-[880px] で横スクロールする幅）で scrollLeft を動かし、名称列の位置を測る
+const nameSnap = (sl) => page.evaluate(async (scrollLeft) => {
+  const cont = document.querySelector('.timeline-scroll-container');
+  cont.scrollLeft = scrollLeft;
+  await new Promise((r) => requestAnimationFrame(r));
+  await new Promise((r) => requestAnimationFrame(r));
+  const abs = (el) => Math.round(el.getBoundingClientRect().left);
+  const frameLeft = abs(cont);
+  const header = document.getElementById('facility-time-header');
+  const headCell = header.querySelector('.facility-name-cell');
+  const cells = [...document.querySelectorAll('#facility-matrix-body [data-facility-row] > .facility-name-cell')];
+  const alpha = (s) => { const n = (s.match(/[.\d]+/g) || []).map(Number); return n.length < 4 ? 1 : n[3]; };
+  const label = [...header.querySelectorAll('.flex-1.relative [style*="left"]')].find((d) => d.textContent.trim() === '13:00');
+  return {
+    scrollLeft: Math.round(cont.scrollLeft),
+    maxScrollX: Math.round(cont.scrollWidth - cont.clientWidth),
+    headCellLeft: abs(headCell) - frameLeft,
+    headCellW: Math.round(headCell.getBoundingClientRect().width),
+    rowCellLefts: [...new Set(cells.map((el) => abs(el) - frameLeft))],
+    trackLeft: abs(header.querySelector('.flex-1.relative')) - frameLeft,
+    labelLeft: label ? abs(label) - frameLeft : -999,
+    headPos: getComputedStyle(headCell).position,
+    headLeftCss: getComputedStyle(headCell).left,
+    headZ: getComputedStyle(headCell).zIndex,
+    rowPos: getComputedStyle(cells[0]).position,
+    rowLeftCss: getComputedStyle(cells[0]).left,
+    rowZ: getComputedStyle(cells[0]).zIndex,
+    headAlpha: alpha(getComputedStyle(headCell).backgroundColor),
+    rowAlpha: alpha(getComputedStyle(cells[0]).backgroundColor),
+  };
+}, sl);
+
+await page.evaluate(async () => { const m = await import('/js/theme.js'); m.applyTheme('cb-teal'); });
+await page.setViewport({ width: 720, height: 900 });
+await page.evaluate(() => {
+  const c = document.querySelector('.timeline-scroll-container');
+  c.style.maxHeight = '240px';
+  c.scrollTop = 0;
+  c.scrollLeft = 0;
+});
+await sleep(450);
+const at0 = await nameSnap(0);
+const slid = await nameSnap(200);
+log('name-column@scrollLeft0', at0);
+log('name-column@scrollLeft200', slid);
+check('施設名称列のセルは sticky / left 0（本文 z-45・ヘッダー z-60）で不透明背景（下に滑るバンド・グリッド線が透けない）',
+  at0.headPos === 'sticky' && at0.headLeftCss === '0px' && at0.headZ === '60'
+  && at0.rowPos === 'sticky' && at0.rowLeftCss === '0px' && at0.rowZ === '45'
+  && at0.headAlpha === 1 && at0.rowAlpha === 1,
+  { headPos: at0.headPos, headLeftCss: at0.headLeftCss, headZ: at0.headZ, rowPos: at0.rowPos,
+    rowLeftCss: at0.rowLeftCss, rowZ: at0.rowZ, headAlpha: at0.headAlpha, rowAlpha: at0.rowAlpha });
+check('横向きにスライドしても施設名称列は枠左端に固定（ヘッダーと全本文行が同じ左位置＝枠線 2px の内側）',
+  slid.maxScrollX >= 200 && slid.scrollLeft === 200
+  && Math.abs(at0.headCellLeft - slid.headCellLeft) <= 1
+  && slid.rowCellLefts.length === 1 && Math.abs(slid.rowCellLefts[0] - slid.headCellLeft) <= 1
+  && slid.headCellLeft >= 1 && slid.headCellLeft <= 4,
+  { maxScrollX: slid.maxScrollX, scrollLeft: slid.scrollLeft, headCellLeft: slid.headCellLeft,
+    rowCellLefts: slid.rowCellLefts, at0HeadCellLeft: at0.headCellLeft });
+check('時間トラックとラベルはスライド分だけ左へ動く（固定された名称列がトラックの左端を覆い、名称列とトラックの間に隙間が出ない）',
+  Math.abs((at0.labelLeft - slid.labelLeft) - slid.scrollLeft) <= 1
+  && Math.abs((at0.trackLeft - slid.trackLeft) - slid.scrollLeft) <= 1
+  && slid.trackLeft <= slid.headCellLeft + slid.headCellW
+  && at0.trackLeft === at0.headCellLeft + at0.headCellW,
+  { at0LabelLeft: at0.labelLeft, slidLabelLeft: slid.labelLeft, scrollLeft: slid.scrollLeft,
+    at0TrackLeft: at0.trackLeft, slidTrackLeft: slid.trackLeft,
+    headCellLeft: slid.headCellLeft, headCellW: slid.headCellW });
+
+// 横向きスライド状態で施設名称列が固定されているスクリーンショット（狭幅・scrollLeft 200・縦スクロール併用）
+await page.evaluate(() => {
+  const c = document.querySelector('.timeline-scroll-container');
+  c.scrollTop = 100;
+  c.scrollLeft = 200;
+});
+await sleep(350);
+const slidShot = await page.$('.timeline-scroll-container');
+await slidShot.screenshot({ path: `${import.meta.dirname}/output/facility-name-column-sticky.png` });
+
+// 既存のヘッダー固定スクリーンショットは広幅で撮るため、幅とスクロール状態と枠高さを戻す
+await page.evaluate(() => {
+  const c = document.querySelector('.timeline-scroll-container');
+  c.style.maxHeight = '';
+  c.scrollTop = 0;
+  c.scrollLeft = 0;
+});
+await page.setViewport({ width: 1280, height: 900 });
+await sleep(300);
+
 // 縦スクロール状態でヘッダー行が固定されているスクリーンショット（cb-teal・狭幅）
 await page.evaluate(async () => { const m = await import('/js/theme.js'); m.applyTheme('cb-teal'); });
 await page.evaluate(() => {

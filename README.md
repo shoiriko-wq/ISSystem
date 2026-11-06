@@ -38,8 +38,8 @@ npm start           # HTTPS/WSS は SSL_PORT (既定 3443)、PORT (既定 3000) 
 | `SSL_PORT` (既定 3443) | HTTPS/WSS によるアプリ本体・API・Socket.io（サーバー証明書はプライベートCAで署名） |
 | `PORT` (既定 3000) | 非安全 HTTP。**CA証明書のダウンロードページ専用に固定**。アプリ画面は提供せず API は `426 Upgrade Required` で拒否 |
 
-- `npm run cert:gen` が `certs/` に発行する: ルートCA `issystem-ca.pem`（秘密鍵 `issystem-ca.key`）、サーバー証明書 `server.pem` + 鍵 `server.key`（SAN: localhost, issystem.local, issystem, 127.0.0.1, ::1。CAにサーバ証明書を提示するため WSS でも検証可能）。再発行は `--force`。
-- **端末の信頼ストアに `certs/issystem-ca.pem` をインストール**するとブラウザのアドレスバーで「安全な接続」として開ける。Windows はダブルクリック →「信頼されたルート証明機関」、macOS は「常時信頼」。Node からのアクセスは `NODE_EXTRA_CA_CERTS=./certs/issystem-ca.pem`。
+- `npm run cert:gen` が `certs/` に発行する: ルートCA `issystem-ca.crt`（秘密鍵 `issystem-ca.key`）、サーバー証明書 `server.pem` + 鍵 `server.key`（SAN: localhost, issystem.local, issystem, 127.0.0.1, ::1。CAにサーバ証明書を提示するため WSS でも検証可能）。再発行は `--force`。
+- **端末の信頼ストアに `certs/issystem-ca.crt` をインストール**するとブラウザのアドレスバーで「安全な接続」として開ける。Windows はダブルクリック →「信頼されたルート証明機関」、macOS は「常時信頼」。Node からのアクセスは `NODE_EXTRA_CA_CERTS=./certs/issystem-ca.crt`。
 - **非HTTP (`http://` や `ws://`) でアクセスしてきた相手には CAダウンロードページ (`/ca`) が表示される。** ページには SHA-256指紋、OS別のインストール手順、ダウンロードリンク、`https://HOST:SSL_PORT/` へ移動するボタンがある。アプリ画面や API は返らない。HTTPS の `/ca` も同じページ（指紋とダウンロード）で利用可能。
 - 設定は `.env` の `SSL_PORT` / `SSL_HOST` / `SSL_DIR` / `SSL_KEY` / `SSL_CERT` / `SSL_CA` / `SSL_HOSTS` / `SSL_CA_PAGE_BASE`（`PORT` は CA配布専用ポート）。
 - 検証: `npm run test:ui:https`（CA検証・TLSハンドシェイク・CAページ表示・API 426・CAダウンロード・ブラウザ wss 接続・非HTTP ws 拒否の 23項目）。
@@ -56,6 +56,9 @@ npm start           # HTTPS/WSS は SSL_PORT (既定 3443)、PORT (既定 3000) 
 | `SSL_HOSTS` | サーバー証明書のSANホスト | 既定 `localhost,issystem.local,issystem,127.0.0.1,::1` |
 | `SSL_CA_PAGE_BASE` | 非HTTPで CAページを見た際の安全URL基点 | 例 `https://127.0.0.1:3443`。「安全接続で開く」ボタンを作る |
 | `PORT` | 非安全 HTTP (CA配布専用) ポート | 既定 3000。アプリは提供せず API は 426。CAページは `/` と `/ca` |
+| `MAIL_IMAP_HOST` / `MAIL_IMAP_PORT` | 受信 (IMAP) サーバー初期値 | 未設定ユーザーのフォームプリフィルと未入力保存時のフォールバック。**Git に入れない実値は `.env` だけ** |
+| `MAIL_SMTP_HOST` / `MAIL_SMTP_PORT` | 送信 (SMTP) サーバー初期値 | 同上。143 / 25 は STARTTLS、993 / 465 は TLS 直結として扱う |
+| `MAIL_TIMEOUT_MS` | 接続テストのタイムアウト | 既定 12000 ミリ秒 |
 
 ### アカウントのパスワード2系統
 
@@ -68,6 +71,14 @@ $env:PGPASSWORD='otome601'
 & 'C:\Program Files\PostgreSQL\18\bin\psql.exe' -h localhost -p 5432 -U postgres -d issystem
 ```
 
+## メール接続テスト
+
+- メールタブでメールアドレスとパスワードを入力し「接続テスト（保存前に試す）」を押すと、**保存せずに**その入力値で IMAP / SMTP へ実接続テストを行う。フォームの「接続設定を保存する」後にヘッダーの「接続テスト」を押すと、保存済み設定（DB に AES-256-GCM で暗号化保存されたパスワード）でテストし、成否を `status` (VERIFIED / FAILED) とヘッダーバッジへ反映する。
+- 実装は `src/services/mail.transport.js`。`node:net` / `node:tls` のみを使い、IMAP は `STARTTLS → LOGIN`、SMTP は `EHLO → STARTTLS → AUTH LOGIN` を確認する。新規 npm 依存は増やさない。
+- 校内サーバーの証明書は CN 不一致・自己署名が多いため `rejectUnauthorized: false`（SNI の servername は送る）。証明書の厳密検証は行わない。
+- API: `POST /api/mail/test`。body に `password` とフォーム値を送れば未保存設定のプレテスト（DB 書き込みなし）、空なら保存済み設定でテストし `status` を更新して監査ログ `MAIL_CONNECTION_TEST` を残す。
+- 検証: `npm run test:api:mail-test`（Jest 6項目・存在しない `issystem.example` 宛てなので接続は必ず失敗し、`status=FAILED` と成功系はプローブ差し替えで検証）と `npm run test:ui:mail`（ブラウザ 37項目）。
+
 ## コマンド
 
 | コマンド | 内容 |
@@ -76,6 +87,9 @@ $env:PGPASSWORD='otome601'
 | `npm run cert:gen` | プライベートCAとサーバー証明書を生成（既存があればスキップ。`--force` で再発行） |
 | `npm test` | jest 統合テスト (5スイート / 40テスト、各スイートで pg プールを close するため `--forceExit` 不要) |
 | `npm run api:check` | API スモークテスト (HTTPS の GET/POST/PUT/DELETE を実行しステータスを検証) |
+| `npm run test:api:mail-test` | メール接続テスト API 検証 (Jest `test/mail.test.js` 6項目) |
+| `npm run test:api:mail-defaults` | メール初期値 (.env プリフィル・Git 秘匿) API 検証 (12項目) |
+| `npm run test:ui:mail` | メール UI 検証 (初回設定・プリフィル・接続テスト・受信箱の 37項目) |
 | `npm run test:ui:https` | 安全通信検証 (CA検証 / TLS / CAページ / API 426 / CA配布 / ブラウザ wss) |
 | `npm run db:create` / `db:init` / `db:seed` | DB 作成 / スキーマ適用 / ダミーデータ投入 |
 | `npm run db:tables` | コード内参照テーブル名の一覧表示 (スキーマ整合チェック) |
@@ -122,5 +136,5 @@ $env:PGPASSWORD='otome601'
 - 二重予約判定は `toDateTime()` で `HH:MM` を `YYYY-MM-DD HH:MM:SS` に正規化して比較
 - システムメッセージの `sender_id` は FK 制約のため、`resolveSenderId()` で `system` ユーザーへ変換
 - `ensureSchema()` はプロメモ化され、複数プロセスからの同時適用による「pool closed」を防止
-- スモークテストは `npm start`（HTTPS 3443）でサーバーを起動してから `npm run api:check` を実行する（`NODE_EXTRA_CA_CERTS=./certs/issystem-ca.pem` が付与されCAトラストで検証する）
+- スモークテストは `npm start`（HTTPS 3443）でサーバーを起動してから `npm run api:check` を実行する（`NODE_EXTRA_CA_CERTS=./certs/issystem-ca.crt` が付与されCAトラストで検証する）
 

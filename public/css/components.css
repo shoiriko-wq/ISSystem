@@ -70,7 +70,8 @@
 #chat-btn-send,
 #chat-btn-create-group,
 #absence-btn-submit,
-#bulletin-btn-post {
+#bulletin-btn-post,
+#bulletin-comment-send {
   color: var(--text-on-accent) !important;
   text-shadow: var(--on-accent-shadow, 0 1px 1.5px rgba(0, 0, 0, 0.35));
   min-height: 2.4rem;
@@ -168,6 +169,27 @@
   color: var(--text-muted);
   background-color: transparent;
   border-color: transparent;
+}
+
+/* ===== 職員チャット左下「目のマーク」（非表示編集モード）トグル =====
+   モード ON/OFF の状態の真は aria-pressed にある。base.css は bg-surface / text-muted /
+   border-main を !important で固定し、readability.css もサイドバー内の色を !important で
+   上書きするため、クラス付け外しだけでは色が変わらない（＝見た目がモードに連動しない）。
+   ID + 属性の specificity と !important でこれらを確実におさえ、
+   テーマ（light/dark・saturated/inverted）でも同じ連動になる。
+   lucide の svg は stroke=currentColor のため color に追随して目のマークも色が変わる。 */
+#chat-btn-toggle-hide {
+  transition: background-color var(--duration-fast) var(--ease-spring),
+    border-color var(--duration-fast) var(--ease-spring),
+    color var(--duration-fast) var(--ease-spring),
+    box-shadow var(--duration-fast) var(--ease-spring);
+}
+
+#chat-btn-toggle-hide[aria-pressed="true"] {
+  background-color: var(--warning-soft) !important;
+  border-color: var(--warning-border) !important;
+  color: var(--text-warning-strong) !important;
+  box-shadow: 0 0 0 2px var(--warning-border-soft) !important;
 }
 
 /* 3. Form Inputs & Controls */
@@ -527,11 +549,13 @@
 
 /* ===== メールヘッダーのコントロール統一（職員掲示板・施設物品予約と同じ 2.4rem 高・0.875rem 文字） ===== */
 #view-mail #mail-btn-settings,
+#view-mail #mail-btn-test,
 #view-mail #mail-btn-refresh {
   height: 2.4rem;
 }
 
-#view-mail #mail-btn-settings {
+#view-mail #mail-btn-settings,
+#view-mail #mail-btn-test {
   padding: 0 0.8rem;
   font-size: 0.875rem;
   font-weight: 700;
@@ -807,7 +831,10 @@
 
 /* 右ペイン全文コンテナ（flex column: ヘッダー・本文・添付・コメントが縦に並ぶ。
    pre-wrap は本文 pre 要素側に効かせる。コンテナ側で pre-wrap を効かせると
-   余白テキストノードが flex アイテム化してレイアウトが崩れ scrollWidth が膨らむ） */
+   余白テキストノードが flex アイテム化してレイアウトが崩れ scrollWidth が膨らむ）。
+   ★ ホバーリングのリング（box-shadow 0 0 0 4px）と上昇（translateY(-2px)）は見切れると
+      「枠が切れた」ように見える。スクロールコンテナの影は padding box 外で clip されるため、
+      上下左右にリング＋上昇分の余白を padding box 内（リング 4px + 上昇 2px → 6px 以上）に持つ。 */
 .bulletin-detail-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -817,6 +844,7 @@
   gap: 0.4rem;
   overflow-y: auto;
   overflow-x: hidden;
+  padding: 0.5rem 0.55rem 0.6rem;
   font-size: 1rem;
   line-height: 1.7;
   color: var(--text-soft);
@@ -1125,6 +1153,15 @@
   gap: 0.3rem;
   margin-top: 0.5rem;
 }
+/* 入力＋送信の行（チャット送信フォーム flex items-end gap-2 と同一の形）。
+   送信ボタンは入力欄の幅いっぱいに伸ばさず、内容幅（h-[42px]）で下端揃え。
+   ホバーリングのリング（4px）と上昇（2px）を見切らない余白は .bulletin-detail-body の padding が確保する。 */
+.comment-form-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+.comment-form-row > .flex-1 { min-width: 0; }
 
 /* 中心日読取（‹ › の間。連打しても幅が動かず › の位置がずれない固定幅・等幅数字。
    クリックでミニカレンダーを開くボタン。aria-expanded=true で開いていることを着色で示す） */
@@ -1176,6 +1213,62 @@
   color: var(--text-soft);
   border: 1px solid var(--border-main);
 }
+
+/* 11. コメントホバー時の読み込みメニュー（未読者・取り消し）
+   普段は隠し、コメント行へホバー（またはキーボードフォーカス）時だけ吹き出しの下へ
+   プルダウンとして開く。絶対配置でレイアウトシフトを防ぎ、最前面の z-index は 30
+   （プロジェクトの階層定義: 列表本文 z-20〜z-40、時間枠 z-30、モーダル 50、トースト 60）。
+   転換時間は速め（var(--duration-fast)）、easing は var(--ease-spring)。JS ホバー制御は使わない。 */
+.chat-msg-row {
+  position: relative;
+}
+
+/* ホバー（またはフォーカス）中の行自体を最前面へ上げる。
+   後続の行も position: relative で同じ階層になるため、行の階層を上げないと
+   次の行の箱がプルダウンを覆い、実マウスがボタンに届かない。 */
+.chat-msg-row:hover,
+.chat-msg-row:focus-within {
+  z-index: 30;
+}
+
+.chat-msg-footer {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.5rem;
+  border: var(--border-width-thick) solid var(--border-strong);
+  background-color: var(--bg-card);
+  box-shadow: 0 6px 14px -6px var(--shadow-color);
+  font-size: 0.68rem;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-6px);
+  transition: opacity var(--duration-fast) var(--ease-spring),
+              transform var(--duration-fast) var(--ease-spring),
+              visibility var(--duration-fast) var(--ease-spring);
+}
+
+/* 自分の発言はメニューを吹き出しの右端に揃える */
+.chat-msg-row[data-own="true"] .chat-msg-footer {
+  left: auto;
+  right: 0;
+}
+
+/* ホバー・キーボードフォーカスでのみ開く */
+.chat-msg-row:hover .chat-msg-footer,
+.chat-msg-row:focus-within .chat-msg-footer,
+.chat-msg-footer:focus-within {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
 
 /* ─── スケジュール部署カテゴリのフィルタチップ（選択/非選択の視認性） ─────── */
 /* 選択中: 着色バッジ + 二重リング + 太字 + check アイコン */

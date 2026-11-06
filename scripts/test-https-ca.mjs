@@ -12,7 +12,7 @@
  *  8. ブラウザは wss:// で接続し、アプリ内 API は https 相対で機能する
  *  9. 非HTTPポートでは plain ws 接続が確立しない
  *
- * 実行: npm run test:ui:https   (NODE_EXTRA_CA_CERTS=./certs/issystem-ca.pem 付き)
+ * 実行: npm run test:ui:https   (NODE_EXTRA_CA_CERTS=./certs/issystem-ca.crt 付き)
  *  options: UI_BASE=https://127.0.0.1:3443  INSECURE_BASE=http://127.0.0.1:3000
  *           UI_USER=T2026001  UI_PASS=password123  CHROME_PATH=/usr/bin/google-chrome
  */
@@ -31,10 +31,41 @@ const INSECURE = process.env.INSECURE_BASE || 'http://127.0.0.1:3000';
 const USER = process.env.UI_USER || 'T2026001';
 const PASS = process.env.UI_PASS || 'password123';
 const CHROME = process.env.CHROME_PATH || '/usr/bin/google-chrome';
-const CA_PATH = path.join(ROOT, 'certs', 'issystem-ca.pem');
+const CA_PATH = path.join(ROOT, 'certs', 'issystem-ca.crt');
 const SRV_PATH = path.join(ROOT, 'certs', 'server.pem');
 const SECURE_PORT = Number(new URL(SECURE).port || 443);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// OpenSSL の実行ファイルを探索する（PATH → Git for Windows → Program Files 等）
+const findOpenSSL = () => {
+  const candidates = [];
+  if (process.env.OPENSSL) candidates.push(process.env.OPENSSL);
+  candidates.push('openssl');
+  const programFiles = process.env['ProgramFiles'] || 'C:\\Program Files';
+  const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+  const systemRoot = process.env['SystemRoot'] || 'C:\\Windows';
+  candidates.push(path.join(programFiles, 'Git', 'usr', 'bin', 'openssl.exe'));
+  candidates.push(path.join(programFiles, 'Git', 'bin', 'openssl.exe'));
+  for (const base of [programFiles, programFilesX86]) {
+    for (const name of ['OpenSSL', 'OpenSSL-Win64', 'OpenSSL-Win32', 'GnuWin32']) {
+      const exe = path.join(base, name, 'bin', 'openssl.exe');
+      if (fs.existsSync(exe)) candidates.push(exe);
+    }
+  }
+  candidates.push(path.join(systemRoot, 'System32', 'openssl.exe'));
+  for (const cand of candidates) {
+    try {
+      execFileSync(cand, ['version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      return cand;
+    } catch {
+      // この候補は使えない → 次を試す
+    }
+  }
+  throw new Error(
+    'OpenSSL が見つかりませんでした。Git for Windows をインストールするか、' +
+    '環境変数 OPENSSL に openssl.exe のフルパスを設定してください。'
+  );
+};
+
 
 const failures = [];
 const check = (name, ok, detail = null) => {
@@ -77,7 +108,8 @@ const san = srvX509.subjectAltName || '';
 check('サーバー証明書のSANに localhost と 127.0.0.1', san.includes('DNS:localhost') && san.includes('127.0.0.1'), {
   san: san.replace(/\n/g, ' '),
 });
-const verifyOut = execFileSync('openssl', ['verify', '-CAfile', CA_PATH, SRV_PATH], { encoding: 'utf8' }).trim();
+const OPENSSL_BIN = findOpenSSL();
+const verifyOut = execFileSync(OPENSSL_BIN, ['verify', '-CAfile', CA_PATH, SRV_PATH], { encoding: 'utf8' }).trim();
 check('openssl verify でサーバー証明書が OK', verifyOut.endsWith(': OK'), { verify: verifyOut });
 
 
@@ -151,12 +183,12 @@ check(
   { status: appInsecure.status }
 );
 
-const caDl = await getRaw(`${INSECURE}/ca/issystem-ca.pem`);
+const caDl = await getRaw(`${INSECURE}/ca/issystem-ca.crt`);
 check('CA証明書をHTTPでダウンロードできる', caDl.status === 200 && caDl.text.startsWith('-----BEGIN CERTIFICATE'), {
   status: caDl.status,
 });
 const disp = String(caDl.headers['content-disposition'] || '');
-check('CAダウンロードは attachment ファイル名付き', disp.includes('attachment') && disp.includes('issystem-ca.pem'), {
+check('CAダウンロードは attachment ファイル名付き', disp.includes('attachment') && disp.includes('issystem-ca.crt'), {
   contentDisposition: disp,
 });
 check('ダウンロードCAがルートCAと完全一致', caDl.text.trim() === caPem.trim());

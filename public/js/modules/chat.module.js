@@ -26,6 +26,11 @@ let hideEditMode = false;
 
 /**
  * 非表示編集モードの切替（目のマークボタン）
+ * 状態の真は aria-pressed。見た目は components.css の
+ * #chat-btn-toggle-hide[aria-pressed="true"] が背景・枠・文字色・影を連動させ、
+ * アイコンは eye-off（OFF）→ eye（ON）へ差し替える。
+ * ※ base.css は bg-surface / text-muted / border-main を !important で固定するため、
+ *   クラスの付け外しだけでは色が変わらない（＝モードに連動しない）。
  */
 function setHideEditMode(on) {
   hideEditMode = on;
@@ -37,9 +42,8 @@ function setHideEditMode(on) {
     btn.setAttribute('aria-pressed', String(on));
     btn.setAttribute('title', label);
     btn.setAttribute('aria-label', label);
-    btn.classList.toggle('bg-warning-soft', on);
-    btn.classList.toggle('border-warning-soft', on);
-    btn.classList.toggle('text-warning-strong', on);
+    btn.innerHTML = `<i data-lucide="${on ? 'eye' : 'eye-off'}" class="w-4 h-4"></i>`;
+    refreshLucideIcons();
   }
   renderChannels();
 }
@@ -1305,6 +1309,36 @@ function findMessageRow(msgId) {
 }
 
 /**
+ * メタ行HTML（アイコン・名前・年月日時間）
+ * 相手の発言: 左から アイコン → 名前 → 年月日時間
+ * 自分の発言: 右から アイコン → 名前 → 年月日時間（DOM 上は 年月日時間 → 名前 → アイコン）
+ * 年月日時間は名前の底辺と揃える（items-end ＝ 下揃え）。単一行・アバターサイズは変えない。
+ * @param {Object} m メッセージ
+ * @param {boolean} isMe 自分の発言か
+ * @returns {string} メタ行HTML
+ */
+function chatMetaRowHtml(m, isMe) {
+  const avatarHtml = isMe
+    ? userAvatarHtml({
+        name: state.currentUser?.name || '自分',
+        avatarUrl: state.currentUser?.avatar_url || null,
+        size: 'xs',
+      })
+    : userAvatarHtml({
+        name: m.senderName || m.senderId,
+        avatarUrl: m.senderAvatar || m.sender_avatar || m.avatar_url || null,
+        size: 'xs',
+      });
+  const nameHtml = `<span class="font-bold text-soft">${escapeHTML(m.senderName || m.senderId)}</span>`;
+  const timeHtml = `<span class="font-mono text-[10px]">${formatDate(m.createdAt)}</span>`;
+
+  // 自分の行は右端にアイコンが来るため、Flex の左から「日時・名前・アイコン」の順に並べる
+  const ordered = isMe ? [timeHtml, nameHtml, avatarHtml] : [avatarHtml, nameHtml, timeHtml];
+  return `<div class="flex items-end gap-2 text-[11px] text-muted">${ordered.join('')}</div>`;
+}
+
+
+/**
  * メッセージ行HTML（アバター + 発言者 + 本文 + 既読badge + 取り消しボタン）
  * ※ 取り消済みメッセージは本文を一切表示しない（サーバーから本文は配信されない）
  * @param {Object} m
@@ -1313,16 +1347,10 @@ function messageRowHtml(m) {
   if (m.cancelled) return cancelledMessageRowHtml(m);
 
   const isMe = isMyMessage(m);
-  const senderAvatarUrl = m.senderAvatar || m.sender_avatar || m.avatar_url || null;
 
   return `
-    <div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} space-y-1" data-msg-id="${m.id}">
-      <div class="flex items-center gap-2 text-[11px] text-muted">
-        ${isMe ? '' : userAvatarHtml({ name: m.senderName || m.senderId, avatarUrl: senderAvatarUrl, size: 'xs' })}
-        <span class="font-bold text-soft">${escapeHTML(m.senderName || m.senderId)}</span>
-        <span class="font-mono text-[10px]">${formatDate(m.createdAt)}</span>
-        ${isMe ? userAvatarHtml({ name: state.currentUser?.name || '自分', avatarUrl: state.currentUser?.avatar_url || null, size: 'xs' }) : ''}
-      </div>
+    <div class="chat-msg-row relative flex flex-col ${isMe ? 'items-end' : 'items-start'} space-y-1" data-msg-id="${m.id}" data-own="${isMe ? 'true' : 'false'}">
+      ${chatMetaRowHtml(m, isMe)}
 
       <div class="max-w-[85%] md:max-w-[70%] rounded-2xl p-3 text-xs leading-relaxed ${
         isMe
@@ -1346,7 +1374,8 @@ function messageRowHtml(m) {
         ` : ''}
       </div>
 
-      <div class="flex items-center gap-2 text-[10px] text-muted" data-read-footer>
+      <!-- 未読者・取り消しメニュー: 普段は隠し、コメントホバー時だけ吹き出しの下へ開く -->
+      <div class="chat-msg-footer text-muted" data-read-footer>
         ${readFooterInner(m)}
       </div>
     </div>
@@ -1362,16 +1391,10 @@ function messageRowHtml(m) {
  */
 function cancelledMessageRowHtml(m) {
   const isMe = isMyMessage(m);
-  const senderAvatarUrl = m.senderAvatar || m.sender_avatar || m.avatar_url || null;
 
   return `
-    <div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} space-y-1" data-msg-id="${m.id}" data-cancelled="1">
-      <div class="flex items-center gap-2 text-[11px] text-muted">
-        ${isMe ? '' : userAvatarHtml({ name: m.senderName || m.senderId, avatarUrl: senderAvatarUrl, size: 'xs' })}
-        <span class="font-bold text-soft">${escapeHTML(m.senderName || m.senderId)}</span>
-        <span class="font-mono text-[10px]">${formatDate(m.createdAt)}</span>
-        ${isMe ? userAvatarHtml({ name: state.currentUser?.name || '自分', avatarUrl: state.currentUser?.avatar_url || null, size: 'xs' }) : ''}
-      </div>
+    <div class="chat-msg-row relative flex flex-col ${isMe ? 'items-end' : 'items-start'} space-y-1" data-msg-id="${m.id}" data-own="${isMe ? 'true' : 'false'}" data-cancelled="1">
+      ${chatMetaRowHtml(m, isMe)}
 
       <div class="chat-cancelled-note max-w-[85%] md:max-w-[70%] rounded-2xl px-3 py-2 text-xs leading-relaxed">
         <div class="flex items-center gap-1.5">

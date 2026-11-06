@@ -15,6 +15,8 @@ let account = null;
 let messages = [];
 let selectedId = null;
 let showSetupForm = true; // 初回は必ず入力フォームを表示
+let lastTest = null;      // 直近の接続テスト結果
+let testing = false;      // 接続テスト実行中（二重クリック防止）
 
 const STATUS_META = {
   UNVERIFIED: { label: '設定保存済み（未接続確認）', cls: 'text-warning-strong', bg: 'bg-warning-soft' },
@@ -100,6 +102,9 @@ function headerHtml() {
       </div>
       <div class="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
         <span class="text-[10px] px-2 py-0.5 rounded border border-divider ${meta.bg} ${meta.cls} font-bold shrink-0">${meta.label}</span>
+        <button type="button" id="mail-btn-test" class="btn-secondary shrink-0 flex items-center gap-1.5" title="IMAP / SMTP に実際に接続してログインを確認します">
+          <i data-lucide="plug" class="w-4 h-4"></i> 接続テスト
+        </button>
         <button type="button" id="mail-btn-settings" class="btn-secondary shrink-0 flex items-center gap-1.5" title="メール接続設定（メールアドレス・パスワード）">
           <i data-lucide="settings" class="w-4 h-4"></i> メール設定
         </button>
@@ -160,6 +165,7 @@ function setupFormHtml(prefillEmail) {
         </details>
         <div class="flex items-center gap-2 pt-1">
           <button type="submit" class="btn-primary py-2 px-4 text-xs font-bold">接続設定を保存する</button>
+          <button type="button" id="mail-btn-test-form" class="btn-secondary py-2 px-4 text-xs shrink-0" title="保存せずに現在の入力値で IMAP / SMTP 接続を試します">接続テスト（保存前に試す）</button>
           ${configured ? '<button type="button" id="mail-btn-cancel-edit" class="btn-secondary py-2 px-4 text-xs">変更しない</button>' : ''}
           ${configured ? '<button type="button" id="mail-btn-remove" class="btn-danger py-2 px-4 text-xs">設定を削除</button>' : ''}
         </div>
@@ -260,6 +266,90 @@ function inboxHtml() {
     </div>`;
 }
 
+/** 接続テストの成否を 1 行表示 */
+function testRowHtml(label, r, host, port) {
+  const cls = r.ok ? 'text-success-strong' : 'text-danger-strong';
+  return `
+    <div class="flex items-start gap-2">
+      <i data-lucide="${r.ok ? 'check' : 'x'}" class="w-4 h-4 ${cls} shrink-0 mt-0.5"></i>
+      <div class="min-w-0">
+        <div class="text-xs font-bold ${cls}">${label}: ${r.ok ? '接続 OK' : '接続 NG'}</div>
+        <div class="text-[10px] text-muted font-mono mt-0.5">${escapeHTML(String(host))}:${escapeHTML(String(port))}</div>
+        <div class="text-[10px] text-soft mt-0.5">${escapeHTML(r.message || '')}</div>
+      </div>
+    </div>`;
+}
+
+/** 接続テスト結果パネル（ヘッダー直下に IMAP / SMTP の成否と理由を出す） */
+function testResultHtml(t) {
+  if (!t) return '';
+  const badge = t.status === 'VERIFIED'
+    ? '<span class="badge bg-success-soft text-success-strong border-success-soft shrink-0">接続確認済み</span>'
+    : '<span class="badge bg-danger-soft text-danger-strong border-danger-soft shrink-0">接続失敗</span>';
+
+  return `
+    <div class="card p-3 border border-divider" id="mail-test-result">
+      <div class="flex items-center justify-between gap-2 mb-2">
+        <h3 class="text-xs font-bold text-main flex items-center gap-2">
+          <i data-lucide="plug" class="w-4 h-4 text-info"></i> 接続テスト結果
+        </h3>
+        ${badge}
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        ${testRowHtml('IMAP (受信)', t.imap, t.imap_host, t.imap_port)}
+        ${testRowHtml('SMTP (送信)', t.smtp, t.smtp_host, t.smtp_port)}
+      </div>
+      <p class="text-[10px] text-muted mt-2 font-mono">
+        確認 ${escapeHTML(formatDateTime(t.checked_at))}:
+        ${t.imap.ok ? 'IMAP OK' : 'IMAP NG'} / ${t.smtp.ok ? 'SMTP OK' : 'SMTP NG'}
+      </p>
+    </div>`;
+}
+
+/** フォームの現在値（未保存設定でのプレテスト用ペイロード） */
+function formProbePayload() {
+  const root = document.getElementById(VIEW_ID);
+  const get = (id) => root?.querySelector(`#${id}`)?.value ?? '';
+  return {
+    email_address: get('mail-setup-email'),
+    password: get('mail-setup-password'),
+    imap_host: get('mail-setup-imap-host'),
+    imap_port: get('mail-setup-imap-port'),
+    smtp_host: get('mail-setup-smtp-host'),
+    smtp_port: get('mail-setup-smtp-port'),
+  };
+}
+
+/**
+ * 接続テスト実行
+ * @param {Object} body 空なら保存済み設定、フォーム値とパスワードを送れば未保存設定のプレテスト
+ */
+async function runConnectionTest(body = {}) {
+  if (testing) return;
+  testing = true;
+  showToast('接続テストを実行しています…', 'info');
+  try {
+    const res = await apiPost('/mail/test', body);
+    lastTest = {
+      status: res.status,
+      imap: res.imap,
+      smtp: res.smtp,
+      imap_host: res.imap_host,
+      imap_port: res.imap_port,
+      smtp_host: res.smtp_host,
+      smtp_port: res.smtp_port,
+      checked_at: res.checked_at,
+    };
+    if (res.account) account = res.account;
+    renderMailView();
+    showToast(res.message, res.status === 'VERIFIED' ? 'success' : 'warning');
+  } catch (err) {
+    showToast(`接続テストを実行できません: ${err.message}`, 'error');
+  } finally {
+    testing = false;
+  }
+}
+
 /** メールタブの実データ取得 (設定済みなら受信箱も読む) */
 export async function loadMailData() {
   if (!state.currentUser || !state.authToken) return;
@@ -298,6 +388,8 @@ function renderMailView() {
 
   const configured = !!account && !account.needs_setup;
   const parts = [headerHtml()];
+
+  if (lastTest) parts.push(testResultHtml(lastTest));
 
   if (configured && !showSetupForm) {
     parts.push(inboxHtml());
@@ -349,6 +441,25 @@ export function initMailModule() {
 
     const btn = e.target.closest('button');
     if (!btn) return;
+
+    if (btn.id === 'mail-btn-test') {
+      if (!account || account.needs_setup) {
+        showToast('接続テストの前にメールアドレスとパスワードを登録してください。', 'warning');
+        return;
+      }
+      await runConnectionTest();
+      return;
+    }
+
+    if (btn.id === 'mail-btn-test-form') {
+      const payload = formProbePayload();
+      if (!payload.password.trim()) {
+        showToast('接続テストにはメールパスワードが必要です。', 'warning');
+        return;
+      }
+      await runConnectionTest(payload);
+      return;
+    }
 
     if (btn.id === 'mail-btn-refresh') {
       await loadMailData();

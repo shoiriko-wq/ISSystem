@@ -201,6 +201,23 @@
   background-color: var(--bg-surface-strong);
 }
 
+/* 施設名称列（左端 w-40 のセル）は横向きにスライドしても左端に固定される。
+   ヘッダーの名称セルは sticky top（#facility-time-header）と併用され、左上の角に固定される。
+   z-index は本文バンド（z-20〜z-40）より上（45）、ヘッダー名称セル（60）は本文名称セルより上。
+   背景は不透明で、下に滑り込むグリッド線・予約バンドが透けない。
+   border-r border-divider の右辺 2px は readability.css R2 が面単位で復元するため維持される。 */
+.facility-name-cell {
+  position: sticky;
+  left: 0;
+  z-index: 45;
+  background-color: var(--bg-surface-strong);
+}
+
+#facility-time-header .facility-name-cell {
+  z-index: 60;
+  background-color: var(--bg-surface-strong);
+}
+
 /* キーボードでも枠内にフォーカスして矢印キーで縦スクロールできる（焦点リングを表示） */
 .timeline-scroll-container:focus-visible {
   outline: var(--border-width) solid var(--accent-primary);

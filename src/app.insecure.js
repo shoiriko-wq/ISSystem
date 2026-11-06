@@ -39,8 +39,8 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 // 1. ルートCA証明書のダウンロード（証明書は公開情報 = HTTPでも配布）
-insecureApp.get(`/ca/${CA_FILE_NAME}`, caController.downloadCaPem);
-insecureApp.get(`/${CA_FILE_NAME}`, caController.downloadCaPem);
+insecureApp.get(`/ca/${CA_FILE_NAME}`, caController.downloadCa);
+insecureApp.get(`/${CA_FILE_NAME}`, caController.downloadCa);
 
 // 2. CA設定ページ
 insecureApp.get('/ca', caController.showCaPage);

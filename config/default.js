@@ -90,6 +90,21 @@ const config = {
       .filter(Boolean),
   },
 
+  // 8. メール接続設定の初期値 (IMAP / SMTP)
+  //    実値は .env 秘匿情報として保存し GitHub にはコミットしない。
+  //    未設定ユーザーのフォームプリフィル、保存時未入力時のフォールバックに使用する。
+  mail: {
+    imapHost: process.env.MAIL_IMAP_HOST || null,
+    imapPort: toInt(process.env.MAIL_IMAP_PORT, null),
+    smtpHost: process.env.MAIL_SMTP_HOST || null,
+    smtpPort: toInt(process.env.MAIL_SMTP_PORT, null),
+    // 143 / 25 は平文ポート = STARTTLS、993 / 465 は TLS 直接続とみなす
+    imapSecureTls: toInt(process.env.MAIL_IMAP_PORT, null) === 993,
+    smtpSecureTls: toInt(process.env.MAIL_SMTP_PORT, null) === 465,
+    // 接続テストの接続・応答タイムアウト (既定 12 秒)
+    timeoutMs: toInt(process.env.MAIL_TIMEOUT_MS, 12000),
+  },
+
   // キャッシュ・運用制限 (仕様書 v2.1.0 準拠)
   cache: {
     newsTtlMs: toInt(process.env.NEWS_CACHE_TTL_MS, 3600000),
@@ -115,7 +130,7 @@ const config = {
     dir: process.env.SSL_DIR || 'certs',
     key: process.env.SSL_KEY || 'certs/server.key',
     cert: process.env.SSL_CERT || 'certs/server.pem',
-    ca: process.env.SSL_CA || 'certs/issystem-ca.pem',
+    ca: process.env.SSL_CA || 'certs/issystem-ca.crt',
     hosts: (process.env.SSL_HOSTS || 'localhost,issystem.local,issystem,127.0.0.1,::1')
       .split(',')
       .map((s) => s.trim())

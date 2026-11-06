@@ -145,6 +145,9 @@ router.get('/mail/account', authenticateToken, safe(mailController?.getAccount))
 router.post('/mail/account', authenticateToken, safe(mailController?.saveAccount));
 router.delete('/mail/account', authenticateToken, safe(mailController?.deleteAccount));
 
+// 接続テスト API (フォーム値でのプレテスト / 保存済み設定の IMAP・SMTP 接続確認)
+router.post('/mail/test', authenticateToken, safe(mailController?.testConnection));
+
 // 受信箱 API (左：件名と日時、右：本文 / 既読記録)
 router.get('/mail/messages', authenticateToken, safe(mailController?.getInbox));
 router.post('/mail/messages/:id/read', authenticateToken, safe(mailController?.markMessageRead));
