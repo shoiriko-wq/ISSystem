@@ -14,6 +14,9 @@ const BASE = process.env.UI_BASE || 'https://127.0.0.1:3443';
 const USER = process.env.UI_USER || 'T2026001';
 const PASS = process.env.UI_PASS || 'password123';
 const VIEWPORTS = [320, 500, 760, 1020, 1280];
+// メニュー名（.nav-label）とツールチップ（title）の不一致数と検証件数
+let mismatchTotal = 0;
+let checkedTotal = 0;
 
 function findChrome() {
   const candidates = [process.env.CHROME_PATH, '/usr/bin/google-chrome', '/usr/bin/chromium'].filter(Boolean);
@@ -51,6 +54,8 @@ for (const vw of VIEWPORTS) {
       const label = n.querySelector('.nav-label');
       return {
         title: (n.getAttribute('title') || n.textContent.trim()).slice(0, 6),
+        titleText: (n.getAttribute('title') || '').trim(),
+        labelText: (label ? label.textContent : '').trim(),
         w: px(r.width), h: px(r.height),
         iconW: ir ? px(ir.width) : null, iconH: ir ? px(ir.height) : null,
         labelShown: label ? getComputedStyle(label).display !== 'none' : false,
@@ -71,9 +76,16 @@ for (const vw of VIEWPORTS) {
   });
 
   console.log(`\n=== viewport=${report.viewport} sidebar=${report.sidebar.w}x${report.sidebar.h} nav=${report.nav.w}x${report.nav.h} ===`);
+  let viewportMismatch = 0;
   report.items.forEach((i) => {
+    const match = i.titleText === i.labelText && i.labelText !== '';
+    if (!match) viewportMismatch += 1;
     console.log(`  ${i.active ? '[ACTIVE]' : '[      ]'} ${i.title} box=${i.w}x${i.h} (ratio=${(i.w / i.h).toFixed(2)}) icon=${i.iconW}x${i.iconH} label=${i.labelShown} pad=${i.pad} radius=${i.radius} bg=${i.bg}`);
+    console.log(`    ${match ? '[TITLE OK]' : '[TITLE NG]'} title="${i.titleText}" label="${i.labelText}"`);
   });
+  checkedTotal += report.items.length;
+  mismatchTotal += viewportMismatch;
+  console.log(`  TITLE/LABEL 一致: ${report.items.length - viewportMismatch}/${report.items.length}${viewportMismatch ? ` (不一致 ${viewportMismatch} 件)` : ''}`);
 
   // せり出し前（アイコンのみ）のスクリーンショット
   const collapsedShot = path.join(OUT_DIR, `nav-shapes-${vw}-collapsed.png`);
@@ -123,3 +135,11 @@ for (const vw of VIEWPORTS) {
 }
 
 await browser.close();
+
+// メニュー名とツールチップ（代替テキスト）が一致していることの検証
+if (mismatchTotal > 0) {
+  console.log(`\n=== FAIL: メニュー名とツールチップの不一致 ${mismatchTotal} 件 ===`);
+  process.exitCode = 1;
+} else {
+  console.log(`\n=== PASS: メニュー名とツールチップが全 ${checkedTotal} 件で一致 ===`);
+}
