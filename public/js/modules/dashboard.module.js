@@ -160,16 +160,18 @@ export function initDashboardModule() {
              年休等 = 赤系 (bg-danger-soft / border-danger-soft / text-danger)
              出張   = 黄系 (bg-warning-soft / border-warning-soft / text-warning) -->
         <div class="grid grid-cols-2 gap-2 mb-3 items-start">
-          <div class="flex flex-col items-center gap-1 py-2.5 px-0 rounded-lg bg-danger-soft border border-danger-soft"
-               title="本日年休等（年休・半日休・早退・遅刻・欠席）の人数">
+          <div id="dash-absence-leave-tile" role="button" tabindex="0"
+               class="flex flex-col items-center gap-1 py-2.5 px-0 rounded-lg bg-danger-soft border border-danger-soft cursor-pointer transition hover:brightness-110 focus:outline-2 focus:outline-offset-2 focus:outline-danger"
+               title="クリックして本日の「年休等」取得者の詳細リストを表示">
             <div class="flex items-center gap-1.5 text-danger text-xs font-bold whitespace-nowrap">
               <i data-lucide="bed-double" class="w-3.5 h-3.5 shrink-0"></i>
               <span>年休等</span>
             </div>
             <span id="dash-absence-leave" class="text-xl font-black text-danger leading-none">0名</span>
           </div>
-          <div class="flex flex-col items-center gap-1 py-2.5 px-0 rounded-lg bg-warning-soft border border-warning-soft"
-               title="本日出張（校外・校内研修）の人数">
+          <div id="dash-absence-trip-tile" role="button" tabindex="0"
+               class="flex flex-col items-center gap-1 py-2.5 px-0 rounded-lg bg-warning-soft border border-warning-soft cursor-pointer transition hover:brightness-110 focus:outline-2 focus:outline-offset-2 focus:outline-warning"
+               title="クリックして本日の「出張」取得者の詳細リストを表示">
             <div class="flex items-center gap-1.5 text-warning text-xs font-bold whitespace-nowrap">
               <i data-lucide="briefcase" class="w-3.5 h-3.5 shrink-0"></i>
               <span>出張</span>

@@ -523,8 +523,10 @@
 
 #view-facility .day-date-input {
   height: 2.4rem;
-  width: 7rem;
-  padding: 0 0.3rem;
+  width: 8.8rem;
+  /* 右パディングで webkit カレンダーアイコン分の余白を予約し、
+     「日」(YYYY-MM-DD の右端) がアイコンに隠れないようにする */
+  padding: 0 1.5rem 0 0.35rem;
   font-size: 1.02rem;
   font-weight: 700;
   background-color: transparent;
@@ -534,6 +536,8 @@
 }
 #view-facility .day-date-input::-webkit-calendar-picker-indicator {
   font-size: 1.02rem;
+  opacity: 1;
+  filter: invert(1);
 }
 
 #view-facility #facility-btn-today,
@@ -720,7 +724,7 @@
   width: 100%;
   min-height: 2.25rem;
   padding: 0.35rem 0.45rem 0.35rem 1.25rem;
-  border-bottom: var(--border-width) solid var(--border-divider);
+  border: var(--border-width) solid var(--border-divider);
   border-radius: 0.5rem;
   background-color: var(--bg-card);
   cursor: pointer;
@@ -733,7 +737,7 @@
 /* 選択中（右ペインに全文が出ている行）はアクセント系背景＋左辺で強調 */
 .bulletin-title-row.active {
   background-color: var(--accent-soft);
-  border-bottom-color: var(--accent-border);
+  border-color: var(--accent-border);
   box-shadow: inset 3px 0 0 var(--accent-primary);
 }
 

@@ -1,9 +1,10 @@
 /**
  * ISSystem Application Configuration
- * PostgreSQL 一本化 (仕様書 v2.1.0) - .env の環境変数から設定を構築
+ * PostgreSQL 一本化 (ISSystem仕様書 §9) - .env の環境変数から設定を構築
  */
 
 import dotenv from 'dotenv';
+import path from 'path';
 // 既存の OS 環境変数 (DB_NAME=is_system 等) より .env を優先して上書きする
 dotenv.config({ override: true, quiet: true });
 
@@ -115,6 +116,12 @@ const config = {
     // 3分無操作編集ロックの自動解放閾値
     editingLockTimeoutSeconds: toInt(process.env.EDITING_LOCK_TIMEOUT_SECONDS, 180),
     auditRetentionDays: toInt(process.env.AUDIT_RETENTION_DAYS, 90),
+  },
+
+  // 7. ストレージ & ファイルアップロード設定 (upload.service.js が参照: uploadDir / maxFileSize)
+  storage: {
+    uploadDir: process.env.UPLOAD_DIR || path.join(process.cwd(), 'data', 'uploads'),
+    maxFileSize: toInt(process.env.MAX_FILE_SIZE, 10485760), // 10MB
   },
 
   // 8. 安全通信（プライベートCA / HTTPS・WSS）

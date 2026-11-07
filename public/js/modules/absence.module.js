@@ -85,6 +85,22 @@ export function initAbsenceModule() {
 
   // ダッシュボードの記入ボタン（人数・登録件の表示は撤去済み。記入するボタンだけから登録モーダルを開く）
   document.getElementById('dash-btn-absence')?.addEventListener('click', () => openAbsenceModal('ALL'));
+
+  // ダッシュボードの区分別人数タイル → クリックでその区分の「本日の詳細リスト」を表示
+  const bindAbsenceTile = (id, filterType) => {
+    const tile = document.getElementById(id);
+    if (!tile) return;
+    const open = () => openAbsenceModal(filterType);
+    tile.addEventListener('click', open);
+    tile.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+        e.preventDefault();
+        open();
+      }
+    });
+  };
+  bindAbsenceTile('dash-absence-leave-tile', 'LEAVE');
+  bindAbsenceTile('dash-absence-trip-tile', 'TRIP');
 }
 
 /**

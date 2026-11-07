@@ -134,7 +134,7 @@ function renderAuthScreen() {
     socketClient.init();
 
     if (userBadge) {
-      // データベース仕様書 v2.1.0: 氏名(name) 未設定時は 教職員番号(staff_code) を表示
+      // ISSystem仕様書 §9 (users): 氏名(name) 未設定時は 教職員番号(staff_code) を表示
       const displayName = state.currentUser?.name || state.currentUser?.staff_code || state.currentUser?.id || '教員';
       userBadge.textContent = displayName;
     }

@@ -2,14 +2,15 @@
  * ISSystem 定期考査 モジュールシェル
  * サイドメニュー「定期考査」の画面骨格・サブタブ・考査ボード読み込み・権限表示
  * メニュー順（教務）: 基本情報の登録 → 年間考査計画 → 実施科目の決定 →
- * 時間割の作成 → 教室割の作成 → 出張等の登録 → 監督割の作成（+ 公表ビュー）
+ * 出張等の登録 → 時間割の作成 → 教室割の作成 → 監督割の作成（+ 公表ビュー）
+ * ※ 出張等の登録は時間割の作成より前（出張中の先生の試験を同日に入れないため）
  * 考査の登録は年間考査計画タブへ統合済み（独立タブを持たない）
  */
 
 import { state } from '../../state.js';
-import { escapeHTML, refreshLucideIcons, showToast } from '../../ui-helpers.js';
+import { refreshLucideIcons, showToast } from '../../ui-helpers.js';
 import { socketClient } from '../../socket.js';
-import { examStore, examApi, loadBoard, resolveActiveExamId, phaseBadge, isKyomuUser, syncRoleKyomu } from './exam.shared.js';
+import { examStore, examApi, loadBoard, resolveActiveExamId, isKyomuUser, syncRoleKyomu } from './exam.shared.js';
 import { renderPlanTab, bindPlanTab } from './exam.plan.ui.js';
 import { renderBasicTab, bindBasicTab } from './exam.basic.ui.js';
 import { renderDecisionTab, bindDecisionTab } from './exam.decision.ui.js';
@@ -23,9 +24,9 @@ const SUB_TABS = [
   { id: 'basic', label: '基本情報の登録', icon: 'library' },
   { id: 'plan', label: '年間考査計画', icon: 'calendar-range' },
   { id: 'decision', label: '実施科目の決定', icon: 'stamp', openToAll: true },
+  { id: 'trip', label: '出張等の登録', icon: 'plane' },
   { id: 'timetable', label: '時間割の作成', icon: 'grid-3x3' },
   { id: 'room', label: '教室割の作成', icon: 'layout-grid' },
-  { id: 'trip', label: '出張等の登録', icon: 'plane' },
   { id: 'proctor', label: '監督割の作成', icon: 'shield-check' },
   { id: 'view', label: '公表・自分の担当', icon: 'eye', openToAll: true },
 ];
@@ -47,15 +48,6 @@ function ensureSubTab() {
   }
 }
 
-const PHASE_KEYS = [
-  ['plan_phase', '計画'],
-  ['subject_phase', '実施科目'],
-  ['decision_phase', '決定'],
-  ['timetable_phase', '時間割'],
-  ['room_phase', '教室割'],
-  ['trip_phase', '出張等'],
-  ['proctor_phase', '監督割'],
-];
 
 const RENDERERS = {
   plan: { render: renderPlanTab, bind: bindPlanTab },
@@ -96,31 +88,14 @@ function renderActivePanel() {
 function renderHeader() {
   const bar = document.getElementById('exam-header-bar');
   if (!bar) return;
-  const board = examStore.board;
-  const masters = examStore.masters || [];
-  const options = masters
-    .map((m) => `<option value="${m.id}" ${m.id === examStore.examId ? 'selected' : ''}>${escapeHTML(m.title)}</option>`)
-    .join('');
-  const phaseStrip = board
-    ? PHASE_KEYS.map(([k, label]) => `<span class="flex items-center gap-1">${label} ${phaseBadge(board.phases[k])}</span>`).join('')
-    : '';
   bar.innerHTML = `
     <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
       <div>
         <h2 class="text-lg font-bold text-main flex items-center gap-2">
           <i data-lucide="file-spreadsheet" class="w-5 h-5 text-warning"></i> 定期考査
         </h2>
-        <p class="text-[11px] text-muted">教務権限者は 7 つの作成メニュー（考査の登録は年間考査計画に統合）、教員は公表ビューと自分の担当コマを確認できます。</p>
-      </div>
-      <div class="flex flex-wrap items-center gap-2">
-        <label class="text-[11px] text-muted">対象考査</label>
-        <select id="exam-select" class="input-field py-1.5 px-2 text-xs w-56">${options || '<option value="">（考査未登録）</option>'}</select>
-        <button id="exam-refresh" class="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1">
-          <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> 更新
-        </button>
       </div>
     </div>
-    <div class="flex flex-wrap items-center gap-3 text-[10px] text-muted pt-1">${phaseStrip}</div>
   `;
   refreshLucideIcons();
 }
@@ -170,16 +145,7 @@ export function initExamModule() {
     renderActivePanel();
   });
 
-  document.getElementById('exam-header-bar')?.addEventListener('change', async (e) => {
-    if (e.target.id !== 'exam-select') return;
-    examStore.examId = e.target.value;
-    resetTimetableState();
-    showToast('対象考査を切り替えました', 'info');
-    await reload();
-  });
-  document.getElementById('exam-header-bar')?.addEventListener('click', async (e) => {
-    if (e.target.closest('#exam-refresh')) await reload();
-  });
+
 
   // 教科マスタの改名/削除は考査計画の教科名へ cascade するため、変更時に板を再読み込みする
   socketClient.on('subjects:changed', () => {

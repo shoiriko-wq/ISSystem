@@ -1,6 +1,6 @@
 /**
  * ISSystem Bulletin & Circular Controller
- * 掲示板・要承認回覧板・ワンクリックデジタル承認・未確認者督促API (SQLite・フロントエンド構造完全互換版)
+ * 掲示板・要承認回覧板・ワンクリックデジタル承認・未確認者督促API (PostgreSQL / フロントエンド構造完全互換版)
  */
 
 import bulletinService from '../services/bulletin.service.js';

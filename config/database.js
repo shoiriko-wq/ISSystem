@@ -99,7 +99,7 @@ const query = (text, params) => pool.query(normalizePlaceholders(text), params);
 const getClient = () => pool.connect();
 
 /**
- * モデル層用の SQLite 互換アダプタ (get / all / run / query / exec / close)
+ * モデル層用の PostgreSQL アダプタ (get / all / run / query / exec / close)
  * 共有プール上で SQLite と同じ API を提供し、close() は no-op とする
  * @param {import('pg').Pool | import('pg').Client} client
  */

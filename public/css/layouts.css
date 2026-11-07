@@ -135,6 +135,9 @@
   overflow-y: auto;
   overflow-x: hidden;
   padding-right: 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
 }
 
 /* 右ペイン（全文・添付・コメント）。横スクロールを出さず縦スクロールで読む */

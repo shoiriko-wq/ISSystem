@@ -780,6 +780,79 @@ html[data-chrome="saturated"][data-theme-mode="light"] .app-header #user-dropdow
   border-color: var(--base-border-strong) !important;
 }
 
+/* Hover on the saturated bars: bg-card-hover resolves to white in the chrome
+   scope, so the sidebar nav-item hover paints a white plate under white bar ink.
+   Use a dark plate on the bar so white ink keeps a luminance gap. */
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .nav-item:hover,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .nav-item:hover .nav-label,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .nav-item:hover i,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar .nav-item:hover svg {
+  background-color: rgba(0, 0, 0, 0.30) !important;
+  color: #ffffff !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+/* Account / notification dropdown are white cards on the saturated bar, but the
+   button/a classes read the chrome --text-main which is white, so dark-on-white
+   cards show white-on-white. Re-anchor dropdown ink to the dark content color and
+   give hover a light accent-tinted plate so dark ink clears the contrast gap. */
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header #user-dropdown-menu .text-main,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header #user-dropdown-menu .text-soft,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header #user-dropdown-menu .text-muted,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header #user-dropdown-menu .text-faint,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar #user-dropdown-menu .text-main,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar #user-dropdown-menu .text-soft,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header #notification-dropdown-menu .text-main,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header #notification-dropdown-menu .text-soft,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header #notification-dropdown-menu .text-muted,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header #notification-dropdown-menu .text-faint,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header #notification-dropdown-menu a {
+  color: var(--base-text-main) !important;
+}
+
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header #user-dropdown-menu .text-danger,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header #notification-dropdown-menu .text-danger {
+  color: var(--base-danger) !important;
+}
+
+/* Icons in the account dropdown carry text-accent / text-success classes, which in
+   the saturated chrome resolve to the white chrome ink — so user-pen / palette /
+   users land white-on-white on the white card (almost no luminance gap). Re-anchor
+   the status/accent icon ink to the content palette so it clears 4.5:1 on white. */
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header #user-dropdown-menu .text-accent,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar #user-dropdown-menu .text-accent {
+  color: var(--base-accent-primary) !important;
+}
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header #user-dropdown-menu .text-success,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar #user-dropdown-menu .text-success {
+  color: var(--base-success) !important;
+}
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header #user-dropdown-menu .text-warning,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar #user-dropdown-menu .text-warning {
+  color: var(--base-warning) !important;
+}
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header #user-dropdown-menu .text-info,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar #user-dropdown-menu .text-info {
+  color: var(--base-info) !important;
+}
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header #user-dropdown-menu .text-accent:hover,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar #user-dropdown-menu .text-accent:hover {
+  color: var(--base-accent-primary) !important;
+}
+
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header #user-dropdown-menu button:hover,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-sidebar #user-dropdown-menu button:hover,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header #notification-dropdown-menu button:hover,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header #notification-dropdown-menu a:hover {
+  background-color: color-mix(in srgb, var(--base-accent-primary) 24%, var(--base-bg-card)) !important;
+  color: var(--base-text-main) !important;
+}
+
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header #user-dropdown-menu .text-danger:hover,
+html[data-chrome="saturated"][data-theme-mode="light"] .app-header #notification-dropdown-menu .text-danger:hover {
+  color: var(--base-danger) !important;
+}
+
 
 /* --------------------------------------------------------------------------
    4. Inverted two-tone themes (DARK content + LIGHT bars)
@@ -907,4 +980,40 @@ html[data-chrome="inverted"][data-theme-mode="dark"] .app-header #user-dropdown-
   background-color: var(--base-bg-card) !important;
   color: var(--base-text-main) !important;
   border-color: var(--base-accent-primary) !important;
+}
+
+/* Dropdown panels are dark content cards on the light bars, but the button/a
+   classes (.text-main/.text-soft/...) read the chrome --text-main which remaps to
+   the dark inverse ink, landing dark-on-dark. Re-anchor dropdown ink to the light
+   content color and give hover a dark tinted plate so hover keeps a luminance gap. */
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header #user-dropdown-menu .text-main,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header #user-dropdown-menu .text-soft,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header #user-dropdown-menu .text-muted,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header #user-dropdown-menu .text-faint,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar #user-dropdown-menu .text-main,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar #user-dropdown-menu .text-soft,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header #notification-dropdown-menu .text-main,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header #notification-dropdown-menu .text-soft,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header #notification-dropdown-menu .text-muted,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header #notification-dropdown-menu .text-faint,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header #notification-dropdown-menu a {
+  color: var(--base-text-main) !important;
+}
+
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header #user-dropdown-menu .text-danger,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header #notification-dropdown-menu .text-danger {
+  color: var(--base-danger) !important;
+}
+
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header #user-dropdown-menu button:hover,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-sidebar #user-dropdown-menu button:hover,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header #notification-dropdown-menu button:hover,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header #notification-dropdown-menu a:hover {
+  background-color: color-mix(in srgb, var(--base-text-inverse) 24%, var(--base-bg-card)) !important;
+  color: var(--base-text-main) !important;
+}
+
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header #user-dropdown-menu .text-danger:hover,
+html[data-chrome="inverted"][data-theme-mode="dark"] .app-header #notification-dropdown-menu .text-danger:hover {
+  color: var(--base-danger) !important;
 }

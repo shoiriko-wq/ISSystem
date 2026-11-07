@@ -16,7 +16,7 @@ export const authController = {
    */
   async login(req, res, next) {
     try {
-      // データベース仕様書 v2.1.0 に基づき staff_code を主体として取得
+      // ISSystem仕様書 §9 (users) に基づき staff_code を主体として取得
       const { staff_code, staffCode, username, userId, email, password } = req.body;
       const targetStaffCode = staff_code || staffCode || username || userId || email;
 

@@ -100,25 +100,17 @@ export function buildCaPage(ctx) {
   // 末尾のスラッシュを揃えて URL を表示・リンクする
   const httpsUrl = secureBase.endsWith('/') ? secureBase : `${secureBase}/`;
   const fingerprint = caInfo.exists ? caInfo.fingerprint : '（証明書が見つかりません）';
-  const validTo = caInfo.exists ? caInfo.validTo : '-';
-  const subject = caInfo.exists ? caInfo.subject : '-';
 
   const statusBlock = secure
-    ? `<div class="alert ok">
-        <strong>このページは安全な接続 (HTTPS) で開かれています。</strong><br />
-        証明書をインストール済みであれば、そのまま ISSystem を利用できます。
-        同じページから CA 証明書を再取得することも可能です。
-      </div>`
-    : `<div class="alert warn">
-        <strong>このページは「非安全」な接続 (HTTP) で開かれています。</strong><br />
-        ISSystem はプライベートCAで発行した証明書により <code>https://</code>（HTTPS）と
-        <code>wss://</code>（WebSocket Secure）で通信します。<br />
-        ブラウザがこの証明書を信頼できるよう、下記のルートCA証明書を端末にインストールしてください。
-      </div>`;
+    ? `<p class="note ok">このページは安全な接続 (HTTPS) で開かれています。<br />証明書はインストール済みなので、そのまま <code>${escapeHtml(httpsUrl)}</code> を開けます。</p>`
+    : `<p class="note">ISSystem は学校内ネットワーク用の証明書（プライベートCA）で安全にやり取りします。<br />はじめての方は、下の設定を一度だけ行えば、警告なく使えるようになります。</p>`;
 
   const certBlock = caInfo.exists
-    ? `<a class="btn" href="/ca/${caFileName}" download>ルートCA証明書（${escapeHtml(caFileName)}）をダウンロード</a>`
-    : `<span class="btn disabled">CA証明書が見つかりません</span>`;
+    ? `<a class="btn" href="/ca/${caFileName}" download>ルートCA証明書をダウンロード</a>`
+    : `<span class="btn disabled">証明書が見つかりません</span>`;
+  const openHttps = secure
+    ? ''
+    : `<a class="btn secondary" href="${escapeHtml(httpsUrl)}">ISSystem を開く</a>`;
 
 
   const head = `<!DOCTYPE html>
@@ -127,7 +119,7 @@ export function buildCaPage(ctx) {
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="referrer" content="strict-origin-when-cross-origin" />
-<title>ISSystem ｜ 安全通信（プライベートCA）設定</title>
+<title>ISSystem ｜ はじめに（証明書の設定）</title>
 <style>
   :root { --bg:#F7FAFC; --card:#FFFFFF; --text:#0F172A; --muted:#64748B; --brand:#037A71; --ring:#CBD5E1; }
   * { box-sizing:border-box; }
@@ -150,6 +142,25 @@ export function buildCaPage(ctx) {
   .btn.secondary { background:#334155; }
   .btn.disabled { background:#94A3B8; color:#F1F5F9; }
   .fp { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8125rem; background:#EEF2F7; border:1px solid var(--ring); border-radius:.5rem; padding:.75rem; letter-spacing:.05em; word-break:break-all; margin-top:.5rem; }
+  .note { border-radius:.75rem; padding:1rem 1.125rem; font-size:.9375rem; line-height:1.7; border:1px solid var(--ring); background:var(--card); }
+  .note.ok { border:1px solid #A7F3D0; background:#ECFDF5; color:#065F46; }
+  .muted { color:var(--muted); font-size:.875rem; }
+  .tabs { margin-top:1rem; }
+  .tabs input[type=radio] { position:absolute; width:1px; height:1px; opacity:0; }
+  .tablist { display:flex; flex-wrap:wrap; gap:.35rem; }
+  .tablist label { cursor:pointer; font-size:.875rem; padding:.5rem .8rem; border:1px solid var(--ring); border-bottom:none; border-radius:.5rem .5rem 0 0; background:#EEF2F7; color:var(--muted); }
+  .panels { border-top:2px solid var(--brand); }
+  .panel { display:none; padding-top:.9rem; }
+  #dev-win:checked ~ .tablist label[for=dev-win],
+  #dev-ios:checked ~ .tablist label[for=dev-ios],
+  #dev-android:checked ~ .tablist label[for=dev-android],
+  #dev-firefox:checked ~ .tablist label[for=dev-firefox],
+  #dev-node:checked ~ .tablist label[for=dev-node] { background:var(--brand); color:#fff; border-color:var(--brand); }
+  #dev-win:checked ~ .panels #p-win,
+  #dev-ios:checked ~ .panels #p-ios,
+  #dev-android:checked ~ .panels #p-android,
+  #dev-firefox:checked ~ .panels #p-firefox,
+  #dev-node:checked ~ .panels #p-node { display:block; }
   footer { margin-top:1.5rem; font-size:.8125rem; color:var(--muted); line-height:1.7; }
 </style>
 </head>
@@ -161,69 +172,84 @@ export function buildCaPage(ctx) {
   const body = `
 <main class="wrap">
   <header>
-    <div class="brand">ISSystem 職員室情報共有システム</div>
-    <div class="sub">プライベートCAによる安全通信（HTTPS / WSS）設定ページ</div>
+    <div class="brand">ISSystem 職員室情報共有システムへようこそ</div>
+    <div class="sub">はじめて接続される方へ — 証明書の設定は一度だけ、安全に使えます。</div>
   </header>
 
   ${statusBlock}
 
   <div class="card">
-    <h2>1. ルートCA証明書をダウンロードしてインストールする</h2>
-    <p>ISSystem のサーバー証明書は、学校内ネットワーク用のプライベートCAが発行しています。<br />
-    端末（ブラウザ・OS・Node.js）にルートCAを登録すると、警告なく HTTPS / WSS が利用できるようになります。</p>
+    <h2>はじめ設定（3ステップ）</h2>
     <div class="actions">
       ${certBlock}
-      ${secure ? '' : `<a class="btn secondary" href="${escapeHtml(httpsUrl)}">安全接続 (HTTPS) で開く</a>`}
+      ${openHttps}
     </div>
-    <h3>指紋（SHA-256）で真正性を確認してください</h3>
+
+    <div class="tabs">
+      <input type="radio" name="dev" id="dev-win" checked>
+      <input type="radio" name="dev" id="dev-ios">
+      <input type="radio" name="dev" id="dev-android">
+      <input type="radio" name="dev" id="dev-firefox">
+      <input type="radio" name="dev" id="dev-node">
+      <div class="tablist">
+        <label for="dev-win">Windows</label>
+        <label for="dev-ios">iPhone / iPad</label>
+        <label for="dev-android">Android</label>
+        <label for="dev-firefox">Firefox</label>
+        <label for="dev-node">その他（開発・テスト）</label>
+      </div>
+      <div class="panels">
+        <div class="panel" id="p-win">
+          <ol>
+            <li>上の「証明書をダウンロード」を押す。</li>
+            <li><code>${escapeHtml(caFileName)}</code> をダブルクリックし、<code>信頼されたルート証明機関</code> に「常時信頼する」で登録。</li>
+            <li>ブラウザを再起動し、<code>${escapeHtml(httpsUrl)}</code> を開く。</li>
+          </ol>
+        </div>
+        <div class="panel" id="p-ios">
+          <ol>
+            <li>証明書をダウンロードし、「ファイル」アプリに保存。</li>
+            <li>その <code>.crt</code> をタップし、設定の「プロファイルとデバイス管理」でインストール。</li>
+            <li>設定 → 一般 → 証明書設定で <code>ISSystem CA</code> を「常時信頼」に設定し、Safari を再起動。</li>
+          </ol>
+        </div>
+        <div class="panel" id="p-android">
+          <ol>
+            <li>証明書をダウンロード。</li>
+            <li>設定 → セキュリティ → 認証情報の削除とインストール → CA証明書をインストール。</li>
+            <li>ブラウザを再起動して <code>${escapeHtml(httpsUrl)}</code> を開く。</li>
+          </ol>
+        </div>
+        <div class="panel" id="p-firefox">
+          <ol>
+            <li>設定 → 個人情報保護 → 証明書 → 信頼されたルート →「証明書をインポート」で <code>.crt</code> を選び、「このCAによるWebサイトの信頼」を有効化。</li>
+            <li><code>${escapeHtml(httpsUrl)}</code> を開く。</li>
+          </ol>
+        </div>
+        <div class="panel" id="p-node">
+          <ol>
+            <li>環境変数 <code>NODE_EXTRA_CA_CERTS=./certs/${escapeHtml(caFileName)}</code> を設定して実行。</li>
+            <li>ヘッドレスブラウザ検証は <code>--ignore-certificate-errors</code> を使用。</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    <h3>指紋（SHA-256）</h3>
     <div class="fp">${escapeHtml(fingerprint)}</div>
-    <p>指紋が管理者の案内と一致することを確認してからインストールしてください。<br />
-    発行者: <code>${escapeHtml(subject)}</code> ／ 有効期限: <code>${escapeHtml(validTo)}</code></p>
-  </div>
-`;
-
-
-  const steps = `
-  <div class="card">
-    <h2>2. 端末ごとのインストール手順</h2>
-    <h3>Windows 10 / 11（Chrome・Edge）</h3>
-    <ol>
-      <li>上のボタンで <code>${escapeHtml(caFileName)}</code> をダウンロードします。</li>
-      <li>ファイルをダブルクリックし、<code>信頼されたルート証明機関</code> に登録します（「常時信頼する」を設定）。</li>
-      <li>ブラウザを再起動し、<code>${escapeHtml(httpsUrl)}</code> を開きます。</li>
-    </ol>
-    <h3>macOS（Safari・Chrome）</h3>
-    <ol>
-      <li>ダウンロードした .crt を開き、キーチェーンで <code>常時信頼</code> に設定します。</li>
-      <li><code>${escapeHtml(httpsUrl)}</code> を開きます。</li>
-    </ol>
-    <h3>Firefox</h3>
-    <ol>
-      <li><code>設定 → 個人情報保護 → 証明書 → 信頼されたルート → 証明書をインポート</code> で .crt を選択し、<code>このCAによるWebサイトの信頼</code> を有効化します。</li>
-    </ol>
-    <h3>Node.js（スクリプト・自動化・UIテスト）</h3>
-    <ol>
-      <li>環境変数 <code>NODE_EXTRA_CA_CERTS=./certs/${escapeHtml(caFileName)}</code> を設定して実行します。</li>
-      <li>ヘッドレスブラウザの検証では <code>ignoreHTTPSErrors</code> / <code>--ignore-certificate-errors</code> を使用します。</li>
-    </ol>
-    <h3>Android / iPad（学校端末）</h3>
-    <ol>
-      <li>ダウンロードした .crt を端末に保存し、<code>設定 → セキュリティ → 認証情報の削除とインストール</code>（Android）または構成ファイル（iPad）で信頼設定します。</li>
-    </ol>
+    <p class="muted">指紋が管理者の案内と一致することを確認してからインストールしてください。</p>
   </div>
 
   <footer>
-    <p><strong>非HTTP接続について:</strong> 非安全ポート（HTTP）はCA証明書の配布専用です。<br />
-    API 呼び出しは <code>426 Upgrade Required</code> で拒否され、アプリケーション（画面）は安全接続 (HTTPS) でのみ提供されます。<br />
-    WebSocket (socket.io) は HTTPS と同一ポートの <code>wss://</code> でのみ接続できます。</p>
-    <p>サーバー管理者: 証明書の生成は <code>npm run cert:gen</code>（OpenSSL が必要）です。</p>
+    <p>設定は一度だけ。数分で終わります。分からない時は職員室・管理者に気軽に声をかけてください。</p>
+    <p>サーバー管理者: 証明書の生成は <code>npm run cert:gen</code>。</p>
   </footer>
 </main>
 </body>
 </html>
 `;
 
-  return head + body + steps;
+  return head + body;
 }
 
 export default { sslPaths, certsExist, loadTlsOptions, getCaInfo, buildCaPage, CA_FILE_NAME };

@@ -996,3 +996,18 @@ html[data-theme-mode='light'] .btn-success {
   justify-content: center;
 }
 
+/* --------------------------------------------------------------------------
+   13. Dark-theme contrast for outline warning buttons (exam rows add/delete)
+       .btn-warning has no fill in components.css; the section-12 rule pins the
+       dark --on-warning-ink in EVERY theme. On the dark content surfaces of the
+       two-tone dark themes (and the dark themes generally) that dark ink sits on
+       a dark card, so the "追加"/"削除" glyphs have almost no luminance gap.
+       In dark themes we switch the outline warning text to the bright
+       --text-warning-strong (warning + light text-tint), which clears 4.5:1 on
+       the dark card. Filled .bg-warning surfaces keep the dark ink via section 12.
+   -------------------------------------------------------------------------- */
+html[data-theme-mode='dark'] .btn-warning {
+  color: var(--text-warning-strong) !important;
+  text-shadow: none !important;
+}
+

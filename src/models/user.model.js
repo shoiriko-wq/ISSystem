@@ -7,7 +7,7 @@ import { query } from '../../config/database.js';
 import { openDb, nowIso } from '../utils/db.js';
 import { parseSubjectList } from './subject.model.js';
 
-/** モデル層用 SQLite 互換アダプタ (共有プール借用 / close() は no-op) */
+/** モデル層用 PostgreSQL アダプタ（SQLite と同じ get / all / run API を共有プール上で提供、close() は no-op） */
 async function getDb() {
   return openDb();
 }

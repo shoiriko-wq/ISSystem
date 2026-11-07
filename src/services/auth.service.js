@@ -89,7 +89,7 @@ export const authService = {
 
     const userId = user._id || user.id;
 
-    // SQLite の 1/0 数値フラグおよび boolean 型に対応した is_kyomu 判定
+    // PostgreSQL の INTEGER(1/0)・BOOLEAN・TEXT いずれの is_kyomu 値にも対応した判定
     const isKyomuRole = user.is_kyomu === 1 || user.is_kyomu === true || user.role === 'KYOMU';
 
     const token = this.generateTokenForUser(user);

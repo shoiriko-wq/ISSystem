@@ -9,7 +9,7 @@ import { loginToken, bearer, pickId, closePool } from './helpers.js';
 let reservationId = null;
 
 const uniqueSlot = {
-  facility_id: '3',
+  facility_id: 'fac_1',
   title: 'Jest確認予約',
   target_date: '2027-01-15',
   start_time: '09:00',
@@ -32,8 +32,8 @@ describe('Facility Reservation API (/api/facilities)', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.count).toBeGreaterThanOrEqual(5);
-    expect(res.body.facilities.some((f) => f.name === '第一会議室')).toBe(true);
-    expect(res.body.facilities.some((f) => f.name === '体育館')).toBe(true);
+    expect(res.body.facilities.some((f) => f.name === '学文館会議室')).toBe(true);
+    expect(res.body.facilities.some((f) => f.name === '視聴覚教室')).toBe(true);
   });
 
   it('GET /api/facilities - トークンなしでは 401 になること', async () => {
@@ -75,7 +75,7 @@ describe('Facility Reservation API (/api/facilities)', () => {
 
   it('GET /api/facilities/:facilityId/reservations - 登録した予約が日付範囲で返ること', async () => {
     const res = await request(app)
-      .get('/api/facilities/3/reservations?date=2027-01-15')
+      .get('/api/facilities/fac_1/reservations?date=2027-01-15')
       .set('Authorization', bearer(token));
     expect(res.statusCode).toBe(200);
     expect(res.body.reservations.some((r) => r.id === reservationId)).toBe(true);

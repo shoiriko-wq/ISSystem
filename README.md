@@ -1,14 +1,6 @@
-# IS System - プロジェクト構成
-
-このプロジェクトは、IS System（情報システム）を管理するためのシステムです。以下の構成で構成されています。
-
-- `index.html` - メインページ
-- `style.css` - スタイルシート
-- `script.js` - JavaScriptファイル
-- `README.md` - プロジェクトの説明
-
-このプロジェクトは、ユーザーが情報を入力し、システムに登録するためのインターフェースを提供します。
 # ISSystem (職員室情報共有システム)
+
+**仕様書の正典は `ISSystem仕様書.md`（v3.0.0）。** 本書は運用・コマンド・環境変数の手順書。仕様の全体像（層構成・API・Socket・DB 51テーブル・RBAC・セキュリティ既知課題）は仕様書側を参照。
 
 校務支援バックエンド。Express + PostgreSQL 18 + Socket.io + Cron によるリアルタイム職員室共有システム。
 
@@ -38,11 +30,11 @@ npm start           # HTTPS/WSS は SSL_PORT (既定 3443)、PORT (既定 3000) 
 | `SSL_PORT` (既定 3443) | HTTPS/WSS によるアプリ本体・API・Socket.io（サーバー証明書はプライベートCAで署名） |
 | `PORT` (既定 3000) | 非安全 HTTP。**CA証明書のダウンロードページ専用に固定**。アプリ画面は提供せず API は `426 Upgrade Required` で拒否 |
 
-- `npm run cert:gen` が `certs/` に発行する: ルートCA `issystem-ca.crt`（秘密鍵 `issystem-ca.key`）、サーバー証明書 `server.pem` + 鍵 `server.key`（SAN: localhost, issystem.local, issystem, 127.0.0.1, ::1。CAにサーバ証明書を提示するため WSS でも検証可能）。再発行は `--force`。
+- `npm run cert:gen` が `certs/` に発行する: ルートCA `issystem-ca.crt`（秘密鍵 `issystem-ca.key`、**SAN 付き**：localhost, issystem.local, issystem, 127.0.0.1, ::1）、サーバー証明書 `server.pem` + 鍵 `server.key`（同じ SAN。CAにサーバ証明書を提示するため WSS でも検証可能）。`issystem-ca.pem` は `.crt` と同一内容。再発行は `--force`。
 - **端末の信頼ストアに `certs/issystem-ca.crt` をインストール**するとブラウザのアドレスバーで「安全な接続」として開ける。Windows はダブルクリック →「信頼されたルート証明機関」、macOS は「常時信頼」。Node からのアクセスは `NODE_EXTRA_CA_CERTS=./certs/issystem-ca.crt`。
 - **非HTTP (`http://` や `ws://`) でアクセスしてきた相手には CAダウンロードページ (`/ca`) が表示される。** ページには SHA-256指紋、OS別のインストール手順、ダウンロードリンク、`https://HOST:SSL_PORT/` へ移動するボタンがある。アプリ画面や API は返らない。HTTPS の `/ca` も同じページ（指紋とダウンロード）で利用可能。
 - 設定は `.env` の `SSL_PORT` / `SSL_HOST` / `SSL_DIR` / `SSL_KEY` / `SSL_CERT` / `SSL_CA` / `SSL_HOSTS` / `SSL_CA_PAGE_BASE`（`PORT` は CA配布専用ポート）。
-- 検証: `npm run test:ui:https`（CA検証・TLSハンドシェイク・CAページ表示・API 426・CAダウンロード・ブラウザ wss 接続・非HTTP ws 拒否の 23項目）。
+- 検証: `npm run test:ui:https`（CA検証（CA自身のSAN含む）・TLSハンドシェイク・CAページ表示・API 426・CAダウンロード・ブラウザ wss 接続・非HTTP ws 拒否の 27項目）。
 
 ### .env の設定
 
@@ -66,9 +58,12 @@ npm start           # HTTPS/WSS は SSL_PORT (既定 3443)、PORT (既定 3000) 
 - **アプリのログインパスワード**: `password123` → `scripts/seed.js` の教職員アカウント共通パスワード。教職員番号 `T2026001` (教務主任) などでログイン
 
 ```bash
-# psql を使う場合
-$env:PGPASSWORD='otome601'
-& 'C:\Program Files\PostgreSQL\18\bin\psql.exe' -h localhost -p 5432 -U postgres -d issystem
+# psql を使う場合（Linux 現行環境）
+PGPASSWORD='otome601' psql -h localhost -p 5432 -U postgres -d issystem
+
+# 旧 Windows 開発環境（パスに psql が無い）
+# $env:PGPASSWORD='otome601'
+# & 'C:\Program Files\PostgreSQL\18\bin\psql.exe' -h localhost -p 5432 -U postgres -d issystem
 ```
 
 ## メール接続テスト
@@ -85,8 +80,9 @@ $env:PGPASSWORD='otome601'
 | --- | --- |
 | `npm start` / `npm run dev` | サーバー起動 (HTTPS/WSS + Cron + CA配布用HTTP) |
 | `npm run cert:gen` | プライベートCAとサーバー証明書を生成（既存があればスキップ。`--force` で再発行） |
-| `npm test` | jest 統合テスト (5スイート / 40テスト、各スイートで pg プールを close するため `--forceExit` 不要) |
+| `npm test` | jest 統合テスト (10スイート / 139テスト、各スイートで pg プールを close するため `--forceExit` 不要) |
 | `npm run api:check` | API スモークテスト (HTTPS の GET/POST/PUT/DELETE を実行しステータスを検証) |
+| `npm run test:socket-auth` | Socket 接続権限検証 (tokenless / garbage / demoトークン / 外部Origin の拒否、KYOMU・ADMIN gate、ロック自保持限定、chat メンバーシップの 20項目。サーバー起動後に実行) |
 | `npm run test:api:mail-test` | メール接続テスト API 検証 (Jest `test/mail.test.js` 6項目) |
 | `npm run test:api:mail-defaults` | メール初期値 (.env プリフィル・Git 秘匿) API 検証 (12項目) |
 | `npm run test:ui:mail` | メール UI 検証 (初回設定・プリフィル・接続テスト・受信箱の 37項目) |
@@ -101,11 +97,15 @@ $env:PGPASSWORD='otome601'
 | ファイル | 内容 |
 | --- | --- |
 | `test/auth.test.js` | ログイン、`/auth/me`、招待コード発行 (201)、招待登録、新規アカウントでのログイン、消費済みコード 400・既存教職員番号 409、誤パスワード 401、トークンなし 401 |
-| `test/facility.test.js` | 施設一覧、日別概要 (`facilitiesOverview`)、予約作成 201、**重複時間帯 409**、予約一覧、キャンセル、`start>=end` は 400、キャンセル後の再予約 |
+| `test/facility.test.js` | 施設一覧、日別概要 (`facilitiesOverview`)、予約作成 201、**重複時間帯 409**、予約一覧、キャンセル、`start>=end` は 400、キャンセル後の再予約、施設マスタ CRUD (教務部限定・同名 409・有効予約残 409)、並び順 `PUT /api/facilities/order` |
 | `test/approvals.test.js` | 一覧、申請作成 201、詳細、承認処理 (`APPROVED`)、無効ステータス 400、存在しない ID 404 |
 | `test/bulletins.test.js` | 一覧、詳細 (確認率 `ack_percentage`)、投稿作成 201、件名・本文欠落 400、コメント、既読、電子承認、不存在 404 |
 | `test/chat.test.js` | チャンネル一覧、メンバー一覧 (`chat_channel_members`)、チャンネル作成 201、メッセージ投稿、取得、既読、削除、公開チャンネル削除 400、チャンネル名欠落 400 |
 | `test/invitation.test.js` | 招待コード発行 (トップレベル `code`)、新規登録、招待コードによるパスワード再設定、旧パスワード 401、消費済みコード 400、未登録教職員番号 404、8文字未満/項目欠金 400、`used_for` (REGISTER / PASSWORD_RESET) |
+| `test/exam.test.js` | 考査マスタ CRUD、教科・スロット・時間割セル、監督者配置、部屋割りのブロックソルバー、禁止時間帯、検証 API |
+| `test/absence.test.js` | 欠席・早期帰・遅刻の作成・一覧・修正・削除と期間集計 |
+| `test/schedules.test.js` | 学校日程の作成・年月一覧・当日取得・削除とカテゴリマッピング |
+| `test/mail.test.js` | メール設定保存・初期値プリフィル・接続テスト API (`status` VERIFIED/FAILED) (6項目) |
 
 ## 認証フロー
 
@@ -127,7 +127,7 @@ $env:PGPASSWORD='otome601'
 
 ## スキーマ上の重要テーブル
 
-`users`, `invitation_codes`, `posts`, `post_acknowledgements`, `post_comments`, `chat_channels`, `chat_channel_members`, `chat_messages`, `seating_status`, `resources`, `reservations`, `facility_cells`, `approvals`, `school_schedules`, `audit_logs` (90日保持), `editing_locks` (3分TTL), `classes`, `subjects`, `exam_masters`, `exam_slots`, `exam_proctor_assignments`, `exam_teacher_exemptions` (全22テーブル / `npm run db:tables` でコード参照との整合確認可)
+`users`, `invitation_codes`, `posts`, `bulletin_attachments`, `bulletin_comments`, `post_acknowledgements`, `chat_channels`, `chat_channel_members`, `chat_messages`, `chat_message_reads`, `seating_status`, `resources`, `reservations`, `facility_cells`, `basic_rooms`, `approvals`, `school_schedules`, `schedule_categories`, `schedule_category_map`, `audit_logs` (90日保持), `system_audit_logs`, `editing_locks` (3分TTL), `classes`, `subjects`, `curriculum_subjects`, `curriculum_courses`(運用廃止・表のみ), 考査系22テーブル (`exam_masters`, `exam_phases`, `exam_slots`, `exam_subject_plan`, `exam_subject_decisions`, `exam_trips`, `exam_timetable_rules`, `exam_proctor_rules`, `exam_room_rules`, `exam_rooms`, `exam_room_config`, `exam_room_assignments`, `exam_parttime_staff`, `exam_parttime_availability`, `exam_slot_history`, `exam_teacher_constraints`, `exam_teacher_exemptions`, `exam_proctor_assignments`, `exam_commands`, `exam_block_shapes`, `exam_block_groups`, `exam_block_conditions`), `absence_records`, `mail_accounts`, `mail_messages`（**全51ユニークテーブル / 52 CREATE TABLE（`invitation_codes` 二重定義）/ 77インデックス**。詳細と分類表は `ISSystem仕様書.md` §9。`npm run db:tables` でコード参照との整合確認可）
 
 座席レイアウトは `seating_status` + `facility_cells` から導出、考査ステータスは `exam_masters` から導出するため専用のレイアウト/ステータステーブルは存在しない。教育ニュース (`/api/news`) は外部RSS＋インメモリキャッシュであり DB 永続化しない (意図された設計)。
 

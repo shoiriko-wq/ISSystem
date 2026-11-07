@@ -8,7 +8,7 @@ import { openDb, nowIso, todayJst, withTransaction } from '../utils/db.js';
 
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})/;
 
-/** モデル層用 SQLite 互換アダプタ (共有プール借用 / close() は no-op) */
+/** モデル層用 PostgreSQL アダプタ（SQLite と同じ get / all / run API を共有プール上で提供、close() は no-op） */
 async function getDb() {
   return openDb();
 }

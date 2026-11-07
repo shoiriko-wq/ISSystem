@@ -750,20 +750,9 @@ function ensureScheduleDom() {
               </label>
               <input type="text" id="sched-title-input" maxlength="${TITLE_MAX}" required class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" placeholder="例: 中間考査（第1日）">
             </div>
-            <div class="grid grid-cols-2 gap-3">
-              <div>
-                <label class="block text-xs font-semibold text-soft mb-1">日付 <span class="text-danger">*</span></label>
-                <input type="date" id="sched-date-input" required class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main">
-              </div>
-              <div>
-                <label class="block text-xs font-semibold text-soft mb-1">対象学年</label>
-                <select id="sched-grade-input" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main">
-                  <option value="">全学年</option>
-                  <option value="1">1年生</option>
-                  <option value="2">2年生</option>
-                  <option value="3">3年生</option>
-                </select>
-              </div>
+            <div>
+              <label class="block text-xs font-semibold text-soft mb-1">日付 <span class="text-danger">*</span></label>
+              <input type="date" id="sched-date-input" required class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main">
             </div>
             <div class="grid grid-cols-2 gap-3">
               <div>
@@ -931,7 +920,6 @@ function openScheduleForm(ev, presetDate = null) {
   document.getElementById('sched-date-input').value = ev ? ev.date : preset;
   document.getElementById('sched-start-input').value = ev && ev.startTime ? ev.startTime : '';
   document.getElementById('sched-end-input').value = ev && ev.endTime ? ev.endTime : '';
-  document.getElementById('sched-grade-input').value = ev ? (ev.gradeValue || '') : '';
   document.getElementById('sched-desc-input').value = ev && ev.description ? ev.description : '';
 
   updateTitleCounter();
@@ -992,7 +980,6 @@ async function submitScheduleForm(event) {
     start_time: document.getElementById('sched-start-input').value || null,
     end_time: document.getElementById('sched-end-input').value || null,
     description: document.getElementById('sched-desc-input').value.trim() || null,
-    target_grade: document.getElementById('sched-grade-input').value || null,
     category_ids: categoryIds,
   };
 

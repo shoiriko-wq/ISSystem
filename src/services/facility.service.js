@@ -22,7 +22,7 @@ export const FACILITY_CATEGORY_LABELS = {
 
 const CATEGORY_KEYS = Object.keys(FACILITY_CATEGORY_LABELS);
 
-/** 施設予約の施設名（初期設定・デフォルト）。これ以外の名前は登録不可 */
+/** 初期設定の施設名（一覧取得時に自動補完される。削除ガード対象であり、この範囲外の名前も教務部は追加・改名できる） */
 export const DEFAULT_FACILITY_NAMES = [
   '学文館会議室',
   '西会議室',
@@ -230,10 +230,6 @@ export const facilityService = {
     const name = normalizeFacilityName(payload.name);
     const category = normalizeFacilityCategory(payload.category || 'ROOM');
 
-    if (!isDefaultFacilityName(name)) {
-      throw new ApiError(400, `施設名は「${DEFAULT_FACILITY_NAMES.join('・')}」の範囲内で指定してください。`);
-    }
-
     const existing = await facilityModel.listFacilities();
     ensureNameAvailable(existing, name);
 
@@ -270,9 +266,6 @@ export const facilityService = {
       payload.category !== undefined ? normalizeFacilityCategory(payload.category) : undefined;
 
     if (name) {
-      if (!isDefaultFacilityName(name)) {
-        throw new ApiError(400, `施設名は「${DEFAULT_FACILITY_NAMES.join('・')}」の範囲内で指定してください。`);
-      }
       const existing = await facilityModel.listFacilities();
       ensureNameAvailable(existing, name, id);
     }

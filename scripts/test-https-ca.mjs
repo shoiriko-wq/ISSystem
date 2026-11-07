@@ -2,7 +2,7 @@
  * ISSystem 安全通信（プライベートCA + HTTPS/WSS）検証テスト
  *
  * 検証項目:
- *  1. プライベートCA・サーバー証明書が存在し openssl verify が OK
+ *  1. プライベートCA・サーバー証明書が存在し openssl verify が OK（CAは SAN 付き）
  *  2. TLS ハンドシェイクが CA のみで信頼される (authorized, issuer, SAN)
  *  3. HTTPS のアプリ・API・ログインが CA トラストのみで機能する
  *  4. 非HTTPアクセスには CAダウンロードページが表示される (指紋・HTTPS案内)
@@ -101,6 +101,12 @@ const caFingerprint = crypto
   .match(/../g)
   .join(':');
 check('ルートCA証明書は CA:TRUE', caX509.ca === true, { isCA: caX509.ca, fingerprint: caFingerprint });
+const caSan = caX509.subjectAltName || '';
+check(
+  'ルートCA証明書にSAN（localhost と 127.0.0.1）がある',
+  caSan.includes('DNS:localhost') && caSan.includes('127.0.0.1'),
+  { san: caSan.replace(/\n/g, ' ') }
+);
 check('サーバー証明書の発行者がプライベートCA', srvX509.issuer.includes('ISSystem Private Root CA'), {
   issuer: srvX509.issuer.replace(/\n/g, ' '),
 });

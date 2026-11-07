@@ -6,7 +6,7 @@
 import { query } from '../../config/database.js';
 import { openDb, nowIso, parseJson } from '../utils/db.js';
 
-/** モデル層用 SQLite 互換アダプタ (共有プール借用 / close() は no-op) */
+/** モデル層用 PostgreSQL アダプタ（SQLite と同じ get / all / run API を共有プール上で提供、close() は no-op） */
 async function getDb() {
   return openDb();
 }
@@ -182,7 +182,7 @@ export const bulletinModel = {
       await db.close();
       return mapPost(bulletin);
     } catch (err) {
-      console.warn('[BulletinModel SQLite Warning] findById failed:', err.message);
+      console.warn('[BulletinModel Warning] findById failed:', err.message);
       return null;
     }
   },
@@ -353,7 +353,7 @@ export const bulletinModel = {
       }
       await db.close();
     } catch (err) {
-      console.warn('[BulletinModel SQLite Warning] create failed:', err.message);
+      console.warn('[BulletinModel Warning] create failed:', err.message);
     }
 
     return {
@@ -398,7 +398,7 @@ export const bulletinModel = {
       );
       await db.close();
     } catch (err) {
-      console.warn('[BulletinModel SQLite Warning] updateAcknowledgement failed:', err.message);
+      console.warn('[BulletinModel Warning] updateAcknowledgement failed:', err.message);
     }
 
     return { id, post_id: postId, user_id: userId, status, comment, acknowledged_at: acknowledgedAt };
@@ -421,7 +421,7 @@ export const bulletinModel = {
       await db.close();
       return rows || [];
     } catch (err) {
-      console.warn('[BulletinModel SQLite Warning] getAcknowledgements failed:', err.message);
+      console.warn('[BulletinModel Warning] getAcknowledgements failed:', err.message);
       return [];
     }
   },
@@ -481,7 +481,7 @@ export const bulletinModel = {
         created_at: toJstIso(r.created_at),
       }));
     } catch (err) {
-      console.warn('[BulletinModel SQLite Warning] getComments failed:', err.message);
+      console.warn('[BulletinModel Warning] getComments failed:', err.message);
       return [];
     }
   },
@@ -589,7 +589,7 @@ export const bulletinModel = {
       await db.run(`UPDATE posts SET is_deleted = 1, updated_at = ? WHERE id = ?`, [nowIso(), id]);
       await db.close();
     } catch (err) {
-      console.warn('[BulletinModel SQLite Warning] delete failed:', err.message);
+      console.warn('[BulletinModel Warning] delete failed:', err.message);
     }
   }
 };

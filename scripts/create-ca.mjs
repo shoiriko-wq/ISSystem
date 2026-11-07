@@ -4,6 +4,7 @@
  * OpenSSL を使って自己署名のルートCA（プライベートCA）と、
  * そのCAで署名されたサーバー証明書（HTTPS/WSS用）を certs/ に生成する。
  * ルートCAは Windows ユーザーに親切な .crt（PEM 内容・ダブルクリックで開ける）で出力する。
+ * ルートCA・サーバー証明書の双方に SAN（SSL_HOSTS と同一のホスト名/IP）を付与する。
  *
  * 実行:  npm run cert:gen            # 未存在時のみ生成（冪等）
  *        npm run cert:gen -- --force # 既存があっても再生成
@@ -36,6 +37,7 @@ const sanItems = rawHosts.map((h) => {
 
 const CA_KEY = path.join(CERT_DIR, 'issystem-ca.key');
 const CA_CRT = path.join(CERT_DIR, 'issystem-ca.crt'); // PEM 内容・.crt 拡張（Windows 用）
+const CA_PEM = path.join(CERT_DIR, 'issystem-ca.pem'); // 旧来名（PEMコピー・常に .crt と同期）
 const SRV_KEY = path.join(CERT_DIR, 'server.key');
 const SRV_PEM = path.join(CERT_DIR, 'server.pem');
 const CHAIN_PEM = path.join(CERT_DIR, 'chain.pem');
@@ -123,17 +125,23 @@ const main = () => {
   fs.mkdirSync(CERT_DIR, { recursive: true });
   fs.chmodSync(CERT_DIR, 0o755);
 
-  // 1. ルートCA（自己署名・CA拡張）
+  // 1. ルートCA（自己署名・CA拡張・SAN付き）
   console.log('[1/4] ルートCA を生成中...');
   openssl([
     'req', '-x509', '-newkey', 'rsa:2048', '-sha256', '-days', String(CA_DAYS), '-nodes',
     '-keyout', CA_KEY,
     '-out', CA_CRT,
     '-subj', CA_SUBJECT,
+    // SAN を CA にも付与する（サーバー証明書と同じホスト名/IP。信頼ストアや
+    // SAN を要求するツールが CA を拒否しないため）
+    '-addext', `subjectAltName=${sanItems.join(',')}`,
     '-addext', 'basicConstraints=critical,CA:TRUE,pathlen:0',
     '-addext', 'keyUsage=critical,keyCertSign,cRLSign',
   ]);
   fs.chmodSync(CA_KEY, 0o600);
+  fs.chmodSync(CA_CRT, 0o644);
+  // 旧来名 issystem-ca.pem は常に .crt と同一内容に保つ（古いCAの取り残しを防ぐ）
+  fs.copyFileSync(CA_CRT, CA_PEM);
 
   // 2. サーバー鍵 + CSR
   console.log('[2/4] サーバー鍵・CSR を生成中...');
@@ -200,6 +208,7 @@ const printInfo = () => {
     console.log('');
     console.log(`ルートCA   : ${ca.subject}`);
     console.log(`  SHA-256指紋: ${sha256Fingerprint(ca)}`);
+    console.log(`  SAN        : ${ca.subjectAltName || '(なし)'}`);
     console.log(`  有効期限   : ${ca.validTo}`);
     console.log(`サーバー証明書: ${srv.subject}`);
     console.log(`  発行者     : ${srv.issuer}`);

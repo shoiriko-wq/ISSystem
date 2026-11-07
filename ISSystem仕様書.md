@@ -11,8 +11,8 @@
 | `仕様書.md` | 0バイト（空） |
 | `問題分析.md` | 参照パス `/home/iriko/デスクトップ/ISSystem`（現 `/home/iriko/programing/ISSystem`）、存在しない `CLAUDE.md` を参照 |
 | `システム機能仕様書.md` v2.0.0 | 「MongoDB/軽量データストア選択可」→ 現行は PostgreSQL 一本（`config/default.js` は `DB_TYPE≠postgres` に警告）。督促・再通知機能は**実装なし** |
-| `データベース仕様書.md` v2.2.0 | 記載約11テーブル → 現行**51テーブル / 65インデックス**。`posts.post_type`・`posts.priority` は撤廃（カラム削除済み） |
-| `ＵＩ・ＵＸ仕様書.md` | 「Single-File HTML」「FontAwesome 6.4.0」「インラインCSS」→ 現行は `index.html`(883行) + CSS**7ファイル(3,387行)** + JS**モジュール制(15,393行)**、アイコンは **Lucide** |
+| `データベース仕様書.md` v2.2.0 | 記載約11テーブル → 現行**51テーブル / 77インデックス**。`posts.post_type`・`posts.priority` は撤廃（カラム削除済み） |
+| `ＵＩ・ＵＸ仕様書.md` | 「Single-File HTML」「FontAwesome 6.4.0」「インラインCSS」→ 現行は `index.html`(883行) + CSS**7ファイル(4,406行)** + JS**モジュール分割31ファイル(15,793行)**、アイコンは **Lucide** |
 | `UI構成ファイル分割計画.txt` | 分割は**実行済み**。計画書は履歴 |
 | `バックエンドファイル分割計画.txt` | models 9 / services 10 / controllers 9 / sockets 4 → 現行 **13 / 16 / 13 / 6 (+ utils 10, config 2)** |
 
@@ -179,7 +179,8 @@
 | PUT/DELETE | `/api/facilities/reservations/:reservationId` | A | 予約変更・キャンセル（`is_cancelled` INTEGER 0/1） |
 | PUT | `/api/facilities/order` | A+K | `{ ids: [...] }` 全件必須。未知 404、重複・全件不足・空 400、非教務部 403 |
 | POST/PUT/DELETE | `/api/facilities[/:facilityId]` | A+K | マスタ CRUD（同名 409、有効予約残 409） |
-| GET/PUT | `facility_cells`（`updateCells`/`getCells`） | A | フィールドセル値の取得・更新 |
+
+`facility_cells` を扱う `facility.model.js` の `updateCells()`/`getCells()` は**サービス・コントローラー・テストから一度も呼ばれていない**（ルートなし＝未使用パス）。
 
 ### 7.5 スケジュール・決裁・欠席・監査
 
@@ -208,7 +209,9 @@
 
 ### 7.7 座席（`/api/seating`）
 
-`GET /layouts`・`GET /layouts/:id`・`POST /layouts`・`PUT /layouts/:id/cells`（`checkEditingLock('seating')` 付き）・`PUT /layouts`・`PUT /master`・`GET /master`・`GET /students/code/:code`（4桁生徒コード）・`GET /students/search`・`POST/DELETE /layouts/:id/lock`（編集ロック取得/解放）。座席レイアウトは `seating_status` + `facility_cells` から導出（専用テーブルなし）。
+`GET /layouts`・`GET /layouts/:id`・`POST /layouts`・`PUT /layouts/:id/cells`（`checkEditingLock('seating')` 付き）・`PUT /layouts`・`PUT /master`・`GET /master`・`GET /students/code/:code`（4桁生徒コード）・`GET /students/search`・`POST/DELETE /layouts/:id/lock`（編集ロック取得/解放）。
+
+**実装の要点（実測）:** レイアウト geometry は DB に永続化されない。`seating.model.js` の `listLayouts()`/`createLayout()` は rows/cols（既定 6×8、id `staff_room`、name `職員室メイン配置図`）を**返すだけ**で INSERT しない。セル保存 `updateCells(_layoutId, cells)` は `desk_number`（`A-01` 形式）・`current_status`・`status_note` を `seating_status` へ UPSERT する。座席レイアウト専用テーブルは存在しない。
 
 ### 7.8 定期考査（`/api/exam`）— フェーズ制
 
@@ -255,22 +258,30 @@
 
 `src/sockets/socketEvents.js`(110) と `src/sockets/socketClient.js` は**クライアントから一度も import されていない**（`public/js/socket.js` が自前の `socketClient` を持つ）。しかも `socketClient.js` は自分自身を import する循環参照で、両者は同一の `socketEvents` を export する**複製**であり、受けるイベント名（`chat:new_message`, `chat:unread_update`, `seating:student_highlight`）はサーバーが発行しない名前である。削除またはサーバー側統一の対象。
 
+### 8.4 接続認証とハンドラー権限 gate（2026/11/7 強化・`src/middlewares/socket.middleware.js`）
+
+- **Origin 許可リスト**: `SOCKET_CORS_ORIGINS`（未設定時 `CORS_ORIGINS`）＋ `SSL_HOSTS`×`SSL_PORT` から導出する `https://<host>:<port>` 集合で照合する。Origin を持つハンドシェイクは明示リスト外なら `Authentication error: Origin not allowed` で拒否。`src/server.js` の socket.io `cors.origin` も**同一関数**（`isSocketOriginAllowed`）で照合し、wildcard `*` は明示設定時のみ許可＋警告ログ。非ブラウザクライアント（テストスクリプト）は Origin を送らないため許可（CORS はブラウザ概念）。
+- **JWT 厳格検証**: `verifySocketToken()` が `config.auth.jwtSecret` で `jwt.verify` を同期実行。`demo-jwt-token-*` プレフィックス無条件通過と `NODE_ENV≠production` の `dev-user` フォールバックは**廃止**（検証失敗は常時 `connect_error`、サーバーログに `[Socket.io Auth] 拒否`）。
+- **ハンドラー gate**: `seating:update_status` は `socket.user.id` のみ（payload の userId は無視）＋ `SEATING_STATUSES` ホワイトリスト。`seating:grid_updated` は `KYOMU/ADMIN` のみ（`socketHasRole`）。`lock:*` は `SOCKET_RESOURCE_TYPES` ホワイトリスト＋ `resourceId` サニタイズ、`acquireEditingLock` は model の位置引数署名で呼び、解放・タイムアウト解放は**自保持分のみ**。`chat:send_message` / `chat:mark_as_read` / `chat:typing_*` はメンバーシップ検証（`canAccessChannel`、非PUBLIC はメンバーのみ）。
+- **UI 側**: `public/js/socket.js` は `connect_error` が認証失敗（`Authentication error` / `jwt` / `Origin not allowed`）を示すとき `socket.io.reconnection(false)` で無限再接続を停止し「再ログインしてください」トーストを出す。
+- **検証**: `npm run test:socket-auth`（`scripts/test-socket-auth.mjs`、20項目）。代替ポートで検証する場合は `PROBE_SSL_PORT=<port>` で実行する。
+
 ---
 
-## 9. データベース（PostgreSQL / 51テーブル・65インデックス・1,262行スキーマ）
+## 9. データベース（PostgreSQL / 51テーブル（52 CREATE TABLE）/ 77インデックス / 1,262行スキーマ）
 
 - **UTF-8、タイムゾーン `Asia/Tokyo`**（`CURRENT_TIMESTAMP` は JST 壁時計で格納）。
 - 主キーは **`id TEXT PRIMARY KEY`**（UUID文字列）。`staff_code` はユニークログインID。外部キーは常に有効（PRAGMA なし）。
 - **フラグは INTEGER 0/1 に統一**（`is_deleted`, `is_cancelled`。旧 boolean 環境からは冪等マイグレーション: DROP INDEX → 型変換 → 再作成）。`exam_*` の一部は BOOLEAN を使用。
 - `ensureSchema()`（`config/database.js`）が起動時に冪等適用（`DB_AUTO_SCHEMA=false` で無効化可）。`npm run db:init`、`npm run db:tables`（コード参照テーブル名との整合チェック）。
-- 歴史的な重複定義が残る: `invitation_codes` は §1c と §11 に2度定義（`IF NOT EXISTS` で冪等）、`audit_logs`（90日保持）と `system_audit_logs` が併存。
+- 歴史的な重複定義が残る: `invitation_codes` は §1c と §11 に2度定義（`IF NOT EXISTS` で冪等、51ユニーク / 52 CREATE TABLE）、`audit_logs`（90日保持）と `system_audit_logs` が併存。
 
 | 分類 | テーブル |
 | --- | --- |
 | アカウント・招待 | `users`（role/grade/department/extension_number/is_kyomu/is_parttime/invited_by_user_id）, `invitation_codes`（`code`, `is_used`, `used_for`, `expires_at`） |
 | 掲示・回覧 | `posts`（`target_scope` JSON, `attachments` JSON, `display_start_date`/`display_end_date`/`target_date`, `is_deleted`）, `bulletin_attachments`, `bulletin_comments`, `post_acknowledgements`（複合ユニーク `(post_id,user_id)`、status `UNREAD/READ/APPROVED/REJECTED`） |
 | チャット | `chat_channels`（`PUBLIC/GROUP/DM`）, `chat_channel_members`（複合PK + `is_hidden`）, `chat_messages`（`is_cancelled`）, `chat_message_reads` |
-| 座席・施設 | `seating_status`（`desk_number`, `group_zone`, `current_status` `PRESENT/CLASS/TRIP/LEAVE`, `status_note`）, `resources`（`sort_order`）, `reservations`（`is_cancelled`）, `facility_cells`, `basic_rooms` |
+| 座席・施設 | `seating_status`（`desk_number`, `group_zone`, `current_status` `PRESENT/CLASS/TRIP/LEAVE`, `status_note`。座席セル実体はここに UPSERT）, `resources`（`sort_order`）, `reservations`（`is_cancelled`）, `facility_cells`（**未使用**: model 関数があるが呼び出し元・ルートなし）, `basic_rooms` |
 | スケジュール | `school_schedules`, `schedule_categories`, `schedule_category_map` |
 | 決裁・欠席 | `approvals`, `absence_records` |
 | 監査・ロック | `audit_logs`（90日保持）, `system_audit_logs`, `editing_locks`（TTL 180秒） |
@@ -278,7 +289,7 @@
 | 考査（22） | `exam_masters`, `exam_phases`, `exam_slots`, `exam_subject_plan`, `exam_subject_decisions`, `exam_trips`, `exam_timetable_rules`, `exam_proctor_rules`, `exam_room_rules`, `exam_rooms`, `exam_room_config`, `exam_room_assignments`, `exam_parttime_staff`, `exam_parttime_availability`, `exam_slot_history`, `exam_teacher_constraints`, `exam_teacher_exemptions`, `exam_proctor_assignments`, `exam_commands`, `exam_block_shapes`, `exam_block_groups`, `exam_block_conditions` |
 | メール | `mail_accounts`（`password_enc`, `status` `UNVERIFIED/VERIFIED/FAILED`, `last_checked_at`）, `mail_messages`（`is_read`, `idx_…_time` 降順, `idx_…_unread`） |
 
-**意図された設計:** 座席レイアウトは `seating_status` + `facility_cells` から、考査ステータスは `exam_masters` + `exam_phases` から導出するため専用テーブルを持たない。教育ニュースは DB 永続化しない。
+**意図された設計:** 座席レイアウト geometry は DB に持たず（既定 6×8）、セル状態のみ `seating_status` に保持する。考査ステータスは `exam_masters` + `exam_phases` から導出する。教育ニュースは DB 永続化しない。`npm run db:tables` はコードが参照するテーブル名を一覧表示する（厳密な diff ではなく目視照合用）。
 
 **考査の状態機械:** `exam_phases` の各フェーズ（`subject`調査, `decision`決定, `timetable`時間割, `trip`出張, `room_phase`教室割）は `DRAFT` → `PUBLISHED` → `ENDED`。`exam_room_assignments` は `UNIQUE (exam_master_id, class_id, day_number, slot_number)`、`exam_block_shapes`/`exam_block_groups` は `UNIQUE (exam_master_id, lower(name))`。`exam_slot_history` は過去考査の科目・日分布スナップショット（前後半の偏り均等化用）。
 
@@ -321,11 +332,11 @@
 ## 14. フロントエンド構成
 
 - **エントリ:** `public/index.html`（883行、`<html lang="ja" class="theme-light-azure" data-theme-mode="light" data-chrome="light">`）。CDN: Tailwind + `lucide@latest` + `socket.io@4.7.5`。スクリプトは ES Modules（`main.js` 1,073行）。
-- **共有層:** `api.js`(155) 共通API呼び出し、`config.js`(77) `API_BASE_URL='/api'`・`WS_BASE_URL=window.location.origin`・`ENDPOINTS`・`STORAGE_KEYS`・`DEFAULT_THEME='light-azure'`、`state.js`(106) トークン/ユーザー/テーマの localStorage 永続化、`socket.js`(404) 接続と購読、`theme.js`(178) テーマ切替、`ui-helpers.js`(436) 共通UI部品、`main.js` タブ切替・初期化。
-- **タブモジュール（12）:** `dashboard`(969), `bulletin`(1,250), `chat`(1,526), `facility`(992), `schedule`(1,124), `approval`(302), `absence`(309), `seating`(342), `subjects`(308), `mail`(515), `news`(257), `about`(217)。
-- **考査モジュール（11・計5,253行）:** `exam.module.js`(210) + `exam.master.ui`(209), `exam.plan.ui`(428), `exam.subject.ui`(576), `exam.decision.ui`(461), `exam.timetable.ui`(1,004), `exam.room.ui`(548), `exam.proctor.ui`(766), `exam.trip.ui`(261), `exam.view.ui`(240), `exam.shared`(209)。
-- **CSS 7ファイル（3,387行）:** `base`(119), `variables`(1,019), `components`(1,291), `layouts`(455), `theme`(167), `readability`(1,013), `animations`(342)。`base.css` の `!important` 制約より ID specificity + `!important` で優先させる実装慣例あり（例 `#chat-btn-toggle-hide[aria-pressed="true"]`）。
-- **テーマ:** 24テーマクラス。3系統 × 配色。**light**（`theme-light-{azure,slate,forest,rose,amber,teal}`）、**dark**（`theme-dark-{navy,slate,emerald,amber,rose,plum}`）、**cb（色彩配慮・色覚多様性対応）**（`theme-cb-{azure,slate,forest,rose,amber,violet,teal,crimson}`）。`localStorage` の `is_system_theme_preference_v251` に保存、`document.body.className` を差し替える。旧設定との互換エイリアス（`hidden`）が定義されている。
+- **共有層（7ファイル 2,429行）:** `main.js`(1,073) タブ切替・初期化、`ui-helpers.js`(436) 共通UI部品、`socket.js`(404) 接続と購読、`theme.js`(178) テーマ切替、`api.js`(155) 共通API呼び出し、`state.js`(106) トークン/ユーザー/テーマの localStorage 永続化、`config.js`(77) `API_BASE_URL='/api'`・`WS_BASE_URL=window.location.origin`・`ENDPOINTS`・`STORAGE_KEYS`・`DEFAULT_THEME='light-azure'`。
+- **タブモジュール（12ファイル 8,111行）:** `chat`(1,526), `bulletin`(1,250), `schedule`(1,124), `facility`(992), `dashboard`(969), `mail`(515), `seating`(342), `absence`(309), `subjects`(308), `approval`(302), `news`(257), `about`(217)。
+- **考査モジュール（12ファイル 5,253行）:** `exam.timetable.ui`(1,004), `exam.proctor.ui`(766), `exam.subject.ui`(576), `exam.room.ui`(548), `exam.decision.ui`(461), `exam.plan.ui`(428), `exam.basic.ui`(341), `exam.trip.ui`(261), `exam.view.ui`(240), `exam.module.js`(210), `exam.shared`(209), `exam.master.ui`(209)。
+- **CSS 7ファイル（4,406行）:** `components`(1,291), `readability`(1,013), `variables`(1,019), `layouts`(455), `animations`(342), `theme`(167), `base`(119)。`base.css` の `!important` 制約より ID specificity + `!important` で優先させる実装慣例あり（例 `#chat-btn-toggle-hide[aria-pressed="true"]`）。
+- **テーマ:** **18テーマクラス（実測）**。3系統 × 6配色。**light**（`theme-light-{azure,slate,forest,rose,amber,teal}`）、**dark**（`theme-dark-{navy,slate,emerald,amber,rose,plum}`）、**cb（色彩配慮・色覚多様性対応）**（`theme-cb-{azure,crimson,forest,slate,teal,violet}`）。既定は `light-azure`。`localStorage` の `is_system_theme_preference_v251` に保存し、`document.body.className` を差し替える。`<html>` は `data-theme-mode` と `data-chrome` を持つ。旧 localStorage との互換エイリアス（`hidden` テーマ）が定義されている。
 - **アクセシビリティ/レスポンシブ:** 通常テキストのコントラスト比 4.5:1 以上を保つ（`readability.css` と `npm run test:ui:contrast` / `test:ui:chrome` / `test:ui:contrast-plain` で検証）。`lg`（≥1024px）3カラム、`md` 未満は1カラム。グローバル検索は `Ctrl+K` / `Cmd+K`。
 - **チャット「目のマーク」非表示編集モードトグル:** サイドバーフッター左下の `#chat-btn-toggle-hide`（アイコンのみ）。`aria-pressed` が ON 時のみグループ名横に非表示ボタン（`eye-off`）が出、ON は開いた目 `eye` + 警告色リング。色・枠は `components.css`、アイコンは `chat.module.js` の `setHideEditMode()` が差し替え `refreshLucideIcons()` を呼ぶ。回帰テスト `npm run test:ui:chat`（検証項目11）。
 
@@ -336,19 +347,20 @@
 ### 15.1 実装済み（現行コードで確認）
 
 - 全アプリ通信は TLS（HTTPS/WSS、`SSL_PORT` 3443）。非HTTPポートは CA 配布専用で API を `426` 拒否。
-- `helmet` セキュリティヘッダー、CORS は `CLIENT_ORIGIN` の明示リスト、`express.json` 10MB上限。
+- `helmet` セキュリティヘッダー、CORS は `CORS_ORIGIN` / `CLIENT_ORIGIN` の明示リスト（wildcard `*` 既定化は廃止）、`express.json` 10MB上限。
 - JWT（`Bearer`）検証 + RBAC ミドルウェア、bcrypt(10) ハッシュ、`JWT_EXPIRES_IN` 24h。
+- Socket 接続は Origin 許可リスト＋JWT 厳格検証、ハンドラーにロール/メンバーシップ gate（§8.4、`src/middlewares/socket.middleware.js`）。
 - 監査ログ（`audit_logs` / `system_audit_logs`、500系は `SERVER_ERROR` として stack を監査ログへ）、`AUDIT_RETENTION_DAYS` 既定90日保持。
 - エラーレスポンスの stack trace は **`NODE_ENV=development` のみ**（本番では出さない）。
 - 座席セル・施設予約等の業務単位での排他ロック（3分自動解放）、二重予約 409。
 - メールのパスワードは AES-256-GCM 暗号保存（平文不可）。
 
-### 15.2 既知の課題（2026/11/7 監査で確定した重大度順・**未対応**）
+### 15.2 既知の課題（2026/11/7 監査で確定した重大度順・**#1 と #9 一部は対応済み**、#2 以降は未対応）
 
 | # | 重大度 | 内容 | 是正案 |
 | --- | --- | --- | --- |
-| 1 | **Critical** | `src/sockets/socket.index.js` が **`NODE_ENV≠production` で JWT 検証失敗時に `dev-user`（role `TEACHER`）として接続を許可**し、`demo-jwt-token-*` プレフィックスのトークンも無条件で通す。Socket ハンドラー（`seating:*`, `lock:*`, `chat:*`）には**ロール検証がない**ため、開発モードでは無資格端末が在席更新・座席グリッド更新・ロック取得できる | デモ/fallback 許可を削除し常時 `jwt.verify` を強制。ハンドラーに `socket.user.role` チェックを追加 |
-| 2 | **Critical** | 既定 `JWT_SECRET`（`is_system_secret_key_2026_default_jwt`）が `.env.example` に平文公開済み。この秘密鍵で ADMIN トークンを伪造すると `/api/users`・`/api/audit/logs` に到達可能。同じ秘密鍵がメール AES 鍵の導出元 | `openssl rand -hex 32` で採り `.env` 秘密化、既定値をコードに残さない。メール鍵は `MAIL_ENC_KEY` として JWT と分離（移行は再暗号化マイグレーション） |
+| 1 | **Critical**（**対応済み 2026/11/7**） | `src/sockets/socket.index.js` が `NODE_ENV≠production` で JWT 検証失敗時に `dev-user`（role `TEACHER`）として接続を許可し、`demo-jwt-token-*` を無条件で通していた。Socket ハンドラーにロール検証がなく、socket.io の cors origin は `*`。**`wss://0.0.0.0:3443` に有効 JWT なしで職員全体チャンネルへ書き込み可能**だった | **実装済みの是正**: `src/middlewares/socket.middleware.js` を新設し、(a) Origin 許可リスト照合（`server.js` の cors も同一関数）、(b) `verifySocketToken()` で常時 `jwt.verify`（デモ/fallback 廃止）、(c) `seating:update_status` 本人限定＋ステータスホワイトリスト、(d) `seating:grid_updated` は KYOMU/ADMIN のみ、(e) `lock:*` は種別ホワイトリスト・自保持のみ解放（`getActiveEditingLock`/`refreshEditingLock` の実体欠如も修正）、(f) chat はメンバーシップ検証、(g) UI は認証失敗で再接続を停止。`.env` は `NODE_ENV=production` と明示 Origin リストへ変更。回帰検証 `npm run test:socket-auth`（20項目 PASS） |
+| 2 | **Critical** | 既定 `JWT_SECRET`（`is_system_secret_key_2026_default_jwt`）が `.env.example` に平文公開済み。この秘密鍵で ADMIN トークンを伪造すると `/api/users`・`/api/audit/logs` に到達可能。同じ秘密鍵がメール AES 鍵の導出元（`mail.model.js` は `sha256(config.auth.jwtSecret)`） | `openssl rand -hex 32` で採り `.env` 秘密化、既定値をコードに残さない。メール鍵は `MAIL_ENC_KEY` として JWT と分離（移行は再暗号化マイグレーション）。**注意**: `JWT_SECRET` は bcrypt ソルトにも使われているため、変更時は全ユーザーのパスワードハッシュ再作成（`npm run db:seed` 相当の再ハッシュ）が必須 |
 | 3 | **High** | `/api/users`（一覧・作成・削除）は `authenticateToken` のみ。**`TEACHER` が ADMIN アカウントを作成・削除できる**（`requireAdminRole` は定義済みだが未適用） | `POST /users`・`DELETE /users/:id` に `requireAdminRole`（または `requireKyomuRole`）を付与 |
 | 4 | **High** | ログイン・招待コード登録に**レート制限・アカウントロックアウトがない**（`express-rate-limit` 依存なし）。招待コードは8文字16進（4バイトエントロピー）で試行攻撃に対して弱い | `express-rate-limit` を `/api/auth/login` と `register-invitation`/`reset-password-invitation` に適用。コードは6バイト以上＋試行上限 |
 | 5 | **Medium** | `src/services/auth.service.js:86` がパスワード照合失敗時に **`dbHash`（bcryptハッシュ全文）をログへ出力**（morgan と併せてサーバログに流出） | `dbHash` を出さず `identifier` のみにする |
@@ -357,14 +369,14 @@
 | 8 | **Medium** | メール接続テストは `rejectUnauthorized: false`（意図された設計）だが、中間者攻撃に対して STARTTLS が検証されない | 校内CAの指紋を `.env` に登録して pinning をオプション化 |
 | 9 | **Low** | 開発モードで `morgan('dev')` がリクエストパス・ユーザー名等をログ出力、監査ログの `SERVER_ERROR.details.stack` はスタックトレ全文を含む | 本番ログレベルと保持期間を運用で固定 |
 
-**優先対応順:** #1 → #2 → #3 → #4 → #5。対応後は `npm test`（139テスト）と `npm run test:ui:https`（27項目）で回帰確認する。
+**優先対応順:** ~~#1~~（対応済み）→ #2 → #3 → #4 → #5。対応後は `npm test`（139テスト）、`npm run test:socket-auth`（20項目）、`npm run test:ui:https`（27項目）、`npm run test:ui:chat` で回帰確認する。
 
 ---
 
 ## 16. 意図された非実装・履歴（仕様として明示）
 
 - **督促:** 掲示板 `POST /api/bulletins/:id/remind` と決裁 `POST /api/approvals/:id/remind` は**実装されている**。旧UI/旧仕様書の「廃止済み」表記は古い（v3.0.0 で訂正）。
-- **未使用コード:** `src/sockets/socketEvents.js` / `src/sockets/socketClient.js`（§8.3）。
+- **未使用コード:** `src/sockets/socketEvents.js` / `src/sockets/socketClient.js`（§8.3）、`facility.model.js` の `updateCells()`/`getCells()`（`facility_cells` への書き込み経路が未接続、§7.4）。
 - **旧データ互換:** `curriculum_courses`（運用廃止、表のみ）、`classes.course_ids`（`'[]'` 維持）、`posts.post_type`/`priority`（カラム削除済み）、`invitation_codes` 二重定義、`audit_logs` と `system_audit_logs` の併存。
 - **DB 永続化なし:** 教育ニュース・天気（インメモリキャッシュのみ）。
 - `news` タブは無い（ダッシュボードウィジェット）。
@@ -374,11 +386,11 @@
 
 ## 17. 運用・テスト
 
-**コマンド**（詳細は `README.md`）: `npm run db:create` / `db:init` / `db:seed` / `cert:gen` / `npm start`（`npm run dev` = nodemon）/ `npm test` / `npm run api:check` / `npm run db:tables`。
+**コマンド**（詳細は `README.md`）: `npm run db:create` / `db:init` / `db:seed` / `cert:gen` / `npm start`（`npm run dev` = nodemon）/ `npm test` / `npm run api:check` / `npm run db:tables` / `npm run test:socket-auth`。
 
 **Jest 統合テスト:** 10スイート・139テスト（`--experimental-vm-modules --runInBand`、`pretest` が `init-db` + `seed` を実行）。共通ヘルパー `test/helpers.js`（`loginToken`, `bearer`, `pickId`, `closePool`）。スイート: `auth`, `facility`, `approvals`, `bulletins`, `chat`, `invitation`, `exam`, `absence`, `schedules`, `mail`。jest は `<rootDir>/test/**/*.test.js` を対象し `/node_modules/` と `<rootDir>/.kilo/` を無視（`.kilo` は削除済み＝無害な履歴設定）。
 
-**UI 検証スクリプト（`puppeteer-core` + `NODE_EXTRA_CA_CERTS`）:** `test:ui:https`（CA検証・TLS・CAページ・API 426・CA配布・ブラウザ wss 接続・非HTTP ws 拒否の 27項目）、`test:ui:all`（17スクリプトの回帰: modal / frames / scan / header-frames / audit / chrome / contrast / contrast-plain / nav / bulletin / chat / facility / facility-order / facility-header-sticky / timeline / mail / https）、`test:ui:mail`（37項目）。API 検証: `api:check`（スモーク）、`test:api:mail-defaults`（12項目）、`test:api:mail-test`（6項目）。
+**UI 検証スクリプト（`puppeteer-core` + `NODE_EXTRA_CA_CERTS`）:** `test:ui:https`（CA検証・TLS・CAページ・API 426・CA配布・ブラウザ wss 接続・非HTTP ws 拒否の 27項目）、`test:ui:all`（17スクリプトの回帰: modal / frames / scan / header-frames / audit / chrome / contrast / contrast-plain / nav / bulletin / chat / facility / facility-order / facility-header-sticky / timeline / mail / https）、`test:ui:mail`（37項目）。API 検証: `api:check`（スモーク）、`test:api:mail-defaults`（12項目）、`test:api:mail-test`（6項目）。Socket 権限検証: `test:socket-auth`（20項目: tokenless/garbage/demoトークン/外部Origin の拒否、KYOMU/ADMIN gate、ロック自保持限定、chat メンバーシップ、`editing_locks` のホワイトリスト外行）。
 
 **開発メモ:** 二重予約判定は `toDateTime()` で `HH:MM` → `YYYY-MM-DD HH:MM:SS` 正規化。システムメッセージの `sender_id` は FK 制約のため `resolveSenderId()` で `system` ユーザーへ変換。`ensureSchema()` はプロメモ化（複数プロセス同時適用で「pool closed」防止）。スモークテストは `npm start` 起動後に `npm run api:check`。
 
@@ -391,7 +403,8 @@
 | バージョン | 日付 | 内容 |
 | --- | --- | --- |
 | v1.0.0〜v2.2.0 | 2026/09〜2026/10 | 旧 `システム機能仕様書.md` / `ＵＩ・ＵＸ仕様書.md` / `データベース仕様書.md` / `仕様書.md` / 各種分割計画 txt に分散（**実装との乖離により削除**） |
-| **v3.0.0** | 2026/11/7 | 現行コード（`src`+`config` 23,482行、`public` 19,663行（JS 15,393行・CSS 3,387行・`index.html` 883行）、`db/schema.sql` 1,262行・51テーブル）を計測し**単一正典として再構成**。Socket 認証バックdoor・JWT 既定鍵・`/api/users` の RBAC ギャップ・レート制限欠如・ログ流出を既知課題として明文化（§15）。`README.md` は運用手順書として維持 |
+| **v3.0.0** | 2026/11/7 | 現行コード（`src`+`config` 23,482行、`public` 21,082行（JS 31ファイル 15,793行・CSS 7ファイル 4,406行・`index.html` 883行）、`db/schema.sql` 1,262行・51テーブル/77インデックス）を計測し**単一正典として再構成**。Socket 認証バックdoor・JWT 既定鍵・`/api/users` の RBAC ギャップ・レート制限欠如・ログ流出を既知課題として明文化（§15）。`README.md` は運用手順書として維持 |
+| **v3.0.1** | 2026/11/7 | §15.2 **#1 を実装で解消**。`src/middlewares/socket.middleware.js` 新設（Origin 許可リスト照合・JWT 厳格検証・`socketHasRole`・`sanitizeSocketString`・リソース種別ホワイトリスト）、`socket.index.js` から demo/fallback を削除、`seating.socket.js` に本人限定と KYOMU/ADMIN gate、`lock.socket.js` は model の位置引数署名へ修正＋自保持のみ解放（`audit.model.js` に `getActiveEditingLock`/`refreshEditingLock` を実装＝旧 export の実体欠如を解消）、`chat.socket.js` にメンバーシップ検証、`app.js`/`server.js` の CORS を wildcard 既定化から明示リストへ変更、UI は認証失敗で無限再接続を停止。`scripts/test-socket-auth.mjs`（20項目）と `npm run test:socket-auth` を追加。回帰: `npm test` 139テスト PASS、`npm run test:ui:chat` ALL PASSED |
 
 
 
