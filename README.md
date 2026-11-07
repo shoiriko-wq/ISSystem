@@ -86,6 +86,8 @@ PGPASSWORD='otome601' psql -h localhost -p 5432 -U postgres -d issystem
 | `npm run test:api:mail-test` | メール接続テスト API 検証 (Jest `test/mail.test.js` 6項目) |
 | `npm run test:api:mail-defaults` | メール初期値 (.env プリフィル・Git 秘匿) API 検証 (12項目) |
 | `npm run test:ui:mail` | メール UI 検証 (初回設定・プリフィル・接続テスト・受信箱の 37項目) |
+| `npm run test:ui:exambasic` | 定期考査 基本情報「3. 科目 × 実施クラス・コース」の列幅・チップ配置検証 (実施数列なし / 科目名14%・略称8% / チップ内容分63% / はみ出し0 / チップクリック・Shift範囲選択・保存反映の 4ビューポート 38項目) |
+| `npm run test:ui:bulletin-search` | 職員掲示板の全対象日検索 UI 検証 (左列が全対象日の検索結果を対象日見出し付きで一覧表示 / タイトルの `<mark>` ハイライト / 結果クリックで中心日をその対象日へジャンプして右ペインに全文 / 検索ピルで当日表示と切替 / ミニカレンダーの検索該当枠 / 検索語クリアで通常表示の 13項目) |
 | `npm run test:ui:https` | 安全通信検証 (CA検証 / TLS / CAページ / API 426 / CA配布 / ブラウザ wss) |
 | `npm run db:create` / `db:init` / `db:seed` | DB 作成 / スキーマ適用 / ダミーデータ投入 |
 | `npm run db:tables` | コード内参照テーブル名の一覧表示 (スキーマ整合チェック) |

@@ -24,7 +24,9 @@
     "test:ui:contrast": "NODE_EXTRA_CA_CERTS=$(pwd)/certs/issystem-ca.crt node scripts/contrast-scan.mjs",
     "test:ui:contrast-plain": "NODE_EXTRA_CA_CERTS=$(pwd)/certs/issystem-ca.crt SCAN_TARGETS=plain node scripts/contrast-scan.mjs",
     "test:ui:nav": "NODE_EXTRA_CA_CERTS=$(pwd)/certs/issystem-ca.crt node scripts/check-nav-shapes.mjs",
+    "test:ui:sidebar": "NODE_EXTRA_CA_CERTS=$(pwd)/certs/issystem-ca.crt node scripts/test-sidebar-collapse.mjs",
     "test:ui:bulletin": "NODE_EXTRA_CA_CERTS=$(pwd)/certs/issystem-ca.crt node scripts/test-bulletin-split.mjs",
+    "test:ui:bulletin-search": "NODE_EXTRA_CA_CERTS=$(pwd)/certs/issystem-ca.crt node scripts/test-bulletin-search-all-days.mjs",
     "test:ui:chat": "NODE_EXTRA_CA_CERTS=$(pwd)/certs/issystem-ca.crt node scripts/test-chat-unread.mjs",
     "test:ui:facility": "NODE_EXTRA_CA_CERTS=$(pwd)/certs/issystem-ca.crt node scripts/test-facility-master.mjs",
     "test:ui:facility-order": "NODE_EXTRA_CA_CERTS=$(pwd)/certs/issystem-ca.crt node scripts/test-facility-order.mjs",
@@ -33,8 +35,9 @@
     "test:api:mail-defaults": "NODE_EXTRA_CA_CERTS=$(pwd)/certs/issystem-ca.crt node scripts/test-mail-defaults.mjs",
     "test:api:mail-test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand test/mail.test.js",
     "test:ui:https": "NODE_EXTRA_CA_CERTS=$(pwd)/certs/issystem-ca.crt node scripts/test-https-ca.mjs",
-    "test:ui:all": "export NODE_EXTRA_CA_CERTS=$(pwd)/certs/issystem-ca.crt && npm run test:ui:https && npm run test:ui:modal && npm run test:ui:frames && npm run test:ui:audit && npm run test:ui:chrome && npm run test:ui:contrast && npm run test:ui:contrast-plain && npm run test:ui:scan && npm run test:ui:header-frames && npm run test:ui:nav && npm run test:ui:facility-header-sticky && npm run test:ui:facility-order && npm run test:ui:bulletin && npm run test:ui:chat && npm run test:ui:facility && npm run test:ui:timeline && npm run test:ui:mail",
+    "test:ui:all": "export NODE_EXTRA_CA_CERTS=$(pwd)/certs/issystem-ca.crt && npm run test:ui:https && npm run test:ui:modal && npm run test:ui:frames && npm run test:ui:audit && npm run test:ui:chrome && npm run test:ui:contrast && npm run test:ui:contrast-plain && npm run test:ui:scan && npm run test:ui:header-frames && npm run test:ui:nav && npm run test:ui:sidebar && npm run test:ui:facility-header-sticky && npm run test:ui:facility-order && npm run test:ui:bulletin && npm run test:ui:bulletin-search && npm run test:ui:chat && npm run test:ui:facility && npm run test:ui:timeline && npm run test:ui:mail && npm run test:ui:exambasic",
     "test:ui:timeline": "NODE_EXTRA_CA_CERTS=$(pwd)/certs/issystem-ca.crt node scripts/test-facility-timeline.mjs",
+    "test:ui:exambasic": "NODE_EXTRA_CA_CERTS=$(pwd)/certs/issystem-ca.crt node scripts/test-exam-basic-columns.mjs",
     "db:tables": "node scripts/list-tables.js"
   },
   "keywords": [

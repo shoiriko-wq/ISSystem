@@ -413,6 +413,17 @@
   animation: toastIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+/* トーストコンテナは画面右下（#toast-container は index.html の Tailwind クラス）。
+   左下は収納サイドバーのせり出し（z-30）やチャット左カラムのフッター（目のマーク等）を
+   覆って実クリックをトーストに奪うため、右下に置く。
+   z-40 = モーダル（z-50）の下、収納サイドバー（z-30）と画面下バー（z-40）の上。
+   767px 以下では画面下バー（高さ 3.9rem）を覆わないよう、下余白をバー分だけ上げる。 */
+@media (max-width: 767px) {
+  #toast-container {
+    bottom: 4.4rem !important;
+  }
+}
+
 /* 8. Auxiliary Tabs & Theme Selectors */
 .about-tab-btn {
   padding: 0.65rem 1rem;
@@ -783,6 +794,76 @@
   border: 1px solid var(--danger-border-soft);
   pointer-events: none;
 }
+
+/* 7.2b 全対象日検索（左列の検索結果一覧・該当ハイライト・対象日見出し・検索ピル・ミニカレンダー該当日）。
+   色は theme tokens のみ。該当ハイライトはアクセント系の淡背景＋濃いアクセントインク（コントラスト 4.5:1 以上）で
+   mark の UA デフォルト（黄色）を上書きする。行内の対象日チップは本文インクより一段軽い text-muted を使う。 */
+.bulletin-hit {
+  background-color: var(--accent-soft);
+  color: var(--text-accent-strong);
+  font-weight: 700;
+  border-radius: 0.2rem;
+  padding: 0 0.1rem;
+}
+.bulletin-row-day {
+  flex: 0 0 auto;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.bulletin-day-sep {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  margin: 0.45rem 0 0.2rem;
+  padding: 0.1rem 0.25rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  border-bottom: var(--border-width) solid var(--border-divider);
+}
+.bulletin-day-sep-count {
+  color: var(--text-faint);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+/* 左列ヘッダーの検索ピル（全対象日の検索結果一覧 ⇔ 表示日の該当表示の切替） */
+.bulletin-search-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 1.7rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text-accent-strong);
+  background-color: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  cursor: pointer;
+  transition: background-color var(--duration-fast), border-color var(--duration-fast);
+}
+.bulletin-search-pill:hover {
+  background-color: var(--accent-inset);
+  border-color: var(--accent-primary);
+}
+.bulletin-search-pill:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+/* 表示・非表示の切替（Tailwind の .hidden と同じ役割。2クラス以上の specificity で上書きを保証） */
+.bulletin-search-pill.hidden {
+  display: none;
+}
+/* ミニカレンダーの検索該当日（打点は既存の ●、枠だけアクセント色。レイアウトは動かさない） */
+.mini-cal-hit {
+  border-color: var(--accent-border);
+  background-color: var(--accent-inset);
+}
+.mini-cal-selected.mini-cal-hit { border-color: var(--accent-primary); }
 
 /* 右ペインヘッダー（読者向けに不要な投稿日時・掲示期間の表記は置かない。全文開きボタンは「詳細」。削除は詳細モーダル内のみで TITLE 行・ペインに削除ボタンは置かない） */
 .pane-header {

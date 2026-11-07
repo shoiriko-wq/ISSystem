@@ -246,8 +246,12 @@
 
 /* 6. Header & Sidebar Responsive Modes */
 
-/* --- 中幅 (768px〜1023px): アイコンのみ、ホバリング/フォーカスでせり出し --- */
-@media (min-width: 768px) and (max-width: 1023px) {
+/* --- 768px以上（画面幅を問わず常時収納）: アイコンのみ、ホバリング/フォーカスでせり出し ---
+   横幅が広い画面でも収納状態（3.6rem・アイコンのみ）とし、カーソルがサイドバーに触れた時・
+   フォーカスした時だけ 12.5rem へせり出してラベルとバッジを表示する。
+   せり出しは main の上に出るオーバーレイ（#app-body が position:relative, sidebar は absolute）。
+   main は padding-left で収納幅分の余白を常時確保する。 */
+@media (min-width: 768px) {
   #app-body {
     position: relative;
     overflow: visible !important;
@@ -329,14 +333,19 @@
     padding: 0.55rem 0.75rem !important;
   }
 
+  /* 行の高さは収納時（2.2rem タイル）と揃える — せり出しで行が縦へズレると、
+     クリックの mousedown→mouseup の間に行が移動して目標行が外れ、
+     アイコンの初回クリックが吸収される（実測でタブが切り替わらない）。
+     高さを固定すると行の y が動かず、同じ位置のクリックがそのまま目標行に入る。 */
   #app-body .app-sidebar:hover nav .nav-item,
   #app-body .app-sidebar.is-hover nav .nav-item,
   #app-body .app-sidebar.is-focus nav .nav-item {
     width: 100% !important;
-    height: auto !important;
+    height: 2.2rem !important;
     aspect-ratio: auto !important;
     margin-inline: 0 !important;
-    padding: 0.55rem 0.5rem !important;
+    padding: 0 0.6rem !important;
+    align-items: center !important;
     justify-content: flex-start !important;
   }
 
@@ -358,10 +367,60 @@
     display: none !important;
   }
 
-  .app-sidebar:hover .nav-badge,
-  .app-sidebar.is-hover .nav-badge,
-  .app-sidebar.is-focus .nav-badge {
+  /* せり出し時は「未読があるバッヂだけ」出す（count 0 の hidden を !important で
+     display: inline-flex に強制すると、枠内に収まらないため描画が抑止される） */
+  .app-sidebar:hover .nav-badge:not(.hidden),
+  .app-sidebar.is-hover .nav-badge:not(.hidden),
+  .app-sidebar.is-focus .nav-badge:not(.hidden) {
     display: inline-flex !important;
+  }
+
+  /* せり出し時は未読バッヂを枠の右側へ揃える（列を揃える）。
+     ラベル群は残りを吸収して縮小し、長いラベルは … で省略する。
+     バッジは margin-left:auto で行の右端に固定（ラベル長で x が動かない）。 */
+  #app-body .app-sidebar:hover nav .nav-item > div,
+  #app-body .app-sidebar.is-hover nav .nav-item > div,
+  #app-body .app-sidebar.is-focus nav .nav-item > div {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .app-sidebar:hover .nav-label,
+  .app-sidebar.is-hover .nav-label,
+  .app-sidebar.is-focus .nav-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #app-body .app-sidebar:hover nav .nav-item .nav-badge,
+  #app-body .app-sidebar.is-hover nav .nav-item .nav-badge,
+  #app-body .app-sidebar.is-focus nav .nav-item .nav-badge {
+    margin-left: auto !important;
+    margin-inline-end: 0 !important;
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  /* 右余白を詰めてバッヂを枠の右側へ寄せる（列の右端を枠に近づける）。
+     バッジ右端から枠右端までの余白 = sidebar 0.35rem(5.6) + 枠線 3 + nav 0.25rem(4)
+     + 行 0.25rem(4) ≒ 17px（実測 19-20px、R7 の 20px 内）。 */
+  #app-body .app-sidebar:hover,
+  #app-body .app-sidebar.is-hover,
+  #app-body .app-sidebar.is-focus {
+    padding-inline-end: 0.35rem !important;
+  }
+
+  #app-body .app-sidebar:hover nav,
+  #app-body .app-sidebar.is-hover nav,
+  #app-body .app-sidebar.is-focus nav {
+    padding-inline-end: 0.25rem !important;
+  }
+
+  #app-body .app-sidebar:hover nav .nav-item,
+  #app-body .app-sidebar.is-hover nav .nav-item,
+  #app-body .app-sidebar.is-focus nav .nav-item {
+    padding-inline-end: 0.25rem !important;
   }
 
   main {

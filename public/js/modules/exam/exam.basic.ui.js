@@ -57,7 +57,8 @@ function sel(name, options, value, cls = '') {
     .join('')}</select>`;
 }
 
-/** クラス・コース選択リスト（data-cc・選択状態は bg-accent-soft クラス、クリック/長押しドラッグで連続選択） */
+/** クラス・コース選択リスト（data-cc・選択状態は bg-accent-soft クラス、クリック/長押しドラッグで連続選択）
+ *  チップは詰めた（px-1.5 py-0.5・10px）——実施クラス・コース列はチップ内容分の幅で足るようにする。 */
 function classCoursePicker(d, selectedIds) {
   const selSet = new Set((selectedIds || []).map(String));
   const byGrade = {};
@@ -68,15 +69,15 @@ function classCoursePicker(d, selectedIds) {
       const chips = byGrade[g]
         .map((cl) => {
           const on = selSet.has(String(cl.id));
-          return `<span data-cc="${escapeHTML(String(cl.id))}" class="cc-chip inline-block px-2 py-1 rounded border text-[10px] cursor-pointer select-none ${
+          return `<span data-cc="${escapeHTML(String(cl.id))}" class="cc-chip inline-block px-1.5 py-0.5 rounded border text-[10px] leading-tight cursor-pointer select-none ${
             on ? 'bg-accent-soft border-accent-strong text-accent-strong font-bold' : 'bg-surface border-main text-soft'
           }">${escapeHTML(cl.name)}</span>`;
         })
         .join('');
-      return `<div class="flex flex-wrap items-center gap-1 py-0.5"><span class="text-[10px] font-semibold text-muted w-7">${g}年</span>${chips}</div>`;
+      return `<div class="flex flex-wrap items-center gap-x-1 gap-y-1 py-0.5"><span class="text-[10px] font-semibold text-muted w-6 shrink-0">${g}年</span>${chips}</div>`;
     })
     .join('');
-  return `<div class="cc-list border border-main rounded bg-surface p-1.5 select-none">${groups || '<span class="text-[10px] text-muted">クラス・コース未登録</span>'}</div>`;
+  return `<div class="cc-list min-w-0 border border-main rounded bg-surface p-1.5 select-none">${groups || '<span class="text-[10px] text-muted">クラス・コース未登録</span>'}</div>`;
 }
 
 /** クリック・長押しドラッグでクラス・コースを連続選択（Shift+クリックで範囲選択） */
@@ -137,11 +138,13 @@ function inp(name, value, cls = '', extra = '') {
   return `<input data-f="${name}" value="${escapeHTML(String(value ?? ''))}" class="input-field py-1 px-1.5 text-[11px] ${cls}" ${extra} />`;
 }
 
-/** 保存・削除ボタン */
+/** 保存・削除ボタン（列幅が狭い幅では折り返して実枠が列からはみ出さない）
+ *  削除ボタンはすべての行に出す（「行を追加」の未保存行は行の破棄、保存済み行は DELETE API）。 */
 function actionCell(id) {
-  return `<div class="flex items-center gap-1">
+  const del = `<button data-act="delete" class="btn-warning border border-warning-soft py-1 px-2 text-[11px] text-warning-strong"><i data-lucide="trash-2" class="w-3 h-3"></i> 削除</button>`;
+  return `<div class="flex flex-wrap items-center gap-1">
     <button data-act="save" class="btn-primary py-1 px-2 text-[11px]"><i data-lucide="save" class="w-3 h-3"></i> 保存</button>
-    ${id ? `<button data-act="delete" class="btn-warning border border-warning-soft py-1 px-2 text-[11px] text-warning-strong"><i data-lucide="trash-2" class="w-3 h-3"></i> 削除</button>` : ''}
+    ${del}
   </div>`;
 }
 
@@ -171,13 +174,11 @@ function groupRow(g, d, kyomu) {
 function subjectRow(sub, d, kyomu) {
   const groupOpts = [['', '（未設定）'], ...d.groups.map((g) => [g.id, g.name])];
   const picked = (sub.offerings || []).map((o) => o.class_course_id);
-  const implemented = (sub.offerings || []).length;
   return `<tr data-kind="subject" data-id="${escapeHTML(String(sub.id ?? ''))}">
-    <td>${sel('subject_id', groupOpts, sub.subject_id ?? '', 'w-24')}</td>
-    <td>${inp('name', sub.name, 'w-28', 'placeholder="生物2年3単位"')}</td>
-    <td>${inp('short_name', sub.short_name ?? sub.name, 'w-16')}</td>
+    <td>${sel('subject_id', groupOpts, sub.subject_id ?? '', 'w-full min-w-0')}</td>
+    <td>${inp('name', sub.name, 'w-full min-w-0', 'placeholder="生物2年3単位"')}</td>
+    <td>${inp('short_name', sub.short_name ?? sub.name, 'w-full min-w-0')}</td>
     <td>${classCoursePicker(d, picked)}</td>
-    <td class="text-[10px] text-muted text-center">${implemented} クラス・コース</td>
     ${kyomu ? `<td>${actionCell(sub.id)}</td>` : '<td class="text-[10px] text-muted">（閲覧のみ）</td>'}
   </tr>`;
 }
@@ -236,19 +237,26 @@ const ROW_BUILDERS = {
   subject: (d) => subjectRow({ name: '', short_name: '', subject_id: '', offerings: [] }, d, true),
 };
 
-function tableHtml(kind, title, headCells, items, renderRow, kyomu, d, hint = '') {
+function tableHtml(kind, title, headCells, items, renderRow, kyomu, d, hint = '', colWidths = null) {
   const rows = items.length
     ? items.map(renderRow).join('')
     : `<tr><td colspan="${headCells.length}" class="px-2 py-3 text-center text-[11px] text-muted">登録がありません（「行を追加」から作成）</td></tr>`;
   const icon = kind === 'group' ? 'layers' : kind === 'class' ? 'users' : kind === 'subject' ? 'book-open' : 'door-open';
+  // colWidths を渡すと table-layout:fixed になり、列幅が百分比で確定する（入力は w-full で列を満たす）
+  const thHtml = headCells
+    .map((h, i) => {
+      const w = colWidths?.[i];
+      return `<th class="px-1 pb-1 font-semibold text-left${w ? ' whitespace-nowrap' : ''}"${w ? ` style="width:${w}"` : ''}>${h}</th>`;
+    })
+    .join('');
   return sectionCard(
     icon,
     title,
     kyomu
       ? `${hint} 右の「＋ 行を追加」→ 入力して「保存」。改名は考査計画・時間割・教室割・監督割へ cascade され、使用中の項目は削除できません。`
       : hint || '教務部の登録を読み出しています。',
-    `<div class="overflow-x-auto"><table class="w-full text-[11px]">
-      <thead><tr class="text-muted text-[10px]">${headCells.map((h) => `<th class="px-1 pb-1 font-semibold text-left">${h}</th>`).join('')}</tr></thead>
+    `<div class="overflow-x-auto"><table class="${colWidths ? 'table-fixed ' : ''}w-full text-[11px]">
+      <thead><tr class="text-muted text-[10px]">${thHtml}</tr></thead>
       <tbody id="basic-body-${kind}">${rows}</tbody>
     </table></div>`,
     `<button id="basic-add-${kind}" class="btn-warning border border-warning-soft py-1 px-3 text-[11px] text-warning-strong flex items-center gap-1"><i data-lucide="plus" class="w-3.5 h-3.5"></i> 行を追加</button>`,
@@ -263,7 +271,20 @@ export function renderBasicTab(container) {
     <div id="exam-basic-panel" class="space-y-4">
       ${tableHtml('class', '1. クラス・コース', ['学年', 'クラス・コース名', '開講科目数', ''], d.classes, (cl) => classRow(cl, d, kyomu), kyomu, d, '「1-1」「1-3理」「1-6看」「1-6保育」のように学校固有の名称を直接入力します（クラスとコースは分離しません）。')}
       ${tableHtml('group', '2. 教科', ['教科名', '使用科目数', ''], d.groups, (g) => groupRow(g, d, kyomu), kyomu, d, '科目で参照する教科を先に登録します。改名は教員の担当教科へ cascade されます。')}
-      ${tableHtml('subject', '3. 科目（教科・科目名・略称）× 実施クラス・コース', ['教科', '科目名', '略称', '実施クラス・コース（クリック / 長押しドラッグで選択）', '実施数', ''], d.subjects, (s) => subjectRow(s, d, kyomu), kyomu, d, '科目名は「公共1年」「生物2年3単位」のように学年・単位数を含め、教科順に並べます。実施しているクラス・コースを選択します（標準試験時間・標準教室の設定はありません）。')}
+      ${tableHtml(
+        'subject',
+        '3. 科目（教科・科目名・略称）× 実施クラス・コース',
+        ['教科', '科目名', '略称', '実施クラス・コース（クリック / 長押しドラッグで選択）', ''],
+        d.subjects,
+        (s) => subjectRow(s, d, kyomu),
+        kyomu,
+        d,
+        '科目名は「公共1年」「生物2年3単位」のように学年・単位数を含め、教科順に並べます。実施しているクラス・コースを選択します（標準試験時間・標準教室の設定はありません）。',
+        // 実施数列は廃止（実施クラス・コースのチップ選択そのものが実施数を示す）。
+        // 科目名・略称を広くし、実施クラス・コースはチップ内容（最も広い学年行）分の幅に寄せる。
+        // 7+14+8+63+8 = 100% で固定レイアウト（列が余りを分散しない）。
+        ['7%', '14%', '8%', '63%', '8%'],
+      )}
       ${tableHtml('room', '4. 教室・座席数', ['教室名', '座席数', '備考', ''], d.rooms, (r) => roomRow(r, kyomu), kyomu, d, '教室名と座席数のみ登録します（種別・使用学年はありません）。')}
     </div>
   `;
@@ -281,8 +302,11 @@ export function bindBasicTab(container, reload) {
   Object.keys(ROW_BUILDERS).forEach((kind) => {
     panel.querySelector(`#basic-add-${kind}`)?.addEventListener('click', () => {
       const d = masterData();
-      const tr = document.createElement('tr');
-      tr.innerHTML = ROW_BUILDERS[kind](d);
+      // tr の innerHTML に <tr> 文字列を入れると属性が落ちる（tr[data-kind] が無くなり保存/削除が効かない）
+      // → tbody でパースして <tr> をそのまま受け取る
+      const frag = document.createElement('tbody');
+      frag.innerHTML = ROW_BUILDERS[kind](d);
+      const tr = frag.firstElementChild;
       panel.querySelector(`#basic-body-${kind}`)?.appendChild(tr);
       refreshLucideIcons();
     });
@@ -314,6 +338,12 @@ export function bindBasicTab(container, reload) {
         }
         await reload();
       } else if (btn.dataset.act === 'delete') {
+        // 「行を追加」直後の未保存行（data-id 空）はサーバーに保存されていない → DOM の行だけを破棄する
+        if (!id) {
+          tr.remove();
+          showToast(`${label}の未保存行を破棄しました。`, 'info');
+          return;
+        }
         if (kind !== 'group') {
           const usageRes = await examApi.get(`/basic-info/usage/${kind}/${id}`);
           const counts = usageRes?.usage || usageRes;

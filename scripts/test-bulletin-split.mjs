@@ -406,8 +406,12 @@ check('コメント送信ボタンはホバリングで枠リングが見切れ�
 check('右ペインタイトル行に投稿者名とアバターアイコンが表示されている',
   Boolean(snap1.paneAuthorText) && snap1.paneAuthorText.length > 0 && snap1.paneAuthorHasIcon === true,
   { paneAuthorText: snap1.paneAuthorText, icon: snap1.paneAuthorHasIcon });
-check('投稿者表示はタイトル行の右側へ右寄せ（ヘッダー右端との差 130px 以内・タイトルより右）',
-  snap1.paneAuthorRightGap !== null && snap1.paneAuthorRightGap <= 130 && snap1.paneAuthorTitleGap > 40,
+// 収容サイドバー（せり出しオーバーレイ）で右ペインが広くなると、未読バッジと「詳細」が
+// ヘッダーの 1 行目に収まり、投稿者はその左寄せになる（幅 94+87+gap 18 ≒ 199px）。
+// 狭い pane ではバッジ/詳細が 2 行目へ折返し、投稿者はヘッダー右端に付く（差 0）。
+// よって「タイトルより右＝右側」と「右端との差はバッジ+詳細が収まる 220px 以内」で判定する。
+check('投稿者表示はタイトル行の右側へ右寄せ（ヘッダー右端との差 220px 以内・タイトルより右）',
+  snap1.paneAuthorRightGap !== null && snap1.paneAuthorRightGap <= 220 && snap1.paneAuthorTitleGap > 40,
   { paneAuthorRightGap: snap1.paneAuthorRightGap, paneAuthorTitleGap: snap1.paneAuthorTitleGap });
 check('右ペインタイトル行の未読バッジは撤去（左列タイトル行の未読バッジは残る）',
   snap1.paneHeaderHasUnread === false && rowStyle.badgeRows > 0 && rowStyle.readHasBadge === false,
@@ -797,9 +801,12 @@ const reselect = await page.evaluate(async (id) => {
   window.__bulletinDebug = [];
   const rows = [...document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]')];
   const other = rows.find((r) => r.getAttribute('data-bulletin-toggle') !== String(id));
-  const mine = rows.find((r) => r.getAttribute('data-bulletin-toggle') === String(id));
   if (other) other.click();
   await new Promise((r) => setTimeout(r, 450));
+  // selectBulletin → renderRows が innerHTML を作り直すため、上記で捕捉した行参照は DOM から切り離される。
+  // 同じ行を再取得してクリックする（切れた参照のクリックは委譲リスナーに届かない）
+  const mine = [...document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]')]
+    .find((r) => r.getAttribute('data-bulletin-toggle') === String(id));
   if (mine) mine.click();
   await new Promise((r) => setTimeout(r, 700));
   return { items: document.querySelectorAll('.comment-list .comment-item').length, dbg: window.__bulletinDebug };

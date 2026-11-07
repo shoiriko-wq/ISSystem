@@ -1,12 +1,143 @@
-職員掲示板の記事のタイトル部ですが、記事１件１件に枠をつけてください。
+## 安全性が確保されていない部分（深刻度順）
 
-定期考査の上部の「教務権限者は 7 つの作成メニュー（考査の登録は年間考査計画に統合）、教員は公表ビューと自分の担当コマを確認できます。 対象考査 2026年度 1学期中間考査 更新 計画...
+### 1. 🔴 Critical: WSS 接続認証に「裏口」が 2 つ（実測）
 
-配色テーマ設定のツートンは、メニューにホバリングしたときに背景と文字の明度に差がなくなり読みにくいです。また、ヘッドメニューのアカウントのプルダウンメニューも背景と文字の明度に差がなくなり読み...
+`src/sockets/socket.index.js` の `io.use()` 内で
 
-ダッシュボードの年休等・出張の表示は、現在時刻の年休等・出張の人数にしてください。年休等をクリックすると本日の年休等の取得者の詳細リストが表示されるようにしてください。出張をクリックすると本日...
+- `token.startsWith('demo-jwt-token-')` → JWT 検証&#x3092;__&#x5B8C;全スキッ&#x30D7;__&#x3057;て `TEACHER` として接続許可
+- `jwt.verify` 失敗時、`NODE_ENV !== 'production'` なら __`dev-user`（TEACHER）として接続を許可__（`console.warn` だけ）
 
-サイドメニューの通知バッヂは右揃えで表示してください。
+`.env` は `NODE_ENV=development` なので、実サーバーで実測した結果：
+
+```javascript
+tokenless            => REJECTED: Token missing          ← 正しく弾かれた
+garbage-token        => CONNECTED  chat:send ack={"success":true,... sender_id:"dev-user"}
+demo-token           => CONNECTED  chat:send ack={"success":true,... sender_id:"demo-teacher"}
+cross-origin+garbage => CONNECTED  chat:send ack={"success":true,...}
+```
+
+つまり __`wss://0.0.0.0:3443` に任意の token（有効な JWT 不要）で接続でき、職員全体チャンネルへの書き込みができる__（Origin も無制限、`src/server.js:60` の socket.io cors は `parseCorsOrigin(...,'*')`、`.env` の `CLIENT_ORIGIN=*`）。
+
+さらに socket ハンドラーには権限チェックがありません:
+
+- `seating:update_status` は role 判定なしで `authService.updateStatus()` を呼ぶ（`src/sockets/seating.socket.js:20-38`）
+- `lock:acquire / release / timeout_released` は `resourceType/resourceId` を文字列のまま受け取り DB 書き込み（`src/sockets/lock.socket.js:20-141`）
+
+__対策__: デモ分岐を削除、`jwt.verify` 失敗は常に `next(new Error(...))`、`NODE_ENV=production` で稼働、socket 側にも `requireKyomu` 相当の role gate と `socket.handshake.headers.origin` の許可リスト照合を追加。
+
+### 2. 🔴 Critical: JWT シークレットが既知の既定値、かつ他機密のキーも兼ねている（実測）
+
+- `.env:42` `JWT_SECRET=is_system_secret_key_2026_default_jwt`、コード内フォールバック `'dev-secret-key-change-in-production'`
+
+- 実測: この secret で自分で ADMIN トークンを署名しただけで
+
+  ```javascript
+  FORGED-ADMIN /api/auth/me    => 200
+  FORGED-ADMIN /api/audit/logs => 200 （監査ログ全件）
+  FORGED-ADMIN /api/users      => 200 （全教職員一覧）
+  ```
+
+- 派生被害: `src/models/mail.model.js:13-15` は __AES-256-GCM のキーを `sha256(jwtSecret)` から導&#x51FA;__&#x3057;ています。つまり secret を知る者&#x306F;__&#x6559;職員のメールパスワードを全件復&#x53F7;__&#x3067;きます。
+
+- `src/services/auth.service.js:20-22,32` に SHA-256(password + secret) フォールバック、さらに `storedHash === password`（__平文パスワード一致__）が残っています。
+
+__対策__: 強随机 secret（`crypto.randomBytes(32)`）+ 環境ごとに個別化、メール暗号キーは別系統（KMS / scrypt + 専用秘密）で分離、平文比較と SHA-256 フォールバック削除、key rotation 手順。
+
+### 3. 🔴 High: 教員が管理者権限の操作できる（RBAC 欠落）
+
+`src/routes/index.js:63-65` は `authenticateToken` のみで __role 制限なし__:
+
+```javascript
+TEACHER GET    /api/users                  => 200   （全教職員の一覧＝教職員番号・メールの閲覧）
+TEACHER POST   /api/users (role: ADMIN)    => 201   （管理者アカウントを自分で作れる）
+TEACHER DELETE /api/users/:id              => 200   （アカウント削除）
+```
+
+__権限昇格の完全な&#x9053;__&#x304C;存在します（`requireAdminRole` は実装済みだが users 系に未適用）。
+
+__対策__: `/api/users` 系・`/api/chat/channels/:id` 削除系・招待コード発行に `requireAdminRole` / `requireKyomuRole` を付与し、コントローラ内でも `req.user.role` を再検証。
+
+### 4. 🔴 High: ログイン試行制限・アカウントロックが一切ない（実測）
+
+`grep -rniE 'rate.?limit|express-rate' src/ package.json` → __該当ゼロ__。実測:
+
+```javascript
+存在しないユーザー T9999999 への 25 回失敗ログイン => 401 ×25（ロックも 429 もなし）
+実在ユーザー T2026001 への 10 並列失敗           => 401 ×10
+```
+
+加えて __招待コードは 8 桁 16 進__（`auth.service.js:248` `crypto.randomBytes(4)`）で有効期限 24 時間、試行制限なし。4.29 億通り、レート制限なしの環境では総当たりが現実的で、`register-invitation` はパスワード再設定にも使えるた&#x3081;__&#x30A2;カウント乗っ取&#x308A;__&#x306B;直結します。失敗ログインは監査ログに記録されません（成功 `LOGIN` のみ、`auth.service.js:102`）。
+
+__対策__: `express-rate-limit` を `/api/auth/login`・`/api/auth/register-invitation` に適用（IP + 識別子キー、15分 5 回）、ユーザー単位ロックアウト、失敗時 `LOGIN_FAILED` を監査ログへ、招待コードは 128bit 系（`randomBytes(16)`）+ 試行カウンタ。
+
+### 5. 🔴 High: パスワードハッシュがログに書き出されている（実測）
+
+サーバーログ `/tmp/server.log` に実際に残っていた:
+
+```javascript
+[AuthService] パスワード照合失敗: {
+  identifier: 'T2026001',
+  dbHash: '$2b$10$OzvCrovx3LMhQ3UUt0AtG.V036KBjiVskTgbVXs0yiH1YEct1QKde'
+}
+```
+
+bcrypt ハッシュがコンソール/ログファイルに露出 → ログ共有・バックアップ経由&#x3067;__&#x30AA;フライン総当た&#x308A;__&#x304C;可能。さらに `src/middlewares/error.middleware.js` は `NODE_ENV === 'development'` で __stack trace をレスポンスに返す__（現状 development で稼働中）。
+
+__対策__: 照合失敗ログは identifier のみ（hash 非表示）、stack 出力を production 限定、ログの権限/保存期間管理。
+
+### 6. 🟠 Medium: CSP 無効 + SRI なし CDN + CORS ワイルドカード（実測）
+
+- `src/app.js:26` → アプリ側で `contentSecurityPolicy: false`（HTTP CA ページには CSP あり）。HTTPS レスポンスヘッダに CSP &#x306F;__&#x51FA;ません__。
+- `public/index.html:9,10,13` → `cdn.tailwindcss.com`・`unpkg.com/lucide`・`cdn.socket.io/4.7.5` を __`integrity`（SRI）なし・`crossorigin` な&#x3057;__&#x3067;読み込み。CDN 改変・パスジャックで任意スクリプトが実行可能。
+- トークンは `localStorage['is_system_jwt_token_v251']`（`public/js/config.js:74`、`public/js/socket.js:34`）→ XSS で即座に盗める。
+- 実測: `Origin: https://evil.example` → `Access-Control-Allow-Origin: *` + __`Access-Control-Allow-Credentials: true`__（`CLIENT_ORIGIN=*`）。Cookie は使いませんが、** Authorization ヘッダ方式なので、盗んだ token を任意サイトから使える**構造です。
+- `data-lucide="${ch.icon}"`・`iconEl.setAttribute('data-lucide', channelInfo.icon)` は DB 由来値&#x3092;__&#x7121;escapeで属性に埋め込み__（`chat.module.js:649, 813`）→ 属性注入の余地。
+
+__対策__: CSP（`script-src 'self'`＋許可 CDN、SRI 付与、socket.io は自前 vendoring）、`CLIENT_ORIGIN` をカンマ区切り明示リスト（`parseCorsOrigin` はリスト対応済み）、wildcard 時は `credentials: false`、icon 値も escape。
+
+### 7. 🟠 Medium: ログアウトが実体を伴わない（JWT に失効機構なし）
+
+実測: `POST /api/auth/logout` &#x306E;__&#x540C;じ token がそのまま 200__ を返します（`auth.controller.js:306-315` は 200 を返すだけ）。`expiresIn: '24h'`（`config/default.js:68`）。token が漏れた場合、24 時間取り消せません。
+
+__対策__: token ブラックリスト（Redis/DB）＋ logout で削除、TTL を短く（15–30分）+ refresh、可能なら httpOnly Secure Cookie セッション。
+
+### 8. 🟠 Medium: 自己署名 CA の信頼配布が TOFU、失効手段がない
+
+CA を各クライアント&#x306B;__&#x5E73;文 HTTP（0.0.0.0:3000）で配&#x5E03;__&#x3059;る構成（`server.js:95-101`）は、初回取得時に CA 差し替え攻撃を受け得ます（コンソールに SHA-256 指紋 `A2:E5:...:DC` を表示しており指紋ピンチングは可能＝好ましい）。サーバー鍵が漏れた際の __CRL/OCSP がな&#x3044;__&#x305F;め、クライアントは気づけません。CA 鍵がサーバーと同じマシンにある点も運用リスクです。
+
+__対策__: CA 配布を管理端末に限定（`INSECURE_HOST` を 127.0.0.1 や校内限定 VLAN に）、指紋を事前共有、CRL 発行＋クライアント側検証、CA 鍵を別マシン/HSM に分離。
+
+### 9. 🟡 Minor: コード品質に起因する認証の隙
+
+- `chat.controller.js:47` `userId = req.user?.id || 'kyomu01'`、`:91` `senderId = req.user?.id || senderId || 'kyomu01'` → `req.user` が無い&#x3068;__&#x6559;務主任名義で投&#x7A3F;__&#x3057;うる（現状は `authenticateToken` があるため実害は低いが、フォールバックと組み合わせると危険）。
+- `chat.controller.js:71-77` が 403 を 200+空配列に変換 → クライアントが「権限なし」を判別できない（プライバシーは守れるが、監査・UI が劣化）。
+- 監視ホストが両ポート `0.0.0.0` → LAN 全体に公開（1 と相乗効果で「LAN 内の誰でも dev-user として書ける」）。
+
+## 対応優先順位（提案）
+
+1. `src/sockets/socket.index.js` の demo 分岐削除 + 開発時フォールバック削除（裏口封じ）
+2. `JWT_SECRET` を強随机化し、メール暗号キーを jwtSecret から分離。`storedHash === password` 削除
+3. `/api/users` 系に `requireAdminRole`（権限昇格の遮断）
+4. `express-rate-limit` をログイン・招待コード登録に導入、招待コード長を延長、失敗を監査ログへ
+5. 照合失敗ログから `dbHash` を除去、stack trace 出力を production で限定
+6. CSP 有効化 + CDN に SRI + socket.io を自前配信、`CLIENT_ORIGIN` 明示リスト化、wildcard + credentials 解除
+7. ログアウトで token を失効させる（ブラックリスト／短 TTL+refresh）
+8. 監視ホストを 127.0.0.1／校内限定、CA 配布パスの指紋ピンチング運用化
+
+## 検証作業の後始末
+
+- プローブで書き込んだテストデータ（probe チャット 2 件、`権限試験室` resource、権限試験用アカウント、招待コード `454396B1`、`dev-user`/`demo-teacher` の監査ログ 3 件）は __DELETE 済み__（残り 0 件を確認）。
+- テストサーバーは `pkill` で停止済み（3000/3443 の LISTEN = 0）。
+- `npm test` は __139 passed / 139 total__（既存テストは無傷）。
+
+ご希望があれば、1〜6 の修正を実際にコードへ適用します（特に socket 認証と users ルートの認可、レート制限は小さく安全に適用可能です）。
+
+
+スケジュールのメイン部分ですが、職員掲示板やメール、施設物品予約などと違い、ここはタイトル部分が存在しません。現在ページの一番上にある枠を先程のページにあるようなタイトル部分のデザインに変更します。現在、表示設定のメニューが枠内にありますが、これは下の枠のカレンダーまたは１日一覧と書かれた部分にタブとして切り替えられる機能に移動します。また、行事のカテゴリ選択ボタンはタイトル部分に「カテゴリ選択」のボタンを作り、ボタンを押すことで表示非表示が切り替わるようにします。ただし、カテゴリ選択の機能は、「全選択に戻す」ボタンの表示が切り替わることにより、カテゴリの位置が移動し、ユーザビリティが悪くなっています。カテゴリの位置が移動しないようにしてください。
+
+簡易承認のメイン部分ですが、タイトルを簡易承認・物品請求ワークフローから簡易承認に書き換えて、校内備品購入・行事申請・予算利用の承認リクエストおよびステータス管理を行えます。の部分は削除してください。
+
+職員掲示板の検索機能ですが、タイトル・本文のみではなく、投稿者名からも検索できるようにしてください。検索した場合は基本的に全日検索になるので、検索ボックスの隣の日にちの表示は「全日」としてはいかがでしょうか。記事を選択したときにその日に移動する挙動は撤廃して、検索ボックスに文字がある間は常に全日とします。したがって、検索時にタイトル部分に表示される、全対象日の検索結果◯件、この日のみ表示のボタンは撤廃します。
 
 定期考査のメニューを次のように変更します。
 定期考査は、教務権限のある人にはメインに次のメニューが表示されます。

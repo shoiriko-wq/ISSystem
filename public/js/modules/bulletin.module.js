@@ -4,7 +4,9 @@
  * 投稿日はヘッダーのタイトル行に ‹ [日付] › を埋め込む（中心日は ‹ › の間の固定幅ボタンで、
  * クリックするとミニカレンダーが開く。カレンダー単独ボタンは置かない）。
  * 選択＝即既読化で右ペインに全文が即表示。コメントは右ペインに並べ、その場で送信できる。
- * 検索は小型インライン、キー操作の手引きは収納（キー操作ボタンで開閉）、詳細モーダル・API連携
+ * 検索は小型インライン（全対象日が検索範囲。検索語入力中は左列が対象日グループ見出し付きの検索結果一覧になり、
+ * 結果クリックで ‹ › の中心日をその対象日へジャンプして右ペインに全文表示。左列ヘッダーのピルで当日表示と切替）、
+ * キー操作の手引きは収納（キー操作ボタンで開閉）、詳細モーダル・API連携
  */
 
 import { apiGet, apiPost, apiPut, apiPostForm, apiDelete } from '../api.js';
@@ -14,6 +16,9 @@ import { API_BASE_URL } from '../config.js';
 
 let bulletinsCache = [];
 let currentSearch = '';
+// ★ 検索結果の表示モード（true = 全対象日の検索結果一覧を左列に出す。検索語入力時に true、
+//    結果クリック・日付ザッピング・ピルでその日の表示へ切り替えたら false）
+let searchResultsView = false;
 
 // ★ 投稿日状態（表示日 = YYYY-MM-DD JST。‹ › と日付クリック（カレンダー）・←/→ キーで 1 日ずつ移動）
 let currentDayDate = '';            // 中心日
@@ -92,10 +97,11 @@ export function initBulletinModule() {
         <i data-lucide="megaphone" class="w-4 h-4 text-accent"></i> 職員掲示板
       </h2>
       <div class="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
-        <!-- ★ 検索（ヘッダー内。タイトル・本文をインクリメンタル検索） -->
+        <!-- ★ 検索（ヘッダー内。タイトル・本文を全対象日でインクリメンタル検索。検索語入力中は左列が全対象日の検索結果一覧になり、
+             結果クリックでその対象日へジャンプして右ペインに全文を出す） -->
         <div class="relative w-full sm:w-72 max-w-full shrink-0">
           <i data-lucide="search" class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none"></i>
-          <input type="text" id="bulletin-search-input" class="input-field pl-8 pr-2 w-full" placeholder="タイトル・本文を検索" aria-label="掲示検索">
+          <input type="text" id="bulletin-search-input" class="input-field pl-8 pr-2 w-full" placeholder="タイトル・本文を全対象日で検索" aria-label="掲示検索（全対象日）">
         </div>
         <!-- ★ ‹ [日付] › を同一グループで隣接（一緒に折り返す。施設予約と同じ慣習）。
              中心日は ‹ › の間。日付は固定幅なので › を連打しても › の位置が動かない。
@@ -128,6 +134,7 @@ export function initBulletinModule() {
       <span><kbd class="kbd-key">←</kbd><kbd class="kbd-key">→</kbd> 前日・翌日（‹ › ボタン）</span>
       <span><kbd class="kbd-key">T</kbd> 今日</span>
       <span><kbd class="kbd-key">C</kbd> カレンダー（‹ › の間の日付をクリックでも開く）</span>
+      <span>検索＝全対象日。検索結果の行クリックでその対象日へジャンプ（左列ヘッダーのピルで当日表示と切替）</span>
       <span><kbd class="kbd-key">?</kbd> 手引き開閉</span>
     </div>
 
@@ -136,7 +143,11 @@ export function initBulletinModule() {
       <div class="bulletin-title-pane">
         <div class="pane-label">
           <span class="flex items-center gap-1.5"><i data-lucide="list" class="w-3.5 h-3.5 text-accent"></i> タイトル</span>
-          <span id="bulletin-title-count" class="text-sm text-muted">0 件</span>
+          <div class="flex items-center gap-2 min-w-0">
+            <!-- ★ 検索ピル（検索語がある時だけ表示。全対象日の検索結果一覧と表示日の該当表示を切り替える） -->
+            <button type="button" id="bulletin-search-pill" class="bulletin-search-pill hidden" aria-label="検索結果の表示切替"></button>
+            <span id="bulletin-title-count" class="text-sm text-muted">0 件</span>
+          </div>
         </div>
         <div id="bulletin-list-container" class="bulletin-list-container" role="listbox" aria-label="掲示タイトル">
           <div class="p-4 text-center text-sm text-muted">掲示板データを読み込み中...</div>
@@ -193,10 +204,19 @@ function bindEvents() {
     });
   }
 
-  // 検索インプット
+  // 検索インプット（検索範囲は全対象日。検索語が入った時点で左列が全対象日の検索結果一覧になる）
   document.getElementById('bulletin-search-input')?.addEventListener('input', (e) => {
     currentSearch = e.target.value.toLowerCase().trim();
+    searchResultsView = Boolean(currentSearch);
     renderBulletinList();
+  });
+
+  // ★ 検索ピル（左列ヘッダー。全対象日の検索結果一覧 ⇔ 表示日の該当表示を切り替える）
+  document.getElementById('bulletin-search-pill')?.addEventListener('click', () => {
+    if (!currentSearch) return;
+    searchResultsView = !searchResultsView;
+    renderBulletinList();
+    focusSelectedRow();
   });
 
   // 添付ファイル選択プレビュー
@@ -217,12 +237,16 @@ function bindEvents() {
   document.getElementById('bulletin-day-current')?.addEventListener('click', () => toggleMiniCalendar());
   document.getElementById('bulletin-keys-toggle')?.addEventListener('click', () => toggleKeysHelp());
 
-  // ★ 左列タイトル行（クリックで選択＝即既読化→右ペイン全文。削除ボタンは置かない＝削除は詳細モーダル内・投稿者のみ）
+  // ★ 左列タイトル行（クリックで選択＝即既読化→右ペイン全文。削除ボタンは置かない＝削除は詳細モーダル内・投稿者のみ）。
+  //    全対象日の検索結果一覧表示中は、クリックした記事の中心日へジャンプしてからその記事を選択する
   const listEl = document.getElementById('bulletin-list-container');
   if (listEl) {
     listEl.addEventListener('click', (e) => {
       const row = e.target.closest('[data-bulletin-toggle]');
-      if (row) selectBulletin(row.getAttribute('data-bulletin-toggle'));
+      if (!row) return;
+      const id = row.getAttribute('data-bulletin-toggle');
+      if (currentSearch && searchResultsView) jumpToBulletinDay(id);
+      else selectBulletin(id);
     });
   }
 
@@ -365,6 +389,27 @@ function weekdayLabel(key) {
   return WEEKDAY_LABELS[new Date(Date.UTC(p[0], p[1] - 1, p[2])).getUTCDay()];
 }
 
+/** 対象日の短いラベル (YYYY-MM-DD → MM/DD(曜)) */
+function dayShortLabel(key) {
+  const parts = String(key || '').split('-');
+  if (parts.length < 3) return '';
+  return `${parts[1]}/${parts[2]}(${weekdayLabel(key)})`;
+}
+
+/**
+ * 検索語に該当する箇所を <mark> で囲む（残りはエスケープ。検索語が部分一致でも安全に 1 箇所だけ強調）
+ * @param {string} text 表示する文字列
+ * @param {string} query 検索語（小文字化済み）
+ */
+function highlightHtml(text, query) {
+  const s = String(text || '');
+  if (!query) return escapeHTML(s);
+  const idx = s.toLowerCase().indexOf(query);
+  if (idx < 0) return escapeHTML(s);
+  const end = idx + query.length;
+  return `${escapeHTML(s.slice(0, idx))}<mark class="bulletin-hit">${escapeHTML(s.slice(idx, end))}</mark>${escapeHTML(s.slice(end))}`;
+}
+
 /** キャッシュから対象日別の件数を算出（ミニカレンダーの打点） */
 function dayCounts() {
   const map = new Map();
@@ -470,6 +515,8 @@ function updateDayReadout() {
  */
 function selectDay(date, dir = 0) {
   const target = String(date || '').substring(0, 10) || dayKey(0);
+  // 日付ザッピングは検索語を保ったままその日の列表へ（全対象日の検索結果一覧表示には戻さない）
+  searchResultsView = false;
   // 移動日数（アニメーションの大きさ用。1日ずれは小さく、複数日ジャンプだけ大きく動く）
   const span = Math.abs(dayDiff(currentDayDate, target)) || 1;
   const shift = dir || Math.sign(dayDiff(currentDayDate, target)) || 0;
@@ -550,6 +597,14 @@ function renderMiniCalendar() {
   const [y, m] = anchor.split('-').map(Number);
   const counts = dayCounts();
   const today = dayKey(0);
+  // 検索語がある日は、全対象日の検索該当数（対象日ベース）を打点に重ねる
+  const hitCounts = currentSearch
+    ? allSearchMatches().reduce((map, b) => {
+        const k = targetDayOf(b);
+        map.set(k, (map.get(k) || 0) + 1);
+        return map;
+      }, new Map())
+    : null;
   const lead = new Date(Date.UTC(y, m - 1, 1)).getUTCDay();
   const dim = new Date(Date.UTC(y, m, 0)).getUTCDate();
 
@@ -558,14 +613,16 @@ function renderMiniCalendar() {
   for (let d = 1; d <= dim; d++) {
     const key = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     const n = counts.get(key) || 0;
+    const hit = hitCounts ? (hitCounts.get(key) || 0) : 0;
     const cls = [
       'mini-cal-day',
       key === today ? 'mini-cal-today' : '',
       key === currentDayDate ? 'mini-cal-selected' : '',
       n > 0 ? 'mini-cal-has' : '',
+      hit > 0 ? 'mini-cal-hit' : '',
     ].filter(Boolean).join(' ');
     cells.push(`<button type="button" class="${cls}" data-cal-date="${key}"
-                 aria-label="${key} ${weekdayLabel(key)} 対象日 ${n} 件">
+                 aria-label="${key} ${weekdayLabel(key)} 対象日 ${n} 件${hit > 0 ? `（検索該当 ${hit} 件）` : ''}">
                  <span class="mini-cal-num">${d}</span>
                  ${n > 0 ? '<span class="mini-cal-dot"></span>' : ''}
                </button>`);
@@ -585,7 +642,7 @@ function renderMiniCalendar() {
       ${WEEKDAY_LABELS.map((w) => `<span class="mini-cal-wd">${w}</span>`).join('')}
     </div>
     <div class="mini-cal-grid">${cells.join('')}</div>
-    <p class="text-sm text-muted mt-2">● は対象日に掲示のある日です。日付をクリックでその日の記事を表示してカレンダーは閉じます。‹ › ボタンと ←/→ キーで前日・翌日（1日分）へ、‹ › の間の日付クリック（<kbd class="kbd-key">C</kbd> キー）でこのカレンダーを開閉できます。本日へは ‹ › の間の「本日」ボタンと T キーで戻ります。</p>
+    <p class="text-sm text-muted mt-2">● は対象日に掲示のある日です。日付をクリックでその日の記事を表示してカレンダーは閉じます。‹ › ボタンと ←/→ キーで前日・翌日（1日分）へ、‹ › の間の日付クリック（<kbd class="kbd-key">C</kbd> キー）でこのカレンダーを開閉できます。本日へは ‹ › の間の「本日」ボタンと T キーで戻ります。${currentSearch ? '検索語がある日（accent の枠）が全対象日の検索結果に該当する日です。' : ''}</p>
   `;
   refreshLucideIcons();
 }
@@ -623,22 +680,45 @@ export async function loadBulletins() {
   renderBulletinList();
 }
 
-/** 検索・投稿日による絞り込みと日時降順ソート（カテゴリフィルタは撤廃） */
+/** 検索語（タイトル・本文・投稿者名）に該当するか。検索語が空なら全件 true */
+function matchesQuery(b) {
+  if (!currentSearch) return true;
+  const q = currentSearch;
+  return String(b.title || '').toLowerCase().includes(q) ||
+    String(b.content || '').toLowerCase().includes(q) ||
+    Boolean(b.authorName && String(b.authorName).toLowerCase().includes(q));
+}
+
+/** 全対象日の検索該当（検索語が空なら全件）。対象日降順 → 投稿日時降順 */
+function allSearchMatches() {
+  const hits = bulletinsCache.filter((b) => matchesQuery(b));
+  hits.sort((a, b) => {
+    const dayA = targetDayOf(a);
+    const dayB = targetDayOf(b);
+    if (dayA !== dayB) return dayA < dayB ? 1 : -1;
+    return postedDesc(a, b);
+  });
+  return hits;
+}
+
+/** 投稿日時降順比較（新しさが上） */
+function postedDesc(a, b) {
+  const dateA = new Date(a.postedAt || a.posted_at || a.createdAt || a.created_at);
+  const dateB = new Date(b.postedAt || b.posted_at || b.createdAt || b.created_at);
+  return dateB - dateA;
+}
+
+/**
+ * 左列表示用の絞り込みとソート
+ * 全対象日の検索結果一覧表示中（searchResultsView）は検索該当全件を対象日降順、
+ * そうでなければ検索語に該当する中心日の掲示を投稿日時降順（カテゴリフィルタは撤廃）
+ */
 function filteredBulletins() {
-  const filtered = bulletinsCache.filter((b) => {
-    const matchQuery = !currentSearch ||
-      String(b.title || '').toLowerCase().includes(currentSearch) ||
-      String(b.content || '').toLowerCase().includes(currentSearch) ||
-      (b.authorName && String(b.authorName).toLowerCase().includes(currentSearch));
+  const inSearch = Boolean(currentSearch) && searchResultsView;
+  if (inSearch) return allSearchMatches();
 
-    return matchQuery && matchesDay(b);
-  });
-
-  filtered.sort((a, b) => {
-    const dateA = new Date(a.postedAt || a.posted_at || a.createdAt || a.created_at);
-    const dateB = new Date(b.postedAt || b.posted_at || b.createdAt || b.created_at);
-    return dateB - dateA;
-  });
+  const filtered = bulletinsCache.filter((b) => matchesQuery(b) && matchesDay(b));
+  filtered.sort(postedDesc);
   return filtered;
 }
 
@@ -690,17 +770,23 @@ function paneAuthorHtml(b) {
 
 /**
  * 左列タイトル行（1行・右端に未読バッジ、行頭シグニファイア › でクリック誘導。全文は右ペインに出す。削除は詳細モーダル内のみ）
+ * 全対象日の検索結果一覧（showDay）では行頭に対象日チップを出し、タイトル内の検索該当を <mark> で強調する
  * @param {Object} b
  * @param {boolean} selected 選択中（既読化済み・強調表示）か
+ * @param {boolean} [showDay] 対象日チップを出すか（全対象日の検索結果一覧でのみ true）
  */
-function titleRowHtml(b, selected) {
+function titleRowHtml(b, selected, showDay = false) {
   const unread = isUnreadBulletin(b);
+  const titleHtml = currentSearch ? highlightHtml(b.title, currentSearch) : escapeHTML(String(b.title || ''));
+  const dayChip = showDay ? `<span class="bulletin-row-day">${escapeHTML(dayShortLabel(targetDayOf(b)))}</span>` : '';
   return `
     <div class="bulletin-title-row${selected ? ' active' : ''}" data-bulletin-toggle="${b.id}"
          data-unread="${unread ? 'true' : 'false'}" role="option" tabindex="0"
-         aria-selected="${selected ? 'true' : 'false'}">
+         aria-selected="${selected ? 'true' : 'false'}"
+         ${showDay ? `data-target-day="${targetDayOf(b)}"` : ''}>
       <span class="bulletin-row-signifier" aria-hidden="true"><i data-lucide="chevron-right" class="w-3.5 h-3.5"></i></span>
-      <span class="bulletin-row-title">${escapeHTML(String(b.title || ''))}</span>
+      ${dayChip}
+      <span class="bulletin-row-title">${titleHtml}</span>
       ${unread ? '<span class="bulletin-unread-badge" aria-hidden="true">未読</span>' : ''}
     </div>`;
 }
@@ -727,27 +813,68 @@ function renderBulletinList() {
   if (selectedId) loadComments(selectedId);
 }
 
-/** 左列タイトル行の描画（日付・件数の欄は左列ヘッダーに寄せる。行は1行タイトル＋未読バッジ） */
+/** 左列タイトル行の描画（日付・件数の欄は左列ヘッダーに寄せる。行は1行タイトル＋未読バッジ）。
+ *  全対象日の検索結果一覧では対象日見出しでグループ化し、ヘッダーに検索ピル（表示切替）を出す */
 function renderRows() {
   const container = document.getElementById('bulletin-list-container');
   if (!container) return;
 
   const filtered = filteredBulletins();
+  const inSearch = Boolean(currentSearch) && searchResultsView;
   const countEl = document.getElementById('bulletin-title-count');
-  if (countEl) countEl.textContent = `${filtered.length} 件`;
+  const pill = document.getElementById('bulletin-search-pill');
+
+  // 左列ヘッダー（件数表示と検索ピル）
+  if (countEl) countEl.textContent = inSearch ? `検索結果 ${filtered.length} 件（全対象日）` : `${filtered.length} 件`;
+  if (pill) {
+    if (!currentSearch) {
+      pill.classList.add('hidden');
+      pill.textContent = '';
+    } else {
+      pill.classList.remove('hidden');
+      const allCount = allSearchMatches().length;
+      pill.textContent = inSearch ? 'この日のみ表示' : `全対象日の検索結果 ${allCount} 件`;
+      pill.title = inSearch ? '中心日の該当だけを表示' : '全対象日の検索結果一覧へ';
+    }
+  }
 
   if (filtered.length === 0) {
-    container.innerHTML = `<div class="p-5 text-center text-sm text-muted">
-      <i data-lucide="calendar-off" class="w-6 h-6 mx-auto mb-2 opacity-60"></i>
-      <div>この日の掲示連絡はありません。<kbd class="kbd-key">←</kbd><kbd class="kbd-key">→</kbd>・‹ › ボタンで前日・翌日、‹ › の間の日付クリック（<kbd class="kbd-key">C</kbd> キー）でカレンダーを開いて好きな日へ移動できます。</div>
-    </div>`;
+    container.innerHTML = inSearch
+      ? `<div class="p-5 text-center text-sm text-muted">
+          <i data-lucide="search-x" class="w-6 h-6 mx-auto mb-2 opacity-60"></i>
+          <div>検索語「${escapeHTML(currentSearch)}」に該当する掲示は全対象日にありません。ピル「この日のみ表示」で中心日の列表へ戻り、検索語を消すと通常表示になります。</div>
+        </div>`
+      : `<div class="p-5 text-center text-sm text-muted">
+          <i data-lucide="calendar-off" class="w-6 h-6 mx-auto mb-2 opacity-60"></i>
+          <div>${currentSearch
+            ? `この日に該当する掲示はありません。ピル「全対象日の検索結果」で検索結果一覧へ戻れます。<kbd class="kbd-key">←</kbd><kbd class="kbd-key">→</kbd>・‹ › ボタンで前日・翌日も検索語のまま移動できます。`
+            : 'この日の掲示連絡はありません。<kbd class="kbd-key">←</kbd><kbd class="kbd-key">→</kbd>・‹ › ボタンで前日・翌日、‹ › の間の日付クリック（<kbd class="kbd-key">C</kbd> キー）でカレンダーを開いて好きな日へ移動できます。'}</div>
+        </div>`;
     refreshLucideIcons();
     return;
   }
 
-  container.innerHTML = filtered
-    .map((b) => titleRowHtml(b, String(b.id) === String(selectedId)))
-    .join('');
+  if (inSearch) {
+    // 対象日降順のグループ（見出し + 行）。行クリックでその対象日へジャンプする
+    const groups = [];
+    filtered.forEach((b) => {
+      const key = targetDayOf(b);
+      const last = groups[groups.length - 1];
+      if (last && last.key === key) last.items.push(b);
+      else groups.push({ key, items: [b] });
+    });
+    container.innerHTML = groups.map((g) => {
+      const sep = `<div class="bulletin-day-sep" aria-hidden="true">
+        <span class="flex items-center gap-1.5"><i data-lucide="calendar" class="w-3.5 h-3.5"></i> ${escapeHTML(dayShortLabel(g.key))}</span>
+        <span class="bulletin-day-sep-count">${g.items.length} 件</span>
+      </div>`;
+      return sep + g.items.map((b) => titleRowHtml(b, String(b.id) === String(selectedId), true)).join('');
+    }).join('');
+  } else {
+    container.innerHTML = filtered
+      .map((b) => titleRowHtml(b, String(b.id) === String(selectedId)))
+      .join('');
+  }
   refreshLucideIcons();
 }
 
@@ -762,7 +889,9 @@ function renderDetailPane(b) {
   if (!b) {
     pane.innerHTML = `<div class="p-6 text-center text-sm text-muted">
       <i data-lucide="inbox" class="w-7 h-7 mx-auto mb-2 opacity-60"></i>
-      <div>この日に掲示された連絡はありません。<kbd class="kbd-key">←</kbd><kbd class="kbd-key">→</kbd>・‹ › ボタンで前日・翌日へ移動できます。日付（‹ › の間）をクリックするとカレンダーが開きます。</div>
+      <div>${currentSearch
+        ? `この日の検索該当はありません。左列ヘッダーのピルで全対象日の検索結果一覧へ戻れます。検索結果を選ぶと、その記事の存在する対象日へページが飛び、右ペインに全文が出ます。`
+        : 'この日に掲示された連絡はありません。<kbd class="kbd-key">←</kbd><kbd class="kbd-key">→</kbd>・‹ › ボタンで前日・翌日へ移動できます。日付（‹ › の間）をクリックするとカレンダーが開きます。'}</div>
     </div>`;
     refreshLucideIcons();
     return;
@@ -929,6 +1058,23 @@ function selectBulletin(id, dir = 0) {
   focusSelectedRow();
   refreshLucideIcons();
   loadComments(key);
+}
+
+/**
+ * 検索結果から記事の存在する対象日へジャンプ（‹ › の中心日をその日へ動かし、その記事を選択して右ペインに全文表示）
+ * 左列はジャンプ後、中心日の列表になる（検索語は維持され、その日の該当だけが表示される）。
+ * @param {string} id 掲示ID
+ */
+function jumpToBulletinDay(id) {
+  const item = findBulletin(id);
+  if (!item) return;
+  const day = targetDayOf(item);
+  const dir = Math.sign(dayDiff(currentDayDate, day)) || 0;
+  searchResultsView = false;
+  selectedId = String(id);  // 中心日をその日にすると filteredBulletins に含まれる（renderBulletinList が保持）
+  selectDay(day, dir);      // renderBulletinList() で左列・右ペインをその日に反映
+  markBulletinRead(String(id));
+  focusSelectedRow();
 }
 
 /** 選択タイトル行へフォーカスを引き継ぐ（↑/↓ 移動でキーボード操作を止めない） */
