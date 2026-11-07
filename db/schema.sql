@@ -78,9 +78,11 @@ ALTER TABLE posts DROP COLUMN IF EXISTS priority;
 -- 論理削除フラグは INTEGER (0/1) に統一 (DB スキーマ統一の完結)
 -- 旧 boolean 環境からの冪等マイグレーション。型統一済み環境では失敗し、ensureSchema は警告扱いとする
 -- boolean 型インデックス idx_posts_deleted が型変換を妨げるため、先に DROP → 型変換 → 再作成する
+-- ※ USING は integer 値を自己キャストで維持する。「true/false 以外は 0」だと毎回テーブルを書き換えて
+--    is_deleted=1 が 0 に巻き戻る（サーバ再起動で論理削除レコードが復活していた）ため、旧パターンは使わない
 DROP INDEX IF EXISTS idx_posts_deleted;
 ALTER TABLE posts ALTER COLUMN is_deleted DROP DEFAULT;
-ALTER TABLE posts ALTER COLUMN is_deleted TYPE integer USING (CASE WHEN is_deleted::text = 'true' THEN 1 ELSE 0 END);
+ALTER TABLE posts ALTER COLUMN is_deleted TYPE integer USING (CASE WHEN is_deleted::text = 'true' THEN 1 WHEN is_deleted::text = 'false' THEN 0 WHEN is_deleted::text = '1' THEN 1 WHEN is_deleted::text = '0' THEN 0 ELSE is_deleted::text::integer END);
 ALTER TABLE posts ALTER COLUMN is_deleted SET DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_posts_deleted ON posts(is_deleted);
 
