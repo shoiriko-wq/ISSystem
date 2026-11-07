@@ -510,6 +510,19 @@
   font-size: 1.02rem;
 }
 
+/* 検索中は中心日が列表表示に影響しないため、‹ ›・本日・日付クリック（カレンダー開閉）を止める。
+   寸法（2.4rem 高・5.4rem 幅）は固定のまま減光だけなので、検索語の入出力で ‹ › の位置は動かず「全日」表示も中心日と同じ枠に収まる。 */
+#view-bulletin #bulletin-day-prev:disabled,
+#view-bulletin #bulletin-day-next:disabled,
+#view-bulletin #bulletin-btn-today:disabled,
+#view-bulletin #bulletin-day-current.day-readout:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+#view-bulletin #bulletin-day-current.day-readout:disabled {
+  color: var(--text-muted);
+}
+
 #view-bulletin #bulletin-btn-today,
 #view-bulletin #bulletin-btn-create {
   height: 2.4rem;
@@ -795,7 +808,7 @@
   pointer-events: none;
 }
 
-/* 7.2b 全対象日検索（左列の検索結果一覧・該当ハイライト・対象日見出し・検索ピル・ミニカレンダー該当日）。
+/* 7.2b 全日の検索（左列の検索結果一覧・該当ハイライト・対象日見出し・ミニカレンダー該当日）。
    色は theme tokens のみ。該当ハイライトはアクセント系の淡背景＋濃いアクセントインク（コントラスト 4.5:1 以上）で
    mark の UA デフォルト（黄色）を上書きする。行内の対象日チップは本文インクより一段軽い text-muted を使う。 */
 .bulletin-hit {
@@ -829,41 +842,19 @@
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-/* 左列ヘッダーの検索ピル（全対象日の検索結果一覧 ⇔ 表示日の該当表示の切替） */
-.bulletin-search-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  min-height: 1.7rem;
-  padding: 0.15rem 0.55rem;
-  border-radius: 9999px;
-  font-size: 0.875rem;
-  font-weight: 700;
-  line-height: 1.3;
-  color: var(--text-accent-strong);
-  background-color: var(--accent-soft);
-  border: 1px solid var(--accent-border);
-  cursor: pointer;
-  transition: background-color var(--duration-fast), border-color var(--duration-fast);
-}
-.bulletin-search-pill:hover {
-  background-color: var(--accent-inset);
-  border-color: var(--accent-primary);
-}
-.bulletin-search-pill:focus-visible {
-  outline: 2px solid var(--accent-primary);
-  outline-offset: 2px;
-}
-/* 表示・非表示の切替（Tailwind の .hidden と同じ役割。2クラス以上の specificity で上書きを保証） */
-.bulletin-search-pill.hidden {
-  display: none;
-}
 /* ミニカレンダーの検索該当日（打点は既存の ●、枠だけアクセント色。レイアウトは動かさない） */
 .mini-cal-hit {
   border-color: var(--accent-border);
   background-color: var(--accent-inset);
 }
 .mini-cal-selected.mini-cal-hit { border-color: var(--accent-primary); }
+
+/* 検索中は中心日が列表表示に影響しないので、ミニカレンダーの日付選択（中心日ジャンプ）を止める（寸法は固定のまま減光） */
+.mini-cal-day:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 
 /* 右ペインヘッダー（読者向けに不要な投稿日時・掲示期間の表記は置かない。全文開きボタンは「詳細」。削除は詳細モーダル内のみで TITLE 行・ペインに削除ボタンは置かない） */
 .pane-header {
