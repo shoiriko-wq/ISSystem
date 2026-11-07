@@ -13,6 +13,7 @@ import routes from './routes/index.js';
 import caRoutes from './routes/ca.routes.js';
 import { errorHandler, notFoundHandler } from './middlewares/error.middleware.js';
 import { parseCorsOrigin } from './utils/origins.js';
+import config from '../config/default.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -28,9 +29,10 @@ app.use(
 );
 
 // 2. CORS (Cross-Origin Resource Sharing) 設定
+// 2026/11/7 監査対策: wildcard ('*') を既定にせず、明示 Origin リストのみ許可する。
 app.use(
   cors({
-    origin: parseCorsOrigin(process.env.CLIENT_ORIGIN, true), // カンマ区切りOriginリスト (HTTPS) にも対応
+    origin: parseCorsOrigin(process.env.CORS_ORIGIN || process.env.CLIENT_ORIGIN, config.cors.allowedOrigins),
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     credentials: true,

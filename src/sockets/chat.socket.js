@@ -5,6 +5,7 @@
 
 import chatService from '../services/chat.service.js';
 import chatModel from '../models/chat.model.js';
+import { sanitizeSocketString } from '../middlewares/socket.middleware.js';
 
 /**
  * チャンネルメンバー全員（送信者除く）へトースト通知を送信
@@ -64,6 +65,20 @@ export async function autoJoinUserChannelRooms(io, socket, user) {
 export function registerChatSocketHandlers(io, socket) {
   const user = socket.user;
 
+  /**
+   * チャンネルアクセス権検証（PUBLIC はメンバーのみ送信可、非PUBLIC はメンバーのみ）
+   * @param {string} channelId
+   * @param {boolean} [requireMembership=true] メンバーシップを要求
+   * @returns {Promise<boolean>}
+   */
+  async function canAccessChannel(channelId, requireMembership = true) {
+    const channel = await chatModel.findChannelById(channelId);
+    if (!channel) return false;
+    if (!requireMembership && channel.type === 'PUBLIC') return true;
+    const members = await chatModel.getMembers(channelId);
+    return members.some((m) => String(m.user_id) === String(user.id));
+  }
+
   // ★ チャット画面以外でも新着通知が届くよう、参加中チャンネルルームを自動参加
   autoJoinUserChannelRooms(io, socket, user);
 
@@ -72,7 +87,7 @@ export function registerChatSocketHandlers(io, socket) {
    * event: 'chat:join_channel'
    */
   socket.on('chat:join_channel', async (data) => {
-    const channelId = data && typeof data === 'object' ? data.channelId : data;
+    const channelId = sanitizeSocketString(data && typeof data === 'object' ? data.channelId : data, 64);
     if (!channelId) return;
 
     try {
@@ -98,7 +113,8 @@ export function registerChatSocketHandlers(io, socket) {
    * チャットチャンネルルームからの離脱
    * event: 'chat:leave_channel'
    */
-  socket.on('chat:leave_channel', (channelId) => {
+  socket.on('chat:leave_channel', (rawChannelId) => {
+    const channelId = sanitizeSocketString(rawChannelId, 64);
     if (!channelId) return;
     const roomName = `chat:channel:${channelId}`;
     socket.leave(roomName);
@@ -111,10 +127,19 @@ export function registerChatSocketHandlers(io, socket) {
    */
   socket.on('chat:send_message', async (data, callback) => {
     try {
-      const { channelId, messageText, attachments } = data;
+      const channelId = sanitizeSocketString(data?.channelId, 64);
+      const messageText = typeof data?.messageText === 'string' ? data.messageText.trim() : '';
+      const attachments = Array.isArray(data?.attachments) ? data.attachments : undefined;
 
       if (!channelId || !messageText) {
         if (callback) callback({ success: false, error: 'チャンネルIDと本文は必須です。' });
+        return;
+      }
+
+      // ★ ロール/メンバーシップ gate: 非メンバーのチャンネルへの送信は拒否
+      if (!(await canAccessChannel(channelId))) {
+        console.warn(`[Socket.io Chat Security] ${user.name} (${user.id}) が非メンバーチャンネル ${channelId} へ送信を試みました`);
+        if (callback) callback({ success: false, error: 'このチャンネルへの送信権限がありません。' });
         return;
       }
 
@@ -168,10 +193,12 @@ export function registerChatSocketHandlers(io, socket) {
    * タイピング中（入力中…）ステータスのブロードキャスト
    * event: 'chat:typing_start'
    */
-  socket.on('chat:typing_start', (channelId) => {
-    if (!channelId) return;
-    socket.to(`chat:channel:${channelId}`).emit('chat:user_typing', {
-      channelId,
+  socket.on('chat:typing_start', async (channelId) => {
+    const safeChannelId = sanitizeSocketString(channelId, 64);
+    if (!safeChannelId) return;
+    if (!(await canAccessChannel(safeChannelId))) return;
+    socket.to(`chat:channel:${safeChannelId}`).emit('chat:user_typing', {
+      channelId: safeChannelId,
       user: { id: user.id, name: user.name },
       isTyping: true,
     });
@@ -181,10 +208,12 @@ export function registerChatSocketHandlers(io, socket) {
    * タイピング終了ステータスのブロードキャスト
    * event: 'chat:typing_stop'
    */
-  socket.on('chat:typing_stop', (channelId) => {
-    if (!channelId) return;
-    socket.to(`chat:channel:${channelId}`).emit('chat:user_typing', {
-      channelId,
+  socket.on('chat:typing_stop', async (channelId) => {
+    const safeChannelId = sanitizeSocketString(channelId, 64);
+    if (!safeChannelId) return;
+    if (!(await canAccessChannel(safeChannelId))) return;
+    socket.to(`chat:channel:${safeChannelId}`).emit('chat:user_typing', {
+      channelId: safeChannelId,
       user: { id: user.id, name: user.name },
       isTyping: false,
     });
@@ -196,8 +225,15 @@ export function registerChatSocketHandlers(io, socket) {
    */
   socket.on('chat:mark_as_read', async (data) => {
     try {
-      const { channelId, lastReadMessageId } = data;
+      const channelId = sanitizeSocketString(data?.channelId, 64);
+      const lastReadMessageId = sanitizeSocketString(data?.lastReadMessageId, 64);
       if (!channelId) return;
+
+      // 非メンバーのチャンネルの既読記録は書かせない
+      if (!(await canAccessChannel(channelId))) {
+        console.warn(`[Socket.io Chat Security] ${user.name} (${user.id}) が非メンバーチャンネル ${channelId} の既読更新を試みました`);
+        return;
+      }
 
       const result = await chatService.updateLastRead(channelId, user.id, lastReadMessageId);
 
@@ -227,7 +263,7 @@ export function registerChatSocketHandlers(io, socket) {
    */
   socket.on('chat:cancel_message', async (data, callback) => {
     try {
-      const messageId = data.messageId || data.id;
+      const messageId = sanitizeSocketString(data?.messageId || data?.id, 64);
       if (!messageId) {
         if (callback) callback({ success: false, message: 'メッセージIDが必要です。' });
         return;

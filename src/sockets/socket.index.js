@@ -3,61 +3,42 @@
  * WebSocket認証ミドルウェア・接続イベントルーティング管理
  */
 
-import jwt from 'jsonwebtoken';
-import config from '../../config/default.js';
 import registerChatSocketHandlers from './chat.socket.js';
 import registerSeatingSocketHandlers from './seating.socket.js';
 import registerLockSocketHandlers from './lock.socket.js';
 import { onlineUserIds } from '../utils/presence.js';
+import {
+  isSocketOriginAllowed,
+  verifySocketToken,
+} from '../middlewares/socket.middleware.js';
 
 /**
  * Socket.io サーバーの初期化およびハンドラー登録
  * @param {import('socket.io').Server} io
  */
 export function initializeSockets(io) {
-  // Socket.io 接続認証ミドルウェア (JWT検証)
+  // Socket.io 接続認証ミドルウェア（Origin 許可リスト + JWT 厳格検証）
+  // 2026/11/7 監査 Critical #1 対策: demo トークン無条件通過と dev フォールバックを廃止。
+  // 検証失敗は NODE_ENV に関係なく常に接続を拒否する。
   io.use((socket, next) => {
+    const origin = socket.handshake.headers?.origin;
+    if (!isSocketOriginAllowed(origin)) {
+      console.warn(`[Socket.io Auth] 拒否: 許可されていない Origin (${origin})`);
+      return next(new Error('Authentication error: Origin not allowed'));
+    }
+
     const rawToken = socket.handshake.auth?.token || socket.handshake.headers?.authorization;
 
-    if (!rawToken) {
-      return next(new Error('Authentication error: Token missing'));
+    let user;
+    try {
+      user = verifySocketToken(rawToken);
+    } catch (err) {
+      console.warn(`[Socket.io Auth] 拒否: ${err.message} (Origin: ${origin || 'none'})`);
+      return next(new Error(`Authentication error: ${err.message}`));
     }
 
-    // "Bearer <token>" の形式にも対応できるよう抽出
-    const token = rawToken.startsWith('Bearer ') ? rawToken.split(' ')[1] : rawToken;
-
-    // ★ 1. デモモード用トークンの個別許容
-    if (token && token.startsWith('demo-jwt-token-')) {
-      socket.user = {
-        id: 'demo-teacher',
-        name: 'デモ教員',
-        role: 'TEACHER'
-      };
-      return next();
-    }
-
-    // ★ 2. 通常の JWT 検証
-    const jwtSecret = (config.auth && config.auth.jwtSecret) || process.env.JWT_SECRET || 'dev-secret-key-change-in-production';
-
-    jwt.verify(token, jwtSecret, (err, decoded) => {
-      if (err) {
-        // 開発環境 (NODE_ENV !== 'production') の場合はエラーで弾かず柔軟にフォールバック
-        if (process.env.NODE_ENV !== 'production') {
-          console.warn(`[Socket.io Auth] トークン検証警告 (${err.message}) - 開発環境用フォールバックユーザーで接続を許可します。`);
-          socket.user = {
-            id: 'dev-user',
-            name: '開発教員',
-            role: 'TEACHER'
-          };
-          return next();
-        }
-
-        return next(new Error('Authentication error: Invalid token'));
-      }
-
-      socket.user = decoded;
-      next();
-    });
+    socket.user = user;
+    next();
   });
 
   // クライアント接続時のイベントリスナー
@@ -69,7 +50,7 @@ export function initializeSockets(io) {
       socket.join(`user:${userId}`);
       io.emit('user:presence', { userId, isOnline: true });
     }
-    console.log(`[Socket.io] クライアント接続: User ID ${userId} (${socket.user.name || '教員'}) - Socket ID: ${socket.id}`);
+    console.log(`[Socket.io] クライアント接続: User ID ${userId} (${socket.user.name} / ${socket.user.role}) - Socket ID: ${socket.id}`);
 
     // 各ドメインごとのリアルタイムハンドラーをバインド
     registerChatSocketHandlers(io, socket);

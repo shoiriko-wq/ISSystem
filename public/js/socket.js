@@ -84,6 +84,16 @@ export const socketClient = {
       const banner = document.getElementById('connection-status-banner');
       if (banner) banner.classList.remove('hidden');
       if (typeof window.refreshLucideIcons === 'function') window.refreshLucideIcons();
+
+      // 2026/11/7 監査 Critical #1 対策: JWT 検証失敗（トークン失効・不正）は
+      // 何度再接続しても成功しないため、無限再接続を停止して再ログインを促す。
+      const authFailure = err && /Authentication error|Token missing|jwt|Origin not allowed/i.test(err.message || '');
+      if (authFailure) {
+        socket.io.reconnection(false);
+        if (typeof showToast === 'function') {
+          showToast('セッションが有効ではありません。再ログインしてください。', 'error');
+        }
+      }
     });
 
     socket.on('disconnect', (reason) => {

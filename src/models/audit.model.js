@@ -190,6 +190,43 @@ export const auditModel = {
   },
 
   /**
+   * アクティブな編集ロックの取得 (無操作タイムアウト内のロックのみ返す)
+   * ※ 2026/11/7: 旧来このメソッドは export だけが存在し実体がないため、
+   *    checkEditingLock('seating') と socket lock ハンドラーは毎回 TypeError になっていた。
+   * @param {string} resourceType
+   * @param {string} resourceId
+   * @param {number} timeoutSeconds - 無操作タイムアウト閾値 (既定 180秒)
+   * @returns {Promise<object|null>} editing_locks 行 (user_id / user_name / acquired_at / last_accessed)
+   */
+  async getActiveEditingLock(resourceType, resourceId, timeoutSeconds = 180) {
+    const res = await query(
+      `SELECT resource_type, resource_id, user_id, user_name, acquired_at, last_accessed, created_at, updated_at
+       FROM editing_locks
+       WHERE resource_type = $1 AND resource_id = $2
+         AND EXTRACT(EPOCH FROM (now() - last_accessed)) <= $3
+       LIMIT 1`,
+      [resourceType, resourceId, timeoutSeconds]
+    );
+    return res.rows[0] || null;
+  },
+
+  /**
+   * ロックの最終アクセス更新 (自ユーザーのロック延長ハートビート)
+   * @param {string} resourceType
+   * @param {string} resourceId
+   * @param {string} userId
+   */
+  async refreshEditingLock(resourceType, resourceId, userId) {
+    const res = await query(
+      `UPDATE editing_locks SET last_accessed = now(), updated_at = now()
+       WHERE resource_type = $1 AND resource_id = $2 AND user_id = $3
+       RETURNING *`,
+      [resourceType, resourceId, userId]
+    );
+    return res.rows[0] || null;
+  },
+
+  /**
    * ロックの最終アクセス更新 (自ユーザーのロック延長)
    */
   async getExpiredEditingLocks(timeoutSeconds = 180) {

@@ -13,7 +13,7 @@ import { initializeDatabase, closeDatabase } from '../config/database.js';
 import { initializeSockets } from './sockets/socket.index.js';
 import { initializeCronJobs } from './utils/cron.jobs.js';
 import { loadTlsOptions, getCaInfo } from './services/ca.service.js';
-import { parseCorsOrigin } from './utils/origins.js';
+import { isSocketOriginAllowed } from './middlewares/socket.middleware.js';
 
 const SSL_PORT = config.ssl.httpsPort; // HTTPS / WSS（アプリ本体）
 const SSL_HOST = config.ssl.host; // 安全サーバーの監視ホスト
@@ -55,9 +55,17 @@ async function startServer() {
       const secureServer = https.createServer(tls, app);
 
       // 4. Socket.io WebSocket サーバー（wss）の初期化
+      // 2026/11/7 監査 Critical #1 対策: cors origin を '*' 既定にしない。
+      // 接続ハンドシェイクの Origin は socket.middleware.js の許可リストで照合する（単一実装）。
       const io = new SocketIOServer(secureServer, {
         cors: {
-          origin: parseCorsOrigin(process.env.CLIENT_ORIGIN, '*'),
+          origin: (origin, callback) => {
+            if (isSocketOriginAllowed(origin)) callback(null, true);
+            else {
+              console.warn(`[Socket.io CORS] 拒否: 許可されていない Origin (${origin})`);
+              callback(new Error('CORS origin not allowed'));
+            }
+          },
           methods: ['GET', 'POST'],
           credentials: true,
         },

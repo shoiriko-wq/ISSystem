@@ -14,6 +14,7 @@
     "db:seed": "node scripts/seed.js",
     "db:create": "node scripts/create-db.js",
     "api:check": "NODE_EXTRA_CA_CERTS=$(pwd)/certs/issystem-ca.crt node scripts/api-smoke-test.js",
+    "test:socket-auth": "NODE_EXTRA_CA_CERTS=$(pwd)/certs/issystem-ca.crt node --env-file=.env scripts/test-socket-auth.mjs",
     "test:ui:modal": "NODE_EXTRA_CA_CERTS=$(pwd)/certs/issystem-ca.crt node scripts/test-modal-close.mjs",
     "test:ui:frames": "NODE_EXTRA_CA_CERTS=$(pwd)/certs/issystem-ca.crt node scripts/test-frame-rules.mjs",
     "test:ui:scan": "NODE_EXTRA_CA_CERTS=$(pwd)/certs/issystem-ca.crt node scripts/scan-frames.mjs",
