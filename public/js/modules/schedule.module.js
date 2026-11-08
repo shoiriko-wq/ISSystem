@@ -36,6 +36,9 @@ const CAT_PALETTE = {
 const TITLE_MAX = 30; // カレンダー枠内に収める行事名の表示上限
 const NAME_MAX = 12;  // カテゴリ名の上限
 const VIEW_MODE_KEY = 'isschedule_view_mode';
+// カテゴリ選択パネルの開閉状態（タイトルバーの「カテゴリ選択」ボタンで切替、永続化）
+const CAT_PANEL_KEY = 'isschedule_cat_panel';
+let catPanelOpen = localStorage.getItem(CAT_PANEL_KEY) === 'open';
 
 let categoriesCache = [];
 let selectedCategoryIds = new Set();
@@ -207,14 +210,30 @@ function eventChipHtml(ev, extra = 'w-full') {
   </button>`;
 }
 
-/** 表示モードボタンの活性表示 */
+/** 表示モードタブ（カレンダー／1日一覧）の活性表示。role=tablist の aria-selected も同期 */
 function paintModeButtons() {
   const cal = document.getElementById('sched-mode-calendar');
   const lst = document.getElementById('sched-mode-list');
   if (!cal || !lst) return;
-  const base = 'sched-mode-btn px-2.5 py-1.5 text-xs font-semibold flex items-center gap-1';
+  const base = 'sched-mode-btn px-3 py-2 text-xs font-bold flex items-center gap-1.5';
   cal.className = `${base} ${viewMode === 'calendar' ? 'bg-accent-soft text-accent-strong' : 'text-soft hover-surface-soft'}`;
   lst.className = `${base} border-l border-main ${viewMode === 'list' ? 'bg-accent-soft text-accent-strong' : 'text-soft hover-surface-soft'}`;
+  cal.setAttribute('aria-selected', String(viewMode === 'calendar'));
+  lst.setAttribute('aria-selected', String(viewMode === 'list'));
+}
+
+/** カテゴリ選択トグルの状態表示（aria-expanded と活性色。クラスは btn-secondary を保つ） */
+function paintCatToggle() {
+  const btn = document.getElementById('sched-cat-toggle');
+  if (!btn) return;
+  btn.setAttribute('aria-expanded', catPanelOpen ? 'true' : 'false');
+}
+
+/** カテゴリ選択パネルの開閉（状態は localStorage に永続化し、タブ復帰後も同じ開閉状態） */
+function toggleCatPanel() {
+  catPanelOpen = !catPanelOpen;
+  localStorage.setItem(CAT_PANEL_KEY, catPanelOpen ? 'open' : 'closed');
+  renderScheduleView();
 }
 
 /** メイン描画 */
@@ -228,57 +247,62 @@ function renderScheduleView() {
   const list = filteredSchedules().filter((ev) => String(ev.date).startsWith(monthPrefix));
 
   const kyomuBtn = canManageCategories()
-    ? `<button type="button" id="sched-cat-admin-btn" class="btn-secondary px-2.5 py-1.5 text-xs rounded-lg flex items-center gap-1" title="部署カテゴリの追加・改名・削除（教務部のみ）">
-         <i data-lucide="tags" class="w-3.5 h-3.5"></i> 部署カテゴリ管理
+    ? `<button type="button" id="sched-cat-admin-btn" class="btn-secondary shrink-0 flex items-center gap-1.5" title="部署カテゴリの追加・改名・削除（教務部のみ）">
+         <i data-lucide="tags" class="w-4 h-4"></i> 部署カテゴリ管理
        </button>`
     : '';
 
-  const frameTitle = viewMode === 'calendar' ? 'カレンダー' : '1日一覧';
-
   container.innerHTML = `
-    <!-- 設定枠：表示モード・部署フィルタ・行事追加（カレンダー枠とは分離して 2px 実枠で囲む） -->
-    <div id="sched-settings-frame" class="card p-3 space-y-2" role="group" aria-label="表示設定">
-      <div class="flex flex-wrap items-center gap-2">
-        <span class="flex items-center gap-1.5 text-xs font-bold text-main shrink-0">
-          <i data-lucide="filter" class="w-3.5 h-3.5 text-accent"></i> 表示設定
-        </span>
-        <div class="flex rounded-lg border border-main overflow-hidden bg-surface" role="group" aria-label="表示モード">
-          <button type="button" id="sched-mode-calendar" data-mode="calendar" class="sched-mode-btn px-2.5 py-1.5 text-xs font-semibold flex items-center gap-1">
-            <i data-lucide="calendar" class="w-3.5 h-3.5"></i> カレンダー表示
-          </button>
-          <button type="button" id="sched-mode-list" data-mode="list" class="sched-mode-btn px-2.5 py-1.5 text-xs font-semibold flex items-center gap-1 border-l border-main">
-            <i data-lucide="rows-3" class="w-3.5 h-3.5"></i> 1日一覧表示
-          </button>
-        </div>
-        <div class="flex-1"></div>
-        <button type="button" id="sched-add-btn" class="btn-primary px-2.5 py-1.5 text-xs rounded-lg flex items-center gap-1">
-          <i data-lucide="plus" class="w-3.5 h-3.5"></i> 行事を追加
+    <!-- ★ タイトルバー（職員掲示板・施設物品予約と同じデザイン：面色＋実枠、左にタイトル、右にコントロール） -->
+    <div id="sched-title-bar" class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-surface-strong p-3 rounded-xl border border-divider">
+      <h2 class="text-base font-bold text-main flex items-center gap-2 shrink-0">
+        <i data-lucide="calendar-check" class="w-4 h-4 text-accent"></i> スケジュール
+      </h2>
+      <div class="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
+        <!-- ★ カテゴリ選択トグル（カテゴリチップのパネルを開閉）。選択状態は固定幅の読み出し部に出す
+             → ボタン幅が変わらないのでタイトルバー上の位置が動かず、パネル内のチップ位置も動かない -->
+        <button type="button" id="sched-cat-toggle" class="btn-secondary shrink-0 flex items-center gap-1.5"
+                aria-expanded="${catPanelOpen ? 'true' : 'false'}" aria-controls="sched-cat-panel"
+                title="行事カテゴリ（部署）の選択パネルを開閉">
+          <i data-lucide="filter" class="w-4 h-4 shrink-0"></i>
+          <span>カテゴリ選択</span>
+          <span id="sched-cat-status" class="sched-cat-status text-accent-strong"></span>
+        </button>
+        <button type="button" id="sched-add-btn" class="btn-primary font-bold flex items-center gap-1.5 shrink-0">
+          <i data-lucide="plus" class="w-4 h-4"></i> 行事を追加
         </button>
         ${kyomuBtn}
       </div>
-      <div id="sched-filter-chips" class="flex flex-wrap items-center gap-1.5"></div>
-      <div id="sched-summary" class="text-[11px] text-muted"></div>
     </div>
-    <!-- カレンダー枠：年月ナビ（‹ [年月] ›）+ 日グリッド / 1日一覧 -->
-    <div id="sched-calendar-frame" class="card p-3" role="group" aria-label="スケジュールカレンダー">
-      <div class="flex items-center gap-1.5 text-xs font-bold text-main mb-2">
-        <i data-lucide="calendar" class="w-3.5 h-3.5 text-accent"></i> ${frameTitle}
+
+    <!-- ★ カテゴリ選択パネル（トグルで表示/非表示。開閉でカレンダー枠は上下するが、
+         パネル内で「全選択に戻す」の出現・消失によるチップ位置の変化は起きない） -->
+    <div id="sched-cat-panel" class="bg-surface-strong border border-divider rounded-xl p-3${catPanelOpen ? '' : ' hidden'}"
+         role="group" aria-label="行事カテゴリ選択">
+      <div id="sched-filter-chips"></div>
+    </div>
+
+    <!-- ★ カレンダー枠：上部タブ（カレンダー／1日一覧）で表示モードを切り替える。
+         年月ナビ（‹ [年月] ›）は表示部（7列グリッド）の中心直上、タブの下に出る -->
+    <div id="sched-calendar-frame" class="card p-3" role="group" aria-label="スケジュール表示">
+      <div id="sched-mode-tabs" class="flex rounded-lg border border-main overflow-hidden bg-surface mb-3" role="tablist" aria-label="表示モード">
+        <button type="button" id="sched-mode-calendar" data-mode="calendar" role="tab" aria-selected="true"
+                aria-controls="sched-view-area" class="sched-mode-btn px-3 py-2 text-xs font-bold flex items-center gap-1.5">
+          <i data-lucide="calendar" class="w-3.5 h-3.5"></i> カレンダー
+        </button>
+        <button type="button" id="sched-mode-list" data-mode="list" role="tab" aria-selected="false"
+                aria-controls="sched-view-area" class="sched-mode-btn px-3 py-2 text-xs font-bold flex items-center gap-1.5 border-l border-main">
+          <i data-lucide="rows-3" class="w-3.5 h-3.5"></i> 1日一覧
+        </button>
       </div>
-      <div id="sched-view-area"></div>
+      <div id="sched-view-area" role="tabpanel" aria-labelledby="sched-mode-calendar"></div>
     </div>
   `;
 
-  renderFilterChips();
+  renderFilterChips(list.length);
 
   if (viewMode === 'calendar') renderCalendarView(y, m, list);
   else renderListView(y, m, list);
-
-  const sel = [...selectedCategoryIds].map((id) => (categoryById(id) || { name: '?' }).name);
-  document.getElementById('sched-summary').textContent = isAllSelected()
-    ? `すべての部署（${categoriesCache.length}種）を選択中 — ${list.length}件の行事を表示`
-    : sel.length === 0
-      ? `すべての部署が非選択 — ${list.length}件（行事は表示されません）`
-      : `選択 ${sel.length} / ${categoriesCache.length}部署（${list.length}件）: ${sel.join(' / ')} のいずれかを含む行事を表示`;
 
   bindHeaderEvents();
   refreshLucideIcons();
@@ -301,8 +325,14 @@ function categoryChipHtml(cat, active) {
   </button>`;
 }
 
-/** カテゴリ（部署）複数選択チップ（「すべて」項目は廃止し、全選択をデフォルトとする） */
-function renderFilterChips() {
+/** カテゴリ（部署）複数選択チップ（「すべて」項目は廃止し、全選択をデフォルトとする）
+ *  ★「全選択に戻す」は常設ボタンとして描く（全選択中なら visibility:hidden）。
+ *    ボタンの出現・消失でレイアウトが変わらないよう、サマリー行は固定高さ h-8（2rem）の
+ *    1行（truncate、折返しなし）とし、チップ行はその直下に固定位置で並ぶ。
+ *    → チップの位置は選択状態・ボタン表示によって動かず、Tab も素通りする（aria-hidden）。
+ * @param {number} shownCount - 当月で表示中の行事件数
+ */
+function renderFilterChips(shownCount = 0) {
   const holder = document.getElementById('sched-filter-chips');
   if (!holder) return;
 
@@ -311,35 +341,38 @@ function renderFilterChips() {
   const allSelected = isAllSelected();
 
   const summary = allSelected
-    ? `<span class="font-bold text-accent-strong">全選択中（${total}部署）</span><span class="text-muted">・すべての行事を表示</span>`
+    ? `<span class="font-bold text-accent-strong">全選択中（${total}部署）</span><span class="text-muted">・すべての行事を表示（${shownCount}件）</span>`
     : selCount === 0
       ? `<span class="font-bold text-danger-strong">すべて非選択</span><span class="text-muted">・${total}部署中 0 選択（行事は表示されません）</span>`
-      : `<span class="font-bold text-main">選択 ${selCount} / ${total}</span><span class="text-muted">・選択部署のいずれかを含む行事のみ表示</span>`;
+      : `<span class="font-bold text-main">選択 ${selCount} / ${total}</span><span class="text-muted">・選択部署のいずれかを含む行事のみ表示（${shownCount}件）</span>`;
 
-  const resetBtn = allSelected
-    ? ''
-    : `<button type="button" id="sched-select-all" class="btn-secondary px-2 py-1 text-[11px] rounded-lg flex items-center gap-1">
-         <i data-lucide="list-checks" class="w-3.5 h-3.5"></i> 全選択に戻す
-       </button>`;
+  // 常設ボタン。全選択中は layout を保ったまま visibility:hidden（位置が動かず、フォーカスも当たらない）
+  const resetBtn = `<button type="button" id="sched-select-all" class="btn-secondary shrink-0 px-2 py-1 text-[11px] rounded-lg flex items-center gap-1${allSelected ? ' invisible' : ''}"
+       ${allSelected ? 'aria-hidden="true" tabindex="-1"' : ''}>
+       <i data-lucide="list-checks" class="w-3.5 h-3.5"></i> 全選択に戻す
+     </button>`;
 
   const chips = categoriesCache.map((c) => categoryChipHtml(c, selectedCategoryIds.has(Number(c.id)))).join('');
-
   const chipsHtml = chips || '<span class="text-[11px] text-muted">部署カテゴリが登録されていません。</span>';
 
   holder.innerHTML = `
-    <div class="flex flex-wrap items-center gap-2">
-      <span class="inline-flex items-center gap-1.5 text-[11px]"><i data-lucide="filter" class="w-3.5 h-3.5 text-accent"></i>${summary}</span>
+    <div class="flex items-center gap-2 h-8">
+      <span id="sched-summary" class="inline-flex items-center gap-1.5 text-[11px] min-w-0 flex-1 truncate"><i data-lucide="filter" class="w-3.5 h-3.5 shrink-0 text-accent"></i>${summary}</span>
       ${resetBtn}
     </div>
     <div id="sched-cat-chip-row" class="flex flex-wrap gap-1.5 mt-1">${chipsHtml}</div>
   `;
+
+  // タイトルバーのトグルに選択状態を固定幅で表示（パネルが閉じていても「何を選択中か」が分かる）
+  const status = document.getElementById('sched-cat-status');
+  if (status) status.textContent = allSelected ? '全選択' : selCount === 0 ? '0選択' : `${selCount} / ${total}`;
 
   holder.querySelectorAll('.sched-cat-chip').forEach((btn) => {
     btn.addEventListener('click', () => {
       const id = Number(btn.dataset.catId);
       if (selectedCategoryIds.has(id)) selectedCategoryIds.delete(id);
       else selectedCategoryIds.add(id);
-      renderScheduleView();
+      loadSchedules();
     });
   });
 
@@ -347,7 +380,7 @@ function renderFilterChips() {
   if (reset) {
     reset.addEventListener('click', () => {
       selectedCategoryIds = new Set(categoriesCache.map((c) => Number(c.id)));
-      renderScheduleView();
+      loadSchedules();
     });
   }
 }
@@ -650,9 +683,13 @@ function setMode(mode) {
   viewMode = mode === 'list' ? 'list' : 'calendar';
   localStorage.setItem(VIEW_MODE_KEY, viewMode);
   renderScheduleView();
+  // ★ renderScheduleView がタブ行ごと作り替えるため、Enter/Space（click）後は focus が body へ落ちる。
+  //    活性タブへ復元して键盘操作（←/→ を続ける）できるようにする。マウスクリック後も同じ挙動
+  const active = document.getElementById(viewMode === 'list' ? 'sched-mode-list' : 'sched-mode-calendar');
+  if (active && document.activeElement !== active) active.focus({ preventScroll: true });
 }
 
-/** ヘッダ操作（月ナビ・表示モード・行事追加・カテゴリ管理）。各行の + は bindViewEvents 側
+/** ヘッダ操作（タイトルバー・表示モードタブ・月ナビ・行事追加・カテゴリ管理）。各行の + は bindViewEvents 側
  *  「今月」ボタンは撤廃（現在月へは年月选择メニューの「今月へ」で戻る） */
 function bindHeaderEvents() {
   const prev = document.getElementById('sched-prev-month');
@@ -661,6 +698,7 @@ function bindHeaderEvents() {
   const listBtn = document.getElementById('sched-mode-list');
   const addBtn = document.getElementById('sched-add-btn');
   const adminBtn = document.getElementById('sched-cat-admin-btn');
+  const toggle = document.getElementById('sched-cat-toggle');
 
   if (prev) prev.addEventListener('click', () => { currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1); loadSchedules(); });
   if (next) next.addEventListener('click', () => { currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1); loadSchedules(); });
@@ -668,8 +706,24 @@ function bindHeaderEvents() {
   if (listBtn) listBtn.addEventListener('click', () => setMode('list'));
   if (addBtn) addBtn.addEventListener('click', () => openScheduleForm(null));
   if (adminBtn) adminBtn.addEventListener('click', () => openCategoryAdmin());
+  if (toggle) toggle.addEventListener('click', () => toggleCatPanel());
+
+  // ★ 表示モードタブは tablist。←/→ でモード切替（renderScheduleView がボタンを作り替えるため、
+  //    切替後に active タブへフォーカスを戻す。フォーカスが外れると键盘操作が続けられない）
+  [calBtn, listBtn].forEach((btn, i) => {
+    if (!btn) return;
+    btn.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      const target = i === 0 ? 'list' : 'calendar';
+      setMode(target);
+      const active = document.getElementById(target === 'list' ? 'sched-mode-list' : 'sched-mode-calendar');
+      if (active) active.focus({ preventScroll: true });
+    });
+  });
 
   paintModeButtons();
+  paintCatToggle();
 }
 
 /** ビュー内クリック（行事名クリックで詳細モーダル、+nでその日を1日一覧表示、行の + でその日の予定を追加、月ナビ・年月メニュー） */

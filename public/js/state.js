@@ -19,9 +19,27 @@ export const state = {
   socketConnected: false,
   unreadCounts: {
     bulletin: 0,
+    // v3.1: ダッシュボード「本日の連絡」ヘッダーのバッヂ（対象日が本日かつ未読）
+    bulletinToday: 0,
     chat: 0
   }
 };
+
+/**
+ * 登録日を 'YYYY-MM-DD' (JST 暦日) に正規化する
+ * 'YYYY-MM-DD HH:MM:SS' (PostgreSQL の素朴 timestamp) は JST 壁時計として暦日を直接抽出する
+ * @param {string} raw created_at 由来の文字列
+ * @returns {string|null}
+ */
+export function normalizeRegisteredDay(raw) {
+  if (!raw) return null;
+  const s = String(raw);
+  const naive = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T]\d{2}:\d{2}/);
+  if (naive && !/[Zz]|[+-]\d{2}/.test(s)) return naive[1];
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return null;
+  return new Date(d.getTime() + 9 * 3600000).toISOString().split('T')[0];
+}
 
 // ステート変更リスナー群
 const stateListeners = new Set();
@@ -54,6 +72,11 @@ export function setUserSession(user, token) {
   state.authToken = token;
   
   if (user && token) {
+    // v3.1: 登録日を JST 暦日 ('YYYY-MM-DD') で保持（旧セッションに created_at が無い場合は制約なし＝全期間カウント）
+    const registeredAt = normalizeRegisteredDay(user.created_at);
+    if (registeredAt) {
+      state.currentUser.registeredAt = registeredAt;
+    }
     localStorage.setItem(APP_CONFIG.STORAGE_KEYS.USER_DATA, JSON.stringify(user));
     localStorage.setItem(APP_CONFIG.STORAGE_KEYS.AUTH_TOKEN, token);
     state.isKyomuMode = (user.role === 'KYOMU');

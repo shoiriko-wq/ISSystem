@@ -1,6 +1,6 @@
 /**
  * ISSystem 年休等・出張 欠席登録モジュール
- * ダッシュボードの「年休等 / 出張」人数表示・クリック詳細モーダル・手動記入フォーム
+ * ダッシュボードの区分別人数タイル（クリックで登録・確認モーダルを開く。記入フォームはモーダル内）
  *
  * 権限: 教務・管理職 (server の PRIVILEGED_RECORDING_ROLES) は全教員分を記入可
  *       一般教員は自分の分だけを記入可
@@ -83,8 +83,7 @@ export function initAbsenceModule() {
     }
   });
 
-  // ダッシュボードの記入ボタン（人数・登録件の表示は撤去済み。記入するボタンだけから登録モーダルを開く）
-  document.getElementById('dash-btn-absence')?.addEventListener('click', () => openAbsenceModal('ALL'));
+  // ダッシュボードの年休等・出張の区分別人数タイルのクリックで登録・確認モーダルを開く（記入ボタンは撤去済み）
 
   // ダッシュボードの区分別人数タイル → クリックでその区分の「本日の詳細リスト」を表示
   const bindAbsenceTile = (id, filterType) => {

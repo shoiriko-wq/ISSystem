@@ -30,6 +30,8 @@ describe('Auth API Endpoints (/api/auth)', () => {
     expect(res.body).toHaveProperty('success', true);
     expect(res.body.token).toBeTruthy();
     expect(res.body.user).toHaveProperty('staff_code', seededAdmin.staff_code);
+    // v3.1: ログイン応答に created_at（登録日）があること。フロントは 'YYYY-MM-DD' (JST) に正規化する
+    expect(String(res.body.user.created_at)).toMatch(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/);
     adminToken = res.body.token;
   });
 
@@ -41,6 +43,8 @@ describe('Auth API Endpoints (/api/auth)', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body.user).toHaveProperty('staff_code', seededAdmin.staff_code);
+    // v3.1: プロフィール応答にも created_at があること（旧セッションで created_at が無い場合、フロントは全期間カウント）
+    expect(String(res.body.user.created_at)).toMatch(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/);
   });
 
   // 3. 招待コード発行

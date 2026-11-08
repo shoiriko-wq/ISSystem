@@ -6,10 +6,32 @@
 import seatingModel from '../models/seating.model.js';
 import userModel from '../models/user.model.js';
 import auditModel from '../models/audit.model.js';
+import absenceModel from '../models/absence.model.js';
+import { onlineUserIds } from '../utils/presence.js';
 import { ApiError } from '../middlewares/error.middleware.js';
 
 // 排他編集ロックの自動解放タイムアウト（ミリ秒） - 3分
 const EDIT_LOCK_TIMEOUT_MS = 3 * 60 * 1000;
+// 排他編集ロックのタイムアウト（秒） - ミドルウェアと同一の 180秒
+const EDIT_LOCK_TIMEOUT_SEC = 180;
+
+/** 座席表マトリクスの既定ID（編集ロックのリソースIDにも使用） */
+const SEAT_MATRIX_ID = 'staff_room';
+
+/** JST の当日日付 (YYYY-MM-DD) を返す */
+function todayJST() {
+  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+}
+
+/** users.subjects (JSON文字列) を文字列配列へ正規化 */
+function parseSubjects(raw) {
+  try {
+    const parsed = JSON.parse(raw || '[]');
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
 
 export const seatingService = {
   /**
@@ -17,6 +39,158 @@ export const seatingService = {
    */
   async getLayouts() {
     return await seatingModel.listLayouts();
+  },
+
+  /**
+   * 座席表マトリクスの取得（rows/cols・席割当て＋オンライン状態・当日の出張/年休）
+   */
+  async getMatrix() {
+    const { matrix, seats } = await seatingModel.getSeatMatrix(SEAT_MATRIX_ID);
+
+    const absences = await absenceModel.listByDate(todayJST());
+    const absencesByUser = new Map();
+    for (const a of absences) {
+      if (!absencesByUser.has(a.user_id)) absencesByUser.set(a.user_id, []);
+      absencesByUser.get(a.user_id).push(a.record_type);
+    }
+
+    const mapped = seats.map((s) => ({
+      ...s,
+      subjects: parseSubjects(s.subjects),
+      is_online: onlineUserIds.has(s.user_id),
+      absences: absencesByUser.get(s.user_id) || [],
+    }));
+
+    const lock = await auditModel.getActiveEditingLock('seating', SEAT_MATRIX_ID, EDIT_LOCK_TIMEOUT_SEC);
+
+    return {
+      matrix: { id: SEAT_MATRIX_ID, name: matrix.name, rows: matrix.rows, cols: matrix.cols },
+      seats: mapped,
+      editingLock: lock,
+    };
+  },
+
+  /**
+   * 座席表マトリクスの保存（rows/cols と席割当てを一括更新）
+   * ※ 編集可能モード（自分のアクティブロック）でのみ保存できる
+   * @param {Object} data - { rows, cols, seats: [{ row, col, user_id }] }
+   * @param {Object} user - { id, name }
+   */
+  async saveMatrix(data, user) {
+    const rows = parseInt(data.rows, 10);
+    const cols = parseInt(data.cols, 10);
+
+    if (!Number.isInteger(rows) || !Number.isInteger(cols) || rows < 1 || cols < 1 || rows > 100 || cols > 100) {
+      throw new ApiError(400, '行列は 1〜100 の範囲で指定してください。');
+    }
+
+    const lock = await auditModel.getActiveEditingLock('seating', SEAT_MATRIX_ID, EDIT_LOCK_TIMEOUT_SEC);
+    if (!lock) {
+      throw new ApiError(409, '編集可能モードへ切り替えてから保存してください。');
+    }
+    if (lock.user_id !== user.id) {
+      throw new ApiError(
+        423,
+        `現在、${lock.user_name || '他の教員'} 先生が編集中のため保存できません。`
+      );
+    }
+
+    const seatsInput = Array.isArray(data.seats) ? data.seats : [];
+    const assignments = [];
+    const assignedUsers = new Set();
+
+    for (const s of seatsInput) {
+      const row = Number(s.row);
+      const col = Number(s.col);
+      const userId = s.user_id;
+
+      if (!userId) continue;
+      if (!Number.isInteger(row) || !Number.isInteger(col)) continue;
+      // 行列設定範囲外の席はマトリクスに存在しないため破棄
+      if (row < 1 || row > rows || col < 1 || col > cols) continue;
+
+      if (assignedUsers.has(userId)) {
+        throw new ApiError(400, '同じ教職員を複数の席に割り当てることはできません。');
+      }
+      assignedUsers.add(userId);
+      assignments.push({ row, col, user_id: userId });
+    }
+
+    const saved = await seatingModel.saveSeatMatrix(SEAT_MATRIX_ID, rows, cols, assignments);
+
+    // 編集モード維持（ロックのハートビートを更新）
+    await auditModel.refreshEditingLock('seating', SEAT_MATRIX_ID, user.id);
+
+    await auditModel.logAction({
+      userId: user.id,
+      userName: user.name,
+      action: 'SAVE_SEAT_MATRIX',
+      resourceType: 'SEAT_MATRIX',
+      resourceId: SEAT_MATRIX_ID,
+      changesJson: JSON.stringify({ rows, cols, seatCount: assignments.length }),
+    });
+
+    return {
+      message: '座席表を保存しました。',
+      rows: saved.rows,
+      cols: saved.cols,
+      seats: assignments,
+    };
+  },
+
+  /**
+   * 編集可能モードへの切り替え（マトリクスの排他ロック取得）
+   * @param {Object} user - { id, name }
+   */
+  async acquireMatrixLock(user) {
+    const current = await auditModel.getActiveEditingLock('seating', SEAT_MATRIX_ID, EDIT_LOCK_TIMEOUT_SEC);
+
+    if (current && current.user_id !== user.id) {
+      throw new ApiError(
+        423,
+        `現在、${current.user_name || '他の教員'} 先生が編集中のため、編集可能モードへ切り替えられません。`
+      );
+    }
+
+    const lock = await auditModel.acquireEditingLock(
+      'seating',
+      SEAT_MATRIX_ID,
+      user.id,
+      user.name,
+      EDIT_LOCK_TIMEOUT_SEC
+    );
+
+    await auditModel.logAction({
+      userId: user.id,
+      userName: user.name,
+      action: 'ACQUIRE_SEAT_MATRIX_LOCK',
+      resourceType: 'SEAT_MATRIX',
+      resourceId: SEAT_MATRIX_ID,
+    });
+
+    return lock;
+  },
+
+  /**
+   * 編集ロックモードへの切り替え（マトリクスの排他ロック解放）
+   * @param {Object} user - { id, name }
+   */
+  async releaseMatrixLock(user) {
+    const current = await auditModel.getActiveEditingLock('seating', SEAT_MATRIX_ID, EDIT_LOCK_TIMEOUT_SEC);
+
+    if (current && current.user_id === user.id) {
+      await auditModel.releaseEditingLock('seating', SEAT_MATRIX_ID);
+    }
+
+    await auditModel.logAction({
+      userId: user.id,
+      userName: user.name,
+      action: 'RELEASE_SEAT_MATRIX_LOCK',
+      resourceType: 'SEAT_MATRIX',
+      resourceId: SEAT_MATRIX_ID,
+    });
+
+    return { success: true };
   },
 
   /**

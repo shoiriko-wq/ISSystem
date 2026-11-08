@@ -55,6 +55,10 @@ function mapPost(row) {
     // 投稿者ID (削除権限の判定に使う。SQL の alias は小文字化されるため両形を確保)
     authorId: row.authorId || row.authorid || row.author_id,
     author_id: row.author_id || row.authorId || row.authorid,
+    // 既読・承認ステータス (PostgreSQL は alias ackStatus を小文字化して返すため camel/snake を統一)
+    ackStatus: row.ackStatus || row.ackstatus || row.ack_status || 'UNREAD',
+    ackstatus: row.ackstatus || row.ackStatus || row.ack_status || 'UNREAD',
+    ack_status: row.ack_status || row.ackstatus || row.ackStatus || 'UNREAD',
     postedAt,
     posted_at: postedAt,
     updatedAt,

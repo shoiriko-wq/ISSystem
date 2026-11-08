@@ -262,55 +262,68 @@
     top: 0;
     left: 0;
     height: 100%;
-    width: 3.6rem !important;
+    /* 収納幅（rem 基準 17.5px）= sidebar枠(左2+右3=5) + sidebar余白(左0.2rem=3.5+右3.5=7)
+       + nav余白(左0.35rem=6.125+右0.5rem=8.75=14.875) + nav枠(3) + 正方形タイル(2.25rem=39.375)
+       = 67.25px（nav のコンテンツ幅 = 39.375 = タイル幅なので行は 100% で縮まない） */
+    width: 67.25px !important;
     z-index: 30;
-    padding: 0.5rem 0.4rem !important;
+    padding: 0.5rem 0.2rem !important;
     box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+    /* アニメーションは横幅（真横スライド）だけ — 上下・斜め移動を起こさない */
     transition: width 0.22s cubic-bezier(0.16, 1, 0.3, 1),
                 box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
-  /* 正方形タイルとホバーリングの余白を確保するためサイドバー内側の左右余白を縮める
-     （#app-body 付きで readability.css の padding !important に勝つ） */
-  #app-body .app-sidebar {
-    padding: 0.5rem 0.25rem !important;
-  }
-
-  /* ホバリングでメニューがスライドしてせり出し、文字も表示。
-     せり出しの発動はホバリング(:hover / is-hover)とフォーカス(is-focus)。
-     クリック(フォーカス)でせり出した後は、カーソルがサイドバーから
-     離れると収納する。:focus-within はフォーカスを保持するためマウス
-     離脱で解除できないので、JS が is-focus を管理し離脱時に解除する。 */
+  /* ホバリングせり出し幅: 3桁バッヂ（999）でも最長ラベル「職員チャット/ダッシュボード」
+     が省略されない幅。
+     sidebar枠(3) + sidebar余白(0.2rem+0.2rem=7) + nav枠(3) + nav余白(左0.35rem=6.125+
+     右0.5rem=8.75=14.875) + 行枠(2)+行余白(0.35rem-1px=5.125 + 0.1rem=1.75=6.875) +
+     行コンテンツ[ svg 26.25 + gap 0.55rem=9.625 + ラベルmin-width 9.1rem=159.25 +
+     ラベル右余白0.4rem=7 + 3桁バッヂ 46.4 = 248.5 ] = 285.25px */
   .app-sidebar:hover,
   .app-sidebar.is-hover,
   .app-sidebar.is-focus {
-    width: 12.5rem !important;
+    width: 16.3rem !important;
     box-shadow: 10px 0 28px -8px var(--shadow-color);
   }
 
-  /* せり出し前はアイコンのみ：ラベルをレイアウトから外してアイコンを中央に置く
-     （ラベルは opacity:0 で幅を残すと内容が幅を奪いアイコンが見切れるため） */
-  /* 選択を意味する背景（アクティブの塗り）は画面下バーと同じ正方形タイル。
-     横幅 3.6rem では項目が約28pxまで縮むため、固定 2.2rem 正方形（余白0・中央配置）で
-     正方形を保つ。せり出し時は全幅の行に戻す。
+  /* せり出しの発動はホバリング(:hover / is-hover)とフォーカス(is-focus)。
+     クリック(フォーカス)でせり出した後は、カーソルがサイドバーから
+     離れると収納する。:focus-within はフォーカスを保持するためマウス
+     離脱で解除できないので、JS が is-focus を管理し離脱時に解除する。 */
+
+  /* 収納・せり出しで位置を完全に揃える（左端・行高・上余白が両状態で同一）:
+     行の左端 = sidebar 左 0.25rem(4.375) + nav 左 0.35rem(6.125) = 10.5px（両状態同一）。
+     アイコン中心: 収納時 = 10.5 + 39.375/2 = 20.19px、せり出し時 = 10.5 + 枠1 + 0.35rem(6.125)
+     + 26.25/2 = 20.75px（差 0.56px・視覚的に看不出）。
+     行高は両状態 2.25rem で固定、上余白（sidebar/nav padding-top）も同一 → 縦移動なし。
+     アニメーションは横幅が伸びる真横スライドだけ。
      readability.css の .app-sidebar nav / .nav-item padding !important に勝つよう
      #app-body と nav を含む。 */
   #app-body .app-sidebar nav {
-    padding: 0.5rem 0.35rem !important;
+    /* 左 0.35rem(6.125)・右 0.5rem(8.75) — 右はホバリングのリング(3+2)と
+       スライド(3)がクリップ境界（nav の padding box 縁＝枠線を引いた位置）で
+       切られない余白（8.75 ≥ 8）。バッヂ右端は枠右端から 19px（R7 の 20px 内） */
+    padding: 0.5rem 0.5rem !important;
+    padding-inline-start: 0.35rem !important;
   }
 
+  /* nav の右余白 0.5rem(8.75px) はホバーリングのリング(3+2)とスライド(3)が
+     nav の overflow で切られないための余白（見切れ防止） */
   #app-body .app-sidebar nav .nav-item {
-    width: min(2.2rem, 100%);
-    height: auto !important;
-    aspect-ratio: 1;
-    padding: 0 !important;
-    margin-inline: auto;
+    width: min(2.25rem, 100%);
+    height: 2.25rem !important;
+    aspect-ratio: auto !important;
+    /* 収納時は余白 0.1rem（1.6px）の対称配置 — タイル（2.25rem）を中央に置く。
+       アイコン中心 = 行左+枠1+1.6+(タイル幅-1-1.6-1.6)/2 + アイコン幅/2 で
+       せり出し時（行左+枠1+0.35rem+アイコン幅/2）と 1px 以内に揃う。
+       右余白 0.1rem はバッヂ右端を枠右端から 20px 以内へ寄せるための値。 */
+    padding: 0 0.1rem !important;
+    margin-inline: 0 !important;
     align-items: center !important;
     justify-content: center !important;
     white-space: nowrap;
     transition: width 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-                height 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-                padding 0.22s cubic-bezier(0.16, 1, 0.3, 1),
                 background-color var(--duration-fast) var(--ease-spring),
                 border-color var(--duration-fast) var(--ease-spring),
                 box-shadow var(--duration-fast) var(--ease-spring),
@@ -322,43 +335,72 @@
     gap: 0;
   }
 
+  /* ラベルは収納時「幅0」でレイアウトに残す（display:none の切替は縦・斜め移动になる）。
+     せり出しで幅が伸びて真横に現れる。幅0はアイコンの幅を奪わないので見切れなし。 */
   .app-sidebar .nav-label {
-    display: none;
+    display: inline-block;
+    max-width: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-width 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+                opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+                margin-inline-end 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
-  /* ホバリング/フォーカスでせり出し：アイコン左寄せ + ラベルをレイアウトに戻す */
-  #app-body .app-sidebar:hover nav,
-  #app-body .app-sidebar.is-hover nav,
-  #app-body .app-sidebar.is-focus nav {
-    padding: 0.55rem 0.75rem !important;
-  }
-
-  /* 行の高さは収納時（2.2rem タイル）と揃える — せり出しで行が縦へズレると、
-     クリックの mousedown→mouseup の間に行が移動して目標行が外れ、
-     アイコンの初回クリックが吸収される（実測でタブが切り替わらない）。
-     高さを固定すると行の y が動かず、同じ位置のクリックがそのまま目標行に入る。 */
+  /* ホバリング/フォーカスでせり出し：左端・行高・上余白は収納時と同一（真横スライドのみ）。
+     行の高さを収納時と揃えると、せり出しで行が縦へズレず、クリックの mousedown→mouseup
+     の間に行が移動して目標行が外れる（初回クリックが吸収される）現象が起こらない。 */
   #app-body .app-sidebar:hover nav .nav-item,
   #app-body .app-sidebar.is-hover nav .nav-item,
   #app-body .app-sidebar.is-focus nav .nav-item {
     width: 100% !important;
-    height: 2.2rem !important;
+    height: 2.25rem !important;
     aspect-ratio: auto !important;
     margin-inline: 0 !important;
-    padding: 0 0.6rem !important;
+    padding: 0 0.1rem 0 0.35rem !important;
     align-items: center !important;
     justify-content: flex-start !important;
+  }
+
+  /* 枠が厚い行（Tailwind の border クラス＝定期考査行など枠 2px）は、せり出し時の
+     左余白を 1px 減らす。アイコン中心（行左+枠+余白+アイコン幅/2）が枠 1px の行と
+     収納時（=行左+タイル幅/2、枠幅に依らない）の両方で同一位置になるための補正。 */
+  #app-body .app-sidebar:hover nav .nav-item.border,
+  #app-body .app-sidebar.is-hover nav .nav-item.border,
+  #app-body .app-sidebar.is-focus nav .nav-item.border {
+    padding-inline-start: calc(0.35rem - 1px) !important;
   }
 
   .app-sidebar:hover .nav-item > div,
   .app-sidebar.is-hover .nav-item > div,
   .app-sidebar.is-focus .nav-item > div {
-    gap: 0.7rem;
+    gap: 0.55rem;
   }
 
+  /* ラベルは幅0から伸びて真横に現れる（3桁バッヂでもメニュー名が省略されない）。
+     ラベルの箱はテキスト幅より 2px 以上広い必要がある（箱==テキスト幅だと
+     text-overflow の「…」が描画され末尾2文字が消える）。最長のテキストは
+     職員チャット 153.1px（ダッシュボード 148.8px）なので min-width 9.1rem(159.25px)。
+     3桁バッヂ(46.4)を置く行でも min-width が shrink を止めて余白（room）を保つ。 */
   .app-sidebar:hover .nav-label,
   .app-sidebar.is-hover .nav-label,
   .app-sidebar.is-focus .nav-label {
-    display: inline;
+    flex: 0 1 auto;
+    min-width: 9.1rem;
+    max-width: 9.2rem;
+    opacity: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-inline-end: 0.4rem;
+  }
+
+  /* アイコン（svg）は行内の flex で縮めない。3桁バッヂ＋最長ラベルでは
+     ラベルの min-width が shrink を止めるため、shrink が svg に集中して幅0になり
+     アイコン中心がずれる（R10 失敗・アイコン消失）のを防ぐ。 */
+  #app-body .app-sidebar nav .nav-item svg {
+    flex: 0 0 auto;
+    flex-shrink: 0;
+    margin-inline-end: 0 !important;
   }
 
   /* せり出し前はカウントバッジ・バージョン表記を隠す */
@@ -376,21 +418,19 @@
   }
 
   /* せり出し時は未読バッヂを枠の右側へ揃える（列を揃える）。
-     ラベル群は残りを吸収して縮小し、長いラベルは … で省略する。
-     バッジは margin-left:auto で行の右端に固定（ラベル長で x が動かない）。 */
+     バッジは margin-left:auto で行の右端に固定（ラベル長で x が動かない）。
+     バッジ右端から sidebar 枠右端までの余白 = 行右余白 0.2rem(3.5) + 行枠 1 +
+     nav 右 0.5rem(8.75) + sidebar 右余白 0.2rem(3.5) + sidebar 枠 3 ≒ 16.75px（R7 の 20px 内）。 */
+  /* ホバリング中はコンテンツがラベル+バッヂで幅を取り、行内の flex 領域を
+     ラベルが受け取る（basis に行幅を与えないと余白がバッヂの margin-left:auto に
+     吸われ、ラベルの箱が文字幅ちょうど＝「…」省略記号が描画される）。
+     3桁バッヂでもメニュー名が省略されない。 */
   #app-body .app-sidebar:hover nav .nav-item > div,
   #app-body .app-sidebar.is-hover nav .nav-item > div,
   #app-body .app-sidebar.is-focus nav .nav-item > div {
     flex: 1 1 auto;
+    width: 100%;
     min-width: 0;
-  }
-
-  .app-sidebar:hover .nav-label,
-  .app-sidebar.is-hover .nav-label,
-  .app-sidebar.is-focus .nav-label {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   #app-body .app-sidebar:hover nav .nav-item .nav-badge,
@@ -402,29 +442,30 @@
     white-space: nowrap;
   }
 
-  /* 右余白を詰めてバッヂを枠の右側へ寄せる（列の右端を枠に近づける）。
-     バッジ右端から枠右端までの余白 = sidebar 0.35rem(5.6) + 枠線 3 + nav 0.25rem(4)
-     + 行 0.25rem(4) ≒ 17px（実測 19-20px、R7 の 20px 内）。 */
-  #app-body .app-sidebar:hover,
-  #app-body .app-sidebar.is-hover,
-  #app-body .app-sidebar.is-focus {
-    padding-inline-end: 0.35rem !important;
-  }
-
-  #app-body .app-sidebar:hover nav,
-  #app-body .app-sidebar.is-hover nav,
-  #app-body .app-sidebar.is-focus nav {
-    padding-inline-end: 0.25rem !important;
-  }
-
-  #app-body .app-sidebar:hover nav .nav-item,
-  #app-body .app-sidebar.is-hover nav .nav-item,
-  #app-body .app-sidebar.is-focus nav .nav-item {
-    padding-inline-end: 0.25rem !important;
-  }
-
+  /* 右余白は収納時とせり出し時で同一（sidebar 0.2rem=3.5 / nav 0.5rem=8.75 /
+     行 0.2rem=3.5）。nav の右余白はホバーリングのリング(5)+スライド(3)を
+     nav の overflow で見切れさせないための余白。 */
   main {
     padding-left: 4.2rem !important;
+  }
+
+  /* 広幅画面 (≥1100px): サイドバーせり出しに main が追従し、コンテンツ幅をせり出し幅分
+     狭めて重なりを無くす。main は #app-body を全幅で占め、padding-left が収納幅
+     4.2rem(73.5px) → せり出し幅 16.3rem(285.25px) へ変化し、コンテンツ左端がせり出し
+     サイドバーの右端ちょうどに着地する（オーバーレイなし）。トランジションは sidebar
+     のスライド (0.22s・同一イージング) と同期。
+     狭幅 (768–1099px) はオーバーレイ維持（main は動かず、画面が崩れない）。
+     JS 管理の is-hover/is-focus とネイティブ :hover のいずれも :has() で捕捉する
+     （is-focus は main.js が管理、:focus-within は解除不能なので採用しない）。 */
+  @media (min-width: 1100px) {
+    #app-body main {
+      transition: padding-left 0.22s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    }
+    #app-body:has(.app-sidebar:hover) main,
+    #app-body:has(.app-sidebar.is-hover) main,
+    #app-body:has(.app-sidebar.is-focus) main {
+      padding-left: 16.3rem !important;
+    }
   }
 }
 

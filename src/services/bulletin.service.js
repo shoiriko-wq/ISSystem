@@ -149,8 +149,8 @@ export const bulletinService = {
         author_name: pAuthorName,
         createdAt: pCreatedAt,
         created_at: pCreatedAt,
-        ackStatus: item.ackStatus || item.ack_status || (item.is_acknowledged ? 'APPROVED' : 'UNREAD'),
-        is_acknowledged: item.ackStatus === 'APPROVED' || item.is_acknowledged === true,
+        ackStatus: item.ackStatus || item.ackstatus || item.ack_status || (item.is_acknowledged ? 'APPROVED' : 'UNREAD'),
+        is_acknowledged: (item.ackStatus || item.ackstatus) === 'APPROVED' || item.is_acknowledged === true,
         targetScope: item.targetScope || { grade: 'ALL', department: 'ALL' },
         targetDate: item.targetDate || item.target_date || null,
         target_date: item.targetDate || item.target_date || null,
@@ -366,7 +366,7 @@ export const bulletinService = {
    * @param {string} postId
    * @param {string} userId
    */
-  async acknowledgeBulletin(postId, userId = 'kyomu01') {
+  async acknowledgeBulletin(postId, userId = 'kyomu01', status = 'APPROVED') {
     const bulletin = await bulletinModel.findById(postId);
     if (!bulletin) {
       throw new ApiError(404, '対象の回覧板が存在しません。');
@@ -374,7 +374,7 @@ export const bulletinService = {
 
     let ack = null;
     if (typeof bulletinModel.updateAcknowledgement === 'function') {
-      ack = await bulletinModel.updateAcknowledgement(postId, userId, 'APPROVED');
+      ack = await bulletinModel.updateAcknowledgement(postId, userId, status);
     } else if (typeof bulletinModel.addAcknowledgement === 'function') {
       ack = await bulletinModel.addAcknowledgement(postId, userId);
     }

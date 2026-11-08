@@ -12,7 +12,7 @@ import { loadMessages } from './modules/chat.module.js';
 import { loadSeatingData } from './modules/seating.module.js';
 import { fetchWeatherData } from './modules/dashboard.module.js';
 import { loadAbsenceSummary } from './modules/absence.module.js';
-import { loadBulletins } from './modules/bulletin.module.js';
+import { loadBulletins, ingestBulletin } from './modules/bulletin.module.js';
 import { loadSubjects } from './modules/subjects.module.js';
 
 
@@ -190,6 +190,13 @@ export const socketClient = {
       }
     });
 
+    // 2b. 座席マトリクス配置変更の再読込通知 (教務主任・管理者の保存による他クライアント更新)
+    socket.on('seating:layout_reloaded', (data) => {
+      if (state.currentTab === 'seating' && typeof loadSeatingData === 'function') {
+        loadSeatingData();
+      }
+    });
+
     // 3. 排他編集ロック状態の通知
     socket.on('lock:status_changed', (data) => {
       if (data.isTimeout) {
@@ -312,6 +319,11 @@ export const socketClient = {
         });
       }
 
+      // v3.1: 新投稿をキャッシュへ反映して未読バッヂを再計算（掲示期間・登録日条件適用、自分の投稿は除く）
+      if (!isSelf && data.bulletin) {
+        ingestBulletin(data.bulletin);
+      }
+
       if (state.currentTab === 'bulletin' && typeof loadBulletins === 'function') {
         loadBulletins();
       }
@@ -399,6 +411,16 @@ export const socketClient = {
   emitStatusChange(status, note = '') {
     if (socket && socket.connected) {
       socket.emit('seating:update_status', { status, note });
+    }
+  },
+
+  /**
+   * 座席マトリクス更新通知の送信 (KYOMU / ADMIN のみサーバーがブロードキャスト)
+   * @param {string} layoutId
+   */
+  emitGridUpdated(layoutId) {
+    if (socket && socket.connected) {
+      socket.emit('seating:grid_updated', { layoutId });
     }
   },
 

@@ -8,15 +8,20 @@
 
 
 
-import { apiGet } from '../api.js';
+import { apiGet, apiPost } from '../api.js';
 
-import { formatDate, escapeHTML, refreshLucideIcons, openModal, showToast, userAvatarHtml } from '../ui-helpers.js';
+import { escapeHTML, refreshLucideIcons, openModal, closeModal, showToast, userAvatarHtml } from '../ui-helpers.js';
 
 import { switchTab } from '../main.js';
 
-import { state } from '../state.js';
+import { state, subscribeState } from '../state.js';
 
 import { loadAbsenceSummary, openAbsenceModal } from './absence.module.js';
+
+import {
+  bulletinsSnapshot, setBulletinCache, isUnreadForMe, isDisplayActiveOn,
+  targetDayOf, markBulletinRead
+} from './bulletin.module.js';
 
 /**
  * JST の時刻帯 (5段階) と季節 (6区分) を返す
@@ -37,48 +42,197 @@ function dashTimeAndSeason(now = new Date()) {
     : month === 6 ? 'RAIN'
     : month === 7 ? 'EARLY_SUMMER'
     : (month >= 8 && month <= 9) ? 'SUMMER'
-    : (month >= 10 && month <= 12) ? 'AUTUMN'
+    : (month === 10 || month === 11) ? 'AUTUMN'
     : 'WINTER';
 
   return { slot, season };
 }
 
-/** 時刻帯別の労い・確認案内（体言止め・短縮版） */
-const DASH_TIME_CLAUSES = {
-  MORNING: '午前の予定と新着掲示を先に確認。',
-  NOON: '午後の予定と緊急連絡を優先。',
-  AFTERNOON: '施設予約と承認依頼を確認。',
-  EVENING: '未処理の承認と当日記録を今日中に。',
-  NIGHT: '緊急連絡以外は翌日で十分。',
+/** 時刻帯別の労いメッセージ（ほっこり・元気が出る声がけ） */
+const DASH_TIME_MESSAGES = {
+  MORNING:   '朝の光が職員室を明るく照らしています。今日の一日が笑顔で始まりますように。',
+  NOON:      '昼の時間帯、温かい食事とひと息の休憩で心もほぐれますように。',
+  AFTERNOON: '午後の時間、子どもたちの声に元気をもらいながら進んでいきましょう。',
+  EVENING:   '今日一日、ありがとうございました。帰路はゆっくり歩いてリセットしましょう。',
+  NIGHT:     '深夜の校務、温かい飲み物を置いて、体の休憩を最優先にしてください。',
 };
 
-/** 季節別の状況案内（体言止め・短縮版） */
-const DASH_SEASON_CLAUSES = {
-  SPRING: '新学期の切り替わり期。',
-  RAIN: '雨天対応の予約が増加中。',
-  EARLY_SUMMER: '考査前で成績入力が集中。',
-  SUMMER: '夏季休業・補充授業の時期。',
-  AUTUMN: '文化祭・体育祭で予約が混雑。',
-  WINTER: '期末考査・冬季休業の時期。',
+/** 季節別の労いメッセージ */
+const DASH_SEASON_MESSAGES = {
+  SPRING:         '桜が舞う新年度、新しい出合いが花開く季節です。',
+  RAIN:           '梅雨の合間に窓辺の緑を眺めて、一息のひとときをどうぞ。',
+  EARLY_SUMMER:   '考査前の集中期、こまめな水分と深呼吸で乗り切りましょう。',
+  SUMMER:         '吹き抜けの風と子どもたちの笑顔がまぶしい夏、涼しい教室で無理なく。',
+  AUTUMN:         '実りの秋、行事で見せる子どもたちの成長に心があたたかくなります。',
+  WINTER:         '冷えた指先、温かい飲み物で一息のひとときを。冬越えの体調管理を大切に。',
 };
+
+/** 曜日別の労いメッセージ（getDay() の 0=日曜〜6=土曜） */
+const DASH_WEEK_MESSAGES = {
+  0: '日曜は家族とゆっくり過ごし、校務は月曜で間に合います。',
+  1: '月曜、今週の歩幅をゆっくり合わせてスタートしましょう。',
+  2: '火曜、調子の整わない日もあります。今日着実に進みましょう。',
+  3: '水曜、折り返し地点、給食後の一息がおすすめです。',
+  4: '木曜、明日の準備を少し早めに、今日を大切に過ごしましょう。',
+  5: '金曜、今週の一週間ありがとう。放課後は早めに切り上げましょう。',
+  6: '土曜、部活動の笑顔に感謝する一日、無理のない範囲で。',
+};
+
+/** JST の曜日 (0=日曜〜6=土曜) を返す */
+function dashWeekday(now = new Date()) {
+  const wd = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Tokyo', weekday: 'short' }).format(now);
+  const map = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return map[wd] ?? 1;
+}
+
+/** 特別な日（祭日・学校の節目）の労いメッセージ。該当なしは null */
+const DASH_EVENT_MESSAGES = {
+  '12-23': '明日はクリスマスイブ、校内の灯りがきらめく季節です。',
+  '12-24': 'ほら、クリスマスイブ。校内の灯りがきらめく季節です。',
+  '12-25': 'クリスマス、子どもたちの笑顔が最高の贈り物です。',
+  '12-26': '終業式、前期修了おめでとう。冬休みはチャージの時間です。',
+  '12-31': '一年の終わり、大掃除は全員協力のリズムで軽やかに。',
+  '01-01': 'あけましておめでとうございます。新年のスタートは心軽く。',
+  '01-05': '仕事始め、新年の挨拶から軽やかに一日を始めてください。',
+  '04-01': '新年度スタート、新しい出合いが始まる日です。',
+  '07-20': '終業式、前期修了おめでとう。夏休みはチャージの時間です。',
+  '09-01': '２学期始業式、子どもたちの声が学校に戻ってきます。',
+};
+
+function dashEventMessage(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo', month: '2-digit', day: '2-digit' }).formatToParts(now);
+  const pick = (t) => parts.find((p) => p.type === t)?.value;
+  return DASH_EVENT_MESSAGES[`${pick('month')}-${pick('day')}`] || null;
+}
+
+/** 労いメッセージ枠の軽量粒子アニメーションテーマ (CSS keyframes のみ・Canvas 不使用) */
+const DASH_FX = {
+  sakura:    { motion: 'fall',    emojis: ['🌸', '🌸', '💮', '🌸', '🌺'] },
+  rain:      { motion: 'fall',    emojis: ['💧', '💧', '🌧️', '💧', '☂️'] },
+  sun:       { motion: 'twinkle', emojis: ['✨', '🌞', '✨', '🕊️', '✨'] },
+  sunhat:    { motion: 'twinkle', emojis: ['👒', '🌻', '✨', '🐚', '🍋'] },
+  ocean:     { motion: 'twinkle', emojis: ['🌊', '🐠', '🩵', '🍉', '🐚'] },
+  leaves:    { motion: 'fall',    emojis: ['🍁', '🍂', '🍁', '🌰', '🍄'] },
+  snow:      { motion: 'fall',    emojis: ['❄️', '🌨️', '❄️', '⛄', '❄️'] },
+  santa:     { motion: 'rise',    emojis: ['🎅', '🎄', '⛄', '🎁', '✨'] },
+  halloween: { motion: 'rise',    emojis: ['🎃', '👻', '🍬', '🦇', '🕷️'] },
+  newyear:   { motion: 'twinkle', emojis: ['🎍', '🗻', '✨', '🎴', '☺️'] },
+  tanabata:  { motion: 'rise',    emojis: ['🎋', '🌙', '✨', '🌌', '🌠'] },
+  confetti:  { motion: 'rise',    emojis: ['🎉', '🎊', '👏', '✨', '🌈'] },
+  star:      { motion: 'twinkle', emojis: ['🌙', '✨', '⭐', '✨', '🌟'] },
+};
+
+/** 特別な日のアニメーションテーマ (mm-dd → theme) */
+const DASH_FX_SPECIAL = {
+  '10-31': 'halloween',
+  '12-23': 'santa', '12-24': 'santa', '12-25': 'santa', '12-26': 'santa',
+  '01-01': 'newyear', '01-02': 'newyear', '01-03': 'newyear', '01-04': 'newyear', '01-05': 'newyear',
+  '04-01': 'sakura', '04-02': 'sakura', '04-06': 'sakura',
+  '07-07': 'tanabata',
+  '07-20': 'confetti',
+  '09-01': 'confetti',
+};
+
+/** 日付をシードにする決定論的乱数 (同日中は粒子配置が固定・翌日変化) */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** 開発・QA 用プレビュー設定（労いカードの粒子アニメーションと労いメッセージを確認する。運用では使わない） */
+const fxDevPreview = { fx: null, date: null, time: null, slot: null, week: null, season: null, evt: null, noEvent: null, message: null };
+
+const FX_DEV_THEME_LABELS = {
+  auto: '自動 (日時)', sakura: '桜', rain: '梅雨', sun: '陽光', sunhat: '日傘', ocean: '海',
+  leaves: '紅葉', snow: '雪', santa: 'サンタ', halloween: 'ハロウィン', newyear: 'お正月',
+  tanabata: '七夕', confetti: '紙吹雪', star: '夜の星',
+};
+
+/** 疑似日時を JST の Date として返す。日付未設定は null */
+function fxDevNow() {
+  if (!fxDevPreview.date) return null;
+  const t = fxDevPreview.time || '12:00';
+  const d = new Date(`${fxDevPreview.date}T${t}:00+09:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** 粒子の落下・上昇距離を労いカードの高さに合わせて --fx-drop に設定する */
+function setDashFxDrop(layer) {
+  const h = layer.offsetHeight;
+  if (h > 0) layer.style.setProperty('--fx-drop', `${Math.round(h + 26)}px`);
+}
+
+/** 時刻・季節・特別な日からアニメーションテーマを選ぶ (開発用 fxOverride があれば優先) */
+function dashFxTheme(now = new Date(), fxOverride = null) {
+  if (fxOverride) return fxOverride;
+  const parts = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo', month: '2-digit', day: '2-digit' }).formatToParts(now);
+  const pick = (t) => parts.find((p) => p.type === t)?.value;
+  const special = DASH_FX_SPECIAL[`${pick('month')}-${pick('day')}`] || null;
+  if (special) return special;
+  const { slot, season } = dashTimeAndSeason(now);
+  if (slot === 'NIGHT') return 'star';
+  return { SPRING: 'sakura', RAIN: 'rain', EARLY_SUMMER: 'sun', SUMMER: 'ocean', AUTUMN: 'leaves', WINTER: 'snow' }[season];
+}
+
+/** 労いメッセージ枠の粒子を描画する (#dash-fx-layer / CSS keyframes が毎フレーム動かす) */
+function renderDashFx(now = new Date(), fxOverride = null) {
+  const layer = document.getElementById('dash-fx-layer');
+  if (!layer) return;
+  const theme = dashFxTheme(now, fxOverride);
+  const def = DASH_FX[theme] || DASH_FX.star;
+  const rnd = mulberry32(Math.floor(now.getTime() / 86400000) + 1);
+  layer.className = `dash-fx-layer fx-${def.motion}`;
+  layer.dataset.fxTheme = theme;
+  let html = '';
+  for (let i = 0; i < 10; i++) {
+    const emoji = def.emojis[i % def.emojis.length];
+    const x = 3 + rnd() * 94;
+    const dur = 6 + rnd() * 6;
+    const delay = rnd() * 9;
+    const size = 12 + Math.round(rnd() * 14);
+    html += `<span class="dash-fx" style="left:${x.toFixed(1)}%;animation-duration:${dur.toFixed(1)}s;animation-delay:-${delay.toFixed(1)}s;font-size:${size}px">${emoji}</span>`;
+  }
+  layer.innerHTML = html;
+  setDashFxDrop(layer);
+}
 
 /**
- * 挨拶文を時刻・季節に応じて描画する (#dash-greeting)
+ * 挨拶文と労いのメッセージを時刻・曜日・季節に応じて描画する (#dash-greeting / #dash-warm-message)
  * @param {Date} now
  */
 function renderDashGreeting(now = new Date()) {
   const nameEl = document.getElementById('dash-user-name');
   if (!nameEl) return;
 
-  const { slot, season } = dashTimeAndSeason(now);
+  const sim = fxDevNow() || now;
+  const auto = dashTimeAndSeason(sim);
+  const slot = fxDevPreview.slot || auto.slot;
+  const season = fxDevPreview.season || auto.season;
   const cu = state.currentUser;
   const name = cu?.name ? String(cu.name) : '先生';
   nameEl.textContent = `${name} 先生`;
 
   const h2 = document.getElementById('dash-greeting');
   if (h2) {
-    h2.innerHTML = `お疲れ様です、<span id="dash-user-name" class="text-primary font-bold">${escapeHTML(name)} 先生</span> ${DASH_TIME_CLAUSES[slot]} ${DASH_SEASON_CLAUSES[season]}`;
+    h2.innerHTML = `お疲れ様です、<span id="dash-user-name" class="text-primary font-bold">${escapeHTML(name)} 先生</span>`;
   }
+
+  // 時刻帯・曜日・季節（特別な日はイベント文優先）を組み合わせた労いのメッセージ
+  const wd = fxDevPreview.week ?? dashWeekday(sim);
+  // 季節セレクトで季節を明示した時は特別な日の文を抑え、季節文を確実に表示する
+  const evt = (fxDevPreview.season || fxDevPreview.noEvent) ? null
+    : (fxDevPreview.evt ? DASH_EVENT_MESSAGES[fxDevPreview.evt] : dashEventMessage(sim));
+  const msgEl = document.getElementById('dash-warm-message');
+  if (msgEl) {
+    msgEl.textContent = fxDevPreview.message || `${DASH_TIME_MESSAGES[slot]} ${DASH_WEEK_MESSAGES[wd]} ${evt ?? DASH_SEASON_MESSAGES[season]}`;
+  }
+
+  // 労いメッセージ枠の軽量粒子アニメーション (時刻・季節・特別な日でテーマ切替)
+  renderDashFx(sim, fxDevPreview.fx);
 }
 
 
@@ -103,39 +257,19 @@ export function initDashboardModule() {
 
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
 
-      <div class="card card--framed p-5 bg-gradient-to-br from-accent-soft via-surface-soft to-surface-strong border-accent-soft md:col-span-2 flex flex-col justify-between">
+      <div class="card card--framed p-5 bg-gradient-to-br from-accent-soft via-surface-soft to-surface-strong border-accent-soft md:col-span-2 flex flex-col justify-between dash-fx-card">
+
+        <div id="dash-fx-layer" class="dash-fx-layer" aria-hidden="true"></div>
 
         <div>
 
-          <div class="flex items-center justify-between mb-2">
-
-            <span class="badge badge-warning">本日: ${formatDate(new Date(), false)}</span>
-
-          </div>
-
           <h2 class="text-xl font-bold text-main mb-1" id="dash-greeting">お疲れ様です、<span id="dash-user-name" class="text-primary font-bold">先生</span></h2>
 
-          <p class="text-xs text-soft leading-relaxed">
+          <p id="dash-warm-message" class="text-sm text-soft leading-relaxed">
 
-            本日の行事・予約・掲示のサマリーです。
+            先生方、いつもありがとう。今日も無理なく、笑顔の一日を。
 
           </p>
-
-        </div>
-
-        <div class="flex items-center gap-2 mt-4 text-xs">
-
-          <button id="dash-btn-bulletin" class="btn-primary py-1.5 px-3 text-xs flex items-center gap-1.5">
-
-            <i data-lucide="megaphone" class="w-3.5 h-3.5"></i> 掲示板を確認
-
-          </button>
-
-          <button id="dash-btn-chat" class="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1.5">
-
-            <i data-lucide="message-square" class="w-3.5 h-3.5"></i> 職員チャットへ
-
-          </button>
 
         </div>
 
@@ -143,7 +277,7 @@ export function initDashboardModule() {
 
 
 
-      <!-- 本日の 年休等・出張 (区分別人数 + 記入ボタンから登録モーダルを開く) -->
+      <!-- 本日の 年休等・出張 (区分別人数タイルをクリックして登録・確認モーダルを開く。記入フォームはモーダル内に常設) -->
 
       <div class="card card--framed p-4 flex flex-col justify-between">
 
@@ -156,13 +290,13 @@ export function initDashboardModule() {
         </div>
 
         <!-- 区分別人数 (absence.module.js の renderAbsenceCounts が数値を流し込む)
-             配色は「記入する」モーダル（index.html の区分別人数サマリー）と同一トークン:
+             配色は登録・確認モーダル（index.html の区分別人数サマリー）と同一トークン:
              年休等 = 赤系 (bg-danger-soft / border-danger-soft / text-danger)
              出張   = 黄系 (bg-warning-soft / border-warning-soft / text-warning) -->
-        <div class="grid grid-cols-2 gap-2 mb-3 items-start">
+        <div class="grid grid-cols-2 gap-2 items-start">
           <div id="dash-absence-leave-tile" role="button" tabindex="0"
                class="flex flex-col items-center gap-1 py-2.5 px-0 rounded-lg bg-danger-soft border border-danger-soft cursor-pointer transition hover:brightness-110 focus:outline-2 focus:outline-offset-2 focus:outline-danger"
-               title="クリックして本日の「年休等」取得者の詳細リストを表示">
+               title="クリックして本日の「年休等」の詳細リストと記入フォームを開く">
             <div class="flex items-center gap-1.5 text-danger text-xs font-bold whitespace-nowrap">
               <i data-lucide="bed-double" class="w-3.5 h-3.5 shrink-0"></i>
               <span>年休等</span>
@@ -171,7 +305,7 @@ export function initDashboardModule() {
           </div>
           <div id="dash-absence-trip-tile" role="button" tabindex="0"
                class="flex flex-col items-center gap-1 py-2.5 px-0 rounded-lg bg-warning-soft border border-warning-soft cursor-pointer transition hover:brightness-110 focus:outline-2 focus:outline-offset-2 focus:outline-warning"
-               title="クリックして本日の「出張」取得者の詳細リストを表示">
+               title="クリックして本日の「出張」の詳細リストと記入フォームを開く">
             <div class="flex items-center gap-1.5 text-warning text-xs font-bold whitespace-nowrap">
               <i data-lucide="briefcase" class="w-3.5 h-3.5 shrink-0"></i>
               <span>出張</span>
@@ -179,11 +313,6 @@ export function initDashboardModule() {
             <span id="dash-absence-trip" class="text-xl font-black text-warning leading-none">0名</span>
           </div>
         </div>
-
-        <button id="dash-btn-absence" class="btn-primary w-full flex items-center justify-center gap-1.5 py-2 px-3 text-sm font-bold"
-                title="年休等・出張を記入する">
-          <i data-lucide="pen-line" class="w-4 h-4"></i> <span class="pt-0.5">記入する</span>
-        </button>
       </div>
 
 
@@ -212,7 +341,7 @@ export function initDashboardModule() {
 
           <div class="flex justify-between items-center p-2 rounded bg-surface-strong border border-divider">
 
-            <span class="text-soft">掲示板 未読連絡:</span>
+            <span class="text-soft">掲示板 未読連絡（全日）:</span>
 
             <span class="font-bold text-accent" id="dash-unread-bulletins">0件</span>
 
@@ -254,6 +383,9 @@ export function initDashboardModule() {
 
             </h3>
 
+            <!-- v3.1: 本日未読バッヂ（対象日が本日かつ未読。カードクリックで即減る） -->
+            <span id="dash-today-bulletin-unread" class="dash-today-unread-badge hidden" aria-label="本日の未読連絡数">未読 0</span>
+
           </div>
 
           <div id="dash-pinned-bulletins" class="dash-news-list">
@@ -278,7 +410,9 @@ export function initDashboardModule() {
 
             </h3>
 
-            <button id="dash-btn-news-more" class="text-xs text-accent hover:underline">すべて見る</button>
+            <button type="button" id="dash-btn-news-share" class="btn-secondary py-1 px-2.5 text-sm shrink-0 flex items-center gap-1.5" title="記事URLをチャット・掲示板へ共有">
+              <i data-lucide="share-2" class="w-3.5 h-3.5"></i> 記事を共有
+            </button>
 
           </div>
 
@@ -354,11 +488,121 @@ export function initDashboardModule() {
 
     </div>
 
+    <!-- 開発・QA 用プレビューパネル（労いカードの粒子アニメーションと教員への労いメッセージを確認するバー。運用では使わない） -->
+    <div id="dash-fx-dev-panel" class="card card--framed p-3 mt-4 flex flex-col gap-2">
+      <div class="flex flex-wrap items-center gap-2">
+        <button type="button" id="dash-fx-dev-toggle" class="btn-secondary py-1 px-2.5 text-xs flex items-baseline gap-1.5" aria-expanded="true" aria-controls="dash-fx-dev-body" title="開発用プレビューパネルを開閉する">
+          <i data-lucide="wand-2" class="w-3.5 h-3.5 shrink-0"></i> <span class="pt-0.5">労いプレビュー</span>
+        </button>
+        <label class="text-[10px] text-muted" for="fxp-theme">アニメーション</label>
+        <select id="fxp-theme" class="input-field py-1 px-2 text-xs" title="労いカードの粒子アニメーションのテーマ">
+          <option value="auto">自動 (日時)</option>
+          <option value="sakura">桜</option>
+          <option value="rain">梅雨</option>
+          <option value="sun">陽光</option>
+          <option value="sunhat">日傘</option>
+          <option value="ocean">海</option>
+          <option value="leaves">紅葉</option>
+          <option value="snow">雪</option>
+          <option value="santa">サンタ</option>
+          <option value="halloween">ハロウィン</option>
+          <option value="newyear">お正月</option>
+          <option value="tanabata">七夕</option>
+          <option value="confetti">紙吹雪</option>
+          <option value="star">夜の星</option>
+        </select>
+        <button type="button" id="fxp-prev" class="btn-secondary py-1 px-2 text-xs flex items-baseline gap-1" title="前のテーマへ切り替える">
+          <i data-lucide="chevron-left" class="w-3.5 h-3.5 shrink-0"></i> <span class="pt-0.5">前</span>
+        </button>
+        <button type="button" id="fxp-next" class="btn-secondary py-1 px-2 text-xs flex items-baseline gap-1" title="次のテーマへ切り替える">
+          <i data-lucide="chevron-right" class="w-3.5 h-3.5 shrink-0"></i> <span class="pt-0.5">次</span>
+        </button>
+        <span class="fxp-note ml-auto">アニメーションと教員への労いメッセージを確認する開発・QA 用パネル（運用では使わない）</span>
+      </div>
+      <div id="dash-fx-dev-body" class="flex flex-wrap items-end gap-2.5">
+        <div class="flex flex-col gap-1">
+          <label class="text-[10px] text-muted" for="fxp-date">疑似日付</label>
+          <input type="date" id="fxp-date" class="input-field py-1 px-2 text-xs w-28" title="労いメッセージと季節アニメーションの疑似日付 (JST)">
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-[10px] text-muted" for="fxp-time">疑似時刻</label>
+          <input type="time" id="fxp-time" class="input-field py-1 px-2 text-xs w-24" title="労いメッセージの疑似時刻 (JST)">
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-[10px] text-muted" for="fxp-slot">時刻帯</label>
+          <select id="fxp-slot" class="input-field py-1 px-2 text-xs" title="労いメッセージの時刻帯">
+            <option value="">自動</option>
+            <option value="MORNING">朝</option>
+            <option value="NOON">昼</option>
+            <option value="AFTERNOON">午後</option>
+            <option value="EVENING">夕方</option>
+            <option value="NIGHT">深夜</option>
+          </select>
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-[10px] text-muted" for="fxp-week">曜日</label>
+          <select id="fxp-week" class="input-field py-1 px-2 text-xs" title="労いメッセージの曜日">
+            <option value="">自動</option>
+            <option value="0">日曜</option>
+            <option value="1">月曜</option>
+            <option value="2">火曜</option>
+            <option value="3">水曜</option>
+            <option value="4">木曜</option>
+            <option value="5">金曜</option>
+            <option value="6">土曜</option>
+          </select>
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-[10px] text-muted" for="fxp-season">季節</label>
+          <select id="fxp-season" class="input-field py-1 px-2 text-xs" title="労いメッセージの季節">
+            <option value="">自動</option>
+            <option value="SPRING">春</option>
+            <option value="RAIN">梅雨</option>
+            <option value="EARLY_SUMMER">初夏</option>
+            <option value="SUMMER">夏</option>
+            <option value="AUTUMN">秋</option>
+            <option value="WINTER">冬</option>
+          </select>
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-[10px] text-muted" for="fxp-event">特別な日</label>
+          <select id="fxp-event" class="input-field py-1 px-2 text-xs" title="特別な日の労いメッセージ">
+            <option value="">自動 (日付)</option>
+            <option value="none">なし (季節文)</option>
+            <option value="12-23">12/23 クリスマスイブ前夜</option>
+            <option value="12-24">12/24 クリスマスイブ</option>
+            <option value="12-25">12/25 クリスマス</option>
+            <option value="12-26">12/26 終業式</option>
+            <option value="12-31">12/31 大掃除</option>
+            <option value="01-01">01/01 元旦</option>
+            <option value="01-05">01/05 仕事始め</option>
+            <option value="04-01">04/01 新年度</option>
+            <option value="07-20">07/20 終業式</option>
+            <option value="09-01">09/01 始業式</option>
+          </select>
+        </div>
+        <div id="fxp-swatches" class="flex flex-wrap items-center gap-1.5 text-base leading-none" title="全テーマの粒子（静的表示）"></div>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <label class="text-[10px] text-muted" for="fxp-message">全メッセージ</label>
+        <select id="fxp-message" class="input-field py-1 px-2 text-xs" title="労いメッセージ文を選んで表示する">
+          <option value="">メッセージを選ぶ</option>
+        </select>
+        <button type="button" id="fxp-reset" class="btn-secondary py-1 px-2.5 text-xs flex items-baseline gap-1.5" title="実日時と自動テーマへ復帰する">
+          <i data-lucide="rotate-ccw" class="w-3.5 h-3.5 shrink-0"></i> <span class="pt-0.5">復帰</span>
+        </button>
+      </div>
+    </div>
+
   `;
 
 
 
   bindDashboardEvents();
+
+  bindDashFxDevPanel();
+
+  bindNewsShareForm();
 
 
 
@@ -392,19 +636,284 @@ export function initDashboardModule() {
 
 function bindDashboardEvents() {
 
-  document.getElementById('dash-btn-bulletin')?.addEventListener('click', () => switchTab('bulletin'));
-
-  document.getElementById('dash-btn-chat')?.addEventListener('click', () => switchTab('chat'));
-
-  // 年休等・出張の記入ボタン (dash-btn-absence) は absence.module.js でバインド
 
   document.getElementById('dash-btn-approval')?.addEventListener('click', () => switchTab('approval'));
 
-  document.getElementById('dash-btn-news-more')?.addEventListener('click', () => switchTab('news'));
+  // v3.1「本日の連絡」カード = 施設予約 (data-facility-open) と同じ button 慣習。
+  // クリックは PUT /api/bulletins/:id/read のみ。タブ移動もモーダルも開かない。既読カードは API を叩かない（冪等）
+  document.getElementById('dash-pinned-bulletins')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-bulletin-read]');
+    if (!btn) return;
+    const id = btn.getAttribute('data-bulletin-read');
+    const item = bulletinsSnapshot().find((b) => String(b.id) === String(id));
+    if (!item) return;
+    if (isUnreadForMe(item)) markBulletinRead(id);
+    renderDashTodayBulletins();
+  });
+
+  // 未読バッヂ追従（全日ラベル・本日バッヂ・カードの未読マーカー）。DOM 書き出しの本体は main.js の subscribeState
+  subscribeState((s, key) => {
+    if (key !== 'unreadCounts') return;
+    const fullEl = document.getElementById('dash-unread-bulletins');
+    if (fullEl) fullEl.textContent = `${s.unreadCounts.bulletin}件`;
+    renderDashTodayBulletins();
+  });
+
+  document.getElementById('dash-btn-news-share')?.addEventListener('click', () => openNewsShareModal());
 
   document.getElementById('dash-btn-facility')?.addEventListener('click', () => switchTab('facility'));
 
   document.getElementById('dash-btn-schedule')?.addEventListener('click', () => switchTab('schedule'));
+
+}
+
+/**
+ * 開発・QA 用プレビューパネル (#dash-fx-dev-panel) のバインディング。
+ * 労いカードの粒子アニメーションと教員への労いメッセージをダッシュボード最下部で確認する（運用では使わない）。
+ * 疑似日時・時刻帯・曜日・季節・特別な日は労いカードの表示ロジックだけに影響し、実 API 呼び出しは変更しない。
+ */
+function bindDashFxDevPanel() {
+  const themeSel = document.getElementById('fxp-theme');
+  const slotSel = document.getElementById('fxp-slot');
+  const weekSel = document.getElementById('fxp-week');
+  const seasonSel = document.getElementById('fxp-season');
+  const evtSel = document.getElementById('fxp-event');
+  const msgSel = document.getElementById('fxp-message');
+  const dateInput = document.getElementById('fxp-date');
+  const timeInput = document.getElementById('fxp-time');
+  const themeKeys = ['auto', ...Object.keys(DASH_FX)];
+
+  const apply = () => {
+    renderDashGreeting();
+    refreshLucideIcons();
+  };
+
+  // 全テーマの粒子を静的スウォッチで並べる (prefers-reduced-motion では粒子レイヤーが消えるため、ここでテーマを確認する)
+  const swatches = document.getElementById('fxp-swatches');
+  if (swatches) {
+    swatches.innerHTML = Object.entries(DASH_FX)
+      .map(([key, def]) => `<span title="${key} : ${FX_DEV_THEME_LABELS[key] || key}">${def.emojis[0]}</span>`)
+      .join('');
+  }
+
+  // 労いメッセージ文を一覧から直接選べる (時刻帯・曜日・季節・特別な日の全メッセージ)
+  if (msgSel) {
+    const groups = [['時刻帯', DASH_TIME_MESSAGES], ['曜日', DASH_WEEK_MESSAGES], ['季節', DASH_SEASON_MESSAGES], ['特別な日', DASH_EVENT_MESSAGES]];
+    let html = '<option value="">メッセージを選ぶ</option>';
+    for (const [glabel, table] of groups) {
+      html += `<optgroup label="${glabel}">`;
+      for (const [key, text] of Object.entries(table)) {
+        html += `<option value="${escapeHTML(text)}">${glabel} ${escapeHTML(String(key))}: ${escapeHTML(text.slice(0, 14))}…</option>`;
+      }
+      html += '</optgroup>';
+    }
+    msgSel.innerHTML = html;
+  }
+
+  themeSel?.addEventListener('change', () => {
+    fxDevPreview.fx = themeSel.value === 'auto' ? null : themeSel.value;
+    apply();
+  });
+
+  const cycleTheme = (dir) => {
+    const idx = (themeKeys.indexOf(themeSel ? themeSel.value : 'auto') + dir + themeKeys.length) % themeKeys.length;
+    if (themeSel) themeSel.value = themeKeys[idx];
+    fxDevPreview.fx = themeKeys[idx] === 'auto' ? null : themeKeys[idx];
+    apply();
+  };
+  document.getElementById('fxp-prev')?.addEventListener('click', () => cycleTheme(-1));
+  document.getElementById('fxp-next')?.addEventListener('click', () => cycleTheme(1));
+
+  dateInput?.addEventListener('change', () => {
+    fxDevPreview.date = dateInput.value || null;
+    fxDevPreview.evt = null;
+    fxDevPreview.noEvent = null;
+    fxDevPreview.message = null;
+    if (evtSel) evtSel.value = '';
+    if (msgSel) msgSel.value = '';
+    apply();
+  });
+
+  timeInput?.addEventListener('change', () => {
+    fxDevPreview.time = timeInput.value || null;
+    fxDevPreview.message = null;
+    if (msgSel) msgSel.value = '';
+    apply();
+  });
+
+  slotSel?.addEventListener('change', () => {
+    fxDevPreview.slot = slotSel.value || null;
+    fxDevPreview.message = null;
+    if (msgSel) msgSel.value = '';
+    apply();
+  });
+
+  weekSel?.addEventListener('change', () => {
+    fxDevPreview.week = weekSel.value === '' ? null : Number(weekSel.value);
+    fxDevPreview.message = null;
+    if (msgSel) msgSel.value = '';
+    apply();
+  });
+
+  seasonSel?.addEventListener('change', () => {
+    fxDevPreview.season = seasonSel.value || null;
+    fxDevPreview.evt = null;
+    fxDevPreview.noEvent = null;
+    fxDevPreview.message = null;
+    if (evtSel) evtSel.value = '';
+    if (msgSel) msgSel.value = '';
+    apply();
+  });
+
+  evtSel?.addEventListener('change', () => {
+    fxDevPreview.evt = evtSel.value && evtSel.value !== 'none' ? evtSel.value : null;
+    fxDevPreview.noEvent = evtSel.value === 'none' ? true : null;
+    fxDevPreview.season = null;
+    fxDevPreview.message = null;
+    if (seasonSel) seasonSel.value = '';
+    if (msgSel) msgSel.value = '';
+    apply();
+  });
+
+  msgSel?.addEventListener('change', () => {
+    fxDevPreview.message = msgSel.value || null;
+    apply();
+  });
+
+  // 復帰 (実日時・自動テーマへ戻す)
+  document.getElementById('fxp-reset')?.addEventListener('click', () => {
+    fxDevPreview.fx = null;
+    fxDevPreview.date = null;
+    fxDevPreview.time = null;
+    fxDevPreview.slot = null;
+    fxDevPreview.week = null;
+    fxDevPreview.season = null;
+    fxDevPreview.evt = null;
+    fxDevPreview.noEvent = null;
+    fxDevPreview.message = null;
+    if (themeSel) themeSel.value = 'auto';
+    if (slotSel) slotSel.value = '';
+    if (weekSel) weekSel.value = '';
+    if (seasonSel) seasonSel.value = '';
+    if (evtSel) evtSel.value = '';
+    if (msgSel) msgSel.value = '';
+    if (dateInput) dateInput.value = '';
+    if (timeInput) timeInput.value = '';
+    apply();
+    showToast('労いプレビューを実日時に復帰しました', 'info');
+  });
+
+  // 開閉 (折りたたまれるとコントロールバーだけが残る)
+  const toggle = document.getElementById('dash-fx-dev-toggle');
+  const body = document.getElementById('dash-fx-dev-body');
+  toggle?.addEventListener('click', () => {
+    const expanded = toggle.getAttribute('aria-expanded') !== 'true';
+    toggle.setAttribute('aria-expanded', String(expanded));
+    if (body) body.classList.toggle('hidden', !expanded);
+    refreshLucideIcons();
+  });
+
+  // 労いカードの高さを計測して粒子の落下・上昇距離 (--fx-drop) を更新する
+  const fxLayer = document.getElementById('dash-fx-layer');
+  if (fxLayer) {
+    setDashFxDrop(fxLayer);
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(() => setDashFxDrop(fxLayer)).observe(fxLayer);
+    }
+  }
+}
+
+
+
+/** JST の本日キー (YYYY-MM-DD) */
+function dashTodayKey() {
+
+  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+
+}
+
+/**
+ * 「本日の連絡」カード群の描画（対象日が本日の掲示だけを既読・未読問わず提示。未読カードに未読マーカーを出す）
+ * カードは button。クリックは PUT /api/bulletins/:id/read のみ（タブ移動・モーダルなし、既読カードは冪等）。
+ * 掲示期間が有効（開始日未設定/≦本日、終了日未設定/≧本日）な物だけ対象日マッチさせる
+ */
+function renderDashTodayBulletins() {
+
+  const listEl = document.getElementById('dash-pinned-bulletins');
+
+  if (!listEl) return;
+
+  const today = dashTodayKey();
+
+  const todays = bulletinsSnapshot()
+
+    .filter((b) => targetDayOf(b) === today && isDisplayActiveOn(b, today))
+
+    .sort((a, b) => {
+
+      const ta = String(a.postedAt || a.posted_at || a.createdAt || a.created_at || '');
+
+      const tb = String(b.postedAt || b.posted_at || b.createdAt || b.created_at || '');
+
+      if (ta < tb) return 1;
+
+      if (ta > tb) return -1;
+
+      return 0;
+
+    });
+
+  if (todays.length === 0) {
+
+    listEl.innerHTML = '<p class="text-sm text-muted text-center py-2">本日の連絡はありません。</p>';
+
+    return;
+
+  }
+
+  listEl.innerHTML = todays.map((b) => {
+
+    const author = b.authorName || b.author_name || '教員';
+
+    const avatarUrl = b.authorAvatar || b.author_avatar || null;
+
+    const unread = isUnreadForMe(b);
+
+    const title = escapeHTML(String(b.title || ''));
+
+    return `
+
+      <button type="button" class="dash-news-item" data-bulletin-read="${b.id}"
+
+              title="${unread ? 'クリックで既読をつける' : '既読済み'}"
+
+              aria-label="${title}（${unread ? '未読' : '既読'}・クリックで既読をつける）">
+
+        <span class="dash-news-head">
+
+          <span class="dash-news-title">${title}</span>
+
+          ${unread ? '<span class="dash-news-unread-marker">未読</span>' : ''}
+
+          <span class="dash-news-author">
+
+            ${userAvatarHtml({ name: author, avatarUrl, size: 'xs' })}
+
+            <span class="dash-news-author-name">${escapeHTML(author)} 教員</span>
+
+          </span>
+
+        </span>
+
+        <span class="dash-news-body">${escapeHTML(String(b.content || ''))}</span>
+
+      </button>
+
+    `;
+
+  }).join('');
+
+  refreshLucideIcons();
 
 }
 
@@ -434,58 +943,23 @@ export async function loadDashboardData() {
 
 
 
-  // 1. 重要掲示の取得
-
+  // 1. 掲示一覧の取得（キャッシュは bulletin.module.js と共有し、未読バッヂを再計算する）
+  //    「本日の連絡」は対象日が本日の掲示だけを既読・未読問わず提示し、未読カードに未読マーカーを出す
   try {
 
     const res = await apiGet('/bulletins', { limit: 100 });
 
     const bulletins = res.bulletins || (Array.isArray(res) ? res : []);
 
-    const listEl = document.getElementById('dash-pinned-bulletins');
+    setBulletinCache(bulletins);
 
-    // 対象日（掲示期間 display_start_date〜display_end_date）が今日の記事のみ
-    const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
-    const todays = bulletins.filter((b) => {
-      const start = b.display_start_date || b.displayStart || b.start_date || b.startDate;
-      const end = b.display_end_date || b.displayEnd || b.end_date || b.endDate;
-      if (start && end) return start <= today && today <= end;
-      if (start) return start === today;
-      if (end) return end === today;
-      return false;
-    });
-
-    if (listEl && todays.length > 0) {
-
-      listEl.innerHTML = todays.map((b) => {
-
-        const author = {
-          name: b.authorName || b.author_name || '教員',
-          avatarUrl: b.authorAvatar || b.author_avatar || null,
-        };
-
-        return `
-          <div class="dash-news-item">
-            <div class="dash-news-head">
-              <h4 class="dash-news-title">${escapeHTML(b.title || '')}</h4>
-              <div class="dash-news-author">
-                ${userAvatarHtml({ ...author, size: 'xs' })}
-                <span class="dash-news-author-name">${escapeHTML(author.name)} 教員</span>
-              </div>
-            </div>
-            <p class="dash-news-body">${escapeHTML(b.content || '')}</p>
-          </div>
-        `;
-
-      }).join('');
-
-    } else if (listEl) {
-
-      listEl.innerHTML = '<p class="text-sm text-muted text-center py-2">本日の連絡はありません。</p>';
-
-    }
+    renderDashTodayBulletins();
 
   } catch (e) {
+
+    console.warn('[Dashboard] 掲示一覧の取得に失敗:', e.message);
+
+    setBulletinCache([]);
 
     const listEl = document.getElementById('dash-pinned-bulletins');
 
@@ -967,4 +1441,177 @@ export async function fetchWeatherData() {
 
    }
 
+}
+
+// ============================================================
+// 記事共有モーダル（教育ニュースのURLをチャット・掲示板へ共有）
+// ============================================================
+
+const SHARE_TARGET_LABELS = { chat: '職員チャット', bulletin: '掲示板' };
+
+// 投稿先チャンネルの選択肢は初回開時だけ取得する
+let shareChannelOptionsLoaded = false;
+
+/** JST の今日 (yyyy-mm-dd) を返す */
+function jstToday() {
+  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+}
+
+/**
+ * 入力URLを http(s) の絶対URLへ正規化する。解釈できない場合は null
+ * スキーマ無し（例: mext.go.jp/...）は https:// を補完する
+ * @param {string} raw
+ * @returns {string|null}
+ */
+function normalizeShareUrl(raw) {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return null;
+  const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed.replace(/^\/+/, '')}`;
+  try {
+    const u = new URL(candidate);
+    // ドットを含まない hostname (例: "foo") はURLとみなさない
+    if (!u.hostname.includes('.')) return null;
+    return u.toString();
+  } catch (e) {
+    return null;
+  }
+}
+
+/** URL から既定タイトル（ドメイン名）を導く */
+function defaultShareTitle(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch (e) {
+    return '共有記事';
+  }
+}
+
+/**
+ * 投稿先チャンネルの選択肢を /chat/channels から生成する（初回のみ）
+ */
+async function loadShareChannelOptions() {
+  const sel = document.getElementById('news-share-channel');
+  if (!sel) return;
+  try {
+    const res = await apiGet('/chat/channels');
+    const list = res.channels || res.data || (Array.isArray(res) ? res : []);
+    sel.innerHTML = list
+      .map((ch) => `<option value="${escapeHTML(String(ch.id))}">${escapeHTML(String(ch.name || ch.id))}</option>`)
+      .join('');
+    const preferred = list.find((ch) => ch.id === 'general')
+      || list.find((ch) => ch.type === 'PUBLIC')
+      || list[0];
+    if (preferred) sel.value = String(preferred.id);
+    shareChannelOptionsLoaded = true;
+  } catch (e) {
+    console.warn('[Dashboard] チャンネル一覧の取得に失敗:', e.message);
+    sel.innerHTML = '<option value="general">📢 職員全体</option>';
+    sel.value = 'general';
+  }
+}
+
+/**
+ * 共有先（チャット / 掲示板）に応じて入力フィールドの表示を切り替える
+ */
+function syncShareFields() {
+  const target = document.getElementById('news-share-target')?.value || 'chat';
+  const channelWrap = document.getElementById('news-share-channel-wrap');
+  const dateWrap = document.getElementById('news-share-date-wrap');
+  if (channelWrap) channelWrap.classList.toggle('hidden', target !== 'chat');
+  if (dateWrap) dateWrap.classList.toggle('hidden', target !== 'bulletin');
+}
+
+/**
+ * 記事共有モーダルを開く（共有先の同期と対象日の初期化、チャンネル一覧の初回取得）
+ */
+export async function openNewsShareModal() {
+  if (!state.currentUser || !state.authToken) {
+    showToast('記事を共有するにはログインが必要です', 'warning');
+    return;
+  }
+
+  const dateInput = document.getElementById('news-share-date');
+  if (dateInput && !dateInput.value) dateInput.value = jstToday();
+  syncShareFields();
+
+  if (!shareChannelOptionsLoaded) await loadShareChannelOptions();
+
+  openModal('news-share-modal');
+  refreshLucideIcons();
+  document.getElementById('news-share-url')?.focus();
+}
+
+/** チャット投稿用のテキストを組み立てる */
+function buildShareMessage(title, url, note) {
+  const lines = [`【記事共有】${title}`, url];
+  if (note) lines.push(note);
+  return lines.join('\n');
+}
+
+/**
+ * 共有モーダルのフォームイベント登録（初期化時に1回だけ）
+ */
+function bindNewsShareForm() {
+  const form = document.getElementById('news-share-form');
+  if (!form || form.dataset.shareBound === '1') return;
+  form.dataset.shareBound = '1';
+
+  document.getElementById('news-share-target')?.addEventListener('change', syncShareFields);
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const url = normalizeShareUrl(document.getElementById('news-share-url')?.value);
+    if (!url) {
+      showToast('記事URLの形式が正しくありません（http:// または https:// のURLを入力してください）', 'error');
+      document.getElementById('news-share-url')?.focus();
+      return;
+    }
+
+    const title = (document.getElementById('news-share-title')?.value || '').trim() || defaultShareTitle(url);
+    const note = (document.getElementById('news-share-note')?.value || '').trim();
+    const target = document.getElementById('news-share-target')?.value || 'chat';
+
+    const submitBtn = form.querySelector('button[type="submit"]');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.classList.add('opacity-60');
+    }
+
+    try {
+      if (target === 'chat') {
+        const channelId = document.getElementById('news-share-channel')?.value || 'general';
+        await apiPost(`/chat/channels/${channelId}/messages`, {
+          messageText: buildShareMessage(title, url, note),
+          senderName: state.currentUser?.name || '教員'
+        });
+      } else {
+        const targetDate = document.getElementById('news-share-date')?.value || jstToday();
+        await apiPost('/bulletins', {
+          title: `【参考記事】${title}`,
+          content: `${url}\n\n${note}`.trim(),
+          category: 'GENERAL',
+          targetDate,
+          authorName: state.currentUser?.name || '教員'
+        });
+      }
+
+      closeModal('news-share-modal');
+      form.reset();
+      syncShareFields();
+      const dateInput = document.getElementById('news-share-date');
+      if (dateInput) dateInput.value = jstToday();
+
+      showToast(`${SHARE_TARGET_LABELS[target]}へ記事を共有しました`, 'success');
+      switchTab(target === 'chat' ? 'chat' : 'bulletin');
+    } catch (err) {
+      // 失敗時はモーダルを開いたままエラー表示（入力内容は保持）
+      showToast(`共有に失敗しました: ${err.message}`, 'error');
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.classList.remove('opacity-60');
+      }
+    }
+  });
 }

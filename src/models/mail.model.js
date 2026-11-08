@@ -9,9 +9,17 @@ import config from '../../config/default.js';
 
 const ALGO = 'aes-256-gcm';
 
-/** JWT シークレットから導出する 32バイト暗号化キー */
+// 2026/11/8 監査 Critical 対策: 暗号化キーは JWT_SECRET から導出しない
+// （JWT secret が漏れた者は全メールパスワードを復号できた）。専用 secret
+// MAIL_ENC_SECRET を scrypt で導出する別系統キーへ分離した。
+// ローテ手順: .env の MAIL_ENC_SECRET を新値へ変更後、
+// `npm run rotate:mail-key -- OLD_SECRET=<旧MAIL_ENC_SECRET>` で再暗号化し、
+// サーバーを再起動する。
+const KEY_SALT = 'issystem-mail-enc-v2';
+
+/** MAIL_ENC_SECRET から導出する 32バイト暗号化キー */
 function deriveKey() {
-  return crypto.createHash('sha256').update(String(config.auth.jwtSecret)).digest();
+  return crypto.scryptSync(String(config.mail.encSecret), KEY_SALT, 32);
 }
 
 /** 平文パスワード -> iv:tag:暗号文 (base64) */

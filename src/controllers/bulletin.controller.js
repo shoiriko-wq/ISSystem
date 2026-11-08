@@ -308,6 +308,33 @@ export const bulletinController = {
   },
 
   /**
+   * 掲示・回覧板の既読化 (既読確認のみ。承認とは区別して ackStatus='READ' で記録する)
+   * PUT /api/bulletins/:id/read
+   */
+  async markBulletinRead(req, res, next) {
+    try {
+      const { id } = req.params;
+      const userId = req.user ? req.user.id : 'kyomu01';
+
+      const result = await bulletinService.acknowledgeBulletin(id, userId, 'READ');
+
+      return res.status(200).json({
+        success: true,
+        message: '既読をつけました。',
+        acknowledgedAt: result ? result.acknowledgedAt : new Date().toISOString(),
+        ackCount: result ? result.ackCount : 1,
+        ackPercentage: result ? result.ackPercentage : 100,
+        data: result
+      });
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || '既読処理に失敗しました。'
+      });
+    }
+  },
+
+  /**
    * 未確認教員への一括督促リマインド通知送信
    * POST /api/bulletins/:id/remind
    */
@@ -396,7 +423,8 @@ export const bulletinController = {
 
 // --- ルーティング側 (src/routes/index.js) との別名エイリアス定義 ---
 bulletinController.digitallyApprove = bulletinController.acknowledgeBulletin;
-bulletinController.markAsRead = bulletinController.acknowledgeBulletin;
+// v3.1: PUT /api/bulletins/:id/read は既読化 (ackStatus='READ')。承認 (APPROVED) とは区別する
+bulletinController.markAsRead = bulletinController.markBulletinRead;
 bulletinController.remindUnapprovedMembers = bulletinController.remindUnacknowledgedUsers;
 
 // 個別インポート (named import) 用の展開エクスポート
@@ -409,6 +437,7 @@ export const {
   downloadBulletinAttachment,
   deleteBulletinAttachment,
   acknowledgeBulletin,
+  markBulletinRead,
   remindUnacknowledgedUsers,
   addComment,
   deleteBulletin,

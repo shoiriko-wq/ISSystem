@@ -298,6 +298,40 @@ check('全行にシグニファイア › があり、未読行の › は既読
     && rowStyle.signifierColorRead.length === 1 && rowStyle.signifierColorUnread[0] !== rowStyle.signifierColorRead[0],
   { signifiers: rowStyle.signifiers, rows: rowStyle.rows, signifierColorUnread: rowStyle.signifierColorUnread, signifierColorRead: rowStyle.signifierColorRead });
 
+// 見出し右の未読バッヂ（全日未読数・サイドバーと一致・ラベル「未読 N」・99+ 対応）
+const titleBadge = await page.evaluate(() => {
+  const h2 = document.querySelector('#view-bulletin h2');
+  const badge = document.getElementById('bulletin-title-unread');
+  const side = document.getElementById('bulletin-unread-count');
+  const unreadRows = [...document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]')]
+    .filter((r) => r.dataset.unread === 'true').length;
+  return {
+    headText: h2 ? h2.textContent.replace(/\s+/g, ' ').trim() : null,
+    inHead: !!h2 && h2.contains(badge),
+    badgeText: badge ? badge.textContent.trim() : null,
+    badgeHidden: badge ? badge.classList.contains('hidden') : null,
+    sideText: side ? side.textContent.trim() : null,
+    sideHidden: side ? side.classList.contains('hidden') : null,
+    unreadRows,
+    listCount: document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]').length,
+  };
+});
+log('title-unread-badge', titleBadge);
+check('見出し右の未読バッヂは「掲示・回覧マスタ」見出しの中（アイコン・ラベルと同一行）',
+  titleBadge.inHead && titleBadge.headText.includes('掲示・回覧マスタ'), { headText: titleBadge.headText });
+check('タイトルバッヂはサイドバーと同じ全日未読数（ラベル「未読 N」。本日の数ではない）',
+  titleBadge.badgeText && titleBadge.badgeText === titleBadge.sideText &&
+  /^未読 \d+$|^99\+$/.test(titleBadge.badgeText) &&
+  titleBadge.badgeText.replace(/\D/g, '') !== '' && Number(titleBadge.badgeText.replace(/\D/g, '')) >= titleBadge.unreadRows,
+  { title: titleBadge.badgeText, side: titleBadge.sideText, unreadRows: titleBadge.unreadRows, listCount: titleBadge.listCount });
+check('未読 0 ならタイトルバッヂは hidden（サイドバーと同じ扱い）',
+  (titleBadge.badgeText === '未読 0') === titleBadge.badgeHidden &&
+  (titleBadge.sideText === '未読 0') === titleBadge.sideHidden,
+  { titleHidden: titleBadge.badgeHidden, sideHidden: titleBadge.sideHidden });
+check('未読バッヂは 100 以上の数字を出さない（100 件超は 99+ へ。999 のような未キャップ表示がない）',
+  !(titleBadge.sideText.match(/^未読 (\d{3,})$/) || titleBadge.badgeText.match(/^未読 (\d{3,})$/)),
+  { title: titleBadge.badgeText, side: titleBadge.sideText });
+
 // 右ペインヘッダーは読者向けに不要な情報（投稿日時・掲示期間）を出さない。全文開きボタンは「詳細」
 check('右ペインヘッダーに投稿日時・掲示期間の表記がない',
   !/\d{4}\/\d{2}\/\d{2}/.test(snap1.paneHeaderText || '') && !(snap1.paneHeaderText || '').includes('掲示期間'),

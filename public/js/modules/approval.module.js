@@ -35,9 +35,8 @@ export function initApprovalModule() {
     <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-surface-strong p-4 rounded-xl border border-divider">
       <div>
         <h2 class="text-lg font-bold text-main flex items-center gap-2">
-          <i data-lucide="check-square" class="w-5 h-5 text-warning"></i> 簡易承認・物品請求ワークフロー
+          <i data-lucide="check-square" class="w-5 h-5 text-warning"></i> 簡易承認
         </h2>
-        <p class="text-xs text-muted">校内備品購入・行事申請・予算利用の承認リクエストおよびステータス管理を行えます。</p>
       </div>
 
       <div class="flex items-center gap-2 w-full sm:w-auto justify-end">

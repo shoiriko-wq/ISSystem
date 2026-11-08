@@ -9,6 +9,9 @@ import subjectService from '../services/subject.service.js';
 import jwt from 'jsonwebtoken';
 import config from '../../config/default.js';
 
+// 教務部以上 (KYOMU / ADMIN / is_kyomu 教務主任) の権限判定。ルートミドルウェアの第二防衛線としてコントローラ内でも再検証する
+const isPrivilegedUser = (u) => !!u && (u.role === 'ADMIN' || u.role === 'KYOMU' || u.is_kyomu === true || u.is_kyomu === 1);
+
 export const authController = {
   /**
    * 教職員ログイン認証
@@ -105,6 +108,13 @@ export const authController = {
    */
   async generateInvitation(req, res, next) {
     try {
+      // 招待コード発行は教務部 (KYOMU/ADMIN) 限定。コントローラでも req.user.role を再検証する
+      if (!isPrivilegedUser(req.user)) {
+        return res.status(403).json({
+          success: false,
+          message: '招待コードの発行は教務部 (KYOMU) またはシステム管理者 (ADMIN) の権限が必要です。',
+        });
+      }
       const createdByUserId = req.user.id || req.user._id;
       const result = await authService.generateInvitationCode(createdByUserId);
 
@@ -171,6 +181,11 @@ export const authController = {
   async getProfile(req, res, next) {
     try {
       const user = req.user;
+      // v3.1: 登録日 (users.created_at) は JWT ペイロードに含まれないため DB から取得する。
+      // フロントはこれを 'YYYY-MM-DD' (JST) に正規化し、未読バッヂの「登録日以降」条件に使う。
+      const dbUser = typeof userModel.findById === 'function'
+        ? await userModel.findById(user.id || user._id)
+        : null;
       return res.status(200).json({
         success: true,
         user: {
@@ -184,6 +199,7 @@ export const authController = {
           department: user.department,
           subjects: user.subjects || [],
           status: user.status || 'PRESENT',
+          created_at: dbUser?.created_at ?? user.created_at ?? null,
         },
       });
     } catch (error) {
@@ -321,22 +337,37 @@ export const authController = {
   async listUsers(req, res, next) {
     try {
       const users = await userModel.listAll();
-      return res.status(200).json({ success: true, users });
+      // 2026/11/8 RBAC: password_hash はいかなるロールにも返さない。
+      // 教務部以上は全件（連絡用メール・内線含む）、一般教員は名簿表示に必要な最小フィールドのみ返す
+      const privileged = isPrivilegedUser(req.user);
+      const safeUsers = users.map((u) => {
+        const { password_hash, ...rest } = u;
+        if (privileged) return rest;
+        const { id, staff_code, name, role, grade, department, subjects, avatar_url, is_kyomu, is_parttime } = rest;
+        return { id, staff_code, name, role, grade, department, subjects, avatar_url, is_kyomu, is_parttime };
+      });
+      return res.status(200).json({ success: true, users: safeUsers });
     } catch (error) {
       next(error);
     }
   },
 
   /**
-   * 新規ユーザーの追加 (誰でも追加可能)
+   * 新規ユーザーの追加 (教務部 KYOMU/ADMIN のみ。ADMIN は role 指定可、教務部は TEACHER 固定＝権限昇格不能)
    * POST /api/users
    */
   async createUser(req, res, next) {
     try {
       const { staff_code, name, email, password, role, grade, department, extension_number, avatar_url, subjects } = req.body;
+      // 2026/11/8 RBAC: ルートの requireKyomuRole に加えコントローラで再検証（第二防衛線）
+      if (!isPrivilegedUser(req.user)) {
+        return res.status(403).json({ success: false, message: '教職員アカウントの追加は教務部 (KYOMU) またはシステム管理者 (ADMIN) の権限が必要です。' });
+      }
       if (!staff_code || !password || !name) {
         return res.status(400).json({ success: false, message: '教職員番号、氏名、パスワードは必須です。' });
       }
+      // 権限昇格抑止: ADMIN が作成する場合のみ ADMIN/KYOMU 等の role を認める。教務部は TEACHER 固定
+      const effectiveRole = req.user.role === 'ADMIN' ? (role || 'TEACHER') : 'TEACHER';
       const bcrypt = await import('bcrypt');
       const password_hash = await bcrypt.default.hash(password, 10);
 
@@ -350,7 +381,7 @@ export const authController = {
         name,
         email,
         password_hash,
-        role: role || 'TEACHER',
+        role: effectiveRole,
         grade,
         department,
         extension_number,
@@ -371,11 +402,15 @@ export const authController = {
   },
 
   /**
-   * ユーザーの削除 (誰でも削除可能)
+   * ユーザーの削除 (システム管理者 ADMIN のみ)
    * DELETE /api/users/:id
    */
   async deleteUser(req, res, next) {
     try {
+      // 2026/11/8 RBAC: ルートの requireAdminRole に加えコントローラで ADMIN を再検証（第二防衛線）
+      if (!req.user || req.user.role !== 'ADMIN') {
+        return res.status(403).json({ success: false, message: '教職員アカウントの削除はシステム管理者 (ADMIN) の権限が必要です。' });
+      }
       const operator = req.user || { name: '管理者' };
       const { id } = req.params;
       await userModel.delete(id);

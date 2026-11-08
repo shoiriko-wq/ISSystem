@@ -54,7 +54,7 @@ export const userModel = {
 
     try {
       const res = await query(
-        `SELECT id, staff_code, email, name, role, grade, department, extension_number, subjects, password_hash FROM users WHERE id = $1`,
+        `SELECT id, staff_code, email, name, role, grade, department, extension_number, subjects, password_hash, created_at FROM users WHERE id = $1`,
         [id]
       );
       return withSubjects(res.rows[0] || null);
@@ -78,7 +78,7 @@ export const userModel = {
 
     try {
       const res = await query(
-        `SELECT id, staff_code, email, name, role, grade, department, extension_number, subjects, password_hash
+        `SELECT id, staff_code, email, name, role, grade, department, extension_number, subjects, password_hash, created_at
          FROM users WHERE UPPER(staff_code) = UPPER($1) OR UPPER(id) = UPPER($2)`,
         [staffCode, staffCode]
       );
@@ -101,7 +101,7 @@ export const userModel = {
 
     try {
       const res = await query(
-        `SELECT id, staff_code, email, name, role, grade, department, extension_number, subjects, password_hash FROM users WHERE LOWER(email) = LOWER($1)`,
+        `SELECT id, staff_code, email, name, role, grade, department, extension_number, subjects, password_hash, created_at FROM users WHERE LOWER(email) = LOWER($1)`,
         [email]
       );
       return withSubjects(res.rows[0] || null);

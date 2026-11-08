@@ -248,7 +248,7 @@
           <!-- スケジュール -->
           <a href="#" data-tab="schedule" title="スケジュール" class="nav-item flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-soft hover-surface transition-all">
             <div class="flex items-center gap-2.5">
-              <i data-lucide="clock" class="w-4 h-4 text-accent-alt"></i>
+              <i data-lucide="calendar" class="w-4 h-4 text-accent-alt"></i>
               <span class="nav-label">スケジュール</span>
             </div>
           </a>
@@ -256,7 +256,7 @@
           <!-- 施設物品予約 -->
           <a href="#" data-tab="facility" title="施設物品予約" class="nav-item flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-soft hover-surface transition-all">
             <div class="flex items-center gap-2.5">
-              <i data-lucide="calendar" class="w-4 h-4 text-info"></i>
+              <i data-lucide="building-2" class="w-4 h-4 text-info"></i>
               <span class="nav-label">施設物品予約</span>
             </div>
           </a>
@@ -458,6 +458,59 @@
       </div>
     </div>
 
+    <!-- 記事共有モーダル（教育ニュースURLのチャット・掲示板共有） -->
+    <div id="news-share-modal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 class="modal-title"><i data-lucide="share-2" class="w-5 h-5 text-accent"></i> 記事を共有</h3>
+          <button type="button" class="modal-close modal-close-x" aria-label="閉じる" title="閉じる"><i data-lucide="x" class="w-5 h-5"></i></button>
+        </div>
+        <!-- novalidate: URL のスキーマ補完（mext.go.jp/... → https://mext.go.jp/...）と独自検証を JS 側で行うため、native validation は使わない -->
+        <form id="news-share-form" class="modal-form" novalidate>
+          <div class="modal-body">
+            <div class="space-y-4">
+              <div>
+                <label class="block text-xs font-semibold text-soft mb-1" for="news-share-url">記事URL <span class="text-danger">*</span></label>
+                <input type="url" id="news-share-url" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" placeholder="https://www.mext.go.jp/b_menu/happou/..." autocomplete="off" required>
+                <p class="mt-1 text-[10px] text-muted">http://・https:// で始まるURLを入力してください（スキーマが無い場合は https:// を補完します）。</p>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-soft mb-1" for="news-share-title">タイトル <span class="text-muted font-normal">(任意)</span></label>
+                <input type="text" id="news-share-title" maxlength="120" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" placeholder="例: 生成AIの校務活用に関する新ガイドライン" autocomplete="off">
+                <p class="mt-1 text-[10px] text-muted">未入力の場合はURLのドメイン名をタイトルとして使用します。</p>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-soft mb-1" for="news-share-note">ひとこと <span class="text-muted font-normal">(任意)</span></label>
+                <textarea id="news-share-note" rows="2" maxlength="200" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" placeholder="共有理由・補足（未入力でも共有できます）"></textarea>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-semibold text-soft mb-1" for="news-share-target">共有先</label>
+                  <select id="news-share-target" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main">
+                    <option value="chat">職員チャット</option>
+                    <option value="bulletin">掲示板</option>
+                  </select>
+                </div>
+                <div id="news-share-channel-wrap">
+                  <label class="block text-xs font-semibold text-soft mb-1" for="news-share-channel">投稿先チャンネル</label>
+                  <select id="news-share-channel" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main"></select>
+                </div>
+                <div id="news-share-date-wrap" class="hidden">
+                  <label class="block text-xs font-semibold text-soft mb-1" for="news-share-date">掲示対象日</label>
+                  <input type="date" id="news-share-date" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main">
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="modal-close btn-secondary px-4 py-2 text-xs rounded bg-surface text-soft hover-surface-strong">閉じる</button>
+            <button type="submit" class="btn-primary px-4 py-2 text-xs rounded bg-accent text-main font-bold hover-primary">共有する</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+
     <!-- プロフィール編集モーダル -->
     <div id="profile-modal" class="modal-overlay hidden">
       <div class="modal-card">
@@ -621,8 +674,8 @@
         </div>
         <div class="modal-body">
         <div class="space-y-6 text-xs text-soft">
-          <!-- 招待コード発行セクション (新規登録・パスワード再設定の両方で利用可) -->
-          <div class="bg-surface p-4 rounded-xl border border-main">
+          <!-- 招待コード発行セクション (新規登録・パスワード再設定の両方で利用可。教務部 KYOMU/ADMIN 限定) -->
+          <div id="invitation-issuance-card" class="bg-surface p-4 rounded-xl border border-main">
             <h4 class="font-bold text-main mb-2 flex items-center gap-1.5 text-sm">
               <i data-lucide="key" class="w-4 h-4 text-warning"></i> 招待コード発行（新規登録・パスワード再設定）
             </h4>
@@ -822,48 +875,18 @@
   <div id="seating-modal" class="modal-overlay hidden">
     <div class="modal-card modal-card--compact">
       <div class="modal-header">
-        <h3 id="seat-modal-title" class="modal-title"><i data-lucide="layout-grid" class="w-5 h-5 text-accent"></i> 座席設定</h3>
+        <h3 id="seat-modal-title" class="modal-title"><i data-lucide="users" class="w-5 h-5 text-accent"></i> <span id="seat-modal-title-text">座席設定</span></h3>
         <button type="button" class="modal-close modal-close-x" aria-label="閉じる" title="閉じる"><i data-lucide="x" class="w-5 h-5"></i></button>
       </div>
       <form id="seating-edit-form" class="modal-form">
         <div class="modal-body">
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block text-xs font-semibold text-soft mb-1">行</label>
-              <input type="number" id="seat-input-row" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" min="1" required>
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-soft mb-1">列</label>
-              <input type="number" id="seat-input-col" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" min="1" required>
-            </div>
-          </div>
-          <div class="mt-3">
-            <label class="block text-xs font-semibold text-soft mb-1">担当教員名（空欄でクリア）</label>
-            <input type="text" id="seat-input-name" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" placeholder="例: 田中 先生">
-          </div>
-          <div class="mt-3">
-            <label class="block text-xs font-semibold text-soft mb-1">担当教科・所属</label>
-            <input type="text" id="seat-input-subject" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" placeholder="例: 英語 / 2年A組">
-          </div>
-          <div class="mt-3">
-            <label class="block text-xs font-semibold text-soft mb-1">在席状態</label>
-            <select id="seat-select-status" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main">
-              <option value="IN">在席</option>
-              <option value="PRESENT">在席</option>
-              <option value="CLASS">授業中</option>
-              <option value="MEETING">会議・打ち合わせ</option>
-              <option value="TRIP">出張</option>
-              <option value="LEAVE">年休・欠席</option>
+          <div>
+            <label class="block text-xs font-semibold text-soft mb-1" for="seat-input-user">座席に配置するユーザ（空欄でクリア）</label>
+            <select id="seat-input-user" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main">
+              <option value="">設定なし（席を空にする）</option>
             </select>
           </div>
-          <div class="mt-3">
-            <label class="block text-xs font-semibold text-soft mb-1">担当生徒コード（カンマ区切り）</label>
-            <input type="text" id="seat-input-codes" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" placeholder="例: 1204, 1205">
-          </div>
-          <div class="mt-3">
-            <label class="block text-xs font-semibold text-soft mb-1">メモ・備考</label>
-            <input type="text" id="seat-input-note" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" placeholder="例: 2-A 英語">
-          </div>
+          <p class="mt-2 text-[11px] text-soft">カードには オンライン・出張／年休・所属部局・担当教科・名前 が表示されます。</p>
         </div>
         <div class="modal-footer">
           <button type="button" class="modal-close btn-secondary px-4 py-2 text-xs rounded bg-surface text-soft hover-surface-strong">閉じる</button>

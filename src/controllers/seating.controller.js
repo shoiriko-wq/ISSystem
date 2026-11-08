@@ -140,6 +140,68 @@ export const seatingController = {
   },
 
   /**
+   * 座席表マトリクスの取得 (rows/cols・席割当て＋オンライン・出張/年休状態)
+   * GET /api/seating/matrix
+   */
+  async getMatrix(req, res, next) {
+    try {
+      const data = await seatingService.getMatrix();
+      return res.status(200).json({ success: true, ...data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * 座席表マトリクスの保存 (編集可能モードのみ)
+   * PUT /api/seating/matrix
+   */
+  async saveMatrix(req, res, next) {
+    try {
+      const result = await seatingService.saveMatrix(req.body, req.user);
+      return res.status(200).json({
+        success: true,
+        message: result.message,
+        matrix: { rows: result.rows, cols: result.cols },
+        seats: result.seats,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * 座席表マトリクスの編集可能モードへの切り替え (ロック取得)
+   * POST /api/seating/matrix/lock
+   */
+  async acquireMatrixLock(req, res, next) {
+    try {
+      const lock = await seatingService.acquireMatrixLock(req.user);
+      return res.status(200).json({
+        success: true,
+        message: '編集可能モードへ切り替えました。',
+        lock,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * 座席表マトリクスの編集ロックモードへの切り替え (ロック解放)
+   * DELETE /api/seating/matrix/lock
+   */
+  async releaseMatrixLock(req, res, next) {
+    try {
+      await seatingService.releaseMatrixLock(req.user);
+      return res.status(200).json({ success: true, message: '編集ロックモードへ切り替えました。' });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+
+  /**
    * 編集作業開始時の排他ロック取得 / ハートビート更新
    * POST /api/seating/layouts/:id/lock
    */

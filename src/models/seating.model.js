@@ -116,6 +116,79 @@ export const seatingModel = {
     return cells;
   },
 
+  /**
+   * 座席表マトリクス（rows/cols と席割当て）の取得
+   * @param {string} matrixId
+   */
+  async getSeatMatrix(matrixId = 'staff_room') {
+    const db = await openDb();
+    const matrixRes = await db.query(
+      `SELECT id, name, rows, cols, updated_at FROM seat_matrices WHERE id = $1`,
+      [matrixId]
+    );
+    const matrixRow = matrixRes.rows[0];
+    const matrix = matrixRow
+      ? { id: matrixRow.id, name: matrixRow.name, rows: Number(matrixRow.rows), cols: Number(matrixRow.cols) }
+      : { id: matrixId, name: '座席表', rows: 5, cols: 6 };
+
+    const cellsRes = await db.query(
+      `SELECT c.row_idx, c.col_idx, c.user_id,
+              u.name, u.staff_code, u.role, u.department, u.subjects, u.avatar_url
+       FROM seat_matrix_cells c
+       JOIN users u ON u.id = c.user_id
+       WHERE c.matrix_id = $1
+       ORDER BY c.row_idx ASC, c.col_idx ASC`,
+      [matrixId]
+    );
+
+    const seats = (cellsRes.rows || []).map((r) => ({
+      row: Number(r.row_idx),
+      col: Number(r.col_idx),
+      user_id: r.user_id,
+      name: r.name,
+      staff_code: r.staff_code || '',
+      role: r.role,
+      department: r.department || '',
+      subjects: r.subjects || '[]',
+      avatar_url: r.avatar_url || null,
+    }));
+
+    return { matrix, seats };
+  },
+
+  /**
+   * 座席表マトリクスの保存（rows/cols と全席割当てを一括差し替え）
+   * @param {string} matrixId
+   * @param {number} rows
+   * @param {number} cols
+   * @param {Array<{row:number,col:number,user_id:string}>} assignments
+   */
+  async saveSeatMatrix(matrixId, rows, cols, assignments = []) {
+    const db = await openDb();
+    const ts = nowIso();
+
+    await db.query(
+      `INSERT INTO seat_matrices (id, name, rows, cols, updated_at)
+       VALUES ($1, '座席表', $2, $3, $4)
+       ON CONFLICT (id) DO UPDATE SET rows = $2, cols = $3, updated_at = $4`,
+      [matrixId, rows, cols, ts]
+    );
+
+    // 席割当てはマトリクス単位で全消去→再登録（ユーザの席移動・クリアを反映）
+    await db.query(`DELETE FROM seat_matrix_cells WHERE matrix_id = $1`, [matrixId]);
+
+    for (const a of assignments) {
+      await db.query(
+        `INSERT INTO seat_matrix_cells (id, matrix_id, row_idx, col_idx, user_id, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (matrix_id, row_idx, col_idx) DO UPDATE SET user_id = $5, updated_at = $6`,
+        [`${matrixId}_${a.row}_${a.col}`, matrixId, a.row, a.col, a.user_id, ts]
+      );
+    }
+
+    return { rows, cols, assignments };
+  },
+
   async findStudentByCode(studentCode) {
     return mockStudents.get(String(studentCode)) || null;
   },

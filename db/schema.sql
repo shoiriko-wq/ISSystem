@@ -210,6 +210,29 @@ CREATE TABLE IF NOT EXISTS seating_status (
 CREATE INDEX IF NOT EXISTS idx_seating_zone ON seating_status(group_zone);
 CREATE INDEX IF NOT EXISTS idx_seating_status ON seating_status(current_status);
 
+-- 6b. 座席表マトリクス (seat_matrices / seat_matrix_cells)
+-- rows/cols は 1..100。初期状態はセル無し＝誰のカードもないマトリクス。
+CREATE TABLE IF NOT EXISTS seat_matrices (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL DEFAULT '座席表',
+  rows INTEGER NOT NULL DEFAULT 5,
+  cols INTEGER NOT NULL DEFAULT 6,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS seat_matrix_cells (
+  id TEXT PRIMARY KEY,
+  matrix_id TEXT NOT NULL,
+  row_idx INTEGER NOT NULL,
+  col_idx INTEGER NOT NULL,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (matrix_id, row_idx, col_idx),
+  UNIQUE (matrix_id, user_id),
+  CONSTRAINT chk_seat_matrix_row CHECK (row_idx BETWEEN 1 AND 100),
+  CONSTRAINT chk_seat_matrix_col CHECK (col_idx BETWEEN 1 AND 100)
+);
+CREATE INDEX IF NOT EXISTS idx_seat_matrix_cells ON seat_matrix_cells(matrix_id, row_idx, col_idx);
+
 -- 7. 施設・備品マスター (resources)
 CREATE TABLE IF NOT EXISTS resources (
   id TEXT PRIMARY KEY,
@@ -507,6 +530,11 @@ VALUES
   ('seat_2', 't-tanaka', 'A-02', 'g1', 'CLASS', '2-A 英語'),
   ('seat_3', 't-sato', 'A-03', 'g2', 'PRESENT', '')
 ON CONFLICT DO NOTHING;
+
+-- 座席表マトリクス（初期はセル無し＝誰のカードもない。rows/cols は編集モードで更新）
+INSERT INTO seat_matrices (id, name, rows, cols)
+VALUES ('staff_room', '座席表', 5, 6)
+ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO school_schedules (id, title, description, event_date, start_time, end_time, category, created_by_user_id)
 VALUES

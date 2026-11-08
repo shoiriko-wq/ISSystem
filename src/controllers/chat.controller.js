@@ -346,6 +346,15 @@ export const chatController = {
       const { channelId } = req.params;
       const user = req.user || { id: 'kyomu01', name: '教務 主任' };
 
+      // 2026/11/8 RBAC: ルートの requireKyomuRole に加えコントローラで権限を再検証（第二防衛線。service 側のメンバー/権限検証も維持）
+      const privileged = user.role === 'ADMIN' || user.role === 'KYOMU' || user.is_kyomu === true || user.is_kyomu === 1;
+      if (!privileged) {
+        return res.status(403).json({
+          success: false,
+          message: 'チャットチャンネルの削除は教務部 (KYOMU) またはシステム管理者 (ADMIN) の権限が必要です。',
+        });
+      }
+
       const result = await chatService.deleteChannel(channelId, user);
 
       // チャンネル参加者へ削除をリアルタイム通知

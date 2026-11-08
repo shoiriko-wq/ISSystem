@@ -12,7 +12,7 @@
 
 import { apiGet, apiPost, apiPut, apiPostForm, apiDelete } from '../api.js';
 import { formatDate, escapeHTML, refreshLucideIcons, openModal, closeModal, showToast, userAvatarHtml } from '../ui-helpers.js';
-import { state } from '../state.js';
+import { state, setUnreadCount } from '../state.js';
 import { API_BASE_URL } from '../config.js';
 
 let bulletinsCache = [];
@@ -28,11 +28,45 @@ let eventsBound = false;           // イベント多重登録防止
 /** 掲示ID → コメント一覧（API の ack コメント＋ローカルで送信した分） */
 const commentsById = new Map();
 
-/** 未読数の安全な更新ヘルパー */
-function updateUnread(count) {
-  if (state && state.unreadCounts) {
-    state.unreadCounts.bulletin = count;
-  }
+/**
+ * v3.1: 未読バッヂの再計算と state 反映
+ *  ・サイドバー #bulletin-unread-count とタイトルバッヂ #bulletin-title-unread = 全日未読（isUnreadForMe）
+ *  ・ダッシュボード #dash-today-bulletin-unread = 対象日が本日かつ未読
+ * DOM への書き出しは main.js の subscribeState (unreadCounts) が一元管理する
+ */
+export function recomputeUnreadBadges() {
+  const today = todayJstDate();
+  const unreadAll = bulletinsCache.filter(isUnreadForMe);
+  setUnreadCount('bulletin', unreadAll.length);
+  setUnreadCount('bulletinToday', unreadAll.filter((b) => targetDayOf(b) === today).length);
+}
+
+/** ダッシュボード・ソケット側から読む掲示キャッシュ（共有元） */
+export function bulletinsSnapshot() {
+  return bulletinsCache;
+}
+
+/**
+ * 掲示キャッシュを差し替えて未読バッヂを再計算する（ダッシュボードの 100 件取得など）
+ * @param {Array} list 掲示一覧
+ */
+export function setBulletinCache(list) {
+  bulletinsCache = Array.isArray(list) ? list.slice() : [];
+  recomputeUnreadBadges();
+}
+
+/**
+ * ソケット受信した新投稿をキャッシュへ反映して未読を再計算する
+ * @param {Object} bulletin 新掲示 (API 応答と同形)
+ */
+export function ingestBulletin(bulletin) {
+  if (!bulletin) return;
+  const key = String(bulletin.id ?? bulletin.post_id ?? '');
+  if (!key) return;
+  const idx = bulletinsCache.findIndex((b) => String(b.id) === key);
+  if (idx >= 0) bulletinsCache[idx] = { ...bulletinsCache[idx], ...bulletin };
+  else bulletinsCache = [bulletin, ...bulletinsCache];
+  recomputeUnreadBadges();
 }
 
 /** JST 基準の今日 (YYYY-MM-DD) */
@@ -94,6 +128,8 @@ export function initBulletinModule() {
     <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-surface-strong p-3 rounded-xl border border-divider mb-4">
       <h2 class="text-base font-bold text-main flex items-center gap-2 shrink-0">
         <i data-lucide="megaphone" class="w-4 h-4 text-accent"></i> 職員掲示板
+        <!-- v3.1: タイトルバッヂ（全日未読。サイドバー #bulletin-unread-count と同一値。100 以上は 99+） -->
+        <span id="bulletin-title-unread" class="bulletin-title-unread hidden" aria-label="掲示板の未読件数（全日）">未読 0</span>
       </h2>
       <div class="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
         <!-- ★ 検索（ヘッダー内。タイトル・本文・投稿者名を全日でインクリメンタル検索。検索語入力中は ‹ › の中心日表示が「全日」になり、
@@ -368,7 +404,7 @@ function toJstDay(iso) {
 }
 
 /** 掲示の「対象日」キー (YYYY-MM-DD)。対象日未設定の旧レコードは投稿日で補完する */
-function targetDayOf(b) {
+export function targetDayOf(b) {
   const raw = String(b.targetDate || b.target_date || b.targetDay || b.target_day || '').substring(0, 10);
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
   return toJstDay(b.postedAt || b.posted_at || b.createdAt || b.created_at);
@@ -707,8 +743,7 @@ export async function loadBulletins() {
     bulletinsCache = getDummyBulletins();
   }
 
-  const unreadCount = bulletinsCache.filter(isUnreadBulletin).length;
-  updateUnread(unreadCount);
+  recomputeUnreadBadges();
 
   renderBulletinList();
 }
@@ -760,6 +795,54 @@ function isUnreadBulletin(b) {
 }
 
 /**
+ * 掲示期間が指定日に有効か（開始日未設定/開始日≦当日、終了日未設定/終了日≧当日）
+ * v3.1: 掲示終了日を過ぎた記事は未読バッヂに数えない（着任前・掲示終了記事を除く）
+ * @param {Object} b 掲示
+ * @param {string} [day] 'YYYY-MM-DD' (JST) 基準日。省略時は本日
+ */
+export function isDisplayActiveOn(b, day = todayJstDate()) {
+  const { start, end } = displayPeriodOf(b);
+  if (start && start > day) return false;
+  if (end && end < day) return false;
+  return true;
+}
+
+/**
+ * target_scope に自分が含まれるか（現行の掲示はほぼ ALL/ALL。未設定は ALL 扱い）
+ * @param {Object} b 掲示
+ */
+function isScopeForMe(b) {
+  const scope = b.targetScope || b.target_scope || { grade: 'ALL', department: 'ALL' };
+  const me = state.currentUser || {};
+  const grade = String(scope.grade ?? 'ALL');
+  const dept = String(scope.department ?? 'ALL');
+  if (grade !== 'ALL' && me.grade && grade !== String(me.grade)) return false;
+  if (dept !== 'ALL' && me.department && dept !== String(me.department)) return false;
+  return true;
+}
+
+/**
+ * ★ 単一の未読判定（v3.1）。ダッシュボード・タイトル・サイドバーが同じ関数を使う
+ *  未読 = ackStatus ∈ {UNREAD, REJECTED}（isUnreadBulletin と同一の土台）
+ *     AND 投稿日 (JST) ≧ ユーザ登録日 registeredAt（created_at が無い旧セッションは制約なし＝全期間）
+ *     AND 掲示期間が有効（isDisplayActiveOn）
+ *     AND target_scope に自分が含まれる
+ *     AND 非削除（サーバーの findAll が既に除外）
+ * @param {Object} b 掲示
+ */
+export function isUnreadForMe(b) {
+  if (!b) return false;
+  if (!isUnreadBulletin(b)) return false;
+  const registeredAt = state.currentUser?.registeredAt;
+  if (registeredAt) {
+    const postedDay = toJstDay(b.postedAt || b.posted_at || b.createdAt || b.created_at);
+    if (postedDay && postedDay < registeredAt) return false;
+  }
+  if (!isDisplayActiveOn(b)) return false;
+  return isScopeForMe(b);
+}
+
+/**
  * 掲示の投稿者がログインユーザー本人か（削除ボタンは投稿者本人にだけ表示する）
  * @param {Object} b 掲示
  */
@@ -808,7 +891,7 @@ function paneAuthorHtml(b) {
  * @param {boolean} [showDay] 対象日チップを出すか（全日の検索結果一覧でのみ true）
  */
 function titleRowHtml(b, selected, showDay = false) {
-  const unread = isUnreadBulletin(b);
+  const unread = isUnreadForMe(b);
   const titleHtml = currentSearch ? highlightHtml(b.title, currentSearch) : escapeHTML(String(b.title || ''));
   const dayChip = showDay ? `<span class="bulletin-row-day">${escapeHTML(dayShortLabel(targetDayOf(b)))}</span>` : '';
   return `
@@ -1112,7 +1195,7 @@ async function deleteBulletinPost(id) {
     commentsById.delete(key);
     const ids = filteredBulletins().map((b) => String(b.id));
     if (!ids.includes(String(selectedId))) selectedId = ids[0] || '';
-    updateUnread(bulletinsCache.filter(isUnreadBulletin).length);
+    recomputeUnreadBadges();
     showToast('削除しました', 'success');
     renderBulletinList();
     focusSelectedRow();
@@ -1122,11 +1205,11 @@ async function deleteBulletinPost(id) {
   }
 }
 
-/** 既読化（PUT /api/bulletins/:id/read）。左列の未読バッジだけ更新する */
-async function markBulletinRead(id) {
+/** 既読化（PUT /api/bulletins/:id/read）。左列の未読バッジ・全バッヂを更新（既読カードの再クリックは API を叩かない＝冪等） */
+export async function markBulletinRead(id) {
   const item = bulletinsCache.find((b) => String(b.id) === String(id));
   if (!item) return;
-  if (item.isRead || item.ackStatus === 'READ' || item.ackStatus === 'APPROVED') return;
+  if (!isUnreadForMe(item)) return;
 
   item.isRead = true;
   item.ackStatus = 'READ';
@@ -1134,8 +1217,7 @@ async function markBulletinRead(id) {
     await apiPut(`/bulletins/${id}/read`, {});
   } catch (e) { /* オフライン時はローカル状態のみ更新 */ }
 
-  const unreadCount = bulletinsCache.filter(isUnreadBulletin).length;
-  updateUnread(unreadCount);
+  recomputeUnreadBadges();
   renderRows();  // 未読バッジの消失だけ反映（右ペインは再描画しない）
 }
 
@@ -1158,15 +1240,8 @@ async function openBulletinDetail(id) {
   const item = bulletinsCache.find((b) => String(b.id) === String(id));
   if (!item) return;
 
-  if (!item.isRead && item.ackStatus !== 'READ' && item.ackStatus !== 'APPROVED') {
-    item.isRead = true;
-    item.ackStatus = 'READ';
-    try {
-      await apiPut(`/bulletins/${id}/read`, {});
-    } catch (e) { /* オフライン時はローカル状態のみ更新 */ }
-    const unreadCount = bulletinsCache.filter(isUnreadBulletin).length;
-    updateUnread(unreadCount);
-    renderRows();  // 左列の未読バッジを更新
+  if (isUnreadForMe(item)) {
+    await markBulletinRead(item.id);
   }
 
   const titleEl = document.getElementById('detail-bulletin-title');

@@ -143,6 +143,8 @@ function renderAuthScreen() {
       const displayName = state.currentUser?.name || state.currentUser?.staff_code || state.currentUser?.id || '教員';
       dashUserEl.textContent = `${displayName} 先生`;
     }
+    // 2026/11/8 RBAC: 招待コード発行カードは教務部 (KYOMU/ADMIN) 権限のユーザーのみ表示
+    document.getElementById('invitation-issuance-card')?.classList.toggle('hidden', !isKyomuUser());
     const userAvatar = document.getElementById('header-user-avatar');
     if (userAvatar) {
       if (state.currentUser?.avatar_url) {
@@ -328,15 +330,32 @@ function initEventsAndListeners() {
     }
 
     if (key === 'unreadCounts') {
+      // v3.1: 100 以上は 99+ にキャップ（ピルは 10px 相当の位置に収まる）。0 は hidden のまま
+      const cap = (n) => (n >= 100 ? '99+' : String(n));
+      const bCount = currState.unreadCounts.bulletin;
+      const tCount = currState.unreadCounts.bulletinToday || 0;
+
       const bBadge = document.getElementById('bulletin-unread-count');
       const cBadge = document.getElementById('chat-unread-count');
-      
+
       if (bBadge) {
-        bBadge.textContent = currState.unreadCounts.bulletin;
-        bBadge.classList.toggle('hidden', currState.unreadCounts.bulletin === 0);
+        bBadge.textContent = cap(bCount);
+        bBadge.classList.toggle('hidden', bCount === 0);
+      }
+      // メイン画面タイトルバッヂ（全日未読。サイドバーと同一値）
+      const titleBadge = document.getElementById('bulletin-title-unread');
+      if (titleBadge) {
+        titleBadge.textContent = `未読 ${cap(bCount)}`;
+        titleBadge.classList.toggle('hidden', bCount === 0);
+      }
+      // ダッシュボード「本日の連絡」ヘッダーバッヂ（本日未読）
+      const dashBadge = document.getElementById('dash-today-bulletin-unread');
+      if (dashBadge) {
+        dashBadge.textContent = `未読 ${cap(tCount)}`;
+        dashBadge.classList.toggle('hidden', tCount === 0);
       }
       if (cBadge) {
-        cBadge.textContent = currState.unreadCounts.chat;
+        cBadge.textContent = cap(currState.unreadCounts.chat);
         cBadge.classList.toggle('hidden', currState.unreadCounts.chat === 0);
       }
     }
@@ -462,8 +481,12 @@ function initEventsAndListeners() {
     }
   });
 
-  // 招待コード発行ボタン (新規登録・パスワード再設定で共用される共通コード)
+  // 招待コード発行ボタン (教務部 KYOMU/ADMIN のみ。2026/11/8 RBAC)
   document.getElementById('generate-invitation-btn')?.addEventListener('click', async () => {
+    if (!isKyomuUser()) {
+      showToast('招待コードの発行は教務部 (KYOMU) またはシステム管理者 (ADMIN) の権限が必要です', 'error');
+      return;
+    }
     try {
       const res = await apiPost('/auth/generate-invitation', {});
       const code = res.code || res.invitation?.code;
@@ -732,6 +755,8 @@ function initEventsAndListeners() {
 
     // 担当教科の複数選択UI (教務部は教科マスタ管理ボタンも表示)
     renderSubjectPicker('profile-subjects', user.subjects || []);
+    // 2026/11/8 RBAC: ユーザー管理メニュー (一覧全件・追加・削除) は教務部以上のみ表示
+    document.getElementById('menu-users-manage-btn')?.classList.toggle('hidden', !isKyomuUser());
     const subjectAdminBtn = document.getElementById('profile-subject-admin-btn');
     if (subjectAdminBtn) {
       subjectAdminBtn.classList.toggle('hidden', !isKyomuUser());

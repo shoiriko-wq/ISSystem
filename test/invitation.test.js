@@ -33,7 +33,8 @@ describe('Invitation code API (/api/auth 招待コード)', () => {
     expect(res.statusCode).toBe(201);
     expect(res.body.success).toBe(true);
     // フロントエンド (main.js) は res.code を参照するため、トップレベルに code が必須
-    expect(res.body.code).toMatch(/^[0-9A-F]{8}$/);
+    // v3.0.7: 128bit 系 = 32文字16進大写
+    expect(res.body.code).toMatch(/^[0-9A-F]{32}$/);
     expect(res.body.code).toBe(res.body.invitation.code);
     expect(res.body.expiresAt).toBeTruthy();
     code1 = res.body.code;
@@ -161,8 +162,10 @@ describe('Invitation code API (/api/auth 招待コード)', () => {
 
   afterAll(async () => {
     // テスト用の仮アカウントを削除し、シードデータを汚さない
+    // v3.0.5 RBAC: ユーザー削除 (DELETE /api/users/:id) は ADMIN のみ。掃除は T2026000 (システム管理者) で行う
     if (newUserId) {
-      await request(app).delete(`/api/users/${newUserId}`).set('Authorization', bearer(adminToken));
+      const cleanupToken = await loginToken(app, { staff_code: 'T2026000' });
+      await request(app).delete(`/api/users/${newUserId}`).set('Authorization', bearer(cleanupToken));
     }
     await closePool();
   });

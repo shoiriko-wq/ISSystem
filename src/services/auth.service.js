@@ -14,11 +14,63 @@ import { ApiError } from '../middlewares/error.middleware.js';
 
 const BCRYPT_ROUNDS = 10;
 
-function legacySha256(password) {
-  const secret = (config && config.auth && config.auth.jwtSecret)
-    ? config.auth.jwtSecret
-    : 'dev-secret-key-change-in-production';
-  return crypto.createHash('sha256').update(password + secret).digest('hex');
+// === v3.0.7 ログイン総当たり対策: ユーザー単位ロックアウト（プロセス内メモリ・単一サーバー運用） ===
+// key = 正規化識別子（小文字）。value = { count, firstAt, lockedUntil }
+// 15分のウィンドウで 5 回失敗すると 15 分間ロック。成功ログインで解除。サーバー再起動で解除される
+// （単一サーバー実運用での十分性。DB 永続化は行わない — 監査 LOGIN_FAILED で検知可能）。
+const LOGIN_FAIL_LIMIT = 5;
+const LOGIN_FAIL_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_LOCK_MS = 15 * 60 * 1000;
+const loginFailures = new Map();
+
+function sweepLoginFailures() {
+  const now = Date.now();
+  for (const [key, st] of loginFailures) {
+    const expired = st.lockedUntil > 0 ? st.lockedUntil < now : st.firstAt + LOGIN_FAIL_WINDOW_MS < now;
+    if (expired) loginFailures.delete(key);
+  }
+}
+
+function isLocked(key) {
+  const st = loginFailures.get(key);
+  return !!st && st.lockedUntil > Date.now();
+}
+
+function recordLoginFailure(key) {
+  if (loginFailures.size > 1000) sweepLoginFailures();
+  const now = Date.now();
+  let st = loginFailures.get(key);
+  if (!st || st.lockedUntil > 0 || st.firstAt + LOGIN_FAIL_WINDOW_MS < now) {
+    st = { count: 0, firstAt: now, lockedUntil: 0 };
+    loginFailures.set(key, st);
+  }
+  st.count += 1;
+  if (st.count >= LOGIN_FAIL_LIMIT) {
+    st.lockedUntil = now + LOGIN_LOCK_MS;
+    console.warn('[AuthService] ログイン失敗により一時ロック:', { key, count: st.count });
+  }
+}
+
+function recordLoginSuccess(key) {
+  loginFailures.delete(key);
+}
+
+// 失敗ログインを監査ログ LOGIN_FAILED として記録（成功 LOGIN のみの旧実装からの拡張）
+async function logLoginFailure(ipAddress, identifier, reason, userId = null) {
+  try {
+    if (auditModel && typeof auditModel.logAction === 'function') {
+      await auditModel.logAction({
+        userId,
+        action: 'LOGIN_FAILED',
+        targetEntity: 'USER',
+        targetId: userId ?? identifier,
+        ipAddress,
+        changesJson: JSON.stringify({ identifier, reason }),
+      });
+    }
+  } catch (auditErr) {
+    console.warn('[Audit Log Warning]', auditErr.message);
+  }
 }
 
 async function hashPassword(password) {
@@ -30,7 +82,10 @@ async function verifyPassword(password, storedHash) {
   if (storedHash.startsWith('$2a$') || storedHash.startsWith('$2b$') || storedHash.startsWith('$2y$')) {
     return bcrypt.compare(password, storedHash);
   }
-  return storedHash === legacySha256(password) || storedHash === password;
+  // 2026/11/8 監査 Critical 対策: legacySha256(password+secret) と
+  // storedHash === password（平文一致）のフォールバックを撤去。
+  // bcrypt 以外のハッシュはすべて拒否する（seed は bcrypt のみ）。
+  return false;
 }
 
 export const authService = {
@@ -59,6 +114,13 @@ export const authService = {
     identifier = String(identifier).trim();
     password = String(password).trim();
 
+    // v3.0.7: ユーザー単位ロックアウトチェック（423）
+    const normalizedKey = identifier.toLowerCase();
+    if (isLocked(normalizedKey)) {
+      await logLoginFailure(ipAddress, identifier, 'locked_out');
+      throw new ApiError(423, 'アカウントは一時ロックされています。15分後に再試行してください。');
+    }
+
     let user = null;
 
     // 1. staff_code で検索 (例: T2026001)
@@ -77,17 +139,23 @@ export const authService = {
     }
 
     if (!user) {
+      recordLoginFailure(identifier.toLowerCase());
+      await logLoginFailure(ipAddress, identifier, 'user_not_found');
       throw new ApiError(401, '教職員番号またはパスワードが正しくありません。');
     }
 
     const isPasswordValid = await verifyPassword(password, user.password_hash);
 
     if (!isPasswordValid) {
-      console.warn('[AuthService] パスワード照合失敗:', { identifier, dbHash: user.password_hash });
+      // dbHash をログに出さない（秘匿）
+      console.warn('[AuthService] パスワード照合失敗:', { identifier });
+      recordLoginFailure(identifier.toLowerCase());
+      await logLoginFailure(ipAddress, identifier, 'bad_password', user._id || user.id);
       throw new ApiError(401, '教職員番号またはパスワードが正しくありません。');
     }
 
     const userId = user._id || user.id;
+    recordLoginSuccess(identifier.toLowerCase());
 
     // PostgreSQL の INTEGER(1/0)・BOOLEAN・TEXT いずれの is_kyomu 値にも対応した判定
     const isKyomuRole = user.is_kyomu === 1 || user.is_kyomu === true || user.role === 'KYOMU';
@@ -122,6 +190,8 @@ export const authService = {
         department: user.department,
         subjects: parseSubjectList(user.subjects),
         status: user.status || 'PRESENT',
+        // v3.1: 登録日 (users.created_at)。フロント側で 'YYYY-MM-DD' (JST) に正規化して未読バッヂの登録日以降条件に使う
+        created_at: user.created_at || null,
       },
     };
   },
@@ -245,7 +315,9 @@ export const authService = {
       throw new ApiError(404, '発行ユーザーが見つかりません。');
     }
 
-    const randomCode = crypto.randomBytes(4).toString('hex').toUpperCase();
+    // v3.0.7: 128bit 系（32文字16進大写・crypto.randomBytes(16)）。総当たり 3.4×10^38 通り、
+    // 24時間有効期限 + コード単位 15分5試行（rate-limit）で総当たりを実務不可能にする
+    const randomCode = crypto.randomBytes(16).toString('hex').toUpperCase();
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     const invitation = await userModel.createInvitationCode(randomCode, createdByUserId, expiresAt);
@@ -359,3 +431,8 @@ export const authService = {
 };
 
 export default authService;
+
+// テスト用フック: ユーザー単位ロックアウトの Map を消す（jest のロックアウト検証後など）
+export function clearLoginLockForTests(identifier) {
+  loginFailures.delete(String(identifier).trim().toLowerCase());
+}

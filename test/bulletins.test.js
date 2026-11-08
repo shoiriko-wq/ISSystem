@@ -6,6 +6,7 @@
 import request from 'supertest';
 import app from '../src/app.js';
 import { loginToken, bearer, pickId, closePool } from './helpers.js';
+import { query } from '../config/database.js';
 
 describe('Bulletin API (/api/bulletins)', () => {
   let token;
@@ -183,13 +184,39 @@ describe('Bulletin API (/api/bulletins)', () => {
     expect(found).toBe(true);
   });
 
-  it('PUT /api/bulletins/post_1/read - 既読状態を更新できること', async () => {
+  it('PUT /api/bulletins/:id/read - 既読化で ackStatus=READ かつ ack 行が増加すること', async () => {
+    const me = await request(app).get('/api/auth/me').set('Authorization', bearer(token));
+    const userId = me.body.user.id;
+
+    // 新規投稿はこのユーザーの ack を持たない → PUT /read で ack 行が 1 増える
+    const createRes = await request(app).post('/api/bulletins').set('Authorization', bearer(token))
+      .send({ title: '既読化検証掲示', content: 'ack 行数増加の検証' });
+    expect(createRes.statusCode).toBe(201);
+    const readTargetId = pickId(createRes.body);
+
+    const beforeRes = await query(`SELECT count(*)::int AS n FROM post_acknowledgements WHERE user_id = $1`, [userId]);
+    const beforeCount = Number(beforeRes.rows[0].n);
+
     const res = await request(app)
-      .put('/api/bulletins/post_1/read')
+      .put(`/api/bulletins/${readTargetId}/read`)
       .set('Authorization', bearer(token))
       .send({ status: 'READ' });
     expect(res.statusCode).toBe(200);
     expect(res.body.success).toBe(true);
+
+    const ackRes = await query(
+      `SELECT status FROM post_acknowledgements WHERE post_id = $1 AND user_id = $2`,
+      [readTargetId, userId]
+    );
+    expect(ackRes.rows[0].status).toBe('READ');
+
+    const afterRes = await query(`SELECT count(*)::int AS n FROM post_acknowledgements WHERE user_id = $1`, [userId]);
+    expect(Number(afterRes.rows[0].n)).toBe(beforeCount + 1);
+
+    // 一覧の ackStatus も READ になる（ダッシュボードの既読カードは再 PUT しない＝冪等）
+    const listRes = await request(app).get('/api/bulletins').set('Authorization', bearer(token));
+    const target = listRes.body.data.find((p) => p.id === readTargetId);
+    expect(target.ackStatus).toBe('READ');
   });
 
   it('PUT /api/bulletins/:id/approve - 電子承認を 200 で登録できること', async () => {

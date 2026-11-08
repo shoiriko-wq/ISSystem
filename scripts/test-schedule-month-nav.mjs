@@ -1,19 +1,24 @@
 /**
  * スケジュール月ナビ（年月ラベル）の位置・アクセシビリティ監査
  *
- * 目的: 年月表示が日のグリッド（7列）の中央直上にあること、設定枠とカレンダー枠が
- *       分離され各自 2px 実枠で囲まれていることを実ブラウザで検証する。
+ * 目的: 年月表示が日のグリッド（7列）の中央直上にあること、タイトルバー・カテゴリ選択パネル・
+ *       カレンダー枠の構造（ツールバーの「表示設定」は撤廃）を実ブラウザで検証する。
  * 経緯: 年月は ‹ › の間にあったがツールバー左端に寄せられており、日グリッドの中央から
  *       大きく左へ外れて位置が悪かった。月ナビ行をカレンダー本体の最上段へ移し、
  *       ‹ [年月] › を対称配置（同じ 32px ボタン + flex-1 text-center）にして中心を揃える。
- *       さらに設定部分（表示モード・部署フィルタ・行事追加）と年月込みのカレンダー部分を
- *       分離してそれぞれ枠で囲み、左上の「今月」ボタンは撤廃した
+ *       さらに「表示設定」ツールバーを撤廃し、ヘッダー最上段にタイトルバー（見出し＋「カテゴリ選択」
+ *       トグル・行事追加・部署カテゴリ管理）を設け、部署チップ・サマリー・常設リセットは開閉可能な
+ *       カテゴリ選択パネルへ移した。表示モード（カレンダー／1日一覧）はカレンダー枠内のタブ化（tablist、
+ *       矢印キーで移動）。パネルを開閉・リセット表示の切替でカテゴリチップの位置は動かず、カレンダー枠だけが動く。
  *       （現在月へは年月选择メニュー内の「今月へ」で戻る）。
  * 検証: 1) ラベルが #sched-view-area 内（グリッドの直上） 2) ラベル中心 x = グリッド中心 x（±3px）
  *       3) ‹ › が左右対称（中心距離差 ±3px） 4) 見出し + aria-live、矢印に aria-label
  *       5) ‹ › とメニュー「今月へ」で月が切り替わる（機能回帰なし） 6) 1日一覧でも中央直上
  *       7) 狭幅 (720px) でも中央直上 8) console/pagejs error なし
- *       9) 設定枠・カレンダー枠の分離と 2px 枠線 10) 左上「今月」ボタンの撤廃
+ *       9) タイトルバー・カテゴリ選択パネル・カレンダー枠の分離と枠線／コントロール高さ 2.4rem
+ *       10) 左上「今月」ボタンの撤廃 11) トグル開閉・「全選択に戻す」表示切替でチップ位置不動
+ *       12) カテゴリ選択トグルの aria-expanded / aria-controls、tablist と矢印キー移動
+ *       13) スローショット scripts/output/schedule-cat-open.png / schedule-cat-closed.png（開／閉の見た目の確認）
  *
  * 実行: node scripts/test-schedule-month-nav.mjs   （ISSystem サーバーが必要）
  *  options: UI_BASE=http://host:port  UI_USER=T2026001  UI_PASS=password123  CHROME_PATH=...
@@ -122,43 +127,257 @@ check('左上の「今月」ボタンは撤廃されている（ツールバー�
   !cal.todayExists && !cal.todayInCalFrame, { todayExists: cal.todayExists, todayInCalFrame: cal.todayInCalFrame });
 
 // ★ 設定枠とカレンダー枠の分離：それぞれ 2px 実枠、内容の帰属が混ざらない
-const frames = await page.evaluate(() => {
-  const settings = document.getElementById('sched-settings-frame');
+// ★ レイアウト検査（タイトルバー／カテゴリ選択パネル／表示モードタブ）
+const layout = await page.evaluate(() => {
+  const titleBar = document.getElementById('sched-title-bar');
+  const panel = document.getElementById('sched-cat-panel');
   const calFrame = document.getElementById('sched-calendar-frame');
-  const bw = (el) => (el ? Math.round(parseFloat(getComputedStyle(el).borderTopWidth)) : null);
+  const toggle = document.getElementById('sched-cat-toggle');
+  const addBtn = document.getElementById('sched-add-btn');
+  const adminBtn = document.getElementById('sched-cat-admin-btn');
+  const calTab = document.getElementById('sched-mode-calendar');
+  const listTab = document.getElementById('sched-mode-list');
+  const reset = document.getElementById('sched-select-all');
+  const status = document.getElementById('sched-cat-status');
+  const cs = (el) => (el ? getComputedStyle(el) : null);
+  const bw = (el) => (el ? Math.round(parseFloat(cs(el).borderTopWidth)) : null);
+  const pad = (el) => (el ? Math.round(parseFloat(cs(el).paddingTop)) : null);
+  const mh = (el) => (el ? Math.round(parseFloat(cs(el).minHeight)) : null);
+  const box = (el) => {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { top: Math.round(r.top), left: Math.round(r.left), width: Math.round(r.width), height: Math.round(r.height) };
+  };
   const inF = (el, sel) => (el ? el.querySelector(sel) !== null : false);
+  const firstChip = document.querySelector('#sched-cat-chip-row .sched-cat-chip');
   return {
-    settingsExists: !!settings,
-    calFrameExists: !!calFrame,
-    settingsBorder: bw(settings),
-    calFrameBorder: bw(calFrame),
-    siblings: !!settings && !!calFrame && settings.parentElement === calFrame.parentElement,
-    settingsHasTitle: settings ? settings.innerText.includes('表示設定') : false,
-    calHasTitle: calFrame ? /カレンダー|1日一覧/.test(calFrame.innerText) : false,
-    settingsHasMode: inF(settings, '#sched-mode-calendar'),
-    settingsHasChips: inF(settings, '#sched-filter-chips'),
-    settingsHasAdd: inF(settings, '#sched-add-btn'),
-    settingsHasSummary: inF(settings, '#sched-summary'),
+    titleExists: !!titleBar, panelExists: !!panel, calExists: !!calFrame,
+    titleBorder: bw(titleBar), panelBorder: bw(panel), calBorder: bw(calFrame),
+    titlePad: pad(titleBar), calPad: pad(calFrame),
+    titleH2: titleBar && titleBar.querySelector('h2') ? titleBar.querySelector('h2').textContent.trim() : null,
+    titleHasToggle: inF(titleBar, '#sched-cat-toggle'),
+    titleHasAdd: inF(titleBar, '#sched-add-btn'),
+    titleHasAdmin: inF(titleBar, '#sched-cat-admin-btn'),
+    toggleMinH: mh(toggle), addMinH: mh(addBtn), adminMinH: mh(adminBtn),
+    toggleExpanded: toggle ? toggle.getAttribute('aria-expanded') : null,
+    toggleControls: toggle ? toggle.getAttribute('aria-controls') : null,
+    statusText: status ? status.textContent.trim() : null,
+    statusW: box(status) ? box(status).width : null,
+    toggleBox: box(toggle),
+    panelVisible: !!panel && !panel.classList.contains('hidden'),
+    panelHasChips: inF(panel, '.sched-cat-chip'),
+    panelHasSummary: inF(panel, '#sched-summary'),
+    panelHasReset: inF(panel, '#sched-select-all'),
+    panelHasGrid: inF(panel, '.grid.grid-cols-7'),
+    panelHasToggle: inF(panel, '#sched-cat-toggle'),
+    chipBox: box(firstChip),
+    chipCount: document.querySelectorAll('.sched-cat-chip').length,
+    resetExists: !!reset,
+    resetVisible: reset ? cs(reset).visibility === 'visible' : null,
+    resetAriaHidden: reset ? reset.getAttribute('aria-hidden') : null,
+    resetMinH: mh(reset),
+    calHasTabs: inF(calFrame, '#sched-mode-calendar') && inF(calFrame, '#sched-mode-list'),
+    tablistRole: calTab && calTab.parentElement ? calTab.parentElement.getAttribute('role') : null,
+    calTabSelected: calTab ? calTab.getAttribute('aria-selected') : null,
+    listTabSelected: listTab ? listTab.getAttribute('aria-selected') : null,
+    tabMinH: mh(calTab),
     calHasLabel: inF(calFrame, '#sched-month-label'),
     calHasGrid: inF(calFrame, '#sched-view-area .grid.grid-cols-7'),
-    settingsHasGrid: inF(settings, '.grid.grid-cols-7'),
-    calHasMode: inF(calFrame, '#sched-mode-calendar'),
     calHasChips: inF(calFrame, '.sched-cat-chip'),
-    noOverlap: !!settings && !!calFrame && !settings.contains(calFrame) && !calFrame.contains(settings),
+    siblings: !!titleBar && !!panel && !!calFrame
+      && titleBar.parentElement === calFrame.parentElement && panel.parentElement === calFrame.parentElement,
+    titleIsFirst: !!titleBar && titleBar.parentElement && titleBar.parentElement.firstElementChild === titleBar,
+    noOverlap: !!titleBar && !!calFrame && !titleBar.contains(calFrame) && !calFrame.contains(titleBar),
+    calTop: box(calFrame) ? box(calFrame).top : null,
+    adminExists: !!adminBtn,
   };
 });
-log('section-frames', frames);
-check('設定枠とカレンダー枠が分離され、それぞれ 2px 実枠（.card）で囲まれ兄弟要素',
-  frames.settingsExists && frames.calFrameExists && frames.settingsBorder >= 2 && frames.calFrameBorder >= 2
-    && frames.siblings && frames.noOverlap,
-  { settingsBorder: frames.settingsBorder, calFrameBorder: frames.calFrameBorder, siblings: frames.siblings, noOverlap: frames.noOverlap });
-check('設定枠に表示モード・部署チップ・行事追加・サマリーが入る（カレンダー枠に混入しない）',
-  frames.settingsHasTitle && frames.settingsHasMode && frames.settingsHasChips && frames.settingsHasAdd
-    && frames.settingsHasSummary && !frames.calHasMode && !frames.calHasChips,
-  { settingsHasTitle: frames.settingsHasTitle, settingsHasMode: frames.settingsHasMode, calHasMode: frames.calHasMode, calHasChips: frames.calHasChips });
-check('カレンダー枠に年月ラベルと日グリッドが入る（設定枠にグリッドはない）',
-  frames.calHasTitle && frames.calHasLabel && frames.calHasGrid && !frames.settingsHasGrid,
-  { calHasTitle: frames.calHasTitle, calHasLabel: frames.calHasLabel, calHasGrid: frames.calHasGrid, settingsHasGrid: frames.settingsHasGrid });
+log('layout', layout);
+check('タイトルバー・カテゴリ選択パネル・カレンダー枠が分離され兄弟要素（タイトルバーとカレンダー枠は 2px 実枠・p-3(12px)、タイトルバーは最上部）',
+  layout.titleExists && layout.panelExists && layout.calExists && layout.titleBorder >= 2 && layout.calBorder >= 2
+    && layout.panelBorder >= 1 && layout.titlePad >= 12 && layout.calPad >= 12
+    && layout.siblings && layout.titleIsFirst && layout.noOverlap,
+  { titleBorder: layout.titleBorder, panelBorder: layout.panelBorder, calBorder: layout.calBorder,
+    titlePad: layout.titlePad, calPad: layout.calPad, siblings: layout.siblings, titleIsFirst: layout.titleIsFirst });
+check('タイトルバーに「スケジュール」見出し・カテゴリ選択トグル・行事追加・部署カテゴリ管理（ツールバーの「表示設定」は撤廃）',
+  layout.titleH2 === 'スケジュール' && layout.titleHasToggle && layout.titleHasAdd && layout.titleHasAdmin
+    && !layout.panelHasToggle,
+  { titleH2: layout.titleH2, titleHasToggle: layout.titleHasToggle, titleHasAdd: layout.titleHasAdd, titleHasAdmin: layout.titleHasAdmin });
+check('ヘッダーのコントロール高さは 2.4rem(38px) 以上（職員掲示板・施設物品予約と同じ）',
+  layout.toggleMinH >= 38 && layout.addMinH >= 38 && layout.adminMinH >= 38,
+  { toggleMinH: layout.toggleMinH, addMinH: layout.addMinH, adminMinH: layout.adminMinH });
+check('カテゴリ選択トグルは aria-controls="sched-cat-panel" を持ち、aria-expanded とパネル表示が一致（開閉状態は localStorage から復元）',
+  layout.toggleControls === 'sched-cat-panel' && layout.panelVisible === (layout.toggleExpanded === 'true'),
+  { toggleControls: layout.toggleControls, toggleExpanded: layout.toggleExpanded, panelVisible: layout.panelVisible });
+check('カテゴリチップ・サマリー・常設リセットはカテゴリ選択パネル内（カレンダー枠に混入しない）',
+  layout.panelHasChips && layout.panelHasSummary && layout.panelHasReset && layout.chipCount > 0
+    && !layout.panelHasGrid && !layout.calHasChips,
+  { panelHasChips: layout.panelHasChips, panelHasSummary: layout.panelHasSummary, panelHasReset: layout.panelHasReset,
+    chipCount: layout.chipCount, calHasChips: layout.calHasChips });
+check('表示モードタブ（カレンダー／1日一覧）はカレンダー枠内の tablist・カレンダーが aria-selected、タブ高 2.3rem(36px) 以上',
+  layout.calHasTabs && layout.tablistRole === 'tablist' && layout.calTabSelected === 'true' && layout.listTabSelected === 'false'
+    && layout.calHasLabel && layout.calHasGrid && layout.tabMinH >= 36,
+  { calHasTabs: layout.calHasTabs, tablistRole: layout.tablistRole, calTabSelected: layout.calTabSelected,
+    listTabSelected: layout.listTabSelected, tabMinH: layout.tabMinH });
+check('「全選択に戻す」は全選択中でも DOM に常設（visibility:hidden + aria-hidden、高さ 1.7rem(27px) 以上）',
+  layout.resetExists && layout.resetVisible === false && layout.resetAriaHidden === 'true' && layout.resetMinH >= 27,
+  { resetExists: layout.resetExists, resetVisible: layout.resetVisible, resetAriaHidden: layout.resetAriaHidden, resetMinH: layout.resetMinH });
+check('トグルの状態読み出し部は固定幅（72px 以上）で「全選択」を表示',
+  layout.statusW >= 72 && layout.statusText === '全選択', { statusW: layout.statusW, statusText: layout.statusText });
+// 開閉状態は localStorage で永続化されるため、テストは「開」に正規化してから位置を測定する
+const norm = await page.evaluate(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  if (document.getElementById('sched-cat-panel').classList.contains('hidden')) {
+    document.getElementById('sched-cat-toggle').click();
+    await sleep(400);
+  }
+  // ヘッダーは再描画されるため要素は毎回再取得する
+  const panel = document.getElementById('sched-cat-panel');
+  const toggle = document.getElementById('sched-cat-toggle');
+  return { open: !panel.classList.contains('hidden'), expanded: toggle.getAttribute('aria-expanded'),
+    ls: localStorage.getItem('isschedule_cat_panel'), calTop: Math.round(document.getElementById('sched-calendar-frame').getBoundingClientRect().top) };
+});
+log('cat-panel-normalize', norm);
+check('「カテゴリ選択」を開に正規化すると aria-expanded=true・パネル表示・localStorage("open") が一致',
+  norm.open && norm.expanded === 'true' && norm.ls === 'open',
+  { open: norm.open, expanded: norm.expanded, ls: norm.ls });
+// ★ カテゴリ選択トグルの開閉：パネル閉じでカレンダー枠は上がるが、トグル位置・チップ位置は不動
+const toggleMove = await page.evaluate(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const chipPos = () => {
+    const c = document.querySelector('#sched-cat-chip-row .sched-cat-chip');
+    const r = c ? c.getBoundingClientRect() : null;
+    return r ? { top: Math.round(r.top), left: Math.round(r.left) } : null;
+  };
+  const calTop = () => Math.round(document.getElementById('sched-calendar-frame').getBoundingClientRect().top);
+  const tLeft = () => Math.round(document.getElementById('sched-cat-toggle').getBoundingClientRect().left);
+  const tWidth = () => Math.round(document.getElementById('sched-cat-toggle').getBoundingClientRect().width);
+  const openPos = chipPos();
+  const calTopOpen = calTop();
+  const tOpen = tLeft();
+  const wOpen = tWidth();
+  document.getElementById('sched-cat-toggle').click();
+  await sleep(400);
+  const closedHidden = document.getElementById('sched-cat-panel').classList.contains('hidden');
+  const expClosed = document.getElementById('sched-cat-toggle').getAttribute('aria-expanded');
+  const calTopClosed = calTop();
+  const tClosed = tLeft();
+  const wClosed = tWidth();
+  const chipPainted = (() => { const c = document.querySelector('#sched-cat-chip-row .sched-cat-chip'); return !!c && !!c.offsetParent; })();
+  document.getElementById('sched-cat-toggle').click();
+  await sleep(400);
+  return { openPos, posReopen: chipPos(), calTopOpen, calTopClosed, calTopReopen: calTop(),
+    tOpen, tClosed, wOpen, wClosed, closedHidden, expClosed,
+    reopened: !document.getElementById('sched-cat-panel').classList.contains('hidden'),
+    expReopen: document.getElementById('sched-cat-toggle').getAttribute('aria-expanded'),
+    chipPainted, panelLS: localStorage.getItem('isschedule_cat_panel') };
+});
+log('cat-toggle', toggleMove);
+check('トグルで閉じると panel hidden・aria-expanded=false、開くと true（開閉状態は localStorage に永続化）',
+  toggleMove.closedHidden && toggleMove.expClosed === 'false' && toggleMove.reopened
+    && toggleMove.expReopen === 'true' && toggleMove.panelLS === 'open',
+  { closedHidden: toggleMove.closedHidden, expClosed: toggleMove.expClosed, reopened: toggleMove.reopened,
+    expReopen: toggleMove.expReopen, panelLS: toggleMove.panelLS });
+check('パネル開閉でカレンダー枠は動く（閉じで上方へ）が、トグルの位置・幅は不動、チップ位置も開閉前と同一（閉時は描画されない）',
+  Math.abs(toggleMove.tClosed - toggleMove.tOpen) <= 1 && Math.abs(toggleMove.wOpen - toggleMove.wClosed) <= 1
+    && toggleMove.calTopClosed < toggleMove.calTopOpen && Math.abs(toggleMove.calTopReopen - toggleMove.calTopOpen) <= 1
+    && toggleMove.openPos.top === toggleMove.posReopen.top && toggleMove.openPos.left === toggleMove.posReopen.left
+    && !toggleMove.chipPainted,
+  { tOpen: toggleMove.tOpen, tClosed: toggleMove.tClosed, calTopOpen: toggleMove.calTopOpen,
+    calTopClosed: toggleMove.calTopClosed, calTopReopen: toggleMove.calTopReopen,
+    openPos: toggleMove.openPos, posReopen: toggleMove.posReopen, chipPainted: toggleMove.chipPainted });
+
+// ★ 選択変更で「全選択に戻す」の表示が切り替わってもチップ位置・トグル位置は不動
+const selMove = await page.evaluate(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const chipPos = () => {
+    const c = document.querySelector('#sched-cat-chip-row .sched-cat-chip');
+    const r = c ? c.getBoundingClientRect() : null;
+    return r ? { top: Math.round(r.top), left: Math.round(r.left) } : null;
+  };
+  const rowTop = () => Math.round(document.querySelector('#sched-cat-chip-row').getBoundingClientRect().top);
+  const rv = () => getComputedStyle(document.getElementById('sched-select-all')).visibility === 'visible';
+  const tLeft = () => Math.round(document.getElementById('sched-cat-toggle').getBoundingClientRect().left);
+  const tWidth = () => Math.round(document.getElementById('sched-cat-toggle').getBoundingClientRect().width);
+  const out = { p0: chipPos(), rowTop0: rowTop(), rv0: rv(), t0: tLeft(), w0: tWidth() };
+  document.querySelector('.sched-cat-chip').click();  // 1部署を外す →「全選択に戻す」が現れる
+  await sleep(600);
+  out.p1 = chipPos(); out.rowTop1 = rowTop(); out.rv1 = rv(); out.t1 = tLeft(); out.w1 = tWidth();
+  out.aria1 = document.getElementById('sched-select-all').getAttribute('aria-hidden');
+  out.tabIndex1 = document.getElementById('sched-select-all').tabIndex;
+  out.status1 = document.getElementById('sched-cat-status').textContent.trim();
+  document.getElementById('sched-select-all').click();  // 全選択に戻す →「全選択に戻す」は visibility:hidden
+  await sleep(600);
+  out.p2 = chipPos(); out.rowTop2 = rowTop(); out.rv2 = rv(); out.t2 = tLeft(); out.w2 = tWidth();
+  out.aria2 = document.getElementById('sched-select-all').getAttribute('aria-hidden');
+  out.tabIndex2 = document.getElementById('sched-select-all').tabIndex;
+  out.status2 = document.getElementById('sched-cat-status').textContent.trim();
+  return out;
+});
+log('select-move', selMove);
+check('「全選択に戻す」の表示/非表示でカテゴリチップの位置は動かず（チップ行の位置も同一、常設なので DOM も残る）',
+  selMove.p0.top === selMove.p1.top && selMove.p0.left === selMove.p1.left
+    && selMove.p0.top === selMove.p2.top && selMove.p0.left === selMove.p2.left
+    && selMove.rowTop0 === selMove.rowTop1 && selMove.rowTop1 === selMove.rowTop2
+    && selMove.rv0 === false && selMove.rv1 === true && selMove.rv2 === false
+    && selMove.aria1 === null && selMove.aria2 === 'true',
+  { p0: selMove.p0, p1: selMove.p1, p2: selMove.p2, rowTop: [selMove.rowTop0, selMove.rowTop1, selMove.rowTop2],
+    rv: [selMove.rv0, selMove.rv1, selMove.rv2] });
+check('選択状態が変わってもトグルの位置・幅は不動、読み出し部は選択数を反映、全選択中はボタンがフォーカス対象外',
+  selMove.t0 === selMove.t1 && selMove.t1 === selMove.t2 && selMove.w0 === selMove.w1 && selMove.w1 === selMove.w2
+    && selMove.status2 === '全選択' && /\d+\s*\/\s*\d+/.test(selMove.status1)
+    && selMove.tabIndex1 >= 0 && selMove.tabIndex2 < 0,
+  { t: [selMove.t0, selMove.t1, selMove.t2], w: [selMove.w0, selMove.w1, selMove.w2],
+    status1: selMove.status1, status2: selMove.status2, tabIndex1: selMove.tabIndex1, tabIndex2: selMove.tabIndex2 });
+
+
+// ★ 表示モードタブ：クリックと ←→ で切替、aria-selected とフォーカスが追随
+const tabKb = await page.evaluate(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const sel = () => ({
+    cal: document.getElementById('sched-mode-calendar').getAttribute('aria-selected'),
+    list: document.getElementById('sched-mode-list').getAttribute('aria-selected'),
+    focusId: document.activeElement ? document.activeElement.id : null,
+    listInFrame: (() => { const f = document.getElementById('sched-calendar-frame'); const l = document.getElementById('sched-list-container'); return f && l ? f.contains(l) : null; })(),
+    tablist: document.getElementById('sched-mode-calendar').parentElement.getAttribute('role'),
+  });
+  document.getElementById('sched-mode-calendar').focus();
+  const out = { before: sel() };
+  document.getElementById('sched-mode-calendar').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  await sleep(600);
+  out.afterRight = sel();
+  document.getElementById('sched-mode-list').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+  await sleep(600);
+  out.afterLeft = sel();
+  return out;
+});
+log('tab-keyboard', tabKb);
+check('表示モードタブは ←→ で切替（aria-selected が追随しフォーカスも移動、1日一覧一覧が枠内に出る）、← でカレンダーへ戻る',
+  tabKb.before.cal === 'true' && tabKb.before.focusId === 'sched-mode-calendar'
+    && tabKb.afterRight.cal === 'false' && tabKb.afterRight.list === 'true'
+    && tabKb.afterRight.focusId === 'sched-mode-list' && tabKb.afterRight.listInFrame
+    && tabKb.afterLeft.cal === 'true' && tabKb.afterLeft.list === 'false'
+    && tabKb.afterLeft.focusId === 'sched-mode-calendar' && tabKb.afterLeft.tablist === 'tablist',
+  { before: tabKb.before, afterRight: tabKb.afterRight, afterLeft: tabKb.afterLeft });
+
+// ★ 外観スローショット: カテゴリ選択パネルの開／閉（チップ位置不動・カレンダー枠だけ動く）
+await page.setViewport({ width: 1280, height: 900 });
+await sleep(500);
+await page.screenshot({ path: `${OUT_DIR}/schedule-cat-open.png` });
+const catClosed = await page.evaluate(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  document.getElementById('sched-cat-toggle').click();
+  await sleep(600);
+  return { panelHidden: document.getElementById('sched-cat-panel').classList.contains('hidden'),
+    calTop: Math.round(document.getElementById('sched-calendar-frame').getBoundingClientRect().top) };
+});
+await page.screenshot({ path: `${OUT_DIR}/schedule-cat-closed.png` });
+await page.evaluate(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  document.getElementById('sched-cat-toggle').click();
+  await sleep(600);
+});
+check('スローショット: 閉じるとパネルは消えカレンダー枠が上がる（開時の位置を記録）', catClosed.panelHidden === true, catClosed);
 
 // 機能回帰: 月替え・今月
 const months = await page.evaluate(async () => {
@@ -264,7 +483,7 @@ log('list-nav', { labelCenter: lst.labelCenter, listCenter: lst.listCenter, area
 check('1日一覧モードでもラベル中心は表示部の中心 x と一致（±3px）',
   Math.abs(lst.labelCenter - (lst.listCenter !== null ? lst.listCenter : lst.areaCenter)) <= 3 && lst.labelInArea,
   { labelCenter: lst.labelCenter, listCenter: lst.listCenter, areaCenter: lst.areaCenter, labelInArea: lst.labelInArea });
-check('1日一覧モードでは一覧容器がカレンダー枠内に入り、表示モードボタンは設定枠に残る',
+check('1日一覧モードでは一覧容器がカレンダー枠内に入り、表示モードタブはカレンダー枠内の tablist に残る',
   lst.listInCalFrame === true && lst.labelInArea, { listInCalFrame: lst.listInCalFrame, labelInArea: lst.labelInArea });
 
 // ★ 键盘操作：ラベル Enter で開く→月ボタン間を ←→ で移動→Enter で决定→Esc で閉じラベルへ

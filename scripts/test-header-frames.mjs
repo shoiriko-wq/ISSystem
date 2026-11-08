@@ -12,7 +12,7 @@
  *  2. アカウントラッパー: 上右下的枠幅 0、左の区切り線のみ 2px（角張った外枠を描かない）
  *  3. #user-menu-btn: 4面すべて 2px の実枠＋角丸 6px 以上（内側の枠は維持）
  *  4. ラッパーの区切り線とアカウントボックス左端の離间隔 8px 以上（線が枠に重ならない）
- *  5. 天気・時計ウィジェット: 4面 2px の実枠＋角丸（ボックス扱い）
+ *  5. 天気・時計ウィジェット (.header-widget / #weather-widget-btn): 4面 1px 以上の実枠＋角丸 6px 以上
  *  6. サイドバー: 右仕切り 2px 以上（R3 の骨格枠は維持）
  *  7. ライトテーマでは装飾分離線撤去ルールで区切り線が透明（既存の意図を維持）
  *  8. スローショット: scripts/output/header-frames-dark.png, header-frames-inverted.png
@@ -101,7 +101,8 @@ for (const theme of THEMES) {
   const header = await probeBox('header.app-header');
   const btn = await probeBox('#user-menu-btn');
   const wrap = await probeWrap();
-  const weather = await probeBox('header .hidden.lg\\:flex');
+  const weather = await probeBox('#weather-widget-btn');
+  const clock = await probeBox('.header-widget--static');
   const sidebar = await probeBox('.app-sidebar');
 
   log(`${theme.id} header`, header);
@@ -133,11 +134,14 @@ for (const theme of THEMES) {
     wrap && wrap.leftColor !== 'rgba(0, 0, 0, 0)' && wrap.leftColor !== 'transparent',
     { leftColor: wrap?.leftColor });
 
-  check(`${tag}: 天気・時計ウィジェットは 4面 2px の実枠＋角丸`,
-    weather && num(weather.top) >= 2 && num(weather.right) >= 2 && num(weather.bottom) >= 2
-      && num(weather.left) >= 2 && num(weather.radius) >= 6,
-    { top: weather?.top, right: weather?.right, bottom: weather?.bottom,
-      left: weather?.left, radius: weather?.radius });
+  check(`${tag}: 天気・時計ウィジェット（.header-widget）は 4面 1px 以上の実枠＋角丸 6px 以上`,
+    weather && num(weather.top) >= 1 && num(weather.right) >= 1 && num(weather.bottom) >= 1
+      && num(weather.left) >= 1 && num(weather.radius) >= 6
+      && weather.leftStyle === 'solid'
+      && clock && num(clock.top) >= 1 && num(clock.right) >= 1 && num(clock.bottom) >= 1
+      && num(clock.left) >= 1 && num(clock.radius) >= 6,
+    { weather: { top: weather?.top, right: weather?.right, bottom: weather?.bottom, left: weather?.left, radius: weather?.radius },
+      clock: { top: clock?.top, right: clock?.right, bottom: clock?.bottom, left: clock?.left, radius: clock?.radius } });
 
   check(`${tag}: サイドバーの右仕切り線は 2px 以上（R3 の骨格枠は維持）`,
     sidebar && num(sidebar.right) >= 2, { right: sidebar?.right });

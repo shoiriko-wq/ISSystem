@@ -6,6 +6,13 @@
 import { Router } from 'express';
 import { authenticateToken, requireKyomuRole, requireKyomuOnlyRole, requireAdminRole } from '../middlewares/auth.middleware.js';
 import { checkEditingLock } from '../middlewares/lock.middleware.js';
+import {
+  loginLimiter,
+  authIpLimiter,
+  registerInvitationLimiter,
+  resetInvitationLimiter,
+  generateInvitationLimiter,
+} from '../middlewares/rate-limit.middleware.js';
 
 import authController from '../controllers/auth.controller.js';
 import bulletinController from '../controllers/bulletin.controller.js';
@@ -49,20 +56,25 @@ const safe = (fn) => (req, res, next) => {
 // ==========================================
 // 1. 認証 & ユーザー管理 API (/api/auth)
 // ==========================================
-router.post('/auth/login', safe(authController?.login));
-router.post('/auth/register-invitation', safe(authController?.registerWithInvitation));
-router.post('/auth/reset-password-invitation', safe(authController?.resetPasswordWithInvitation));
-router.post('/auth/generate-invitation', authenticateToken, safe(authController?.generateInvitation));
+// レート制限 (v3.0.7 監査 High 対策): IP+識別子 15分5回（失敗のみカウント）、IP グローバル 1h20回、
+// 招待コード 15分5試行。ユーザー単位ロックアウトは auth.service.js で実装（423）。
+router.post('/auth/login', authIpLimiter, loginLimiter, safe(authController?.login));
+router.post('/auth/register-invitation', authIpLimiter, registerInvitationLimiter, safe(authController?.registerWithInvitation));
+router.post('/auth/reset-password-invitation', authIpLimiter, resetInvitationLimiter, safe(authController?.resetPasswordWithInvitation));
+router.post('/auth/generate-invitation', authenticateToken, requireKyomuRole, generateInvitationLimiter, safe(authController?.generateInvitation));
 router.get('/auth/me', authenticateToken, safe(authController?.getProfile));
 router.put('/auth/profile', authenticateToken, safe(authController?.updateProfile));
 router.put('/auth/change-password', authenticateToken, safe(authController?.changePassword));
 router.put('/auth/status', authenticateToken, safe(authController?.updateStatus));
 router.post('/auth/logout', authenticateToken, safe(authController?.logout));
 
-// ユーザー一覧・追加・削除 API
+// ユーザー一覧・追加・削除 API (2026/11/8 RBAC 強化)
+// 一覧: 全員取得可だがコントローラでロール再検証（KYOMU/ADMIN は全件、TEACHER は名簿最小フィールドのみ）
+// 追加: 教務部 (KYOMU/ADMIN) のみ。TEACHER はアカウント作成不可、role 昇格も制御で抑制
+// 削除: システム管理者 (ADMIN) のみ
 router.get('/users', authenticateToken, safe(authController?.listUsers));
-router.post('/users', authenticateToken, safe(authController?.createUser));
-router.delete('/users/:id', authenticateToken, safe(authController?.deleteUser));
+router.post('/users', authenticateToken, requireKyomuRole, safe(authController?.createUser));
+router.delete('/users/:id', authenticateToken, requireAdminRole, safe(authController?.deleteUser));
 
 // 教科マスタ API (一覧は全教職員 / 追加・改名・削除は教務部 KYOMU のみ)
 router.get('/subjects', authenticateToken, safe(subjectController?.listSubjects));
@@ -80,10 +92,10 @@ router.post('/basic-info/:kind', authenticateToken, requireKyomuRole, safe(basic
 router.put('/basic-info/:kind/:id', authenticateToken, requireKyomuRole, safe(basicinfoController?.updateItem));
 router.delete('/basic-info/:kind/:id', authenticateToken, requireKyomuRole, safe(basicinfoController?.deleteItem));
 
-// エイリアス
-router.post('/auth/register', safe(authController?.registerWithInvitation));
-router.post('/auth/reset-password', safe(authController?.resetPasswordWithInvitation));
-router.post('/auth/invite-code', authenticateToken, safe(authController?.generateInvitation));
+// エイリアス（同じレート制限を適用）
+router.post('/auth/register', authIpLimiter, registerInvitationLimiter, safe(authController?.registerWithInvitation));
+router.post('/auth/reset-password', authIpLimiter, resetInvitationLimiter, safe(authController?.resetPasswordWithInvitation));
+router.post('/auth/invite-code', authenticateToken, generateInvitationLimiter, safe(authController?.generateInvitation));
 
 // ==========================================
 // 2. 掲示板 & 回覧板 API (/api/bulletins)
@@ -116,7 +128,8 @@ router.put('/chat/channels/:channelId/read', authenticateToken, safe(chatControl
 // グループの「非表示 / 表示」切り替え
 router.put('/chat/channels/:channelId/hide', authenticateToken, safe(chatController?.toggleHideChannel));
 // チャンネルの削除（公開チャンネルは 400、参加者・管理者のみ削除可）
-router.delete('/chat/channels/:channelId', authenticateToken, safe(chatController?.deleteChannel));
+// チャンネル削除は教務部 (KYOMU/ADMIN) のみ (2026/11/8 RBAC。service 側のメンバー/権限検証は第二防衛線として維持)
+router.delete('/chat/channels/:channelId', authenticateToken, requireKyomuRole, safe(chatController?.deleteChannel));
 // コメント（メッセージ）の取り消し
 router.delete('/chat/messages/:messageId', authenticateToken, safe(chatController?.cancelMessage));
 // 未読者への再通知（/chat/renotify）は廃止済み。未読者一覧の表示のみ残す
@@ -180,6 +193,18 @@ router.post('/approvals/:id/remind', authenticateToken, safe(approvalController?
 // ==========================================
 // 7. 座席表 & 生徒検索 API (/api/seating)
 // ==========================================
+// 座席表マトリクス（rows/cols と席割当て、編集可能モードのみ保存）
+router.get('/seating/matrix', authenticateToken, safe(seatingController?.getMatrix));
+router.put(
+  '/seating/matrix',
+  authenticateToken,
+  checkEditingLock('seating'),
+  safe(seatingController?.saveMatrix)
+);
+router.post('/seating/matrix/lock', authenticateToken, safe(seatingController?.acquireMatrixLock));
+router.delete('/seating/matrix/lock', authenticateToken, safe(seatingController?.releaseMatrixLock));
+router.get('/seating/layouts', authenticateToken, safe(seatingController?.getLayouts));
+
 router.get('/seating/layouts', authenticateToken, safe(seatingController?.getLayouts));
 router.get('/seating/layouts/:id', authenticateToken, safe(seatingController?.getLayoutDetail));
 router.post('/seating/layouts', authenticateToken, safe(seatingController?.createLayout));
