@@ -1,343 +1,394 @@
 /**
- * ISSystem Seating Module
- * 座席表可変グリッド描画・4桁生徒コード/教員検索・在席ステータス管理コントローラー (404 / 401 完全修正版)
+ * ISSystem 座席表モジュール
+ * ・マトリクス（行・列 1〜100）は編集可能モードでのみ設定できる
+ * ・空席・配置済みカードのクリックはユーザセレクトモーダルを開く（行・列・状態の入力欄は無し）
+ * ・座席カードは オンライン / 出張・年休 / 所属部局 / 担当教科 / 名前 を表示する
  */
 
-import { apiGet, apiPut } from '../api.js';
+import { apiGet, apiPost, apiPut, apiDelete } from '../api.js';
 import { escapeHTML, refreshLucideIcons, openModal, closeModal, showToast } from '../ui-helpers.js';
 import { state } from '../state.js';
+import { socketClient } from '../socket.js';
 
-let gridRows = 5;
-let gridCols = 6;
-let seatsData = [];
-let searchHighlightQuery = '';
+/** マトリクスID（編集ロックのリソースIDにも使用） */
+const MATRIX_ID = 'staff_room';
+/** マトリクスの最大行列数 */
+const MAX_SIZE = 100;
 
-const STATUS_CONFIG = {
-  IN: { label: '在席', bgClass: 'bg-success-inset border-success text-success-strong', badgeClass: 'bg-success-soft text-success-strong' },
-  PRESENT: { label: '在席', bgClass: 'bg-success-inset border-success text-success-strong', badgeClass: 'bg-success-soft text-success-strong' },
-  OUT: { label: '離席', bgClass: 'bg-surface-strong border-main text-muted', badgeClass: 'bg-surface text-muted' },
-  CLASS: { label: '授業中', bgClass: 'bg-accent-inset border-accent text-accent-strong', badgeClass: 'bg-accent-soft text-accent-strong' },
-  MEETING: { label: '会議中', bgClass: 'bg-accent-inset border-accent text-accent-strong', badgeClass: 'bg-accent-soft text-accent-strong' },
-  TRIP: { label: '出張', bgClass: 'bg-warning-inset border-warning text-warning-strong', badgeClass: 'bg-warning-soft text-warning-strong' },
-  LEAVE: { label: '年休', bgClass: 'bg-danger-inset border-danger text-danger-strong', badgeClass: 'bg-danger-soft text-danger-strong' }
+const seatingStore = {
+  rows: 5,
+  cols: 6,
+  seats: [],
+  editMode: false,
+  users: [],
+  pendingCell: null,
 };
 
+/** 欠席登録のバッヂ表示（当日の LEAVE / TRIP） */
+const ABSENCE_BADGES = [
+  { type: 'TRIP', label: '出張', badgeClass: 'badge badge-warning' },
+  { type: 'LEAVE', label: '年休', badgeClass: 'badge badge-danger' },
+];
+
+function headerEl() {
+  return document.getElementById('seating-header-container');
+}
+
+function matrixEl() {
+  return document.getElementById('seating-matrix-container');
+}
+
+function seatAt(row, col) {
+  return seatingStore.seats.find((s) => s.row === row && s.col === col) || null;
+}
+
+/** 1..max の行列選択オプション */
+function sizeOptions(max) {
+  let html = '';
+  for (let n = 1; n <= max; n++) html += `<option value="${n}">${n}</option>`;
+  return html;
+}
+
+/** 列数に応じたカードの最小幅（狭い列数は横向きスクロールで表示） */
+function cardMinWidth(cols) {
+  if (cols <= 8) return 120;
+  if (cols <= 14) return 104;
+  if (cols <= 24) return 84;
+  if (cols <= 40) return 66;
+  return 54;
+}
+
+
 /**
- * 座席表モジュールの初期化とHTMLレイアウト構築
+ * 座席カード（オンラインバッヂ・出張/年休バッヂ・所属部局・担当教科・名前）
+ */
+function seatCardHtml(seat) {
+  const badges = [];
+  if (seat.is_online) {
+    badges.push('<span class="badge badge-success" title="オンライン">オンライン</span>');
+  }
+  const absences = Array.isArray(seat.absences) ? seat.absences : [];
+  for (const b of ABSENCE_BADGES) {
+    if (absences.includes(b.type)) {
+      badges.push(`<span class="${b.badgeClass}" title="${b.label}">${b.label}</span>`);
+    }
+  }
+
+  const department = escapeHTML(seat.department || '');
+  const subjects = escapeHTML((Array.isArray(seat.subjects) ? seat.subjects : []).join(' / '));
+  const name = escapeHTML(seat.name || '');
+  const clickable = seatingStore.editMode;
+
+  return `<div class="seat-card rounded-lg bg-surface border border-main p-1.5 flex flex-col gap-1${clickable ? ' cursor-pointer hover-surface' : ' cursor-default'}" data-seat-row="${seat.row}" data-seat-col="${seat.col}" title="${name}">
+    <div class="flex items-center gap-1 flex-wrap">${badges.join('')}</div>
+    <div class="text-[10px] text-soft truncate">${department || '-'}</div>
+    <div class="text-[11px] text-main truncate">${subjects || '-'}</div>
+    <div class="text-xs font-bold text-main truncate">${name}</div>
+  </div>`;
+}
+
+/**
+ * 空席セル（編集可能モードでのみクリックできる）
+ */
+function emptySeatHtml(row, col) {
+  const clickable = seatingStore.editMode;
+  return `<div class="seat-card seat-card--empty rounded-lg bg-surface-transparent border border-dashed border-main p-1.5 flex items-center justify-center min-h-[3rem]${clickable ? ' cursor-pointer hover-surface' : ' cursor-default'}" data-seat-row="${row}" data-seat-col="${col}">
+    <span class="text-[10px] text-soft">${row}-${col}</span>
+  </div>`;
+}
+
+/**
+ * ヘッダー描画（タイトル「座席表」・行列設定・編集ロック切替）
+ */
+function renderHeader() {
+  const el = headerEl();
+  if (!el) return;
+
+  const editMode = seatingStore.editMode;
+  el.innerHTML = `
+    <div class="flex items-center gap-3 flex-wrap">
+      <h2 class="text-lg font-bold text-main flex items-center gap-2">
+        <i data-lucide="users" class="w-5 h-5 text-accent"></i> 座席表
+      </h2>
+      <div class="flex items-center gap-2 ml-auto flex-wrap">
+        <label class="text-xs font-semibold text-soft" for="seat-grid-rows">行</label>
+        <select id="seat-grid-rows" class="input-field h-[2.4rem] w-14 p-1 text-xs rounded bg-surface border border-main text-main" ${editMode ? '' : 'disabled'}>${sizeOptions(MAX_SIZE)}</select>
+        <label class="text-xs font-semibold text-soft" for="seat-grid-cols">列</label>
+        <select id="seat-grid-cols" class="input-field h-[2.4rem] w-14 p-1 text-xs rounded bg-surface border border-main text-main" ${editMode ? '' : 'disabled'}>${sizeOptions(MAX_SIZE)}</select>
+        <button id="seating-edit-toggle" type="button" class="${editMode ? 'btn-primary' : 'btn-secondary'} h-[2.4rem] px-3 text-xs font-bold rounded flex items-center gap-1.5" title="${editMode ? 'クリックで編集ロック（読み取り専用）へ' : 'クリックで編集可能モードへ'}">
+          <i data-lucide="${editMode ? 'lock-open' : 'lock'}" class="w-4 h-4"></i>
+          <span>${editMode ? '編集可能' : '編集ロック'}</span>
+        </button>
+      </div>
+    </div>
+  `;
+
+  const rowsSelect = el.querySelector('#seat-grid-rows');
+  const colsSelect = el.querySelector('#seat-grid-cols');
+  rowsSelect.value = String(seatingStore.rows);
+  colsSelect.value = String(seatingStore.cols);
+
+  rowsSelect.addEventListener('change', () => {
+    applyGridSize(parseInt(rowsSelect.value, 10), seatingStore.cols);
+  });
+  colsSelect.addEventListener('change', () => {
+    applyGridSize(seatingStore.rows, parseInt(colsSelect.value, 10));
+  });
+
+  el.querySelector('#seating-edit-toggle').addEventListener('click', toggleEditMode);
+
+  refreshLucideIcons();
+}
+
+/**
+ * マトリクス描画（rows × cols のグリッド）
+ */
+function renderMatrix() {
+  const el = matrixEl();
+  if (!el) return;
+
+  const minW = cardMinWidth(seatingStore.cols);
+  const cells = [];
+  for (let row = 1; row <= seatingStore.rows; row++) {
+    for (let col = 1; col <= seatingStore.cols; col++) {
+      const seat = seatAt(row, col);
+      cells.push(seat ? seatCardHtml(seat) : emptySeatHtml(row, col));
+    }
+  }
+
+  el.innerHTML = `<div class="seating-grid gap-2" style="grid-template-columns: repeat(${seatingStore.cols}, minmax(${minW}px, 1fr));">${cells.join('')}</div>`;
+}
+
+/**
+ * 編集可能モード ⇔ 編集ロックモード の切替（サーバーの排他ロックと連動）
+ */
+async function toggleEditMode() {
+  const toggle = document.getElementById('seating-edit-toggle');
+  if (toggle) toggle.disabled = true;
+
+  try {
+    if (seatingStore.editMode) {
+      await apiDelete('/seating/matrix/lock');
+      seatingStore.editMode = false;
+      showToast('編集ロックモードへ切り替えました（読み取り専用）。', 'info');
+    } else {
+      await apiPost('/seating/matrix/lock', { resourceId: MATRIX_ID });
+      seatingStore.editMode = true;
+      showToast('編集可能モードへ切り替えました。行列と席を編集できます。', 'success');
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+
+  renderHeader();
+  renderMatrix();
+}
+
+/**
+ * マトリクス（行列＋席割当て）の保存。編集可能モードでのみ成功する
+ * @param {Object} [options] - { silent: true } でトースト省略
+ */
+async function persistMatrix(options = {}) {
+  const res = await apiPut('/seating/matrix', {
+    resourceId: MATRIX_ID,
+    rows: seatingStore.rows,
+    cols: seatingStore.cols,
+    seats: seatingStore.seats.map((s) => ({ row: s.row, col: s.col, user_id: s.user_id })),
+  });
+
+  if (!options.silent) {
+    showToast(res.message || '座席表を保存しました。', 'success');
+  }
+
+  // 他クライアントへ再読込通知 (KYOMU / ADMIN のみサーバーがブロードキャスト)
+  try {
+    socketClient.emitGridUpdated(MATRIX_ID);
+  } catch {
+    /* ソケット未接続時は通知を省略 */
+  }
+
+  return res;
+}
+
+/**
+ * 行列設定の適用（範囲外の席はマトリクスから除き、編集モードなら保存）
+ */
+async function applyGridSize(rows, cols) {
+  const r = Math.min(MAX_SIZE, Math.max(1, Number(rows) || 1));
+  const c = Math.min(MAX_SIZE, Math.max(1, Number(cols) || 1));
+
+  seatingStore.rows = r;
+  seatingStore.cols = c;
+  seatingStore.seats = seatingStore.seats.filter((s) => s.row <= r && s.col <= c);
+
+  renderMatrix();
+
+  try {
+    await persistMatrix({ silent: true });
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+/**
+ * 登録ユーザ一覧の取得（モーダルのユーザセレクト用・キャッシュ）
+ */
+async function ensureUsers() {
+  if (seatingStore.users.length) return seatingStore.users;
+
+  const res = await apiGet('/users');
+  seatingStore.users = res.users || [];
+  return seatingStore.users;
+}
+
+/**
+ * 席クリック処理（編集可能モードのみモーダルを開く）
+ */
+function handleSeatClick(e) {
+  const card = e.target.closest('[data-seat-row]');
+  if (!card) return;
+
+  if (!seatingStore.editMode) {
+    showToast('編集可能モードへ切り替えてから席を選択してください。', 'info');
+    return;
+  }
+
+  const row = parseInt(card.dataset.seatRow, 10);
+  const col = parseInt(card.dataset.seatCol, 10);
+
+  if (row > seatingStore.rows || col > seatingStore.cols) return;
+
+  openSeatModal(row, col);
+}
+
+/**
+ * ユーザセレクトモーダルの表示（席のユーザ割当て／解除）
+ * @param {number} row
+ * @param {number} col
+ */
+async function openSeatModal(row, col) {
+  seatingStore.pendingCell = { row, col };
+
+  try {
+    const users = await ensureUsers();
+    const seat = seatAt(row, col);
+    const select = document.getElementById('seat-input-user');
+    const titleText = document.getElementById('seat-modal-title-text');
+
+    if (titleText) titleText.textContent = `座席設定 (${row}行 - ${col}列)`;
+
+    const options = ['<option value="">設定なし（席を空にする）</option>'];
+    for (const u of users) {
+      const label = [u.name, u.department, (u.subjects || []).join(' / ')]
+        .filter(Boolean)
+        .join(' / ');
+      const selected = seat && seat.user_id === u.id ? ' selected' : '';
+      options.push(`<option value="${u.id}"${selected}>${escapeHTML(label)}</option>`);
+    }
+
+    if (select) {
+      select.innerHTML = options.join('');
+      select.value = seat ? seat.user_id : '';
+    }
+
+    openModal('seating-modal');
+    if (select) select.focus();
+  } catch (err) {
+    showToast(err.message || '登録ユーザを取得できませんでした。', 'error');
+  }
+}
+
+/**
+ * モーダル保存（席へのユーザ割当て／解除）
+ */
+async function handleSeatFormSubmit(e) {
+  e.preventDefault();
+
+  const cell = seatingStore.pendingCell;
+  if (!cell) return;
+
+  const userId = document.getElementById('seat-input-user')?.value || '';
+
+  // 対象席の既存割当てを除去
+  seatingStore.seats = seatingStore.seats.filter((s) => !(s.row === cell.row && s.col === cell.col));
+
+  if (userId) {
+    const user = seatingStore.users.find((u) => u.id === userId);
+    if (!user) {
+      closeModal('seating-modal');
+      return;
+    }
+    // 同一ユーザの既存席は移動（二重割当て防止）
+    seatingStore.seats = seatingStore.seats.filter((s) => s.user_id !== userId);
+    seatingStore.seats.push({
+      row: cell.row,
+      col: cell.col,
+      user_id: user.id,
+      name: user.name,
+      department: user.department || '',
+      subjects: user.subjects || [],
+      is_online: user.id === state.currentUser?.id,
+      absences: [],
+    });
+  }
+
+  closeModal('seating-modal');
+
+  try {
+    await persistMatrix();
+    renderMatrix();
+  } catch (err) {
+    showToast(err.message, 'error');
+    await loadSeatingData();
+  }
+}
+
+/**
+ * 座席表の読み込み（タブ表示・ソケット通知時に呼ばれる）
+ */
+export async function loadSeatingData() {
+  try {
+    const matrixRes = await apiGet('/seating/matrix');
+    await ensureUsers();
+
+    seatingStore.rows = Number(matrixRes.matrix.rows) || 5;
+    seatingStore.cols = Number(matrixRes.matrix.cols) || 6;
+    seatingStore.seats = matrixRes.seats || [];
+
+    // 自分のアクティブロックがあるか（= 編集可能モード）
+    const lock = matrixRes.editingLock;
+    seatingStore.editMode = !!lock && lock.user_id === state.currentUser?.id;
+
+    renderHeader();
+    renderMatrix();
+  } catch (err) {
+    console.warn('[Seating] 読み込みエラー:', err.message);
+    showToast(err.message || '座席表を読み込めませんでした。', 'error');
+  }
+}
+
+/**
+ * 座席表モジュールの初期化（ヘッダー・マトリクス・モーダルイベントの構築）
  */
 export function initSeatingModule() {
   const container = document.getElementById('view-seating');
   if (!container) return;
 
   container.innerHTML = `
-    <!-- ヘッダー・操作ツールバー -->
-    <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 bg-surface-strong p-4 rounded-xl border border-divider">
-      <div>
-        <h2 class="text-lg font-bold text-main flex items-center gap-2">
-          <i data-lucide="layout-grid" class="w-5 h-5 text-accent"></i> 職員室座席表 & 担当生徒検索
-        </h2>
-        <p class="text-xs text-muted">リアルタイム在席状態の確認・更新および4桁生徒コードによる迅速な担当教員ピックアップを行えます。</p>
-      </div>
+    <!-- ヘッダー（タイトル・行列設定・編集ロック切替） -->
+    <div id="seating-header-container" class="bg-surface-strong p-4 rounded-xl border border-divider"></div>
 
-      <!-- 検索 & グリッドサイズ設定 -->
-      <div class="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-end">
-        <!-- 4桁生徒コード・教員検索 -->
-        <div class="relative flex-1 sm:w-64">
-          <i data-lucide="search" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted"></i>
-          <input type="text" id="seating-search-input" class="input-field pl-9 py-1.5 text-xs" placeholder="生徒コード(例:1204) / 教員名でハイライト...">
-        </div>
-
-        <!-- 可変グリッド設定 -->
-        <div class="flex items-center gap-1.5 bg-surface p-1 rounded-lg border border-main text-xs">
-          <span class="text-muted text-[11px] px-1 font-bold">行列:</span>
-          <select id="seating-rows-select" class="bg-surface-strong text-main rounded px-1.5 py-0.5 border border-main focus:outline-none">
-            ${[3, 4, 5, 6, 7, 8].map(r => `<option value="${r}" ${r === gridRows ? 'selected' : ''}>${r}行</option>`).join('')}
-          </select>
-          <span class="text-muted">×</span>
-          <select id="seating-cols-select" class="bg-surface-strong text-main rounded px-1.5 py-0.5 border border-main focus:outline-none">
-            ${[4, 5, 6, 7, 8, 10].map(c => `<option value="${c}" ${c === gridCols ? 'selected' : ''}>${c}列</option>`).join('')}
-          </select>
-        </div>
-
-        <button id="seating-btn-refresh" class="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1">
-          <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> 更新
-        </button>
-      </div>
-    </div>
-
-    <!-- ステータス凡例 & サマリー -->
-    <div class="flex flex-wrap items-center justify-between gap-3 text-xs bg-inset p-3 rounded-lg border border-divider">
-      <div class="flex items-center gap-4">
-        <span class="text-muted font-bold">ステータス:</span>
-        <span class="flex items-center gap-1.5 text-success"><span class="w-2.5 h-2.5 rounded-full bg-success"></span> 在席</span>
-        <span class="flex items-center gap-1.5 text-accent"><span class="w-2.5 h-2.5 rounded-full bg-accent"></span> 授業・会議</span>
-        <span class="flex items-center gap-1.5 text-warning"><span class="w-2.5 h-2.5 rounded-full bg-warning"></span> 出張</span>
-        <span class="flex items-center gap-1.5 text-muted"><span class="w-2.5 h-2.5 rounded-full bg-surface-strong"></span> 離席・年休</span>
-      </div>
-      <div class="text-[11px] text-muted font-mono" id="seating-stats-bar">
-        在席: <strong class="text-success" id="stat-in-count">0</strong>名 / 全員: <span id="stat-total-count">0</span>名
-      </div>
-    </div>
-
-    <!-- 可変グリッド表示コンテナ -->
-    <div class="card p-4 overflow-x-auto">
-      <div id="seating-grid-container" class="grid gap-3 min-w-[700px]">
-        <div class="text-center py-12 text-xs text-muted">座席表配置データを読み込み中...</div>
-      </div>
-    </div>
+    <!-- 座席マトリクス（カード枠維持のため .seating-matrix-container を付与） -->
+    <div id="seating-matrix-container" class="seating-matrix-container card bg-surface-strong p-4 rounded-xl border border-main overflow-x-auto"></div>
   `;
 
-  bindEvents();
-
-  // ★ 認証済み（トークンが存在する）場合のみデータ通信を実行
-  if (state.currentUser && state.authToken) {
-    loadSeatingData();
-  }
-}
-
-/**
- * イベントリスナー登録
- */
-function bindEvents() {
-  document.getElementById('seating-search-input')?.addEventListener('input', (e) => {
-    searchHighlightQuery = e.target.value.trim().toLowerCase();
-    renderSeatingGrid();
-  });
-
-  document.getElementById('seating-rows-select')?.addEventListener('change', (e) => {
-    gridRows = Number(e.target.value);
-    renderSeatingGrid();
-  });
-
-  document.getElementById('seating-cols-select')?.addEventListener('change', (e) => {
-    gridCols = Number(e.target.value);
-    renderSeatingGrid();
-  });
-
-  document.getElementById('seating-btn-refresh')?.addEventListener('click', () => {
-    loadSeatingData();
-    showToast('座席状況を再読み込みしました', 'info');
-  });
-
   const form = document.getElementById('seating-edit-form');
-  if (form) {
-    form.addEventListener('submit', handleSaveSeatModal);
-  }
+  if (form) form.addEventListener('submit', handleSeatFormSubmit);
+
+  const matrixContainer = matrixEl();
+  if (matrixContainer) matrixContainer.addEventListener('click', handleSeatClick);
+
+  // ソケット通知（在席ステータス変更）からの再読込フック
+  window.seatingModule = { handleStatusChange: loadSeatingData };
 }
 
-/**
- * 座席マスターデータの取得 (404対策: /seating/layouts 呼び出し)
- */
-export async function loadSeatingData() {
-  try {
-    // ★ 正しい API エンドポイント (/seating/layouts) を呼び出し
-    const data = await apiGet('/seating/layouts');
-    
-    if (data && (Array.isArray(data.seats) || Array.isArray(data.layouts) || Array.isArray(data))) {
-      const rawSeats = data.seats || data.layouts || (Array.isArray(data) ? data : []);
-      seatsData = rawSeats.map((s, idx) => ({
-        row: s.row || Math.floor(idx / gridCols) + 1,
-        col: s.col || (idx % gridCols) + 1,
-        teacherId: s.user_id || s.teacherId || s.id,
-        teacherName: s.name || s.teacherName || '教員',
-        subject: s.department || s.subject || '一般',
-        status: s.current_status || s.status || 'PRESENT',
-        studentCodes: s.studentCodes || ['1001', '1002'],
-        note: s.status_note || s.note || ''
-      }));
-      if (data.rows) gridRows = data.rows;
-      if (data.cols) gridCols = data.cols;
-    } else {
-      seatsData = getDummySeatsData();
-    }
-  } catch (err) {
-    console.warn('[Seating] API通信失敗のためフォールバック表示:', err.message);
-    seatsData = getDummySeatsData();
-  }
-
-  const rowSel = document.getElementById('seating-rows-select');
-  const colSel = document.getElementById('seating-cols-select');
-  if (rowSel) rowSel.value = String(gridRows);
-  if (colSel) colSel.value = String(gridCols);
-
-  renderSeatingGrid();
-}
-
-/**
- * 座席表グリッドの動的描画
- */
-function renderSeatingGrid() {
-  const container = document.getElementById('seating-grid-container');
-  if (!container) return;
-
-  container.style.gridTemplateColumns = `repeat(${gridCols}, minmax(0, 1fr))`;
-
-  let inCount = 0;
-  let totalAssigned = 0;
-  let htmlCells = [];
-
-  for (let r = 1; r <= gridRows; r++) {
-    for (let c = 1; c <= gridCols; c++) {
-      const seat = seatsData.find(s => Number(s.row) === r && Number(s.col) === c);
-
-      if (seat && seat.teacherName) {
-        totalAssigned++;
-        if (seat.status === 'IN' || seat.status === 'PRESENT') inCount++;
-
-        const stConfig = STATUS_CONFIG[seat.status] || STATUS_CONFIG.IN;
-
-        let isMatch = false;
-        if (searchHighlightQuery.length > 0) {
-          const teacherNameMatch = seat.teacherName.toLowerCase().includes(searchHighlightQuery);
-          const studentCodeMatch = seat.studentCodes && seat.studentCodes.some(code => code.toLowerCase().includes(searchHighlightQuery));
-          const subjectMatch = seat.subject && seat.subject.toLowerCase().includes(searchHighlightQuery);
-          isMatch = teacherNameMatch || studentCodeMatch || subjectMatch;
-        }
-
-        const codesList = seat.studentCodes ? seat.studentCodes.join(', ') : '';
-
-        htmlCells.push(`
-          <div class="seat-card card p-3 rounded-xl border transition-all cursor-pointer flex flex-col justify-between h-28 relative ${stConfig.bgClass} ${
-            isMatch ? 'ring-2 ring-warning border-warning shadow-lg shadow-glow-warning scale-[1.02] z-10' : 'hover-border-accent'
-          }" data-row="${r}" data-col="${c}">
-            
-            <div class="flex items-center justify-between text-[10px]">
-              <span class="font-bold text-muted truncate">${escapeHTML(seat.subject || '教員')}</span>
-              <span class="badge ${stConfig.badgeClass} px-1.5 py-0.2">${stConfig.label}</span>
-            </div>
-
-            <div class="my-1">
-              <h4 class="font-bold text-sm text-main flex items-center justify-between">
-                <span>${escapeHTML(seat.teacherName)}</span>
-                ${seat.teacherId === state.currentUser?.id ? '<span class="text-[9px] bg-accent text-main px-1 rounded font-normal">自分</span>' : ''}
-              </h4>
-              <p class="text-[10px] text-muted truncate mt-0.5">${escapeHTML(seat.note || '')}</p>
-            </div>
-
-            <div class="mt-auto pt-1 border-t border-main flex items-center justify-between text-[10px]">
-              <span class="text-muted font-mono truncate">コード: <strong class="text-main">${escapeHTML(codesList || '-')}</strong></span>
-              <i data-lucide="edit-2" class="w-3 h-3 text-muted hover-text-main"></i>
-            </div>
-          </div>
-        `);
-      } else {
-        htmlCells.push(`
-          <div class="seat-card p-3 rounded-xl border border-dashed border-divider bg-main hover-border-strong transition-all cursor-pointer flex items-center justify-center h-28 text-soft hover-text-main text-xs font-mono" data-row="${r}" data-col="${c}">
-            <div class="text-center">
-              <i data-lucide="plus" class="w-4 h-4 mx-auto mb-1 opacity-60"></i>
-              <span>空席 (${r}-${c})</span>
-            </div>
-          </div>
-        `);
-      }
-    }
-  }
-
-  container.innerHTML = htmlCells.join('');
-
-  const inEl = document.getElementById('stat-in-count');
-  const totalEl = document.getElementById('stat-total-count');
-  if (inEl) inEl.textContent = String(inCount);
-  if (totalEl) totalEl.textContent = String(totalAssigned);
-
-  container.querySelectorAll('[data-row]').forEach(card => {
-    card.addEventListener('click', () => {
-      const r = Number(card.getAttribute('data-row'));
-      const c = Number(card.getAttribute('data-col'));
-      openSeatEditModal(r, c);
-    });
-  });
-
-  refreshLucideIcons();
-}
-
-/**
- * 座席詳細/編集モーダル
- */
-function openSeatEditModal(row, col) {
-  let seat = seatsData.find(s => Number(s.row) === row && Number(s.col) === col);
-  if (!seat) {
-    seat = { row, col, teacherName: '', subject: '', status: 'IN', studentCodes: [], note: '' };
-  }
-
-  const titleEl = document.getElementById('seat-modal-title');
-  const rowInput = document.getElementById('seat-input-row');
-  const colInput = document.getElementById('seat-input-col');
-  const nameInput = document.getElementById('seat-input-name');
-  const subjectInput = document.getElementById('seat-input-subject');
-  const statusSelect = document.getElementById('seat-select-status');
-  const codesInput = document.getElementById('seat-input-codes');
-  const noteInput = document.getElementById('seat-input-note');
-
-  if (titleEl) titleEl.textContent = `座席設定 (${row}行 - ${col}列)`;
-  if (rowInput) rowInput.value = String(row);
-  if (colInput) colInput.value = String(col);
-  if (nameInput) nameInput.value = seat.teacherName || '';
-  if (subjectInput) subjectInput.value = seat.subject || '';
-  if (statusSelect) statusSelect.value = seat.status || 'IN';
-  if (codesInput) codesInput.value = seat.studentCodes ? seat.studentCodes.join(', ') : '';
-  if (noteInput) noteInput.value = seat.note || '';
-
-  openModal('seating-modal');
-}
-
-/**
- * 座席保存処理
- */
-async function handleSaveSeatModal(e) {
-  e.preventDefault();
-
-  const row = Number(document.getElementById('seat-input-row')?.value);
-  const col = Number(document.getElementById('seat-input-col')?.value);
-  const teacherName = document.getElementById('seat-input-name')?.value.trim();
-  const subject = document.getElementById('seat-input-subject')?.value.trim();
-  const status = document.getElementById('seat-select-status')?.value || 'IN';
-  const codesRaw = document.getElementById('seat-input-codes')?.value.trim();
-  const note = document.getElementById('seat-input-note')?.value.trim();
-
-  const studentCodes = codesRaw ? codesRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
-
-  let seatIndex = seatsData.findIndex(s => Number(s.row) === row && Number(s.col) === col);
-
-  const updatedSeat = {
-    row,
-    col,
-    teacherName,
-    subject,
-    status,
-    studentCodes,
-    note,
-    teacherId: teacherName === state.currentUser?.name ? state.currentUser?.id : `t-${Date.now()}`
-  };
-
-  if (seatIndex >= 0) {
-    if (!teacherName) {
-      seatsData.splice(seatIndex, 1);
-    } else {
-      seatsData[seatIndex] = updatedSeat;
-    }
-  } else if (teacherName) {
-    seatsData.push(updatedSeat);
-  }
-
-  try {
-    // ★ 正しい API エンドポイント (/seating/layouts) へ保存
-    await apiPut('/seating/layouts', { seats: seatsData, rows: gridRows, cols: gridCols });
-  } catch (err) {
-    console.warn('[Seating] 保存エラー:', err.message);
-  }
-
-  closeModal('seating-modal');
-  showToast(`座席 (${row}-${col}) の情報を更新しました`, 'success');
-  renderSeatingGrid();
-}
-
-function getDummySeatsData() {
-  return [
-    { row: 1, col: 1, teacherId: 'kyomu01', teacherName: '教務 主任', subject: '教務部', status: 'PRESENT', studentCodes: ['1001', '1002'], note: 'A-01' },
-    { row: 1, col: 2, teacherId: 't-tanaka', teacherName: '田中 先生', subject: '英語', status: 'CLASS', studentCodes: ['1201', '1202'], note: '2-A 英語' },
-    { row: 1, col: 3, teacherId: 't-sato', teacherName: '佐藤 先生', subject: '数学', status: 'MEETING', studentCodes: ['1301', '1302'], note: '第一会議室' },
-    { row: 1, col: 4, teacherId: 't-suzuki', teacherName: '鈴木 先生', subject: '国語', status: 'TRIP', studentCodes: ['1401'], note: '県庁出張' },
-    { row: 2, col: 1, teacherId: 't-takahashi', teacherName: '高橋 先生', subject: '保体', status: 'LEAVE', studentCodes: ['1501'], note: '年休' }
-  ];
-}
