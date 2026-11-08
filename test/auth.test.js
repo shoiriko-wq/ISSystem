@@ -7,6 +7,8 @@
 import request from 'supertest';
 import app from '../src/app.js';
 import { closePool } from './helpers.js';
+import { authService, clearLoginLockForTests } from '../src/services/auth.service.js';
+import { query } from '../config/database.js';
 
 describe('Auth API Endpoints (/api/auth)', () => {
   // scripts/seed.js に種目されている教務主任アカウントと連動
@@ -49,7 +51,8 @@ describe('Auth API Endpoints (/api/auth)', () => {
       .send({});
 
     expect(res.statusCode).toBe(201);
-    expect(res.body.invitation.code).toMatch(/^[0-9A-F]{8}$/);
+    // v3.0.7: 128bit 系 = 32文字16進大写
+    expect(res.body.invitation.code).toMatch(/^[0-9A-F]{32}$/);
     invitationCode = res.body.invitation.code;
   });
 
@@ -118,6 +121,40 @@ describe('Auth API Endpoints (/api/auth)', () => {
     expect(res.body.success).toBe(false);
   });
 
+  // 8b. ユーザー単位ロックアウト (v3.0.7) — サービス直接呼び出し（レート制限はミドルウェアなのでバイパス）
+  it('ログイン失敗5回でアカウントが一時ロック (423) となり LOGIN_FAILED が監査記録されること', async () => {
+    const target = newStaffCode; // 登録済みユーザー (newPassword)
+    const ip = '198.51.100.7';
+    for (let i = 0; i < 5; i++) {
+      let status = 0;
+      try {
+        await authService.login(target, 'wrong-password', ip);
+      } catch (e) {
+        status = e.statusCode;
+      }
+      expect(status).toBe(401);
+    }
+    // 6 回目はロック (423)
+    let lockStatus = 0;
+    try {
+      await authService.login(target, newPassword, ip);
+    } catch (e) {
+      lockStatus = e.statusCode;
+    }
+    expect(lockStatus).toBe(423);
+
+    // 監査ログ LOGIN_FAILED（reason: bad_password）が 5 件以上記録されていること
+    const rows = await query(
+      "SELECT count(*)::int AS c FROM audit_logs WHERE action = 'LOGIN_FAILED' AND new_value LIKE '%bad_password%'"
+    );
+    expect(Number(rows.rows[0].c)).toBeGreaterThanOrEqual(5);
+
+    // 後片付け: ロックを解除してシード状態を維持（成功ログイン相当で Map から除去）
+    clearLoginLockForTests(target);
+    const okRes = await request(app).post('/api/auth/login').send({ staff_code: target, password: newPassword });
+    expect(okRes.statusCode).toBe(200);
+  });
+
   // 9. パスワード変更 (PUT /api/auth/change-password)
   it('PUT /api/auth/change-password - 新パスワードが8文字未満なら 400 になること', async () => {
     const res = await request(app)
@@ -162,6 +199,26 @@ describe('Auth API Endpoints (/api/auth)', () => {
       .post('/api/auth/login')
       .send({ staff_code: newStaffCode, password: newPassword });
     expect(backLoginRes.statusCode).toBe(200);
+  });
+
+  // 8c. v3.0.8 (§15 監査 #5): パスワード照合失敗ログに bcrypt ハッシュが出ないこと
+  it('パスワード照合失敗ログは identifier のみ（bcryptハッシュ非露出）', async () => {
+    const captured = [];
+    const originalWarn = console.warn;
+    console.warn = (...args) => {
+      captured.push(args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' '));
+    };
+    try {
+      await expect(authService.login({ staff_code: seededAdmin.staff_code, password: 'definitely-wrong' })).rejects.toMatchObject({ statusCode: 401 });
+    } finally {
+      console.warn = originalWarn;
+    }
+    const joined = captured.join('\n');
+    expect(joined).toContain(seededAdmin.staff_code);
+    // bcrypt ハッシュ ($2b$ / $2a$ / $2y$) がログに含まれてはならない
+    expect(joined).not.toMatch(/\$2[aby]\$/);
+    // この失敗はロック窓を汚さないよう消す
+    clearLoginLockForTests(seededAdmin.staff_code);
   });
 
   afterAll(async () => {

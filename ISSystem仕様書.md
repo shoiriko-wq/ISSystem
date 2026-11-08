@@ -54,7 +54,8 @@
 - `npm run cert:gen`（`scripts/create-ca.mjs`）が `certs/` に発行: ルートCA `issystem-ca.crt`（秘密鍵 `issystem-ca.key`、`issystem-ca.pem` は同一内容）、サーバー証明書 `server.pem` + `server.key`。**SAN 付き**（`localhost, issystem.local, issystem, 127.0.0.1, ::1`）で、サーバー証明書をCAに読み込ませ WSS でも検証が成立するチェーンを提示する。再発行は `--force`。`certs/` は Git に入れない。
 - 端末の信頼ストアに `certs/issystem-ca.crt` をインストール（Windows: 信頼されたルート証明機関／macOS: 常時信頼）。Node 側は `NODE_EXTRA_CA_CERTS=./certs/issystem-ca.crt`（npm script に付与済み）。
 - 非HTTP（`http://` / `ws://`）で来た端末には `/ca`（`src/routes/ca.routes.js`）が **SHA-256指紋・OS別インストール手順・ダウンロードリンク・`https://HOST:SSL_PORT/` へ移動するボタン**を表示。HTTPS の `/ca` も同じ。`SSL_CA_PAGE_BASE` がボタンURLの基点。
-- Express 側 (`src/app.js`) ミドルウェア順: `helmet`（CSP はオフ＝インラインスクリプト／CDN許可、`crossOriginResourcePolicy: cross-origin`）→ `cors`（`CLIENT_ORIGIN` カンマ区切り、credentials 有効）→ JSON/urlencoded（10MB上限）→ `morgan`（production: combined、開発: dev、`NODE_ENV=test` では無し）→ `/api/health` → `/ca` → `/api` → `express.static(public)` → SPAフォールバック（`/api` 以外は `index.html`）→ `notFoundHandler` → `errorHandler`。
+- Express 側 (`src/app.js`) ミドルウェア順: `helmet`（CSP はオフ＝インラインスクリプト／CDN許可、`crossOriginResourcePolicy: cross-origin`）→ `cors`（`CLIENT_ORIGIN` カンマ区切り、credentials 有効）→ JSON/urlencoded（10MB上限）→ `morgan`（production: combined、開発: dev、`NODE_ENV=test` では無し、**v3.0.8: 4b で `data/logs/access-YYYY-MM-DD.log` へファイル出力 (dir 700 / file 600、日次ローテーション)**）→ `/api/health` → `/ca` → `/api` → `express.static(public)` → SPAフォールバック（`/api` 以外は `index.html`）→ `notFoundHandler` → `errorHandler`。
+- レート制限（`src/middlewares/rate-limit.middleware.js`、**express-rate-limit v8**、メモリストア＝プロセス内ウィンドウ、`req.ip` は trust proxy 未設定でソケット直結地址＝X-Forwarded-For を信用しない、IPv6 は `ipKeyGenerator` で /48 束ね）: ログイン（IP+識別子小文字キー、失敗のみ 15分5回→429）、認証系グローバル（IP、失敗のみ 1時間200回→429）、招待登録（IP+コード 15分5試行→429）、招待リセット（IP+コード+staff_code 15分5試行→429）、招待発行（IP+ユーザー 15分30回→429）。ユーザー単位ロックアウト（423）は `auth.service.js` 側。成功ログインは失敗カウンタに影響しない。エイリアス（`/auth/register`・`/auth/reset-password`・`/auth/invite-code`）にも同一制限。
 - Socket.io は `transports: ['websocket','polling']`、クライアントは `window.location.origin` を使い HTTPS オリジンから `wss://` へ自動対応（`public/js/socket.js`）。ping 25秒 / timeout 20秒（`config/default.js` `realtime`）。
 
 ---
@@ -87,7 +88,7 @@
 | `requireKyomuRole` | `is_kyomu === true` **または** `role === 'KYOMU'` **または** `role === 'ADMIN'` | 教科マスタ追加/改名/削除、施設マスタ CRUD と並び順、監査ログ `/audit/logs`、ニュースキャッシュクリア、考査の決定・コマ組み系 |
 | `requireKyomuOnlyRole` | `role === 'KYOMU'` の**み**（`ADMIN` は対象外） | スケジュールカテゴリマスタ（＝プロフィールの部署マスタ）の追加・改名・削除 |
 | `requireRoles(...roles)` | 列挙ロール **または** `ADMIN` | ルートでは未使用 |
-| `requireAdminRole` | `role === 'ADMIN'` のみ | `auth.middleware.js` に定義済みだが、**現行ルートでは未適用**（`/api/users`・`/api/audit/logs` に付与すべき：§15 参照） |
+| `requireAdminRole` | `role === 'ADMIN'` のみ | **v3.0.5 で `DELETE /api/users/:id` に適用**（コントローラ内でも ADMIN を再検証。§15 参照） |
 
 **権限がサービス側で判定されるもの:** 年休・出張欠席（教務・管理職は全教員分、一般教員は本人分のみ）、担当教科の他教員変更（教務部のみ）。
 
@@ -97,11 +98,11 @@
 
 ## 6. 認証・招待コード
 
-1. `POST /api/auth/login`（`staff_code` + パスワード、bcrypt比較）→ JWT（`JWT_EXPIRES_IN` 既定 24h）を発行。
-2. 招待コード発行 `POST /api/auth/generate-invitation`（要認証）: `crypto.randomBytes(4).toString('hex').toUpperCase()` = **8文字16進大写**、有効期限 24時間（`config.auth.invitationCodeExpiryHours`）。レスポンスはトップレベルに `code` と `expiresAt`。
+1. `POST /api/auth/login`（`staff_code` + パスワード、bcrypt比較）→ JWT（`JWT_EXPIRES_IN` 既定 24h）を発行。**v3.0.7 総当たり対策**:（a）レート制限 — IP+識別子キーで 15分 5 回（失敗のみカウント、成功は非カウント）超限は 429、IP グローバル 1時間 200 失敗で 429。（b）ユーザー単位ロックアウト — 同一識別子で 15分窓 5 回失敗すると 15分間ロック（423、成功ログインまたはサーバー再起動で解除、`auth.service.js` プロセス内 Map）。（c）失敗ログインは監査ログ `LOGIN_FAILED`（IP・reason: `user_not_found` / `bad_password` / `locked_out`）を記録。パスワード照合失敗ログから `dbHash` を出力しない（§15 監査 #5 対策）。429/423 の `message` はログイン画面の `login-error` に表示される。
+2. 招待コード発行 `POST /api/auth/generate-invitation`（要認証＋`K`＝教務部 KYOMU/ADMIN のみ、v3.0.5）: `crypto.randomBytes(16).toString('hex').toUpperCase()` = **32文字16進大写（128bit・v3.0.7。旧 8文字=4バイトは総当たり可能だったため廃止）**、有効期限 24時間（`config.auth.invitationCodeExpiryHours`）。発行は IP+ユーザーキー 15分 30 回（429）。レスポンスはトップレベルに `code` と `expiresAt`。設定ビューの発行カードとユーザー管理メニューは教務部以上にのみ表示（一般教員には非表示）。
 3. 発行時点で利用目的は確定しない。受け取った教職員がログイン画面で「新規登録（招待コード）」/「パスワード再設定」を自ら選ぶ。
-4. `POST /api/auth/register-invitation`（招待コード + 教職員番号 + パスワード）→ 登録直後に JWT。消費済み 400、既存教職員番号 409、8文字未満/項目不足 400。
-5. `POST /api/auth/reset-password-invitation`（招待コード + 教職員番号 + **新パスワード8文字以上**）→ 再設定直後に JWT。未登録教職員番号 404、旧パスワード 401。
+4. `POST /api/auth/register-invitation`（招待コード + 教職員番号 + パスワード）→ 登録直後に JWT。消費済み 400、既存教職員番号 409、8文字未満/項目不足 400。**v3.0.7**: コード単位試行制限（IP+コードキー 15分 5 試行、超限 429。8桁コード総当たりを封じる）。
+5. `POST /api/auth/reset-password-invitation`（招待コード + 教職員番号 + **新パスワード8文字以上**）→ 再設定直後に JWT。未登録教職員番号 404、旧パスワード 401。**v3.0.7**: IP+コード+staff_code キー 15分 5 試行（429）。
 6. 消費は `invitation_codes` に `is_used` と `used_for`（`REGISTER` / `PASSWORD_RESET`）として記録。再利用不可。
 7. 旧互換ルート（同一ハンドラー）: `POST /api/auth/register`、`POST /api/auth/reset-password`、`POST /api/auth/invite-code`。
 8. 自己管理: `GET /api/auth/me`、`PUT /api/auth/profile`（氏名・学年・分掌）、`PUT /api/auth/change-password`、`PUT /api/auth/status`（在席状態）、`POST /api/auth/logout`。
@@ -114,23 +115,25 @@
 
 ## 7. API 一覧（`src/routes/index.js` 全354行・実測）
 
-凡例: `-` = 認証なし、`A` = `authenticateToken`、`K` = `requireKyomuRole`、`K!` = `requireKyomuOnlyRole`（ADMIN 不可）、`L` = `checkEditingLock(...)`。全ルートは `safe()` でラップされ、未定義ハンドラーは 500 を返す（クラッシュしない）。
+凡例: `-` = 認証なし、`A` = `authenticateToken`、`K` = `requireKyomuRole`、`K!` = `requireKyomuOnlyRole`（ADMIN 不可）、`Ad` = `requireAdminRole`（ADMIN のみ）、`L` = `checkEditingLock(...)`。全ルートは `safe()` でラップされ、未定義ハンドラーは 500 を返す（クラッシュしない）。
 
 ### 7.1 認証・ユーザー・マスタ
 
 | Method | Path | 権限 | 内容 |
 | --- | --- | --- | --- |
-| POST | `/api/auth/login` | - | `staff_code` + パスワード → JWT |
-| POST | `/api/auth/register-invitation` | - | 招待コードによる新規登録 |
-| POST | `/api/auth/reset-password-invitation` | - | 招待コードによるパスワード再設定 |
-| POST | `/api/auth/generate-invitation` | A | 招待コード発行（8文字/24h） |
+| POST | `/api/auth/login` | - | `staff_code` + パスワード → JWT（v3.0.7: IP+識別子 15分5回失敗で 429、ユーザー単位ロック 423） |
+| POST | `/api/auth/register-invitation` | - | 招待コードによる新規登録（v3.0.7: IP+コード 15分5試行で 429） |
+| POST | `/api/auth/reset-password-invitation` | - | 招待コードによるパスワード再設定（v3.0.7: IP+コード+staff_code 15分5試行で 429） |
+| POST | `/api/auth/generate-invitation` | A+K | 招待コード発行（32文字16進大写=128bit・v3.0.7/24h、教務部 KYOMU/ADMIN のみ・v3.0.5、IP+ユーザー 15分30回） |
 | GET | `/api/auth/me` | A | プロフィール |
 | PUT | `/api/auth/profile` | A | 氏名・学年・分掌の自己更新 |
 | PUT | `/api/auth/change-password` | A | パスワード変更 |
 | PUT | `/api/auth/status` | A | 在席状態更新 |
 | POST | `/api/auth/logout` | A | ログアウト |
 | POST | `/api/auth/register`・`/auth/reset-password`・`/auth/invite-code` | -/A | 旧互換エイリアス（同一ハンドラー） |
-| GET/POST/DELETE | `/api/users`, `/api/users/:id` | **A のみ（RBACギャップ）** | ユーザー一覧・作成・削除。`TEACHER` でも ADMIN アカウントを作成・削除可能（§15） |
+| GET | `/api/users` | A＋コントローラでロール再検証 | 一覧（v3.0.5）。KYOMU/ADMIN は全件（email・内線含む）、TEACHER は名簿最小フィールド（id/staff_code/name/role/grade/department/subjects/avatar_url）のみ。**`password_hash` はいかなるロールにも返さない** |
+| POST | `/api/users` | A+K | 教職員アカウント追加（v3.0.5）。ADMIN は role 指定可、KYOMU は role が TEACHER 固定（ADMIN への権限昇格抑止）。TEACHER は 403 |
+| DELETE | `/api/users/:id` | A+Ad | アカウント削除（ADMIN のみ・v3.0.5、コントローラでも ADMIN を再検証） |
 | GET | `/api/subjects` | A | 教科マスタ（全教職員） |
 | POST/PUT/DELETE | `/api/subjects`, `/api/subjects/:id` | A+K | 教科マスタ追加・改名・削除（教務部） |
 | PUT | `/api/users/:id/subjects` | A | 担当教科設定（自身は全教職員、他教員は service 側で教務部検証） |
@@ -165,7 +168,7 @@
 | GET/POST | `/api/chat/channels/:channelId/messages` | A | 履歴取得・メッセージ投稿 |
 | PUT | `/api/chat/channels/:channelId/read` | A | 既読更新（`chat_message_reads`、未読バッジ算出） |
 | PUT | `/api/chat/channels/:channelId/hide` | A | チャンネル非表示トグル（`is_hidden`） |
-| DELETE | `/api/chat/channels/:channelId` | A | チャンネル削除（**公開チャンネルは 400**） |
+| DELETE | `/api/chat/channels/:channelId` | A+K | チャンネル削除（教務部 KYOMU/ADMIN のみ・v3.0.5。**公開チャンネルは 400**。作成 `POST /api/chat/channels` は全教職員開放のまま） |
 | DELETE | `/api/chat/messages/:messageId` | A | メッセージ取り消し（行を残し「取り消された」状態のみ保持。本文はクライアント通信に載せない。`created_at` は変更しない） |
 
 ### 7.4 施設・備品（`/api/facilities`）
@@ -331,16 +334,19 @@
 
 ## 14. フロントエンド構成
 
-- **エントリ:** `public/index.html`（883行、`<html lang="ja" class="theme-light-azure" data-theme-mode="light" data-chrome="light">`）。CDN: Tailwind + `lucide@latest` + `socket.io@4.7.5`。スクリプトは ES Modules（`main.js` 1,073行）。
-- **共有層（7ファイル 2,429行）:** `main.js`(1,073) タブ切替・初期化、`ui-helpers.js`(436) 共通UI部品、`socket.js`(404) 接続と購読、`theme.js`(178) テーマ切替、`api.js`(155) 共通API呼び出し、`state.js`(106) トークン/ユーザー/テーマの localStorage 永続化、`config.js`(77) `API_BASE_URL='/api'`・`WS_BASE_URL=window.location.origin`・`ENDPOINTS`・`STORAGE_KEYS`・`DEFAULT_THEME='light-azure'`。
-- **タブモジュール（12ファイル 8,111行）:** `chat`(1,526), `bulletin`(1,250), `schedule`(1,124), `facility`(992), `dashboard`(969), `mail`(515), `seating`(342), `absence`(309), `subjects`(308), `approval`(302), `news`(257), `about`(217)。
+- **エントリ:** `public/index.html`（908行、`<html lang="ja" class="theme-light-azure" data-theme-mode="light" data-chrome="light">`）。CDN: Tailwind + `lucide@latest` + `socket.io@4.7.5`。スクリプトは ES Modules（`main.js` 1,073行）。
+- **共有層（7ファイル 3,364行）:** `main.js`(1,073) タブ切替・初期化、`ui-helpers.js`(436) 共通UI部品、`socket.js`(431) 接続と購読、`theme.js`(178) テーマ切替、`api.js`(155) 共通API呼び出し、`state.js`(106) トークン/ユーザー/テーマの localStorage 永続化、`config.js`(77) `API_BASE_URL='/api'`・`WS_BASE_URL=window.location.origin`・`ENDPOINTS`・`STORAGE_KEYS`・`DEFAULT_THEME='light-azure'`。
+- **タブモジュール（12ファイル 8,489行）:** `chat`(1,526), `bulletin`(1,397), `schedule`(1,124), `facility`(992), `dashboard`(1,147), `mail`(515), `seating`(395), `absence`(309), `subjects`(308), `approval`(302), `news`(257), `about`(217)。
 - **考査モジュール（12ファイル 5,253行）:** `exam.timetable.ui`(1,004), `exam.proctor.ui`(766), `exam.subject.ui`(576), `exam.room.ui`(548), `exam.decision.ui`(461), `exam.plan.ui`(428), `exam.basic.ui`(341), `exam.trip.ui`(261), `exam.view.ui`(240), `exam.module.js`(210), `exam.shared`(209), `exam.master.ui`(209)。
-- **CSS 7ファイル（4,406行）:** `components`(1,291), `readability`(1,013), `variables`(1,019), `layouts`(455), `animations`(342), `theme`(167), `base`(119)。`base.css` の `!important` 制約より ID specificity + `!important` で優先させる実装慣例あり（例 `#chat-btn-toggle-hide[aria-pressed="true"]`）。
+- **CSS 7ファイル（4,590行）:** `components`(1,394), `readability`(1,013), `variables`(1,019), `layouts`(536), `animations`(342), `theme`(167), `base`(119)。`base.css` の `!important` 制約より ID specificity + `!important` で優先させる実装慣例あり（例 `#chat-btn-toggle-hide[aria-pressed="true"]`）。
 - **テーマ:** **18テーマクラス（実測）**。3系統 × 6配色。**light**（`theme-light-{azure,slate,forest,rose,amber,teal}`）、**dark**（`theme-dark-{navy,slate,emerald,amber,rose,plum}`）、**cb（色彩配慮・色覚多様性対応）**（`theme-cb-{azure,crimson,forest,slate,teal,violet}`）。既定は `light-azure`。`localStorage` の `is_system_theme_preference_v251` に保存し、`document.body.className` を差し替える。`<html>` は `data-theme-mode` と `data-chrome` を持つ。旧 localStorage との互換エイリアス（`hidden` テーマ）が定義されている。
-- **サイドメニュー収納（`layouts.css` §6 と `main.js`、2026/11/7 変更）:** **幅768px以上は画面幅を問わず常時収納**（3.6rem・アイコンのみ。`.nav-label`・`.nav-badge`・`.sidebar-version` は `display:none`）。ホバリング（`:hover` + JS `is-hover`）とフォーカス（JS `is-focus`）で 12.5rem へせり出し、ラベル・バッジ・項目内 `gap:0.7rem` を表示する。せり出しは `#app-body`（`position:relative` + `overflow:visible !important`）内の `position:absolute` オーバーレイで、`main` は `padding-left:4.2rem !important` により収納幅分の余白を常時確保する（収納状態で main が全幅を使う）。カーソル離脱・サイドバー外クリック・フォーカス移動で収納へ戻す（`:focus-within` はフォーカスを保持して閉じないため JS が `is-hover`/`is-focus` を管理）。767px以下は画面下バー（アイコンのみ、ホバリングでも文字は出さない）。収納時の項目は正方形タイル（`width:min(2.2rem,100%)`, `aspect-ratio:1`, `padding:0`, `margin-inline:auto`）、ツールチップ `title` はラベルと同一文案（検証 `npm run test:ui:nav`）。せり出し時の項目高さは収納時と同じ `2.2rem`（`height:2.2rem !important`）に固定する — せり出しで行が縦へズレると `mousedown`→`mouseup` の間に目標行が外れ、アイコンの初回クリックが吸収される（実測でタブが切り替わらなかった）。
+- **サイドメニュー収納（`layouts.css` §6 と `main.js`、2026/11/7 変更）:** **幅768px以上は画面幅を問わず常時収納**（3.6rem・アイコンのみ。`.nav-label`・`.nav-badge`・`.sidebar-version` は `display:none`）。ホバリング（`:hover` + JS `is-hover`）とフォーカス（JS `is-focus`）で 12.5rem へせり出し、ラベル・バッジ・項目内 `gap:0.7rem` を表示する。せり出しは `#app-body`（`position:relative` + `overflow:visible !important`）内の `position:absolute` オーバーレイで、`main` は `padding-left:4.2rem !important` により収納幅分の余白を常時確保する（収納状態で main が全幅を使う）。**広幅画面 (≥1100px) ではせり出しに `main` が追従する:** `@media (min-width:1100px)` で `#app-body:has(.app-sidebar:hover)`（JS の `is-hover`・`is-focus` も同selector）`main { padding-left:16.3rem !important }`（実測285.25px）とし、`padding-left` の 0.22s トランジションを sidebar スライドと同期して、コンテンツ左端がせり出しsidebar の右端に着地し**重ならない**。狭幅 (768〜1099px) は `main` を動かさないオーバーレイ維持（画面崩れ防止）。検証 `npm run test:ui:sidebar-push`（12項目: 1280/1150px で収納・ホバー追従・is-focus のみの追従・収納復帰、900px オーバーレイ維持、500px 画面下バー）。カーソル離脱・サイドバー外クリック・フォーカス移動で収納へ戻す（`:focus-within` はフォーカスを保持して閉じないため JS が `is-hover`/`is-focus` を管理）。767px以下は画面下バー（アイコンのみ、ホバリングでも文字は出さない）。収納時の項目は正方形タイル（`width:min(2.2rem,100%)`, `aspect-ratio:1`, `padding:0`, `margin-inline:auto`）、ツールチップ `title` はラベルと同一文案（検証 `npm run test:ui:nav`）。せり出し時の項目高さは収納時と同じ `2.2rem`（`height:2.2rem !important`）に固定する — せり出しで行が縦へズレると `mousedown`→`mouseup` の間に目標行が外れ、アイコンの初回クリックが吸収される（実測でタブが切り替わらなかった）。
 - **トースト通知（`#toast-container`、2026/11/7 変更）:** 画面**右下**（`fixed bottom-4 right-4 z-40 flex flex-col items-end`）。z-40 はモーダル（z-50）の下・収納サイドバーのせり出し（z-30）の上。左下だと収納サイドバーのせり出しやチャット左カラムのフッター（`#chat-btn-toggle-hide` 等）を覆って実クリックがトーストに当たり、初回クリックが吸収される。767px以下では画面下バー（高さ3.9rem・z-40）を覆わないよう `bottom:4.4rem`（`components.css`）。コンテナは `pointer-events:none`、`.toast` 本体は `auto`。検証 `npm run test:ui:sidebar`（R6・M3）。
 - **アクセシビリティ/レスポンシブ:** 通常テキストのコントラスト比 4.5:1 以上を保つ（`readability.css` と `npm run test:ui:contrast` / `test:ui:chrome` / `test:ui:contrast-plain` で検証）。`lg`（≥1024px）3カラム、`md` 未満は1カラム。グローバル検索は `Ctrl+K` / `Cmd+K`。
 - **チャット「目のマーク」非表示編集モードトグル:** サイドバーフッター左下の `#chat-btn-toggle-hide`（アイコンのみ）。`aria-pressed` が ON 時のみグループ名横に非表示ボタン（`eye-off`）が出、ON は開いた目 `eye` + 警告色リング。色・枠は `components.css`、アイコンは `chat.module.js` の `setHideEditMode()` が差し替え `refreshLucideIcons()` を呼ぶ。回帰テスト `npm run test:ui:chat`（検証項目11）。
+- **記事共有モーダル（`#news-share-modal`、2026/11/8 追加）:** ダッシュボードの「ピックアップ教育ニュース」ウィジェット右上ボタンは、存在しない `news` タブへ遷移していた「すべて見る」（`dash-btn-news-more`）を**撤廃**し、「記事を共有」（`#dash-btn-news-share`）へ置き換えた。モーダルは `#news-share-form`（`novalidate`）に 記事URL（必須。スキーマ無しは `https://` を補完し `new URL()` で検証、ドットを含まない hostname は拒否）、タイトル（任意・未入力時はドメイン名を既定化）、ひとこと（任意）、共有先（職員チャット / 掲示板）を持つ。チャット時は投稿先チャンネル（`/api/chat/channels` から生成、`general` を既定選択）、掲示板時は掲示対象日（JST の今日）を表示し、`syncShareFields()` が他方を `hidden` にする。送信はチャット `POST /api/chat/channels/:id/messages`（`【記事共有】タイトル\nURL\nひとこと`）、掲示板 `POST /api/bulletins`（件名 `【参考記事】タイトル`、本文 `URL\n\nひとこと`、`targetDate`）。成功時は成功トースト＋対象タブへ `switchTab`、失敗時はモーダルを開いたまま入力内容を保つ。閉じ方は右上X・フッター「閉じる」・背景クリック・ESC の共通規約（`ui-helpers.js` の `initModalListeners`）。検証 `npm run test:ui:news-share`（21項目）。
+
+
 
 ---
 
@@ -352,7 +358,8 @@
 - `helmet` セキュリティヘッダー、CORS は `CORS_ORIGIN` / `CLIENT_ORIGIN` の明示リスト（wildcard `*` 既定化は廃止）、`express.json` 10MB上限。
 - JWT（`Bearer`）検証 + RBAC ミドルウェア、bcrypt(10) ハッシュ、`JWT_EXPIRES_IN` 24h。
 - Socket 接続は Origin 許可リスト＋JWT 厳格検証、ハンドラーにロール/メンバーシップ gate（§8.4、`src/middlewares/socket.middleware.js`）。
-- 監査ログ（`audit_logs` / `system_audit_logs`、500系は `SERVER_ERROR` として stack を監査ログへ）、`AUDIT_RETENTION_DAYS` 既定90日保持。
+- 監査ログ（`audit_logs` / `system_audit_logs`、500系は `SERVER_ERROR` として stack を監査ログへ）、`AUDIT_RETENTION_DAYS` 既定90日保持。**v3.0.7**: 失敗ログインを `LOGIN_FAILED`（user_id は該当ユーザー、未登録時は NULL、ip_address、new_value に identifier+reason）として記録（成功 `LOGIN` のみの旧実装から拡張）。
+- **アクセスログファイル (v3.0.8, §15 #5 ログ権限/保存期間管理)**: `src/utils/access-log.js` が morgan ファイルストリーム `data/logs/access-YYYY-MM-DD.log` (日次ローテーション、ディレクトリ mode 700、ファイル mode 600、IP・URL・ステータスコードのみ。bcrypt ハッシュ・パスワードは記録されない) を生成。cron 3:00 AM が `AUDIT_RETENTION_DAYS` (既定 90日、config.limits.auditRetentionDays) で監査ログ (`audit_logs` / `system_audit_logs`) とアクセスログファイルを経過削除 (`cleanOldAuditLogs` の重複定義を統一し、両テーブル削除)。stack トレースは `NODE_ENV=development` かつループバック (127.x / ::1) 要求のレスポンスのみ返り、本番・LAN 越しでは返らない。パスワード照合失敗ログは identifier のみ。検証: `npm run test:logsecurity` 9項目。
 - エラーレスポンスの stack trace は **`NODE_ENV=development` のみ**（本番では出さない）。
 - 座席セル・施設予約等の業務単位での排他ロック（3分自動解放）、二重予約 409。
 - メールのパスワードは AES-256-GCM 暗号保存（平文不可）。
@@ -363,9 +370,9 @@
 | --- | --- | --- | --- |
 | 1 | **Critical**（**対応済み 2026/11/7**） | `src/sockets/socket.index.js` が `NODE_ENV≠production` で JWT 検証失敗時に `dev-user`（role `TEACHER`）として接続を許可し、`demo-jwt-token-*` を無条件で通していた。Socket ハンドラーにロール検証がなく、socket.io の cors origin は `*`。**`wss://0.0.0.0:3443` に有効 JWT なしで職員全体チャンネルへ書き込み可能**だった | **実装済みの是正**: `src/middlewares/socket.middleware.js` を新設し、(a) Origin 許可リスト照合（`server.js` の cors も同一関数）、(b) `verifySocketToken()` で常時 `jwt.verify`（デモ/fallback 廃止）、(c) `seating:update_status` 本人限定＋ステータスホワイトリスト、(d) `seating:grid_updated` は KYOMU/ADMIN のみ、(e) `lock:*` は種別ホワイトリスト・自保持のみ解放（`getActiveEditingLock`/`refreshEditingLock` の実体欠如も修正）、(f) chat はメンバーシップ検証、(g) UI は認証失敗で再接続を停止。`.env` は `NODE_ENV=production` と明示 Origin リストへ変更。回帰検証 `npm run test:socket-auth`（20項目 PASS） |
 | 2 | **Critical** | 既定 `JWT_SECRET`（`is_system_secret_key_2026_default_jwt`）が `.env.example` に平文公開済み。この秘密鍵で ADMIN トークンを伪造すると `/api/users`・`/api/audit/logs` に到達可能。同じ秘密鍵がメール AES 鍵の導出元（`mail.model.js` は `sha256(config.auth.jwtSecret)`） | `openssl rand -hex 32` で採り `.env` 秘密化、既定値をコードに残さない。メール鍵は `MAIL_ENC_KEY` として JWT と分離（移行は再暗号化マイグレーション）。**注意**: `JWT_SECRET` は bcrypt ソルトにも使われているため、変更時は全ユーザーのパスワードハッシュ再作成（`npm run db:seed` 相当の再ハッシュ）が必須 |
-| 3 | **High** | `/api/users`（一覧・作成・削除）は `authenticateToken` のみ。**`TEACHER` が ADMIN アカウントを作成・削除できる**（`requireAdminRole` は定義済みだが未適用） | `POST /users`・`DELETE /users/:id` に `requireAdminRole`（または `requireKyomuRole`）を付与 |
-| 4 | **High** | ログイン・招待コード登録に**レート制限・アカウントロックアウトがない**（`express-rate-limit` 依存なし）。招待コードは8文字16進（4バイトエントロピー）で試行攻撃に対して弱い | `express-rate-limit` を `/api/auth/login` と `register-invitation`/`reset-password-invitation` に適用。コードは6バイト以上＋試行上限 |
-| 5 | **Medium** | `src/services/auth.service.js:86` がパスワード照合失敗時に **`dbHash`（bcryptハッシュ全文）をログへ出力**（morgan と併せてサーバログに流出） | `dbHash` を出さず `identifier` のみにする |
+| 3 | **High** | `/api/users`（一覧・作成・削除）は `authenticateToken` のみ。**`TEACHER` が ADMIN アカウントを作成・削除できる**（`requireAdminRole` は定義済みだが未適用） | `POST /users`・`DELETE /users/:id` に `requireAdminRole`（または `requireKyomuRole`）を付与 → **✅ v3.0.5 で実装**（`POST /users`=K、`DELETE /users/:id`=Ad、招待発行・チャンネル削除=K。コントローラで role 再検証、一覧はロール別最小化、権限昇格抑止。`npm run test:rbac` 17項目 ALL PASS） |
+| 4 | **High** | ログイン・招待コード登録に**レート制限・アカウントロックアウトがない**（`express-rate-limit` 依存なし）。招待コードは8文字16進（4バイトエントロピー）で試行攻撃に対して弱い | `express-rate-limit` を `/api/auth/login` と `register-invitation`/`reset-password-invitation` に適用。コードは6バイト以上＋試行上限 → **✅ v3.0.7 で実装**（コードは 128bit=32文字大写、ログイン IP+識別子 15分5回失敗=429、ユーザー単位ロック 423、コード単位 15分5試行、失敗時 `LOGIN_FAILED` 監査。`npm run test:ratelimit` 8項目 ALL PASS、`test/auth.test.js` 8b で 423 検証） |
+| 5 | **Medium** | `src/services/auth.service.js:86` がパスワード照合失敗時に **`dbHash`（bcryptハッシュ全文）をログへ出力**（morgan と併せてサーバログに流出） | `dbHash` を出さず `identifier` のみにする → **✅ v3.0.7 で実装**（照合失敗ログは identifier のみ）→ **✅ v3.0.8: ログ権限/保存期間管理 + stack 応答秘匿**（アクセスログファイル dir 700 / file 600・日次ローテーション・90日保持 cron、`cleanOldAuditLogs` 重複定義統一で `system_audit_logs` も削除、`NODE_ENV=development` の stack 応答はループバック要求のみ、`npm run test:logsecurity` 9項目 ALL PASS） |
 | 6 | **Medium** | `CSP` が `false`（インラインスクリプト・CDN許可）＋ Tailwind/Lucide/socket.io を CDN から読む。UI にユーザー入力が入るため XSS 表面が広い | コンテンツセキュリティポリシーを段階的に有効化、CDN をローカルへ自前配布 |
 | 7 | **Medium** | JWT を `localStorage`（`is_system_jwt_token_v251`）に保存するため XSS でトークン流出する | 短期有効 + HttpOnly Cookie セッションへ移行 |
 | 8 | **Medium** | メール接続テストは `rejectUnauthorized: false`（意図された設計）だが、中間者攻撃に対して STARTTLS が検証されない | 校内CAの指紋を `.env` に登録して pinning をオプション化 |
@@ -381,7 +388,7 @@
 - **未使用コード:** `src/sockets/socketEvents.js` / `src/sockets/socketClient.js`（§8.3）、`facility.model.js` の `updateCells()`/`getCells()`（`facility_cells` への書き込み経路が未接続、§7.4）。
 - **旧データ互換:** `curriculum_courses`（運用廃止、表のみ）、`classes.course_ids`（`'[]'` 維持）、`posts.post_type`/`priority`（カラム削除済み）、`invitation_codes` 二重定義、`audit_logs` と `system_audit_logs` の併存。
 - **DB 永続化なし:** 教育ニュース・天気（インメモリキャッシュのみ）。
-- `news` タブは無い（ダッシュボードウィジェット）。
+- `news` タブは無い（ダッシュボードウィジェット）。ウィジェット本文 `#dash-news-summary` は現状読み込み関数が無く「ニュースを取得中...」のまま（共有ボタン `#dash-btn-news-share` とは独立。共有は手入力URLで `/news` 取得に依存しない）。
 - 単一HTML構成・NAS配置のみでの運用は現行アーキテクチャ（Express + PostgreSQL + TLS）**では成立しない**（旧 UI/UX 仕様書の記述は廃止）。
 
 ---
@@ -408,6 +415,14 @@
 | **v3.0.0** | 2026/11/7 | 現行コード（`src`+`config` 23,482行、`public` 21,082行（JS 31ファイル 15,793行・CSS 7ファイル 4,406行・`index.html` 883行）、`db/schema.sql` 1,262行・51テーブル/77インデックス）を計測し**単一正典として再構成**。Socket 認証バックdoor・JWT 既定鍵・`/api/users` の RBAC ギャップ・レート制限欠如・ログ流出を既知課題として明文化（§15）。`README.md` は運用手順書として維持 |
 | **v3.0.1** | 2026/11/7 | §15.2 **#1 を実装で解消**。`src/middlewares/socket.middleware.js` 新設（Origin 許可リスト照合・JWT 厳格検証・`socketHasRole`・`sanitizeSocketString`・リソース種別ホワイトリスト）、`socket.index.js` から demo/fallback を削除、`seating.socket.js` に本人限定と KYOMU/ADMIN gate、`lock.socket.js` は model の位置引数署名へ修正＋自保持のみ解放（`audit.model.js` に `getActiveEditingLock`/`refreshEditingLock` を実装＝旧 export の実体欠如を解消）、`chat.socket.js` にメンバーシップ検証、`app.js`/`server.js` の CORS を wildcard 既定化から明示リストへ変更、UI は認証失敗で無限再接続を停止。`scripts/test-socket-auth.mjs`（20項目）と `npm run test:socket-auth` を追加。回帰: `npm test` 139テスト PASS、`npm run test:ui:chat` ALL PASSED |
 | **v3.0.2** | 2026/11/7 | **サイドメニュー収納を画面幅に関係なく適用**（§14）。`public/css/layouts.css` §6 の条件を `@media (min-width:768px) and (max-width:1023px)` → `@media (min-width:768px)` に拡張し、768px以上は常時 3.6rem（アイコンのみ）収納・ホバリング/フォーカスで 12.5rem せり出し。`public/js/main.js` の matchMedia も `(min-width:768px)`（`is-hover`/`is-focus` 管理は同一）。回帰: `test:ui:nav`（title/label 45件一致、1280px で sidebar=63px→hover 218.75px）、`test:ui:frames` 18項目 PASS、`test:ui:all` |
+| **v3.0.3** | 2026/11/8 | **ダッシュボードの「すべて見る」を撤廃し「記事を共有」モーダルへ置換**（§14）。`dash-btn-news-more`（存在しない `news` タブへの遷移）を削除し、`dash-btn-news-share` が `#news-share-modal`（URL・タイトル・ひとこと・共有先、チャンネル選択／掲示対象日）を開く。送信はチャット `POST /api/chat/channels/:id/messages`（`【記事共有】`）と掲示板 `POST /api/bulletins`（`【参考記事】`+URL+対象日）。URL はスキーマ無しを `https://` へ補完し `new URL()` で検証、空・不正はトースト警告で送信しない。`scripts/test-news-share-modal.mjs`（21項目）と `npm run test:ui:news-share` を追加（`test:ui:all` へ組込み）。現行測定: `public` 21,726行（JS 31ファイル 16,228行・CSS 7ファイル 4,590行・`index.html` 908行）。回帰: `test:ui:news-share` 21項目 ALL OK、`test:ui:modal` ALL OK、`test:ui:sidebar` 68項目 PASS、`test:ui:chat` 32項目 PASS、`test:ui:seating` ALL PASSED、`test:ui:frames` 17/18項目 PASS（残りはサイドバー収納アイコンのクリッピング項目＝既存の既知 failure、本変更とは無関係） |
+| **v3.0.4** | 2026/11/8 | **監査 Critical 対策: JWT secret 強制・メール暗号キー分離・平文フォールバック撤去**（§2）。`.env` の `JWT_SECRET` を `openssl rand -hex 32`（64文字16進ランダム）へ再生成し、専用 `MAIL_ENC_SECRET`（同生成手順・JWT とは必ず別値）を新設。`config/default.js` は未設定・32文字未満・既知既定値（`is_system_secret_key_2026_default_jwt` / `dev-secret-key-change-in-production` / `changeme` 等）・`MAIL_ENC_SECRET==JWT_SECRET` を**起動時に throw**（fail-fast、既定値フォールバック撤去）。`src/models/mail.model.js` の AES-256-GCM キーは JWT 導出（sha256）をやめ `scrypt(MAIL_ENC_SECRET, 'issystem-mail-enc-v2', 32)` の別系統へ分離（JWT 流出で全メールパスワードが復号される被害を断った）。`src/services/auth.service.js` の SHA-256(password+secret) フォールバックと `storedHash === password`（平文一致）を撤去し bcrypt のみ（seed は bcrypt）。ローテ手順: `JWT_SECRET` 変更時はサーバー再起動（全トークン失効）、`MAIL_ENC_SECRET` 変更時は `npm run rotate:mail-key -- OLD_JWT_SECRET=<旧>`（`scripts/rotate-mail-enc-key.mjs` が `mail_accounts` を新キーへ再暗号化）。実測検証: 旧既定 secret での FORGED-ADMIN トークンは `/api/auth/me` `/api/audit/logs` `/api/users` すべて 403、sha256(旧既定secret) 暗号化行はローテ後 scrypt 新キーで復号、`npm test` 139/139、`test:api:mail-test` 6/6、`test:ui:mail` ALL PASS、`test:api:mail-defaults` ALL PASS、`test:socket-auth` 20件/失敗0、`test:ui:news-share` ALL OK。なお `.env` のメール初期値（§8）をテストの「Git追跡ファイルに実値なし」項目に配慮し `imap.dev.example.net:143` / `smtp.dev.example.net:25`（到達不能 example）へ整備した |
+| **v3.0.6** | 2026/11/8 | **サイドメニューせり出しに main が追従（広幅は重なりなし）**（§14）。`public/css/layouts.css` §6 に `@media (min-width:1100px)` を追加し、せり出し (`:hover` / JS `is-hover` / `is-focus`) 時 `#app-body:has(...) main` の `padding-left` を 4.2rem → 16.3rem（実測285.25px）へ 0.22s（sidebar と同一イージング）で遷移させ、コンテンツ左端が sidebar 右端に着地して重なりを消去。768〜1099px はオーバーレイ維持（main 不動・画面崩れ防止）、767px 以下は画面下バーで無変更。`scripts/test-sidebar-push.mjs`（12項目）と `npm run test:ui:sidebar-push` を追加。回帰: `test:ui:sidebar-push` 12項目 ALL PASS、`test:ui:sidebar` 68項目 ALL PASSED、`test:ui:nav`（45件一致・sidebar 67.25px→hover 285.25px）、`test:ui:chat`、`test:ui:seating` |
+| **v3.0.5** | 2026/11/8 | **RBAC 強化: ユーザー管理・招待コード発行・チャンネル削除の権限昇格を消去**（§5・§7・§15）。`src/routes/index.js` に `requireKyomuRole` を `POST /api/users`・`POST /api/auth/generate-invitation`・`DELETE /api/chat/channels/:channelId`、`requireAdminRole` を `DELETE /api/users/:id` へ適用（`requireAdminRole` は定義済み未適用だった）。コントローラ（`auth.controller.js` の `isPrivilegedUser`、`chat.controller.js`）でも `req.user.role` を再検証する第二防衛線を設置。`GET /api/users` は `password_hash` を全ロールで一切返さなくなり、TEACHER には名簿最小フィールド（email・内線除去）、KYOMU/ADMIN のみ全件。KYOMU が作成するアカウントの role は TEACHER 固定（ADMIN 昇格は ADMIN のみ）。UI は招待コード発行カード（`invitation-issuance-card`）とユーザー管理メニューを非教務部で非表示化（`main.js`/`index.html`）。招待コード発行は自主分散から教務部発行へ変更（§6 更新、jest テストは KYOMU トークン使用で無影響）。`scripts/test-rbac-user-admin.mjs`（17項目）と `npm run test:rbac` を追加。回帰: `npm test` 139/139、`test:rbac` 17項目 ALL PASS、`test:ui:chat`、`test:ui:seating`、`test:socket-auth` 20件/失敗0 |
+| **v3.0.7** | 2026/11/8 | **ログイン総当たり対策: レート制限・ユーザー単位ロックアウト・LOGIN_FAILED 監査・招待コード 128bit 化**（§5・§6・§13・§15 監査 #4/#5）。`src/middlewares/rate-limit.middleware.js` を新設（**express-rate-limit v8**、メモリストア、`package.json` 依存追加）。ログイン: `authIpLimiter`（IP グローバル失敗のみ 1時間200回→429）＋ `loginLimiter`（IP+識別子小文字キー、失敗のみカウント、15分5回超限 429 JSON）。招待登録 `registerInvitationLimiter`（IP+コード 15分5試行）、招待リセット `resetInvitationLimiter`（IP+コード+staff_code 15分5試行）、発行 `generateInvitationLimiter`（IP+ユーザー 15分30回）。`/auth/register`・`/auth/reset-password`・`/auth/invite-code` エイリアスにも同一適用。IPv6 は `ipKeyGenerator` で /48 束ね（trust proxy 未設定＝X-Forwarded-For 非信用）。ユーザー単位ロックアウトは `auth.service.js` のプロセス内 Map（15分窓 5 回失敗→15分ロック、423。成功ログイン・サーバー再起動で解除、DB 永続化はせず—`LOGIN_FAILED` 監査で検知）。失敗ログインは監査 `LOGIN_FAILED`（ip_address + reason: `user_not_found`/`bad_password`/`locked_out`）を記録し、照合失敗ログの `dbHash` 出力を廃止（§15 #5）。招待コードは `crypto.randomBytes(16)` = 32文字16進大写（128bit）。UI は 429/423 の message を `login-error` に表示（`api.js` の非 OK 分岐）。テスト: `test/auth.test.js` 8b（サービス直結で 5 回 401→6 回目 423、`LOGIN_FAILED` 5件以上を DB count、`clearLoginLockForTests` で後片付け）、招待コード正規表現 8→32文字へ（`auth.test.js`・`invitation.test.js`・`test-rbac-user-admin.mjs`）、`scripts/test-login-ratelimit.mjs`（8項目）と `npm run test:ratelimit` を追加（不存在ユーザー 25 回失敗→401×5+429×20、LOGIN_FAILED delta=5、32文字コード、架空コード 400×5→429、初回登録 201、使用済み 400、ADMIN 後片付け 200。実行ごとに一意な識別子・コードでウィンドウを共有しない）。実測: `npm test` 140/140、`test:ratelimit` 8/8、`test:rbac` 17/17、`test:ui:sidebar-push` 12項目 ALL PASS、`test:ui:nav` 45件一致、`test:ui:chat` ALL PASSED、`test:ui:seating` ALL PASSED |
+| **v3.0.8** | 2026/11/8 | **ログ秘匿・保持管理: アクセスログファイル権限/保持、stack 応答秘匿、cleanOldAuditLogs 統一**（§5・§13・§15 監査 #5）。`src/utils/access-log.js` を新設: morgan ファイルストリーム `data/logs/access-YYYY-MM-DD.log` を日次ローテーション（ディレクトリ mode 700、ファイル mode 600、append。bcrypt ハッシュは日志に現れない）。`src/app.js` に 4b（morgan ファイル出力、test ではスキップ、dir 700 / file 600 を強制 chmod）。`src/middlewares/error.middleware.js` に `isLoopbackIp()` を追加し、stack トレースを `NODE_ENV=development` + ループバック (127.x / ::1 / ::ffff:127.x) 要求のみレスポンスへ返す（本番・LAN 越し開発で秘匿）。`src/models/audit.model.js` の `cleanOldAuditLogs` 重複定義（2 つ、後定義=audit_logs のみ $1 が勝っていた）を統一し `audit_logs` + `system_audit_logs` を $1 で削除（`?::integer` 版は dead code 削除）。`src/utils/cron.jobs.js` は保持日数を `config.limits.auditRetentionDays`（`AUDIT_RETENTION_DAYS` 既定 90日、ハードコード 90 を排除）へ統一し、同一 3:00 AM ジョブでアクセスログファイル (`access-*.log`) も経過削除（`cleanupAccessLogs()`）。`config/default.js` に `logging.logDir`（`LOG_DIR` 既定 `data/logs`）、`.env.example` に `AUDIT_RETENTION_DAYS=90` / `LOG_DIR=data/logs` を追加。テスト: `test/error-middleware.test.js`（新 suite、stack 秘匿 4項目: production / dev+ループバック / dev+外部IP / 404）、`test/auth.test.js` 8c（console.warn インターセプト、失敗ログインログに identifier あり・bcrypt ハッシュ `$2b$/$2a$/$2y$` なし、`clearLoginLockForTests`）、`scripts/test-log-security.mjs` + `npm run test:logsecurity`（9項目: 404 stack なし、失敗ログイン 401、dir 700、file 600、アクセスログにハッシュなし、監査 API に LOGIN_FAILED=11、監査 JSON にハッシュなし、レート制限 6回=401×5+429×1）。実測: `npm test` 11 suite 145/145 ALL PASS、`test:logsecurity` 9/9、`test:ratelimit` 8/8、`test:rbac` 17/17、UI nav 45件一致・scan 12 view 区、`node --check` 8ファイル、サーバー nodemon 自動再起動 (3443 稼働)、`data/logs` 700 / access-2026-11-08.log 600 実測（`tr -d '\0'` == `wc -c` でアクセスログ完全クリーン確認。コンソールログの NUL sparse は nodemon 旧 fd + ログ trunc の運用副作用でアクセスログに影響なし） |
+
+
 
 
 

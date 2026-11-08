@@ -13,6 +13,34 @@ const toInt = (value, fallback) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+// 2026/11/8 監査 Critical 対策: 既知の既定値 secret を起動時に拒否（fail-fast）。
+// JWT_SECRET / MAIL_ENC_SECRET は 32文字以上のランダム値（openssl rand -hex 32）必須。
+const KNOWN_INSECURE_SECRETS = new Set([
+  'is_system_secret_key_2026_default_jwt',
+  'dev-secret-key-change-in-production',
+  'changeme',
+  'secret',
+  'jwt-secret',
+]);
+
+function enforceSecret(name, value) {
+  const str = String(value || '');
+  if (str.length < 32 || KNOWN_INSECURE_SECRETS.has(str)) {
+    throw new Error(
+      `[Config] ${name} が安全ではありません。32文字以上のランダム値が必要です（生成: openssl rand -hex 32）。` +
+      ' 既知の既定値・短値・未設定での起動は禁止されています。'
+    );
+  }
+  return str;
+}
+
+const jwtSecret = enforceSecret('JWT_SECRET', process.env.JWT_SECRET);
+const mailEncSecret = enforceSecret('MAIL_ENC_SECRET', process.env.MAIL_ENC_SECRET);
+if (mailEncSecret === jwtSecret) {
+  throw new Error('[Config] MAIL_ENC_SECRET は JWT_SECRET と必ず別値にしてください（キー系統の分離）。');
+}
+
+
 const config = {
   env: process.env.NODE_ENV || 'development',
 
@@ -24,7 +52,7 @@ const config = {
 
   // 2. 認証・セキュリティ設定 (auth.middleware.js / auth.service.js / socket.index.js が参照)
   auth: {
-    jwtSecret: process.env.JWT_SECRET || 'is_system_secret_key_2026_default_jwt',
+    jwtSecret, // 2026/11/8: 既定値フォールバック撤去（enforceSecret が起動時に検証）
     jwtExpiresIn: process.env.JWT_EXPIRES_IN || '24h',
     bcryptSaltRounds: toInt(process.env.BCRYPT_SALT_ROUNDS, 10),
     invitationCodeExpiryHours: 24,
@@ -64,7 +92,7 @@ const config = {
   },
 
   jwt: {
-    secret: process.env.JWT_SECRET || 'dev-secret-key-change-in-production',
+    secret: jwtSecret, // 2026/11/8: 'dev-secret-key-change-in-production' フォールバック撤去
     expiresIn: process.env.JWT_EXPIRES_IN || '24h',
   },
 
@@ -78,6 +106,8 @@ const config = {
   logging: {
     level: process.env.LOG_LEVEL || 'info',
     auditRetentionDays: toInt(process.env.AUDIT_RETENTION_DAYS, 90),
+    // v3.0.8: アクセスログファイル (access-log.js が日次ローテーション、dir 700 / file 600)
+    logDir: process.env.LOG_DIR ? path.join(process.cwd(), process.env.LOG_DIR) : path.join(process.cwd(), 'data', 'logs'),
   },
 
   security: {
@@ -95,6 +125,9 @@ const config = {
   //    実値は .env 秘匿情報として保存し GitHub にはコミットしない。
   //    未設定ユーザーのフォームプリフィル、保存時未入力時のフォールバックに使用する。
   mail: {
+    // 2026/11/8 監査 Critical 対策: mail_accounts の AES-256-GCM キーは
+    // JWT_SECRET から導出せず、専用 MAIL_ENC_SECRET（scrypt 導出）で分離する。
+    encSecret: mailEncSecret,
     imapHost: process.env.MAIL_IMAP_HOST || null,
     imapPort: toInt(process.env.MAIL_IMAP_PORT, null),
     smtpHost: process.env.MAIL_SMTP_HOST || null,

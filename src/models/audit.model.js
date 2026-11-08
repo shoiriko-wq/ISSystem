@@ -291,33 +291,21 @@ export const auditModel = {
   },
 
   /**
-   * 無操作タイムアウト超過ロックの一覧 (cron 自動解放用)
-   * @param {number} timeoutSeconds
-   */
-  async cleanOldAuditLogs(daysToKeep = 90) {
-    try {
-      const sql = `
-        DELETE FROM system_audit_logs
-        WHERE created_at < CURRENT_TIMESTAMP - make_interval(days => ?::integer)
-      `;
-      const res = await query(sql, [daysToKeep]);
-      return res.changes || res.rowCount || 0;
-    } catch (error) {
-      console.warn('[AuditModel] cleanOldAuditLogs fallback:', error.message);
-      return 0;
-    }
-  },
-
-  /**
-   * 保持期間を超過した監査ログのクリーンアップ
-   * @param {number} days - 保持日数 (既定 90日)
+   * 保持期間を超過した監査ログのクリーンアップ (v3.0.8: 重複定義を統一)
+   * 旧実装は cleanOldAuditLogs が 2 つあり後定義 (audit_logs のみ・$1) が勝っていた。
+   * system_audit_logs と audit_logs の両方を $1 パラメータで削除する。
+   * @param {number} days - 保持日数 (config.limits.auditRetentionDays、既定 90日)
    */
   async cleanOldAuditLogs(days = 90) {
-    const res = await query(
+    const res1 = await query(
       `DELETE FROM audit_logs WHERE created_at < now() - make_interval(days => $1::int)`,
       [days]
     );
-    return res.rowCount;
+    const res2 = await query(
+      `DELETE FROM system_audit_logs WHERE created_at < now() - make_interval(days => $1::int)`,
+      [days]
+    );
+    return (res1.rowCount || 0) + (res2.rowCount || 0);
   },
 };
 

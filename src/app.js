@@ -13,6 +13,7 @@ import routes from './routes/index.js';
 import caRoutes from './routes/ca.routes.js';
 import { errorHandler, notFoundHandler } from './middlewares/error.middleware.js';
 import { parseCorsOrigin } from './utils/origins.js';
+import { createAccessLogStream } from './utils/access-log.js';
 import config from '../config/default.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -46,6 +47,8 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // 4. HTTPアクセスログ出力 (開発環境: dev, 本番: combined)
 if (process.env.NODE_ENV !== 'test') {
   app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+  // 4b. v3.0.8: ファイル出力 (data/logs/access-YYYY-MM-DD.log、dir 700 / file 600、日次ローテーション、cron が AUDIT_RETENTION_DAYS で保持)
+  app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev', { stream: createAccessLogStream() }));
 }
 
 // 5. ヘルスチェック用軽量エンドポイント (ルートから /api/health へ移動)

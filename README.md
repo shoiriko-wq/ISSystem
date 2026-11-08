@@ -80,15 +80,21 @@ PGPASSWORD='otome601' psql -h localhost -p 5432 -U postgres -d issystem
 | --- | --- |
 | `npm start` / `npm run dev` | サーバー起動 (HTTPS/WSS + Cron + CA配布用HTTP) |
 | `npm run cert:gen` | プライベートCAとサーバー証明書を生成（既存があればスキップ。`--force` で再発行） |
-| `npm test` | jest 統合テスト (10スイート / 139テスト、各スイートで pg プールを close するため `--forceExit` 不要) |
+| `npm test` | jest 統合テスト (11スイート / 145テスト、stack 秘匿 4項目 (error.middleware) + bcrypt ハッシュ非露出 (auth 8c) 含む。各スイートで pg プールを close するため `--forceExit` 不要) |
 | `npm run api:check` | API スモークテスト (HTTPS の GET/POST/PUT/DELETE を実行しステータスを検証) |
 | `npm run test:socket-auth` | Socket 接続権限検証 (tokenless / garbage / demoトークン / 外部Origin の拒否、KYOMU・ADMIN gate、ロック自保持限定、chat メンバーシップの 20項目。サーバー起動後に実行) |
+| `npm run test:rbac` | RBAC 権限検証 (`/api/users` 一覧のロール別最小化・追加 KYOMU のみ role=TEACHER 固定・削除 ADMIN のみ、招待コード発行 KYOMU/ADMIN、チャンネル削除 KYOMU/ADMIN の 17項目。TEACHER の権限昇格は 403。サーバー起動後に実行) |
+| `npm run test:ratelimit` | ログイン・招待コード レート制限検証 (不存在ユーザー 25 回失敗ログインで 401×5→429×20、失敗ログインの `LOGIN_FAILED` 監査記録、招待コード 128bit=32文字16進大写、架空コード 5 試行→429、使用済みコード 400、ADMIN 後片付けの 8項目。ユーザー単位ロックアウト 423 は `test/auth.test.js` で検証。サーバー起動後に実行) |
+| `npm run test:logsecurity` | ログ秘匿・保持検証 (404 レスポンスに stack なし、失敗ログイン 401 がアクセスログ `data/logs/access-YYYY-MM-DD.log` に記録、ログディレクトリ mode 700、アクセスログファイル mode 600、アクセスログに bcrypt ハッシュなし、ADMIN 監査 API に `LOGIN_FAILED`、監査 JSON にハッシュなし、レート制限 6回失敗=401×5+429×1 の 9項目。サーバー起動後に実行) |
 | `npm run test:api:mail-test` | メール接続テスト API 検証 (Jest `test/mail.test.js` 6項目) |
 | `npm run test:api:mail-defaults` | メール初期値 (.env プリフィル・Git 秘匿) API 検証 (12項目) |
 | `npm run test:ui:mail` | メール UI 検証 (初回設定・プリフィル・接続テスト・受信箱の 37項目) |
 | `npm run test:ui:exambasic` | 定期考査 基本情報「3. 科目 × 実施クラス・コース」の列幅・チップ配置検証 (実施数列なし / 科目名14%・略称8% / チップ内容分63% / はみ出し0 / チップクリック・Shift範囲選択・保存反映の 4ビューポート 38項目) |
 | `npm run test:ui:bulletin-search` | 職員掲示板の全日検索 UI 検証 (タイトル・本文・投稿者名を全日で検索して左列が対象日見出し付きの全日の列表になる / タイトルの `<mark>` ハイライト・件数「N 件」・行の対象日チップ / 中心日表示は「全日」になり ‹ ›・本日・日付クリック（カレンダー開閉）は disabled（data-day は維持・固定幅なので › の位置は動かず） / 結果クリックは中心日を動かさず右ペインに全文 / 検索ピルは存在しない / ←/→・T・C キーは停止 / ミニカレンダーの検索該当枠と日付セル disabled（合成クリックでも中心日は動かない） / 検索語クリアで通常表示とナビが復帰・投稿者名検索・後片付けの 23項目) |
+| `npm run test:ui:news-share` | ダッシュボード「記事を共有」UI 検証 (「すべて見る」撤廃 / 共有モーダルの開閉とURL入力 / URL空・不正の拒否 / スキーマ無しの `https://` 補完 / 職員チャットへ `【記事共有】`投稿 (チャンネル選択) と掲示板へ `【参考記事】`投稿 (対象日) / サーバー実データへの登録 / 背景クリック・ESC・閉じるボタン・アイコン描画の 21項目) |
+| `npm run test:ui:sidebar-push` | サイドメニューせり出し時の main 追従 UI 検証 (≥1100px はせり出し幅 285.25px に main の padding-left が追従し重なりなし (ホバー・is-focus のみ両経路、カーソル/フォーカス離脱で収納復帰)、768〜1099px はオーバーレイ維持 (main padding 不変)、500px は画面下バー・せり出しなしの 12項目) |
 | `npm run test:ui:https` | 安全通信検証 (CA検証 / TLS / CAページ / API 426 / CA配布 / ブラウザ wss) |
+| `npm run rotate:mail-key -- OLD_JWT_SECRET=<旧> (OLD_SECRET=<旧MAIL_ENC_SECRET> も可)` | mail_accounts の AES-256-GCM キーローテ (sha256(旧JWT) / scrypt(旧MAIL_ENC_SECRET) で暗号化された行を新 MAIL_ENC_SECRET 基準の scrypt キーへ再暗号化。再暗号化後にサーバー再起動) |
 | `npm run db:create` / `db:init` / `db:seed` | DB 作成 / スキーマ適用 / ダミーデータ投入 |
 | `npm run db:tables` | コード内参照テーブル名の一覧表示 (スキーマ整合チェック) |
 
@@ -98,7 +104,8 @@ PGPASSWORD='otome601' psql -h localhost -p 5432 -U postgres -d issystem
 
 | ファイル | 内容 |
 | --- | --- |
-| `test/auth.test.js` | ログイン、`/auth/me`、招待コード発行 (201)、招待登録、新規アカウントでのログイン、消費済みコード 400・既存教職員番号 409、誤パスワード 401、トークンなし 401 |
+| `test/auth.test.js` | ログイン、`/auth/me`、招待コード発行 (201)、招待登録、新規アカウントでのログイン、消費済みコード 400・既存教職員番号 409、誤パスワード 401、トークンなし 401、8c bcrypt ハッシュ非露出（console.warn インターセプト、`$2b$` 系パターン検出） |
+| `test/error-middleware.test.js` | stack トレース秘匿: production では stack なし、development + ループバックのみ stack あり、development + 外部 IP では stack なし、404 ApiError に stack なし (4項目) |
 | `test/facility.test.js` | 施設一覧、日別概要 (`facilitiesOverview`)、予約作成 201、**重複時間帯 409**、予約一覧、キャンセル、`start>=end` は 400、キャンセル後の再予約、施設マスタ CRUD (教務部限定・同名 409・有効予約残 409)、並び順 `PUT /api/facilities/order` |
 | `test/approvals.test.js` | 一覧、申請作成 201、詳細、承認処理 (`APPROVED`)、無効ステータス 400、存在しない ID 404 |
 | `test/bulletins.test.js` | 一覧、詳細 (確認率 `ack_percentage`)、投稿作成 201、件名・本文欠落 400、コメント、既読、電子承認、不存在 404 |

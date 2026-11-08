@@ -4,8 +4,10 @@
  */
 
 import cron from 'node-cron';
+import config from '../../config/default.js';
 import auditModel from '../models/audit.model.js';
 import newsService from '../services/news.service.js';
+import { cleanupAccessLogs } from './access-log.js';
 
 /**
  * ISSystem 定期バックグラウンドタスクの初期化
@@ -77,17 +79,27 @@ export function initializeCronJobs(io = null) {
   });
 
   /**
-   * 3. 古い監査ログのアーカイブ/クリーンアップタスク (保持期間: 90日)
+   * 3. 古い監査ログ・アクセスログのクリーンアップタスク
+   * 保持期間: AUDIT_RETENTION_DAYS (config.limits.auditRetentionDays、既定 90日)
    * 実行周期: 毎日深夜 3:00 AM
    */
   cron.schedule('0 0 3 * * *', async () => {
+    const retentionDays = config.limits.auditRetentionDays;
     try {
-      console.log('[Cron Maintenance] 90日以上経過した古い監査ログの整理を実行します...');
+      console.log(`[Cron Maintenance] ${retentionDays}日以上の監査ログ (audit_logs / system_audit_logs) を整理します...`);
       
-      const cleanedCount = await auditModel.cleanOldAuditLogs(90);
+      const cleanedCount = await auditModel.cleanOldAuditLogs(retentionDays);
       console.log(`[Cron Maintenance] 古い監査ログ ${cleanedCount} 件を正常にクリーンアップしました。`);
     } catch (error) {
       console.error('[Cron Job Error] 監査ログ定期クリーンアップ中にエラーが発生しました:', error);
+    }
+
+    // v3.0.8 (§15 #5): アクセスログファイル data/logs/access-*.log も同一日数で保持
+    try {
+      const removedFiles = cleanupAccessLogs(retentionDays);
+      console.log(`[Cron Maintenance] 保持期間超過のアクセスログ ${removedFiles.length} ファイルを削除しました。`);
+    } catch (error) {
+      console.error('[Cron Job Error] アクセスログ定期クリーンアップ中にエラーが発生しました:', error);
     }
   });
 
