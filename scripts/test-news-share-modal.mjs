@@ -6,13 +6,16 @@
  *  2. 「記事を共有」ボタン（dash-btn-news-share）が同じ位置に存在する
  *  3. クリックで #news-share-modal（モーダル規約: modal-overlay > modal-card > modal-header + modal-form + modal-footer）が開く
  *  4. モーダルの入力欄は記事URLだけ（タイトル・ひとこと・共有先・チャンネル選択・掲示対象日は撤廃）
- *  5. 記事URLが空では送信しない（エラートースト表示、モーダルは開いたまま、POST 発生なし）
- *  6. URL入力 → 職員チャットへ共有（スキーマ無しは https:// を補完、本文は「【記事共有】+ドメイン名+URL」の2行）
- *  7. 投稿先は閲覧中の職員チャットチャンネル（/api/chat/channels/:id/messages）
- *  8. 共有後はモーダルが閉じ、成功トーストとチャットタブへ遷移、サーバー側にも実メッセージが残る
- *  9. フッター「閉じる」と ESC キーで閉じられる（全モーダル共通規約）
- * 10. 背景クリック規則: モーダル内で押し開始→背景で離すと閉じない、背景で押し開始→閉じる
- * 11. ボタン・モーダルの Lucide アイコンが SVG として実描画される
+ *  5. モーダル内に常設説明文はない（p 要素0・本文はラベルだけ／UI十条9 と禁则6: トースト・title・プレースホルダーのみ）
+ *  6. URL入力は7条件（type・id・name・autocomplete・aria-label・label[for]・border-main 2px実線）＝UI十条3・禁则8。
+ *     URLの補完規則はプレースホルダーと title だけで伝える
+ *  7. 記事URLが空では送信しない（エラートースト表示、モーダルは開いたまま、POST 発生なし）
+ *  8. URL入力 → 職員チャットへ共有（スキーマ無しは https:// を補完、本文は「【記事共有】+ドメイン名+URL」の2行）
+ *  9. 投稿先は閲覧中の職員チャットチャンネル（/api/chat/channels/:id/messages）
+ * 10. 共有後はモーダルが閉じ、成功トーストとチャットタブへ遷移、サーバー側にも実メッセージが残る
+ * 11. フッター「閉じる」と ESC キーで閉じられる（全モーダル共通規約）
+ * 12. 背景クリック規則: モーダル内で押し開始→背景で離すと閉じない、背景で押し開始→閉じる
+ * 13. ボタン・モーダルの Lucide アイコンが SVG として実描画される
  *
  * 実行: node scripts/test-news-share-modal.mjs  （ISSystem サーバーが必要）
  *  options: UI_BASE=https://127.0.0.1:3443  UI_USER=T2026001  UI_PASS=password123  CHROME_PATH=...
@@ -105,7 +108,36 @@ check('URL入力欄がフォーカスされる', !!opened.urlPlaceholder && open
 check('入力欄は記事URLだけ（タイトル・ひとこと・共有先・チャンネル選択・掲示対象日は撤廃）',
   opened.inputIds.length === 1 && opened.inputIds[0] === 'news-share-url' && opened.submitCount === 1, opened);
 
-// ---- 4. URL 空の送信は禁止 ----
+// ---- 4b. モーダル内に常設説明文はない（UI十条9・禁则6）、URL入力は7条件（UI十条3・禁则8） ----
+const formShape = await page.evaluate(() => {
+  const form = document.getElementById('news-share-form');
+  const input = document.getElementById('news-share-url');
+  const cs = getComputedStyle(input);
+  return {
+    pCount: form.querySelectorAll('p').length,
+    bodyText: (form.querySelector('.modal-body')?.textContent || '').replace(/\s+/g, ' ').trim(),
+    type: input.type,
+    id: input.id,
+    name: input.getAttribute('name'),
+    autocomplete: input.getAttribute('autocomplete'),
+    ariaLabel: input.getAttribute('aria-label'),
+    labelFor: !!document.querySelector('label[for="news-share-url"]'),
+    borderW: cs.borderTopWidth,
+    borderS: cs.borderTopStyle,
+    placeholder: input.placeholder,
+    title: input.getAttribute('title'),
+  };
+});
+check('モーダル内に常設説明文がない（p 要素0・本文はラベル「記事URL」だけ）',
+  formShape.pCount === 0 && formShape.bodyText === '記事URL *', formShape);
+check('URL入力は7条件（type / id / name / autocomplete / aria-label / label[for] / border-main 2px実線）',
+  formShape.type === 'url' && formShape.id === 'news-share-url' && formShape.name === 'news-share-url'
+  && formShape.autocomplete === 'off' && formShape.ariaLabel === '記事URL' && formShape.labelFor
+  && formShape.borderW === '2px' && formShape.borderS === 'solid', formShape);
+check('URLの補完規則はプレースホルダーと title でだけ伝える',
+  formShape.placeholder.includes('https://') && (formShape.title || '').includes('補完'), formShape);
+
+// ---- 5. URL 空の送信は禁止 ----
 await page.click('#news-share-form button[type="submit"]');
 await sleep(600);
 const afterEmpty = await page.evaluate(() => ({
@@ -116,7 +148,7 @@ check('URL 空では POST が発生しない', posts.length === 0, posts);
 check('URL 空ではエラートースト表示、モーダルは開いたまま', afterEmpty.open && afterEmpty.toasts.some((t) => t.includes('URL')), afterEmpty);
 
 
-// ---- 5,6,7,8. 職員チャットへ共有（スキーマ無しURLは https:// 補完・本文は2行・閲覧中チャンネルへ） ----
+// ---- 6,7,8,9. 職員チャットへ共有（スキーマ無しURLは https:// 補完・本文は2行・閲覧中チャンネルへ） ----
 await page.type('#news-share-url', 'mext.go.jp/b_menu/happou/20261107.html');
 await page.click('#news-share-form button[type="submit"]');
 await sleep(1200);
@@ -153,7 +185,7 @@ const chatMsgs = await page.evaluate(async (cid) => {
 check('サーバー実データ: 閲覧中の職員チャットチャンネルに共有メッセージが登録されている',
   chatMsgs.some((t) => t.includes('https://mext.go.jp/')), chatMsgs.slice(-2));
 
-// ---- 9. 閉じるボタン・ESC（全モーダル共通ルール） ----
+// ---- 11. 閉じるボタン・ESC（全モーダル共通ルール） ----
 await openShare();
 await page.click('#news-share-modal .modal-footer .modal-close');
 await sleep(300);
@@ -166,7 +198,7 @@ await sleep(300);
 const closedByEsc = await page.evaluate(() => document.getElementById('news-share-modal').classList.contains('hidden'));
 check('ESC キーで閉じられる', closedByEsc);
 
-// ---- 10. 背景クリック規則（モーダル内ドラッグ脱出は閉じない／背景押下は閉じる） ----
+// ---- 12. 背景クリック規則（モーダル内ドラッグ脱出は閉じない／背景押下は閉じる） ----
 await openShare();
 const geo = await page.evaluate(() => {
   const o = document.getElementById('news-share-modal').getBoundingClientRect();
@@ -193,7 +225,7 @@ await sleep(300);
 const afterBgClick = await page.evaluate(() => document.getElementById('news-share-modal').classList.contains('hidden'));
 check('背景で押し開始して離すと閉じる', afterBgClick);
 
-// ---- 11. Lucide アイコンが実描画されている（ボタン・モーダルヘッダー） ----
+// ---- 13. Lucide アイコンが実描画されている（ボタン・モーダルヘッダー） ----
 const icons = await page.evaluate(() => {
   const svgIn = (sel) => !!document.querySelector(sel)?.querySelector('svg');
   return {

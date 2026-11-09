@@ -12,12 +12,56 @@
  * （自保持のみ解放）、chat:send_message はメンバーのみ、
  * editing_locks にホワイトリスト外のゴミ行（旧実装の object Object）がないこと。
  */
+import fs from 'node:fs';
+import path from 'node:path';
+import http from 'node:http';
+import https from 'node:https';
+import { fileURLToPath } from 'node:url';
 import { io } from 'socket.io-client';
 import { query, pool } from '../config/database.js';
 
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SSL_PORT = process.env.PROBE_SSL_PORT || process.env.SSL_PORT || 3443;
 const BASE = `https://localhost:${SSL_PORT}`;
 const ALLOWED_TYPES = ['seating', 'exam', 'schedule', 'facility', 'approval', 'bulletin', 'mail', 'chat'];
+
+// ★ Node 側の通信は CA を明示する（AGENTS.md 第12条）。素の fetch は自己署名チェーンを弾く。
+const CA = [fs.readFileSync(path.join(ROOT, 'certs', 'issystem-ca.crt'))];
+
+/** CA を渡す API 呼び出し（fetch と同じ形の res.status / res.json() を返す） */
+function caFetch(url, opts = {}) {
+  const u = new URL(url);
+  const useHttps = u.protocol === 'https:';
+  const mod = useHttps ? https : http;
+  return new Promise((resolve, reject) => {
+    const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+    const body = opts.body ? String(opts.body) : null;
+    if (body) headers['Content-Length'] = String(Buffer.byteLength(body));
+    const reqOpts = {
+      hostname: u.hostname,
+      port: u.port || (useHttps ? 443 : 80),
+      path: u.pathname + u.search,
+      method: opts.method || 'GET',
+      headers,
+    };
+    if (useHttps) reqOpts.ca = CA;
+    const r = mod.request(reqOpts, (res) => {
+      let d = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => (d += c));
+      res.on('end', () =>
+        resolve({
+          status: res.statusCode,
+          text: d,
+          json: async () => JSON.parse(d || '{}'),
+        })
+      );
+    });
+    r.on('error', reject);
+    if (body) r.write(body);
+    r.end();
+  });
+}
 
 const results = [];
 let failures = 0;
@@ -29,7 +73,7 @@ const record = (name, ok, detail = '') => {
 
 /** API ログインで実 JWT を取得 */
 async function login(staffCode, password = 'password123') {
-  const res = await fetch(`${BASE}/api/auth/login`, {
+  const res = await caFetch(`${BASE}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ staff_code: staffCode, password }),
@@ -48,6 +92,7 @@ function tryConnect({ token, origin }) {
       extraHeaders: origin ? { Origin: origin } : {},
       reconnection: false,
       timeout: 6000,
+      ca: CA, // ★ 自己署名チェーンを通す（CA を明示。NODE_EXTRA_CA_CERTS は使わない）
     });
     const settle = (payload) => {
       clearTimeout(timer);
@@ -76,7 +121,7 @@ function emitWithAck(socket, event, payload) {
 }
 
 async function apiGet(path, token) {
-  const res = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await caFetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
   return res.json().catch(() => ({}));
 }
 
@@ -141,14 +186,28 @@ async function main() {
   record('自保持ロックの解放は成功', selfRelease.success === true, JSON.stringify(selfRelease));
 
   // --- 4. チャットメンバーシップ ----------------------------------
+  // ★ 職員全体グループは撤廃済み（v3.1.2）: チャンネルは個人が作成したグループだけ
   const chanBody = await apiGet('/api/chat/channels', kyomu);
   const channels = Array.isArray(chanBody.channels) ? chanBody.channels : Array.isArray(chanBody.data) ? chanBody.data : [];
-  const nonPublic = channels.filter((c) => c && c.type !== 'PUBLIC');
 
-  if (nonPublic.length === 0) {
-    record('非PUBLICチャンネルなし (メンバーシップ検証はスキップ)', true, 'skipped');
+  // 職員全体グループが一覧に出ないことを数値で確認する。
+  // 許されるタイプは GROUP（個人グループ）・DM（1対1）・WORKFLOW（決裁協議）の3つだけ。
+  // 全体タイプはサーバーのホワイトリストが GROUP へ寄せるので出てはならない。
+  const ALLOWED_GROUP_TYPES = ['GROUP', 'DM', 'WORKFLOW'];
+  const badTypes = channels.filter((c) => c && !ALLOWED_GROUP_TYPES.includes(c.type));
+  record(
+    '職員全体グループは存在しない（一覧のタイプは GROUP / DM / WORKFLOW のみ）',
+    channels.length > 0 && badTypes.length === 0,
+    channels.map((c) => `${c.id}:${c.type}`).join(',')
+  );
+
+  // WORKFLOW（決裁協議）を除いた個人作成グループでメンバーシップ検証をする
+  const groups = channels.filter((c) => c && c.type !== 'WORKFLOW');
+
+  if (groups.length === 0) {
+    record('個人作成グループが1件もない（メンバーシップ検証はスキップ）', true, 'skipped');
   } else {
-    const target = nonPublic[0];
+    const target = groups[0];
     const memberBody = await apiGet(`/api/chat/channels/${target.id}/members`, kyomu);
     const members = Array.isArray(memberBody.members) ? memberBody.members : Array.isArray(memberBody.data) ? memberBody.data : [];
     const memberIds = members.map((m) => String(m.user_id || m.id));
@@ -164,17 +223,17 @@ async function main() {
     );
   }
 
-  // KYOMU のみをメンバーとする非PUBLICチャンネルを作り、TEACHER の送信が拒否されることを必ず検証する
-  const createRes = await fetch(`${BASE}/api/chat/channels`, {
+  // KYOMU のみをメンバーとするグループを作り、TEACHER の送信が拒否されることを必ず検証する
+  const createRes = await caFetch(`${BASE}/api/chat/channels`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${kyomu}` },
-    body: JSON.stringify({ name: 'Probe 権限検証', type: 'PRIVATE', memberIds: ['kyomu01'] }),
+    body: JSON.stringify({ name: 'Probe 権限検証', type: 'GROUP', memberIds: ['kyomu01'] }),
   });
   const created = await createRes.json().catch(() => ({}));
   const privateId = created?.channel?.id || created?.id || created?.data?.id;
 
   if (!privateId) {
-    record('プライベートチャンネル作成に失敗 (メンバーシップ検証スキップ)', true, JSON.stringify(created));
+    record('検証用グループの作成に失敗 (メンバーシップ検証スキップ)', true, JSON.stringify(created));
   } else {
     const denyAck = await emitWithAck(teacherConn.socket, 'chat:send_message', {
       channelId: privateId,
@@ -188,7 +247,7 @@ async function main() {
     });
     record('メンバー (KYOMU) の送信は成功', allowAck.success === true, JSON.stringify(allowAck).slice(0, 160));
 
-    const delRes = await fetch(`${BASE}/api/chat/channels/${privateId}`, {
+    const delRes = await caFetch(`${BASE}/api/chat/channels/${privateId}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${kyomu}` },
     });

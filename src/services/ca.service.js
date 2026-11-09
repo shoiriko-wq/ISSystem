@@ -242,6 +242,7 @@ export function buildCaPage(ctx) {
 
   <footer>
     <p>設定は一度だけ。数分で終わります。分からない時は職員室・管理者に気軽に声をかけてください。</p>
+    <p>サーバーと同じ機械で開くときは <code>https://127.0.0.1:${httpsPort}/</code> でも開けます。</p>
     <p>サーバー管理者: 証明書の生成は <code>npm run cert:gen</code>。</p>
   </footer>
 </main>

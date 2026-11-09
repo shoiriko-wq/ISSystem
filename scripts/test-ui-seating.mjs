@@ -11,14 +11,61 @@
  *  7. 編集ロックへ戻すとセレクトは無効化され、カードクリックはモーダルを開かない
  * 実行: npm run test:ui:seating  （ISSystem サーバーが必要 UI_BASE / UI_USER / UI_PASS）
  */
+import fs from 'node:fs';
+import path from 'node:path';
+import http from 'node:http';
+import https from 'node:https';
+import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASE = process.env.UI_BASE || 'https://127.0.0.1:3443';
 const USER = process.env.UI_USER || 'T2026001';
 const PASS = process.env.UI_PASS || 'password123';
 const CHROME = process.env.CHROME_PATH || '/usr/bin/google-chrome';
 const API_BASE = `${BASE}/api`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ★ Node 側の API 呼び出しは CA を明示する（AGENTS.md 第12条）
+//   素の fetch は自己署名チェーンで SELF_SIGNED_CERT_IN_CHAIN になり落ちる。
+//   node:https に certs/issystem-ca.crt を渡して叩く（NODE_EXTRA_CA_CERTS は使わない）。
+const SECURE = BASE.startsWith('https:');
+const CA = SECURE ? [fs.readFileSync(path.join(ROOT, 'certs', 'issystem-ca.crt'))] : null;
+
+/** CA を渡す API 呼び出し（fetch と同じ形の res.status / res.json() を返す） */
+function caFetch(url, opts = {}) {
+  const u = new URL(url);
+  const useHttps = u.protocol === 'https:';
+  const mod = useHttps ? https : http;
+  return new Promise((resolve, reject) => {
+    const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+    const body = opts.body ? String(opts.body) : null;
+    if (body) headers['Content-Length'] = String(Buffer.byteLength(body));
+    const reqOpts = {
+      hostname: u.hostname,
+      port: u.port || (useHttps ? 443 : 80),
+      path: u.pathname + u.search,
+      method: opts.method || 'GET',
+      headers,
+    };
+    if (useHttps) reqOpts.ca = CA;
+    const r = mod.request(reqOpts, (res) => {
+      let d = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => (d += c));
+      res.on('end', () =>
+        resolve({
+          status: res.statusCode,
+          text: d,
+          json: async () => JSON.parse(d || '{}'),
+        })
+      );
+    });
+    r.on('error', reject);
+    if (body) r.write(body);
+    r.end();
+  });
+}
 
 const failures = [];
 const check = (name, ok, detail = null) => {
@@ -36,9 +83,9 @@ const clickSeat = (row, col) => page.evaluate((r, c) => {
 
 const todayJST = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
 
-/** Node 側 API 呼び出し（検証データの作成・掃除用） */
+/** Node 側 API 呼び出し（検証データの作成・掃除用）。CA を渡して TLS を通す */
 const nodeLogin = async () => {
-  const res = await fetch(`${API_BASE}/auth/login`, {
+  const res = await caFetch(`${API_BASE}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ staff_code: USER, password: PASS }),
@@ -48,7 +95,7 @@ const nodeLogin = async () => {
 };
 
 const nodeCall = async (token, method, path, body) => {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await caFetch(`${API_BASE}${path}`, {
     method,
     headers: { 'Content-Type': 'application/json', Authorization: token ? `Bearer ${token}` : '' },
     body: body ? JSON.stringify(body) : undefined,

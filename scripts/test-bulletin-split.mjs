@@ -18,13 +18,60 @@
  * 出力: スクリプト実行ログ + /tmp/bulletin-split-desktop.png / /tmp/bulletin-split-390.png
  *       NG が 1 件でもあれば exit code 1
  */
+import fs from 'node:fs';
+import path from 'node:path';
+import http from 'node:http';
+import https from 'node:https';
+import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASE = process.env.UI_BASE || 'https://127.0.0.1:3443';
 const USER = process.env.UI_USER || 'T2026001';
 const PASS = process.env.UI_PASS || 'password123';
 const CHROME = process.env.CHROME_PATH || '/usr/bin/google-chrome';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ★ Node 側の通信は CA を明示する（AGENTS.md 第12条・禁则14）
+//   素の fetch は自己署名チェーンを SELF_SIGNED_CERT_IN_CHAIN で弾くため、
+//   node:https に certs/issystem-ca.crt を渡して叩く。NODE_EXTRA_CA_CERTS は使わない。
+const SECURE = BASE.startsWith('https:');
+const CA = SECURE ? [fs.readFileSync(path.join(ROOT, 'certs', 'issystem-ca.crt'))] : null;
+
+/** CA を渡す API 呼び出し（fetch と同じ形で status / text / json() を返す） */
+function caFetch(url, opts = {}) {
+  const u = new URL(url);
+  const useHttps = u.protocol === 'https:';
+  const mod = useHttps ? https : http;
+  return new Promise((resolve, reject) => {
+    const headers = { 'content-type': 'application/json', ...(opts.headers || {}) };
+    const body = opts.body ? String(opts.body) : null;
+    if (body) headers['Content-Length'] = String(Buffer.byteLength(body));
+    const reqOpts = {
+      hostname: u.hostname,
+      port: u.port || (useHttps ? 443 : 80),
+      path: u.pathname + u.search,
+      method: opts.method || 'GET',
+      headers,
+    };
+    if (useHttps) reqOpts.ca = CA;
+    const r = mod.request(reqOpts, (res) => {
+      let d = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => (d += c));
+      res.on('end', () =>
+        resolve({
+          status: res.statusCode,
+          text: d,
+          json: async () => JSON.parse(d || '{}'),
+        })
+      );
+    });
+    r.on('error', reject);
+    if (body) r.write(body);
+    r.end();
+  });
+}
 
 const results = [];
 const log = (name, val) => {
@@ -572,7 +619,73 @@ log('active-row-anim', rowAnim);
 check('↑ で先頭行へ戻り右ペインも連動', snapUp.activeIdx === 0 && snapUp.paneTitle === snapUp.activeTitle, { activeIdx: snapUp.activeIdx, paneTitle: snapUp.paneTitle });
 check('選択枠は translateY スライドで移動（上移動は下から滑り込み、終点0・左列全体は動かない）',
   rowAnim && rowAnim.start > 0 && rowAnim.end === 0 && rowAnim.listElTransform === true, rowAnim);
-check('選択行の未読バッジが消える', snap1.unread - snapDown.unread === 1, { before: snap1.unread, after: snapDown.unread });
+/* 選択行の未読バッジが消える（未読状態はテスト間で消費されることがあるため、
+   田中先生（T2026002）に未読の掲示を作ってもらい、その行を実際に選択して1減ることを実測する。
+   作った掲示は最後に削除して元へ戻す＝後片付け。Node 側通信は CA を明示（禁则14）。 */
+const posterLogin = await caFetch(`${BASE}/api/auth/login`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ staff_code: 'T2026002', password: PASS }),
+}).then((r) => r.json());
+const posterToken = posterLogin.token;
+const unreadTitle = 'UI検証バッジ用掲示';  // タイトルに「未読」の文字を入れるとバッジ数と混ざるので使わない
+const madePost = await caFetch(`${BASE}/api/bulletins`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', Authorization: `Bearer ${posterToken}` },
+  body: JSON.stringify({
+    title: unreadTitle,
+    content: '未読バッジ検証用（行の選択で既読化されることを実測し、検証後に削除される）。',
+    target_date: snapUp.centerDate,
+    display_start_date: snapUp.centerDate,
+  }),
+}).then((r) => r.json());
+const madeId = (madePost.data && madePost.data.id) || (madePost.bulletin && madePost.bulletin.id) || null;
+
+// 本日へ戻して新掲示の行をさがす（作った掲示は閲覧者にとって未読＝バッジが付く）
+await page.evaluate(() => document.getElementById('bulletin-btn-today').click());
+await sleep(700);
+const beforeUnread = await snapshot(page);
+const unreadRow = await page.evaluate((t) => {
+  const rows = [...document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]')];
+  return { found: rows.some((r) => r.getAttribute('data-bulletin-toggle') === t), rows: rows.length };
+}, madeId);
+// 行を選択（クリック）して未読バッジが1減ることを数える
+await page.evaluate((t) => {
+  const rows = [...document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]')];
+  const row = rows.find((r) => r.getAttribute('data-bulletin-toggle') === t);
+  if (row) row.click();
+}, madeId);
+await sleep(500);
+const afterUnread = await snapshot(page);
+log('unread-badge-flow', {
+  madeId, before: beforeUnread.unread, after: afterUnread.unread,
+  activeTitle: afterUnread.activeTitle, rowFound: unreadRow.found,
+});
+check('選択行の未読バッジが消える（未読の掲示を選択するとバッジが1減り・選択行のバッジも消える）',
+  Boolean(madeId) && unreadRow.found === true
+    && beforeUnread.unread - afterUnread.unread === 1
+    && afterUnread.activeTitle === unreadTitle,
+  { before: beforeUnread.unread, after: afterUnread.unread, activeTitle: afterUnread.activeTitle, rowFound: unreadRow.found });
+
+// 後片付け: 田中先生が作った掲示を削除する。
+// 一覧はキャッシュ描画なので、削除後はページを再読込してサーバーの実データへ追従させる。
+const delRes = await caFetch(`${BASE}/api/bulletins/${madeId}`, {
+  method: 'DELETE',
+  headers: { Authorization: `Bearer ${posterToken}` },
+});
+const goneCheck = await caFetch(`${BASE}/api/bulletins/${madeId}`, {
+  headers: { Authorization: `Bearer ${posterToken}` },
+});
+await page.reload({ waitUntil: 'networkidle2' });
+await page.waitForSelector('#app-container:not(.hidden)', { timeout: 10000 });
+await sleep(1200);
+await page.evaluate(() => document.querySelector('a[data-tab="bulletin"]').click());
+await sleep(900);
+const afterCleanup = await snapshot(page);
+log('unread-badge-cleanup', { delStatus: delRes.status, goneStatus: goneCheck.status, rowsBefore: beforeUnread.rows, rowsAfter: afterCleanup.rows });
+check('検証用掲示を削除して後片付けできる（API は 200→404、再読込した画面の行数が作成前の数へ戻る）',
+  delRes.status === 200 && goneCheck.status === 404 && afterCleanup.rows === beforeUnread.rows - 1,
+  { delStatus: delRes.status, goneStatus: goneCheck.status, rowsBefore: beforeUnread.rows, rowsAfter: afterCleanup.rows });
 
 // Enter → 右ペインへフォーカス
 await page.keyboard.press('Enter');

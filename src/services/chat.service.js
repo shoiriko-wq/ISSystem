@@ -182,9 +182,15 @@ export const chatService = {
     const initialMembers = new Set(channelData.memberIds || []);
     initialMembers.add(creatorUser.id);
 
+    // ★ 職員全体チャット（PUBLIC）は撤廃済み（2026/11/9 v3.1.2）
+    //   個人が作成するグループのタイプは GROUP / DM の2つだけ。
+    //   'PUBLIC' や架空の 'PRIVATE' を送ってきても GROUP に寄せる（全体グループを作らせない）。
+    const ALLOWED_USER_TYPES = ['GROUP', 'DM'];
+    const safeType = ALLOWED_USER_TYPES.includes(channelData.type) ? channelData.type : 'GROUP';
+
     const newChannel = await chatModel.createChannel({
       name: channelData.name.trim(),
-      type: channelData.type || 'GROUP',
+      type: safeType,
       memberIds: Array.from(initialMembers),
     });
 

@@ -58,7 +58,8 @@ function sel(name, options, value, cls = '') {
 }
 
 /** クラス・コース選択リスト（data-cc・選択状態は bg-accent-soft クラス、クリック/長押しドラッグで連続選択）
- *  チップは詰めた（px-1.5 py-0.5・10px）——実施クラス・コース列はチップ内容分の幅で足るようにする。 */
+ *  チップは詰めた（px-0.5 py-0.5・10px・gap-x-0.5）——実施クラス・コース列はチップ内容分の幅で足るようにする。
+ *  学年のチップは1行に並べる（折り返しを作らない）。 */
 function classCoursePicker(d, selectedIds) {
   const selSet = new Set((selectedIds || []).map(String));
   const byGrade = {};
@@ -69,12 +70,12 @@ function classCoursePicker(d, selectedIds) {
       const chips = byGrade[g]
         .map((cl) => {
           const on = selSet.has(String(cl.id));
-          return `<span data-cc="${escapeHTML(String(cl.id))}" class="cc-chip inline-block px-1.5 py-0.5 rounded border text-[10px] leading-tight cursor-pointer select-none ${
+          return `<span data-cc="${escapeHTML(String(cl.id))}" class="cc-chip inline-block px-0.5 py-0.5 rounded border text-[10px] leading-tight cursor-pointer select-none ${
             on ? 'bg-accent-soft border-accent-strong text-accent-strong font-bold' : 'bg-surface border-main text-soft'
           }">${escapeHTML(cl.name)}</span>`;
         })
         .join('');
-      return `<div class="flex flex-wrap items-center gap-x-1 gap-y-1 py-0.5"><span class="text-[10px] font-semibold text-muted w-6 shrink-0">${g}年</span>${chips}</div>`;
+      return `<div class="flex flex-wrap items-center gap-x-0.5 gap-y-1 py-0.5"><span class="text-[10px] font-semibold text-muted w-6 shrink-0">${g}年</span>${chips}</div>`;
     })
     .join('');
   return `<div class="cc-list min-w-0 border border-main rounded bg-surface p-1.5 select-none">${groups || '<span class="text-[10px] text-muted">クラス・コース未登録</span>'}</div>`;

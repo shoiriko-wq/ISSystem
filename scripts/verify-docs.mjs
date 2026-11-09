@@ -164,7 +164,7 @@ const walk = (dir) => {
       continue;
     }
     if (!/\.(js|mjs)$/.test(e.name) || /^migrate/.test(e.name)) continue;
-    if (path.join(dir, e.name) === 'scripts\\verify-docs.mjs') continue; // ゲート自身の検査語を除外
+    if (path.join(dir, e.name).split(path.sep).join('/') === 'scripts/verify-docs.mjs') continue; // ゲート自身の検査語を除外
     const content = read(rel);
     content.split(/\r?\n/g).forEach((line, i) => {
       if (/chat\/channels\/general|'general'|"general"|`general`/.test(line)) {

@@ -530,7 +530,7 @@ function setupSocketListeners() {
         chatChannels.push({
           id: newId,
           name: ch.name || ch.channelName || '新規グループ',
-          icon: ch.type === 'PUBLIC' ? 'globe' : 'users',
+          icon: 'users', // ★ 職員全体グループは撤廃済み。グループのアイコンは users のみ
           unread: 0,
           type: ch.type || 'GROUP',
         });
@@ -551,13 +551,13 @@ function setupSocketListeners() {
         const existing = chatChannels.find((c) => c.id === serverCh.id);
         if (existing) {
           existing.name = serverCh.name;
-          existing.icon = serverCh.type === 'PUBLIC' ? 'globe' : 'users';
+          existing.icon = 'users'; // ★ 職員全体グループは撤廃済み
           existing.type = serverCh.type || existing.type;
         } else {
           chatChannels.push({
             id: serverCh.id,
             name: serverCh.name,
-            icon: serverCh.type === 'PUBLIC' ? 'globe' : 'users',
+            icon: 'users', // ★ 職員全体グループは撤廃済み
             unread: serverCh.unread || 0,
             type: serverCh.type || 'GROUP',
           });

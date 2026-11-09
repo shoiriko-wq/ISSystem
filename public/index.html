@@ -466,12 +466,16 @@
           <button type="button" class="modal-close modal-close-x" aria-label="閉じる" title="閉じる"><i data-lucide="x" class="w-5 h-5"></i></button>
         </div>
         <!-- novalidate: URL のスキーマ補完（mext.go.jp/... → https://mext.go.jp/...）と独自検証を JS 側で行うため、native validation は使わない -->
+        <!-- モーダルの中身は記事URLだけ。操作の説明はモーダル内に常設しない（UI十条9: トースト・title・プレースホルダーだけ） -->
         <form id="news-share-form" class="modal-form" novalidate>
           <div class="modal-body">
             <div>
               <label class="block text-xs font-semibold text-soft mb-1" for="news-share-url">記事URL <span class="text-danger">*</span></label>
-              <input type="url" id="news-share-url" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" placeholder="https://www.mext.go.jp/b_menu/happou/..." autocomplete="off" required>
-              <p class="mt-1 text-[10px] text-muted">http://・https:// で始まるURLを入力してください（スキーマが無い場合は https:// を補完します）。閲覧中の職員チャットチャンネルへ投稿し、タイトルはURLのドメイン名になります。</p>
+              <input type="url" id="news-share-url" name="news-share-url" aria-label="記事URL"
+                     class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main"
+                     placeholder="https://mext.go.jp/...（スキーマ無しは https:// を補完）"
+                     title="URLを入力します。スキーマが無い場合は https:// を補完し、タイトルはURLのドメイン名になります。閲覧中の職員チャットチャンネルへ投稿します。"
+                     autocomplete="off" required>
             </div>
           </div>
           <div class="modal-footer">

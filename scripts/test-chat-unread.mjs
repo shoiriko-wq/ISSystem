@@ -17,6 +17,9 @@
  *     自分＝右からアイコン・名前・日時となり、年月日時間は名前と下揃え（単一行・サイズ維持）
  * 13. 未読者・取り消しメニューは普段隠れ、コメント行へホバー（またはフォーカス）時だけ
  *     吹き出しの下へプルダウン表示される（実マウスで押せる・レイアウトシフトなし）
+ * 14. サーバーのチャンネル一覧は参加グループだけ（タイプは GROUP / DM / WORKFLOW のみ＝職員全体グループは0件）
+ * 15. サイドバーのグループ行は参加グループだけ（行のIDはサーバーのグループ一覧の中に入り・「全体」の文字がない）
+ *
 
 
  *
@@ -25,6 +28,8 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import http from 'node:http';
+import https from 'node:https';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 import { io } from 'socket.io-client';
@@ -35,6 +40,50 @@ const USER = process.env.UI_USER || 'T2026001';
 const PASS = process.env.UI_PASS || 'password123';
 const CHROME = process.env.CHROME_PATH || '/usr/bin/google-chrome';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ★ Node 側の通信は CA を明示する（AGENTS.md 第12条）
+//   素の fetch は自己署名チェーンを SELF_SIGNED_CERT_IN_CHAIN で弾くため、
+//   node:https に certs/issystem-ca.crt を渡して叩く。NODE_EXTRA_CA_CERTS は使わない。
+const SECURE = BASE.startsWith('https:');
+const CA = SECURE ? [fs.readFileSync(path.join(ROOT, 'certs', 'issystem-ca.crt'))] : null;
+
+/** CA を渡す API 呼び出し（fetch と同じ形の res.status / res.json() を返す） */
+function caFetch(url, opts = {}) {
+  const u = new URL(url);
+  const useHttps = u.protocol === 'https:';
+  const mod = useHttps ? https : http;
+  return new Promise((resolve, reject) => {
+    const headers = { 'content-type': 'application/json', ...(opts.headers || {}) };
+    const body = opts.body ? String(opts.body) : null;
+    if (body) headers['Content-Length'] = String(Buffer.byteLength(body));
+    const reqOpts = {
+      hostname: u.hostname,
+      port: u.port || (useHttps ? 443 : 80),
+      path: u.pathname + u.search,
+      method: opts.method || 'GET',
+      headers,
+    };
+    if (useHttps) reqOpts.ca = CA;
+    const r = mod.request(reqOpts, (res) => {
+      let d = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => (d += c));
+      res.on('end', () =>
+        resolve({
+          status: res.statusCode,
+          text: d,
+          json: async () => JSON.parse(d || '{}'),
+        })
+      );
+    });
+    r.on('error', reject);
+    if (body) r.write(body);
+    r.end();
+  });
+}
+
+/** socket.io クライアント用: https のときは CA を添える */
+const ioOpts = (auth) => (SECURE ? { auth, ca: CA } : { auth });
 
 const failures = [];
 const log = (name, val) => console.log(`${name} = ${JSON.stringify(val)}`);
@@ -61,13 +110,13 @@ page.on('request', (req) => {
 // ⇒ 個人が作成した 3 名グループを作りに検証する（田中先生が未読者として観測できる）
 const MY_ID = 'kyomu01';
 const GROUP_MEMBERS = [MY_ID, 't-tanaka', 't-sato'];
-const probeToken = await fetch(`${BASE}/api/auth/login`, {
+const probeToken = await caFetch(`${BASE}/api/auth/login`, {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify({ staff_code: USER, password: PASS }),
 }).then((r) => r.json()).then((j) => j.token);
 
-const probeGroup = await fetch(`${BASE}/api/chat/channels`, {
+const probeGroup = await caFetch(`${BASE}/api/chat/channels`, {
   method: 'POST',
   headers: { 'content-type': 'application/json', Authorization: `Bearer ${probeToken}` },
   body: JSON.stringify({
@@ -168,6 +217,39 @@ check('グループ作成ボタンはフッター（ヘッダー行にはない�
   chatView.toggleHasEyeIcon === true && chatView.togglePressed === 'false',
   { createInFooter: chatView.createInFooter, createInHeaderRow: chatView.createInHeaderRow, toggleText: chatView.toggleText, toggleHasEyeIcon: chatView.toggleHasEyeIcon, togglePressed: chatView.togglePressed });
 check('目のマークを押す前はグループ名の横に非表示ボタンが出ない', chatView.hideBtns === 0, { hideBtns: chatView.hideBtns });
+
+// ===== 職員全体グループ撤廃（v3.1.2・v3.1.4）の実測 =====
+// サーバーのチャンネル一覧は「参加グループ」だけ。許されるタイプは3つ:
+// 個人グループの GROUP、1対1の DM、決裁協議の WORKFLOW。
+// 全体タイプのチャンネルはサーバーのホワイトリストが GROUP へ寄せるので0件でなければならない。
+const listJson = await caFetch(`${BASE}/api/chat/channels`, {
+  headers: { Authorization: `Bearer ${probeToken}` },
+}).then((r) => r.json());
+const serverChannels = listJson.channels || listJson.data || [];
+const serverIds = serverChannels.map((c) => c.id);
+const serverTypes = serverChannels.map((c) => c.type);
+const ALLOWED_GROUP_TYPES = ['GROUP', 'DM', 'WORKFLOW'];
+const badTypes = serverTypes.filter((t) => !ALLOWED_GROUP_TYPES.includes(t));
+log('group-only-server', { serverIds, serverTypes, badTypes });
+check('サーバーのチャンネル一覧は参加グループだけ（タイプは GROUP / DM / WORKFLOW のみ＝職員全体グループは0件）',
+  serverChannels.length > 0 && badTypes.length === 0,
+  { ids: serverIds, types: serverTypes, badTypes });
+
+// サイドバーのグループ行は参加グループだけ（全体グループの行・「全体」という文字がない）
+const sidebarRows = await page.evaluate(() => {
+  const rows = [...document.querySelectorAll('#chat-channels-list [data-channel-id]')];
+  return {
+    rowCount: rows.length,
+    ids: rows.map((r) => r.getAttribute('data-channel-id')),
+    names: rows.map((r) => (r.textContent || '').replace(/\s+/g, ' ').trim()),
+  };
+});
+log('sidebar-group-rows', sidebarRows);
+check('サイドバーは参加グループ行だけ（行のIDはサーバーのグループ一覧の中に入り・「全体」の文字がない）',
+  sidebarRows.rowCount > 0 &&
+  sidebarRows.ids.every((id) => serverIds.includes(id)) &&
+  sidebarRows.names.every((n) => n.length > 0 && !n.includes('全体')),
+  { rowCount: sidebarRows.rowCount, ids: sidebarRows.ids, names: sidebarRows.names });
 
 // 未読者一覧をクリック（confirm なし・API 呼び出しなし・トースト表示）
 const unreadClick = await page.evaluate(async () => {
@@ -342,13 +424,13 @@ const chatSnapshot = () => page.evaluate(() => {
 });
 
 // 田中先生 (t-tanaka) として WebSocket を接続し、新着配信と既読回执を観測する
-const tanakaLogin = await fetch(`${BASE}/api/auth/login`, {
+const tanakaLogin = await caFetch(`${BASE}/api/auth/login`, {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify({ staff_code: 'T2026002', password: PASS }),
 }).then((r) => r.json());
 
-const tanakaSocket = io(BASE, { auth: { token: tanakaLogin.token } });
+const tanakaSocket = io(BASE, ioOpts({ token: tanakaLogin.token }));
 await new Promise((resolve, reject) => {
   tanakaSocket.on('connect', resolve);
   tanakaSocket.on('connect_error', reject);
@@ -486,7 +568,7 @@ check('chat.module.js の未読者一覧表示 showUnreadersList は残ってボ
 check('config.js の CHAT に UNREAD_RENOTIFY がない', !configSrc.includes('UNREAD_RENOTIFY'), null);
 check('src/routes/index.js に router.post("/chat/renotify") がない', !routeSrc.includes("router.post('/chat/renotify'"), null);
 
-const routeStatus = await fetch(`${BASE}/api/chat/renotify`, {
+const routeStatus = await caFetch(`${BASE}/api/chat/renotify`, {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify({ channelId: groupId, targetUsers: ['X'] }),
@@ -496,7 +578,7 @@ check('サーバーの /api/chat/renotify は 404（ルート廃止）', routeSt
 
 // ===== 相手行を作る（メタ行・ホバーメニュー検証には相手行が必要） =====
 // 職員全体チャットは撤廃済み ⇒ 検証は常に個人作成グループ（groupId）で行う
-const tanakaSocket2 = io(BASE, { auth: { token: tanakaLogin.token } });
+const tanakaSocket2 = io(BASE, ioOpts({ token: tanakaLogin.token }));
 await new Promise((resolve, reject) => {
   tanakaSocket2.on('connect', resolve);
   tanakaSocket2.on('connect_error', reject);
@@ -748,7 +830,7 @@ await browser.close();
 
 tanakaSocket2.close();
 // 検証用グループを削除して後片付けする（撤廃後は個人作成グループのみがチャット単位）
-const groupCleaned = await fetch(`${BASE}/api/chat/channels/${groupId}`, {
+const groupCleaned = await caFetch(`${BASE}/api/chat/channels/${groupId}`, {
   method: 'DELETE',
   headers: { Authorization: `Bearer ${probeToken}` },
 }).then((r) => r.status);

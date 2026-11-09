@@ -137,6 +137,23 @@ describe('Chat API (/api/chat)', () => {
     expect(res.body.success).toBe(false);
   });
 
+  it('POST /api/chat/channels - 職員全体タイプ（PUBLIC）指定は GROUP に寄せられる', async () => {
+    // ★ 職員全体チャットは撤廃済み（v3.1.2）。サーバー側ホワイトリスト（v3.1.4）で
+    //   API 経由の全体グループ作成も防ぐ。PUBLIC・PRIVATE・ALL はすべて GROUP になる。
+    const res = await request(app)
+      .post('/api/chat/channels')
+      .set('Authorization', bearer(token))
+      .send({ name: '全体タイプ指定テスト', type: 'PUBLIC', member_ids: ['kyomu01'], memberIds: ['kyomu01'] });
+    expect(res.statusCode).toBe(201);
+    expect(res.body.data.type).toBe('GROUP');
+
+    const createdId = pickId(res.body);
+    const del = await request(app)
+      .delete(`/api/chat/channels/${createdId}`)
+      .set('Authorization', bearer(token));
+    expect(del.statusCode).toBe(200);
+  });
+
   it('POST /api/chat/channels - チャンネル名欠落は 400', async () => {
     const res = await request(app)
       .post('/api/chat/channels')
