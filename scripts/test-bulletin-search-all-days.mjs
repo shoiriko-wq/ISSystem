@@ -86,15 +86,21 @@ const typeSearch = async (page, text) => {
   await sleep(420);
 };
 
-/** 左列・中心日表示・ナビボタン・右ペインの状態スナップショット */
+/** 左列・中心日表示・ナビボタン・右ペイン・年月選択メニューの状態スナップショット */
 const snapshot = (page) => page.evaluate(() => {
   const rows = [...document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]')];
   const active = document.querySelector('#bulletin-list-container .bulletin-title-row.active');
   const pane = document.getElementById('bulletin-detail-pane');
   const readout = document.getElementById('bulletin-day-current');
   const marks = [...document.querySelectorAll('#bulletin-list-container mark.bulletin-hit')];
-  const navIds = ['bulletin-day-prev', 'bulletin-day-next', 'bulletin-btn-today', 'bulletin-day-current'];
+  // ★ ツールバーの「本日」ボタンとカレンダー「今日」ボタンは撤廃（本日へは年月選択メニューの「本日へ」と T キー）
+  const navIds = ['bulletin-day-prev', 'bulletin-day-next', 'bulletin-day-current'];
   const cal = document.getElementById('bulletin-mini-cal');
+  const rect = (el) => (el ? ((r) => ({ x: Math.round(r.x), w: Math.round(r.width), h: Math.round(r.height), cx: Math.round(r.x + r.width / 2) }))(el.getBoundingClientRect()) : null);
+  const label = document.getElementById('bulletin-month-menu-btn');
+  const row = label ? label.closest('div.flex.items-center') : null;   // ‹ [年月] › グループ
+  const menu = document.getElementById('bulletin-month-menu');
+  const unreadBtn = document.getElementById('bulletin-btn-unread');
   return {
     rows: rows.length,
     rowIds: rows.map((r) => String(r.getAttribute('data-bulletin-toggle'))),
@@ -102,12 +108,27 @@ const snapshot = (page) => page.evaluate(() => {
     seps: [...document.querySelectorAll('#bulletin-list-container .bulletin-day-sep')].map((s) => s.textContent.trim()),
     countText: document.getElementById('bulletin-title-count')?.textContent.trim(),
     pillExists: Boolean(document.getElementById('bulletin-search-pill')),
+    todayBtnExists: Boolean(document.getElementById('bulletin-btn-today')),
+    calTodayExists: Boolean(document.getElementById('bulletin-cal-today')),
+    unreadText: unreadBtn ? unreadBtn.textContent.trim() : null,
+    unreadActive: unreadBtn ? unreadBtn.classList.contains('active') : null,
     readoutText: readout ? readout.textContent.trim() : null,
     centerDate: readout ? readout.dataset.day : null,
     readoutW: readout ? Math.round(readout.getBoundingClientRect().width) : null,
     nextX: document.getElementById('bulletin-day-next') ? Math.round(document.getElementById('bulletin-day-next').getBoundingClientRect().x) : null,
     navDisabled: navIds.map((id) => Boolean(document.getElementById(id)?.disabled)),
     calOpen: Boolean(cal && !cal.classList.contains('hidden')),
+    // ★ 年月部分（スケジュールのカレンダーと同じ形。ラベルは ‹ › の中央、‹ › は同一寸法）
+    monthLabel: label ? label.textContent.trim() : null,
+    labelRect: rect(label),
+    prevMonthRect: rect(cal ? cal.querySelector('[data-cal-month="-1"]') : null),
+    nextMonthRect: rect(cal ? cal.querySelector('[data-cal-month="1"]') : null),
+    rowCx: row ? Math.round(row.getBoundingClientRect().x + row.getBoundingClientRect().width / 2) : null,
+    labelFocused: document.activeElement === label,
+    menuOpen: menu ? !menu.classList.contains('hidden') : null,
+    menuMonths: menu ? menu.querySelectorAll('[data-menu-month]').length : 0,
+    menuToday: Boolean(menu && menu.querySelector('[data-menu-today]')),
+    menuExpanded: label ? label.getAttribute('aria-expanded') : null,
     marks: marks.map((m) => m.textContent),
     activeTitle: active ? active.querySelector('.bulletin-row-title')?.textContent.trim() : null,
     paneTitle: pane.querySelector('h3') ? pane.querySelector('h3').textContent.trim() : null,
@@ -177,11 +198,15 @@ const main = async () => {
   await sleep(900);
 
   const start = await snapshot(page);
-  log('start', { centerDate: start.centerDate, countText: start.countText, rows: start.rows, readoutText: start.readoutText, navDisabled: start.navDisabled, pillExists: start.pillExists });
-  check('初期状態（本日）は件数「N 件」・中心日表示は日付・‹ ›・本日・日付クリックは enabled・検索ピルは無い',
+  log('start', { centerDate: start.centerDate, countText: start.countText, rows: start.rows, readoutText: start.readoutText, navDisabled: start.navDisabled, pillExists: start.pillExists,
+    todayBtnExists: start.todayBtnExists, calTodayExists: start.calTodayExists, unreadText: start.unreadText, monthLabel: start.monthLabel });
+  check('初期状態（本日）は件数「N 件」・中心日表示は日付・‹ ›・日付クリック（カレンダー開閉）は enabled・検索ピルは無い',
     start.centerDate === today && /^\d+ 件$/.test(start.countText || '') && String(start.readoutText).startsWith(shortLabel(today))
     && start.navDisabled.every((d) => d === false) && start.pillExists === false,
     { centerDate: start.centerDate, countText: start.countText, readoutText: start.readoutText, navDisabled: start.navDisabled, pillExists: start.pillExists });
+  check('撤廃チェック：ツールバーの「本日」ボタンとミニカレンダー「今日」ボタンが存在しない（本日へは年月選択メニューの「本日へ」と T キー）',
+    start.todayBtnExists === false && start.calTodayExists === false,
+    { todayBtnExists: start.todayBtnExists, calTodayExists: start.calTodayExists });
 
   // 検索語入力前に C キーでミニカレンダーを開く（検索中は C が止まるため、開くのはここだけ）
   await page.keyboard.press('c');
@@ -206,7 +231,7 @@ const main = async () => {
     s1.rowDays);
   check('タイトル内の該当語が <mark class="bulletin-hit"> でハイライトされる',
     s1.marks.length >= 1 && s1.marks.some((t) => t.toLowerCase() === q), s1.marks);
-  check('中心日表示が「全日」になり、‹ ›・本日・日付クリック（カレンダー開閉）は disabled（data-day は本日まま）',
+  check('中心日表示が「全日」になり、‹ ›・日付クリック（カレンダー開閉）は disabled（data-day は本日まま）',
     s1.readoutText === '全日' && s1.centerDate === today && s1.navDisabled.every((d) => d === true),
     { readoutText: s1.readoutText, centerDate: s1.centerDate, navDisabled: s1.navDisabled });
   check('中心日表示は固定幅（5.4rem 相当）で「全日」も日付と同じ枠に収まり、› の位置は動かず、検索ピルは存在しない',
@@ -282,13 +307,88 @@ const main = async () => {
   const todayCount = await apiFetch(page, 'GET', '/bulletins', null);
   const mineToday = (todayCount.json?.bulletins || []).filter((b) => String(b.target_date || '').slice(0, 10) === today).length;
   log('cleared', { centerDate: s5.centerDate, countText: s5.countText, rows: s5.rows, readoutText: s5.readoutText, navDisabled: s5.navDisabled, calHits: cal2.hits });
-  check('検索語を消すと通常表示（件数「N 件」・中心日表示は本日の日付・‹ ›・本日・日付クリックが enabled・カレンダー閉じない）',
+  check('検索語を消すと通常表示（件数「N 件」・中心日表示は本日の日付・‹ ›・日付クリックが enabled・カレンダー閉じない）',
     s5.centerDate === today && /^\d+ 件$/.test(s5.countText || '') && s5.rows === mineToday
     && String(s5.readoutText).startsWith(shortLabel(today)) && s5.navDisabled.every((d) => d === false) && s5.calOpen === true,
     { centerDate: s5.centerDate, countText: s5.countText, rows: s5.rows, mineToday, readoutText: s5.readoutText, navDisabled: s5.navDisabled, calOpen: s5.calOpen });
   check('検索語を消すとカレンダーの検索該当枠も消える（.mini-cal-hit は 0）', cal2.hits === 0, cal2);
   check('検索語を消すとミニカレンダーの日付セルが選べるようになる（disabled 解除）',
     cal2.dayCells > 0 && cal2.disabledDays === 0, { dayCells: cal2.dayCells, disabledDays: cal2.disabledDays });
+
+  // ★ 年月部分（スケジュールのカレンダーと同じ形。‹ [年月] › の中央ラベルクリックで年月選択メニュー）
+  const wantLabel = `${Number(today.slice(0, 4))}年${Number(today.slice(5, 7))}月`;
+  const geo = s5;
+  log('month-nav-normal', { monthLabel: geo.monthLabel, labelRect: geo.labelRect, prevMonthRect: geo.prevMonthRect, nextMonthRect: geo.nextMonthRect, rowCx: geo.rowCx, menuOpen: geo.menuOpen });
+  check('年月ラベルは「YYYY年M月」で本日の月（‹ › に挟まれ、ラベルは ‹ › の中央）',
+    geo.monthLabel === wantLabel && geo.prevMonthRect && geo.nextMonthRect && Math.abs(geo.labelRect.cx - geo.rowCx) <= 3,
+    { monthLabel: geo.monthLabel, wantLabel, labelRect: geo.labelRect, rowCx: geo.rowCx });
+  check('年月の ‹ › ボタンは同一寸法（高さ・幅が同じ。ラベルの高さは ‹ › の高さ以下）',
+    geo.prevMonthRect.h === geo.nextMonthRect.h && geo.prevMonthRect.w === geo.nextMonthRect.w && geo.labelRect.h <= geo.prevMonthRect.h,
+    { prevMonthRect: geo.prevMonthRect, nextMonthRect: geo.nextMonthRect, labelRect: geo.labelRect });
+
+  // ラベルクリックで年月選択メニュー（年 ‹ › + 12ヶ月 + 「本日へ」）がラベル直下中央に開く
+  await page.evaluate(() => document.getElementById('bulletin-month-menu-btn').click());
+  await sleep(300);
+  const m1 = await snapshot(page);
+  const menuBox = await page.evaluate(() => {
+    const menu = document.getElementById('bulletin-month-menu');
+    const label = document.getElementById('bulletin-month-menu-btn');
+    const mr = menu.getBoundingClientRect(), lr = label.getBoundingClientRect();
+    const yearRow = menu.querySelector('div');
+    const yc = Math.round(yearRow.getBoundingClientRect().x + yearRow.getBoundingClientRect().width / 2);
+    return {
+      menuCx: Math.round(mr.x + mr.width / 2), labelCx: Math.round(lr.x + lr.width / 2),
+      below: Math.round(mr.y - (lr.y + lr.height)), menuW: Math.round(mr.width), yearCx: yc,
+      yearLabel: menu.querySelector('span') ? menu.querySelector('span').textContent.trim() : null,
+      focusMonth: document.activeElement ? document.activeElement.getAttribute('data-menu-month') : null,
+    };
+  });
+  log('month-menu-open', { menuOpen: m1.menuOpen, menuExpanded: m1.menuExpanded, menuMonths: m1.menuMonths, menuToday: m1.menuToday, menuBox, centerDate: m1.centerDate, readoutText: m1.readoutText });
+  const menuYear = Number(String(menuBox.yearLabel).replace(/年/g, ''));
+  check('年月ラベルクリックで年月選択メニューが開く（12ヶ月 + 「本日へ」。ラベル直下中央・年行も中央。中心日は動かさない）',
+    m1.menuOpen === true && m1.menuExpanded === 'true' && m1.menuMonths === 12 && m1.menuToday === true
+    && Math.abs(menuBox.menuCx - menuBox.labelCx) <= 3 && menuBox.below > 0 && menuBox.menuW >= 240
+    && Math.abs(menuBox.yearCx - menuBox.menuCx) <= 3 && menuBox.focusMonth !== null
+    && m1.centerDate === today && String(m1.readoutText).startsWith(shortLabel(today)),
+    { menuBox, centerDate: m1.centerDate, readoutText: m1.readoutText });
+
+  // メニューで月を選ぶ：表示月がその月になり、中心日は動かず、メニューは閉じて焦点は年月ラベルへ
+  await page.evaluate(() => document.querySelector('#bulletin-month-menu [data-menu-month="0"]').click());
+  await sleep(300);
+  const m2 = await snapshot(page);
+  log('month-menu-jan', { monthLabel: m2.monthLabel, menuOpen: m2.menuOpen, menuExpanded: m2.menuExpanded, centerDate: m2.centerDate, labelFocused: m2.labelFocused });
+  check('メニューで 1 月を選ぶと表示月が 1 月になり、中心日は動かさず、メニューは閉じて焦点は年月ラベルへ戻る',
+    m2.monthLabel === `${menuYear}年1月` && m2.menuOpen === false && m2.menuExpanded === 'false'
+    && m2.centerDate === today && m2.labelFocused === true,
+    { monthLabel: m2.monthLabel, menuOpen: m2.menuOpen, centerDate: m2.centerDate, labelFocused: m2.labelFocused });
+
+  // 年月の › ボタンで 1 ヶ月送り（中心日は動かさない）
+  await page.evaluate(() => document.querySelector('#bulletin-mini-cal [data-cal-month="1"]').click());
+  await sleep(300);
+  const m3 = await snapshot(page);
+  log('month-next', { monthLabel: m3.monthLabel, centerDate: m3.centerDate });
+  check('年月の › ボタンで 1 ヶ月送り（ラベルは翌月、中心日は本日まま）',
+    m3.monthLabel === `${menuYear}年2月` && m3.centerDate === today, { monthLabel: m3.monthLabel, centerDate: m3.centerDate });
+
+  // メニューの「本日へ」で本日へ移動してカレンダーが閉じる（ナビ enabled へ復帰）
+  await page.evaluate(() => document.getElementById('bulletin-month-menu-btn').click());
+  await sleep(250);
+  await page.evaluate(() => document.querySelector('#bulletin-month-menu [data-menu-today]').click());
+  await sleep(400);
+  const m4 = await snapshot(page);
+  log('menu-today', { calOpen: m4.calOpen, centerDate: m4.centerDate, readoutText: m4.readoutText, navDisabled: m4.navDisabled });
+  check('年月選択メニューの「本日へ」で本日へ移動しカレンダーが閉じる（中心日は本日、‹ › が enabled へ復帰）',
+    m4.calOpen === false && m4.centerDate === today && String(m4.readoutText).startsWith(shortLabel(today))
+    && m4.navDisabled.every((d) => d === false),
+    { calOpen: m4.calOpen, centerDate: m4.centerDate, readoutText: m4.readoutText, navDisabled: m4.navDisabled });
+
+  // 「本日へ」で閉じた後、C キーでカレンダーを開けると年月ラベルは本月へ追従
+  await page.keyboard.press('c');
+  await sleep(350);
+  const m5 = await snapshot(page);
+  check('「本日へ」で閉じた後 C キーで開けると年月ラベルは本月（中心日は本日）',
+    m5.calOpen === true && m5.monthLabel === wantLabel && m5.centerDate === today,
+    { calOpen: m5.calOpen, monthLabel: m5.monthLabel, wantLabel, centerDate: m5.centerDate });
 
   // C キーでカレンダーを閉じる（検索語が無いので C は効く）
   await page.keyboard.press('c');

@@ -32,6 +32,13 @@ const PASS = process.env.UI_PASS || 'password123';
 const CHROME = process.env.CHROME_PATH || '/usr/bin/google-chrome';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** 本日へ戻る（ツールバーの「本日」ボタンは撤廃済み＝T キーで本日へ。未読表示中は閉じて本日へ）。
+ *   入力欄にフォーカスがあると T キーが効かないので、フォーカスを外してから押す */
+const pressToday = async (pg) => {
+  await pg.evaluate(() => { if (document.activeElement) document.activeElement.blur(); });
+  await pg.keyboard.press('t');
+};
+
 // ★ Node 側の通信は CA を明示する（AGENTS.md 第12条・禁则14）
 //   素の fetch は自己署名チェーンを SELF_SIGNED_CERT_IN_CHAIN で弾くため、
 //   node:https に certs/issystem-ca.crt を渡して叩く。NODE_EXTRA_CA_CERTS は使わない。
@@ -641,8 +648,8 @@ const madePost = await caFetch(`${BASE}/api/bulletins`, {
 }).then((r) => r.json());
 const madeId = (madePost.data && madePost.data.id) || (madePost.bulletin && madePost.bulletin.id) || null;
 
-// 本日へ戻して新掲示の行をさがす（作った掲示は閲覧者にとって未読＝バッジが付く）
-await page.evaluate(() => document.getElementById('bulletin-btn-today').click());
+// 本日へ戻して新掲示の行をさがす（作った掲示は閲覧者にとって未読＝バッジが付く。「本日」ボタンは撤廃＝T キー）
+await pressToday(page);
 await sleep(700);
 const beforeUnread = await snapshot(page);
 const unreadRow = await page.evaluate((t) => {
@@ -800,8 +807,8 @@ check('‹ › は同じ行に隣接して並び、連打できる', posDesktop.
   { prevX: posDesktop.prevX, prevY: posDesktop.prevY, nextX: posDesktop.nextX, nextY: posDesktop.nextY });
 
 // 右ペインヘッダーの「詳細」ボタン → 詳細モーダル（読者向けの情報を全部載せる）
-// 直前の long zapping で中心日が動いているため本日へ戻し、右ペインに選択記事がある状態で開く
-await page.evaluate(() => document.getElementById('bulletin-btn-today').click());
+// 直前の long zapping で中心日が動いているため本日へ戻し、右ペインに選択記事がある状態で開く（「本日」ボタンは撤廃＝T キー）
+await pressToday(page);
 await sleep(500);
 
 const detailModal = await page.evaluate(async (myId) => {
@@ -899,7 +906,7 @@ const created = await apiFetch(page, 'POST', '/bulletins', {
 });
 const createdId = (created.json && created.json.data && created.json.data.id)
   || (created.json && created.json.bulletin && created.json.bulletin.id) || null;
-await page.evaluate(() => document.getElementById('bulletin-btn-today').click());
+await pressToday(page);   // 「本日」ボタンは撤廃済み＝T キーで本日へ
 await sleep(650);
 const createdRow = await page.evaluate((t) => {
   const rows = [...document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]')];

@@ -3,9 +3,11 @@
  *
  * 検証項目:
  *  1. ソース静的検証: 粒子の落下・上昇距離はカード高さを実測した --fx-drop に比例、計測 + ResizeObserver、
- *     「記入する」ボタン (dash-btn-absence) は撤廃済み、1分毎の再描画はプレビュー設定を引き継ぐ
+ *     「記入する」ボタン (dash-btn-absence) は撤廃済み、1分毎の再描画はプレビュー設定を引き継ぐ、
+ *     瞬き系は粒子ごとに inline の top を 4% + i*7% + 0〜5% の帯で振る（CSS top:8% はフォールバック）
  *  2. プレビューパネル #dash-fx-dev-panel は常時表示。開閉バーでコントロール部 #dash-fx-dev-body を折りたためる
- *  3. テーマセレクトと前/次ボタンで粒子レイヤーのテーマとモーションクラスが切り替わる
+ *  3. テーマセレクトと前/次ボタンで粒子レイヤーのテーマとモーションクラスが切り替わる。
+ *     瞬き系（陽光・日傘・海・お正月・夜の星）の粒子は枠全体に広がり、下半分にも3個以上出る
  *  4. 静的スウォッチ #fxp-swatches は全 13 テーマ分（prefers-reduced-motion でもテーマを確認できる）
  *  5. 疑似日付・疑似時刻・時刻帯・曜日・季節・特別な日・全メッセージの選択で労いメッセージとテーマが変わる
  *     (疑似日付 2026-12-24 → サンタテーマ + クリスマスイブ文、季節=夏 → 夏文、
@@ -73,6 +75,11 @@ check('梅雨の keyframes は傾き var(--fx-tilt) 固定・角度変化なし�
   && (rainKf.match(/rotate\(/g) || []).length === (rainKf.match(/rotate\(var\(--fx-tilt/g) || []).length
   && /100% \{ transform: translate\(9px, var\(--fx-drop/.test(rainKf)
   && dashSrc.includes('--fx-tilt:${tilt}deg'), { rainKfLen: rainKf.length });
+
+// 瞬き系は粒子ごとに inline の top を帯（4% + i*7% + 0〜5%）で振る（CSS の top:8% はフォールバック）
+check('瞬き系は粒子ごとに inline の top を 4% + i*7% + 0〜5% の帯で振る（CSS top:8% はフォールバック）',
+  dashSrc.includes('4 + i * 7 + rnd() * 5') && dashSrc.includes('top:${y.toFixed(1)}%') &&
+  /\.dash-fx-layer\.fx-twinkle \.dash-fx \{\s*top: 8%;/.test(cssSrc), null);
 
 // ---- ブラウザ起動とログイン ----
 const browser = await puppeteer.launch({
@@ -173,6 +180,56 @@ await setTheme('leaves');
 await sleep(250);
 const leavesState = await fxState();
 check('紅葉テーマは落下モーション', leavesState.theme === 'leaves' && leavesState.cls.includes('fx-fall'), leavesState);
+
+// ---- 瞬き系（陽光・日傘・海・お正月・夜の星）は枠全体に広がる ----
+// 粒子 i（0〜9）の top は 4% + i*7% + 0〜5%（4〜72%）の帯で決まる。枠内の10個・下半分の粒子・
+// keyframes 50%（translateY(10px)・scale 1.12）の最下点を px と % で実測する
+const twinkleMeasure = async (theme) => {
+  await setTheme(theme);
+  await sleep(300);
+  return page.evaluate(() => {
+    const layer = document.getElementById('dash-fx-layer');
+    const lr = layer.getBoundingClientRect();
+    const spans = [...layer.querySelectorAll('.dash-fx')];
+    const rel = spans.map((s) => {
+      const r = s.getBoundingClientRect();
+      return { top: Math.round(r.top - lr.top), bottom: Math.round(r.bottom - lr.top), inlineTop: parseFloat(s.style.top) };
+    });
+    const tops = rel.map((r) => r.top);
+    const dur = spans[0].getAnimations()[0].effect.getTiming().duration;
+    const delay = spans[0].getAnimations()[0].effect.getTiming().delay || 0;
+    const shift = ((delay % dur) + dur) % dur;
+    let maxY50 = 0;
+    for (const s of spans) {
+      const a = s.getAnimations()[0];
+      a.currentTime = shift + 0.5 * dur;
+      maxY50 = Math.max(maxY50, Math.round(s.getBoundingClientRect().bottom - lr.top));
+    }
+    return {
+      h: Math.round(lr.height),
+      cls: layer.className,
+      n: spans.length,
+      minTop: Math.min(...tops),
+      maxTop: Math.max(...tops),
+      spread: Math.max(...tops) - Math.min(...tops),
+      lower: rel.filter((r) => r.top > lr.height * 0.5).length,
+      inside: rel.every((r) => r.top >= 0 && r.bottom <= lr.height + 1),
+      topPctMin: Math.min(...rel.map((r) => r.inlineTop)),
+      topPctMax: Math.max(...rel.map((r) => r.inlineTop)),
+      maxY50,
+    };
+  });
+};
+
+for (const theme of ['sun', 'sunhat', 'ocean', 'newyear', 'star']) {
+  const m = await twinkleMeasure(theme);
+  check(`${theme}（瞬き系）の粒子は枠全体に広がる（top は 4〜72%、枠内に10個、上端と下端の差は枠高さの50%以上、下半分に3個以上、keyframes 50% の最下点も枠内）`,
+    m.cls.includes('fx-twinkle') && m.n === 10 &&
+    m.topPctMin >= 4 && m.topPctMax <= 72 &&
+    m.inside && m.minTop >= m.h * 0.03 && m.maxTop <= m.h * 0.75 &&
+    m.spread >= m.h * 0.5 && m.lower >= 3 && m.maxY50 <= m.h + 1,
+    { h: m.h, minTop: m.minTop, maxTop: m.maxTop, spread: m.spread, lower: m.lower, topPct: [m.topPctMin, m.topPctMax], maxY50: m.maxY50, inside: m.inside });
+}
 
 check('静的スウォッチは全 13 テーマ分（prefers-reduced-motion でも確認できる）',
   santaState.swatches === 13, { swatches: santaState.swatches });

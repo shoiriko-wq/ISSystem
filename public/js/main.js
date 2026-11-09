@@ -11,7 +11,7 @@ import { socketClient } from './socket.js';
 // 各機能モジュールの初期化およびデータロード関数インポート
 import { initDashboardModule, loadDashboardData, fetchWeatherData } from './modules/dashboard.module.js';
 import { initSeatingModule, loadSeatingData } from './modules/seating.module.js';
-import { initBulletinModule, loadBulletins } from './modules/bulletin.module.js';
+import { initBulletinModule, loadBulletins, setUnreadMode, isFullMode, syncUnreadButtonToState } from './modules/bulletin.module.js';
 import { initChatModule, loadChannels, loadMessages } from './modules/chat.module.js';
 import { initFacilityModule, loadReservations } from './modules/facility.module.js';
 import { initScheduleModule, loadSchedules } from './modules/schedule.module.js';
@@ -98,7 +98,30 @@ export function switchTab(tabName) {
     loadActiveTabData(tabName);
   }
 
+  // ★ 掲示タブの控件を全日表示状態へ追従（検索語・未読表示中は中心日を動かす操作を全て止める）
+  refreshBulletinControls();
+
   refreshLucideIcons();
+}
+
+/**
+ * 掲示タブの操作控件（年月選択・サイドバーの「未読」）を全日表示状態へ追従させる。
+ * 全日表示（検索語・未読表示）は中心日が列表表示に影響しないため、中心日を動かす操作を全て止める。
+ * ‹ ›・中心日クリック・年月選択・カレンダーの日付セルはモジュール側（setDayNavEnabled）が同じ条件で止める。
+ * 寸法は変えない（disabled は見た目の変化をホバーリング用の影だけに効かせる運用）
+ */
+export function refreshBulletinControls() {
+  const fullMode = isFullMode();
+  const monthMenu = document.getElementById('bulletin-month-menu-btn');
+  if (monthMenu) {
+    monthMenu.disabled = fullMode;
+    monthMenu.setAttribute('aria-disabled', String(fullMode));
+  }
+  document.querySelectorAll('#bulletin-btn-unread').forEach((el) => {
+    el.disabled = fullMode;
+    el.setAttribute('aria-disabled', String(fullMode));
+  });
+  syncUnreadButtonToState();
 }
 
 /**
@@ -342,12 +365,17 @@ function initEventsAndListeners() {
         bBadge.textContent = cap(bCount);
         bBadge.classList.toggle('hidden', bCount === 0);
       }
-      // メイン画面タイトルバッヂ（全日未読。サイドバーと同一値）
-      const titleBadge = document.getElementById('bulletin-title-unread');
-      if (titleBadge) {
-        titleBadge.textContent = `未読 ${cap(bCount)}`;
-        titleBadge.classList.toggle('hidden', bCount === 0);
-      }
+      // ★ 全日未読ボタン（検索ボックスの右。サイドバーと同一値。ラベル「未読 N」。0 は hidden＝押せない）
+      // ★ 全日未読ボタン（ツールバーの検索ボックス右＋サイドバー項目。同じ id が 2 つあるので両方同じ数で揃える。0 は hidden＝押せない）
+      document.querySelectorAll('#bulletin-btn-unread').forEach((unreadBtn) => {
+        unreadBtn.textContent = `未読 ${cap(bCount)}`;
+        unreadBtn.setAttribute('aria-label', `全日の未読検索（未読 ${cap(bCount)} 件）`);
+        unreadBtn.classList.toggle('hidden', bCount === 0);
+        // 未読が 0 件になったときは未読表示を閉じて日付表示へ戻す（空の未読一覧を残さない）
+        if (bCount === 0) setUnreadMode(false);
+      });
+      // 全日表示（検索語・未読表示）中は中心日を動かす操作を止める（年月選択・サイドバーの「未読」）
+      refreshBulletinControls();
       // ダッシュボード「本日の連絡」ヘッダーバッヂ（本日未読）
       const dashBadge = document.getElementById('dash-today-bulletin-unread');
       if (dashBadge) {

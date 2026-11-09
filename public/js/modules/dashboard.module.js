@@ -204,7 +204,11 @@ function dashFxTheme(now = new Date(), fxOverride = null) {
   return { SPRING: 'sakura', RAIN: 'rain', EARLY_SUMMER: 'sun', SUMMER: 'ocean', AUTUMN: 'leaves', WINTER: 'snow' }[season];
 }
 
-/** 労いメッセージ枠の粒子を描画する (#dash-fx-layer / CSS keyframes が毎フレーム動かす) */
+/** 労いメッセージ枠の粒子を描画する (#dash-fx-layer / CSS keyframes が毎フレーム動かす)
+ *  落下系・上昇系は CSS が上端/下端に置き、--fx-drop（カード高さ実測）で枠全体を移動する。
+ *  瞬き系（陽光・日傘・海・お正月・夜の星）は枠全体に広がるよう、粒子 i（0〜9）ごとに inline の top を
+ *  4% + i*7% + 0〜5%（＝4〜72%）で振る。帯分かれなので必ず枠全体へ広がり、下半分にも粒子が出る。
+ *  4〜72% は絵文字の高さ（最大26px）と keyframes の translateY(10px) を引いた安全域で、粒子は枠の内側に収まる。 */
 function renderDashFx(now = new Date(), fxOverride = null) {
   const layer = document.getElementById('dash-fx-layer');
   if (!layer) return;
@@ -217,12 +221,15 @@ function renderDashFx(now = new Date(), fxOverride = null) {
   for (let i = 0; i < 10; i++) {
     const emoji = def.emojis[i % def.emojis.length];
     const x = 3 + rnd() * 94;
+    // 瞬き系は縦位置を帯で分けて粒子ごとに決める（枠全体に必ず広がる）。落下系・上昇系は CSS の top/bottom を使うので rnd を使わない
+    const y = def.motion === 'twinkle' ? 4 + i * 7 + rnd() * 5 : null;
     const dur = 6 + rnd() * 6;
     const delay = rnd() * 9;
     const size = 12 + Math.round(rnd() * 14);
     // 降り注ぎ系 (梅雨) は傾き角を粒子ごとに 14〜24deg で決める。角度は進行中に変わらない（keyframes に回転はない）
     const tilt = def.tilt ? Math.round(def.tilt[0] + rnd() * (def.tilt[1] - def.tilt[0])) : 0;
-    html += `<span class="dash-fx" style="left:${x.toFixed(1)}%;animation-duration:${dur.toFixed(1)}s;animation-delay:-${delay.toFixed(1)}s;font-size:${size}px;--fx-tilt:${tilt}deg">${emoji}</span>`;
+    const topCss = y === null ? '' : `top:${y.toFixed(1)}%;`;
+    html += `<span class="dash-fx" style="left:${x.toFixed(1)}%;${topCss}animation-duration:${dur.toFixed(1)}s;animation-delay:-${delay.toFixed(1)}s;font-size:${size}px;--fx-tilt:${tilt}deg">${emoji}</span>`;
   }
   layer.innerHTML = html;
   setDashFxDrop(layer);

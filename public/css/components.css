@@ -1566,7 +1566,9 @@ span.dash-news-body { display: block; }
   animation-name: dash-fx-rise;
 }
 
-/* 瞬く系: 夜の星・陽光・海・正月 */
+/* 瞬く系: 夜の星・陽光・海・正月（粒子は枠全体に広がる。
+   実 top は dashboard.module.js が粒子 i（0〜9）ごとに inline で 4% + i*7% + 0〜5%（4〜72%）を振る。
+   ここは top 未設定時のフォールバック（上部8%） */
 .dash-fx-layer.fx-twinkle .dash-fx {
   top: 8%;
   animation-timing-function: ease-in-out;
