@@ -283,17 +283,23 @@ const iconFit = await narrow.evaluate(() => {
   return [...document.querySelectorAll('.app-sidebar .nav-item')].map((n) => {
     const icon = n.querySelector('svg.lucide, i[data-lucide], i');
     const ir = icon.getBoundingClientRect();
+    const label = n.querySelector('.nav-label');
+    // 収納時のラベルは display:none にせず「幅0」で隠す（layouts.css §6 の設計）。
+    // 幅0はアイコンの幅を奪わないので見切れ起きず、縦ズレも起きない。
+    // 旧テストは display:none を期待していたが、現行設計に合わせて「幅0」で判定する。
+    const labelWidth = Math.round(label.getBoundingClientRect().width);
     return {
       title: (n.getAttribute('title') || '').slice(0, 6),
       left: Math.round(ir.left), right: Math.round(ir.right),
       clipLeft: Math.round(contentLeft - ir.left), clipRight: Math.round(ir.right - contentRight),
-      labelShown: getComputedStyle(n.querySelector('.nav-label')).display !== 'none'
+      labelWidth,
+      labelHidden: labelWidth <= 1
     };
   });
 });
 check('collapsed sidebar icons stay fully inside the sidebar box (no clipping)',
-  iconFit.length >= 3 && iconFit.every((c) => c.clipLeft <= 0 && c.clipRight <= 0 && !c.labelShown),
-  iconFit.map((c) => `${c.title}=${c.left}-${c.right} clipL=${c.clipLeft} clipR=${c.clipRight}`).join(' '));
+  iconFit.length >= 3 && iconFit.every((c) => c.clipLeft <= 0 && c.clipRight <= 0 && c.labelHidden),
+  iconFit.map((c) => `${c.title}=${c.left}-${c.right} clipL=${c.clipLeft} clipR=${c.clipRight} labelw=${c.labelWidth}`).join(' '));
 
 // ---- R6b: アイコンのみモードの選択背景（アクティブの塗り）は正方形タイル ----
 const squareTiles = await narrow.evaluate(() => {

@@ -66,15 +66,15 @@ export function registerChatSocketHandlers(io, socket) {
   const user = socket.user;
 
   /**
-   * チャンネルアクセス権検証（PUBLIC はメンバーのみ送信可、非PUBLIC はメンバーのみ）
+   * チャンネルアクセス権検証
+   * ★ 職員全体チャット撤廃（2026/11/9 v3.1.2）: 全チャンネルが個人作成グループ。
+   *   メンバーでないユーザーは閲覧・送信・既読更新いずれも不可。
    * @param {string} channelId
-   * @param {boolean} [requireMembership=true] メンバーシップを要求
    * @returns {Promise<boolean>}
    */
-  async function canAccessChannel(channelId, requireMembership = true) {
+  async function canAccessChannel(channelId) {
     const channel = await chatModel.findChannelById(channelId);
     if (!channel) return false;
-    if (!requireMembership && channel.type === 'PUBLIC') return true;
     const members = await chatModel.getMembers(channelId);
     return members.some((m) => String(m.user_id) === String(user.id));
   }
@@ -91,14 +91,17 @@ export function registerChatSocketHandlers(io, socket) {
     if (!channelId) return;
 
     try {
+      // ★ 職員全体チャット撤廃: 個人作成グループのメンバーのみルーム参加を許す
       const channel = await chatModel.findChannelById(channelId);
-      if (channel && channel.type !== 'PUBLIC') {
-        const members = await chatModel.getMembers(channelId);
-        const isMember = members.some((m) => m.user_id === user.id);
-        if (!isMember) {
-          console.warn(`[Socket.io Chat Security] Unauthorized join attempt: User ${user.name} (${user.id}) tried to join non-member channel ${channelId}`);
-          return;
-        }
+      if (!channel) {
+        console.warn(`[Socket.io Chat Security] 存在しないチャンネル ${channelId} への参加要求`);
+        return;
+      }
+      const members = await chatModel.getMembers(channelId);
+      const isMember = members.some((m) => m.user_id === user.id);
+      if (!isMember) {
+        console.warn(`[Socket.io Chat Security] Unauthorized join attempt: User ${user.name} (${user.id}) tried to join non-member channel ${channelId}`);
+        return;
       }
 
       const roomName = `chat:channel:${channelId}`;

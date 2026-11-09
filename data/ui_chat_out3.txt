@@ -1,0 +1,109 @@
+﻿probe-group-created = {"groupId":"chat_1794196663423_si73y","members":["kyomu01","t-tanaka","t-sato"]}
+  PASS - 蛟倶ｺｺ菴懈・繧ｰ繝ｫ繝ｼ繝暦ｼ・蜷搾ｼ峨ｒ 201 縺ｧ菴懈・縺ｧ縺阪ｋ -> {"success":true,"message":"繝√Ε繝・ヨ繝√Ε繝ｳ繝阪Ν繧剃ｽ懈・縺励∪縺励◆縲・,"data":{"id":"chat_1794196663423_si73y","name":"譛ｪ隱ｭ讀懆ｨｼ繧ｰ繝ｫ繝ｼ繝・,"type":"GROUP","created_at":"2026-11-09 03:57:43"},"channel":{"id":"chat_1794196663423_si73y","name":"譛ｪ隱ｭ讀懆ｨｼ繧ｰ繝ｫ繝ｼ繝・,"type":"GROUP","created_at":"2026-11-09 03:57:43"}}
+seed-group-opened = {"seedGroupOpened":true}
+  PASS - 繧ｷ繝ｼ繝画ｸ医∩繧ｰ繝ｫ繝ｼ繝暦ｼ域蕗蜍咎Κ騾｣邨｡・峨ｒ髢九＞縺ｦ髢ｲ隕ｧ縺ｧ縺阪ｋ -> {"seedGroupOpened":true}
+chat-view = {"renotifyCount":0,"headerBtns":["繝｡繝ｳ繝舌・ (2蜷・"],"hasUnreadListBtn":true,"hasMarkReadBtn":false,"hasMembersBtn":true,"renotifyGlobal":"undefined","unreadListGlobal":"undefined","sidebarText":"閨ｷ蜩｡繝√Ε繝・ヨ 縲先ｱｺ陬∝鵠隴ｰ縲遷est豎ｺ陬∫筏隲・譛ｪ隱ｭ讀懆ｨｼ繧ｰ繝ｫ繝ｼ繝・譛ｪ隱ｭ讀懆ｨｼ繧ｰ繝ｫ繝ｼ繝・譛ｪ隱ｭ讀懆ｨｼ繧ｰ繝ｫ繝ｼ繝・譛ｪ隱ｭ讀懆ｨｼ繧ｰ繝ｫ繝ｼ繝・譛ｪ隱ｭ讀懆ｨｼ繧ｰ繝ｫ繝ｼ繝・搭 謨吝漁驛ｨ騾｣邨｡ ｧｭ 騾ｲ霍ｯ謖・ｰ朱｣邨｡ 繧ｰ繝ｫ繝ｼ繝嶺ｽ懈・","createInFooter":true,"createInHeaderRow":false,"hasToggleHide":true,"togglePressed":"false","toggleText":"","toggleHasEyeIcon":true,"toggleInner":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" data-lucide=\"eye-off\" aria-hidden=\"true\" class=\"lucide lucide-eye-off w-4 h-4\"><path d=\"M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49\"></path><path d=\"M14.084 14.158a3 3 0 0 1-4.242-4.242\"></path><path d=\"M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143\"></path><path d=\"m2 2 20 20\"></path></svg>","toggleBg":"rgb(255, 255, 255)","toggleColor":"color(srgb 0.1 0.140314 0.205255)","toggleBorder":"color(srgb 0.656667 0.701176 0.757059)","hideBtnsInFooter":false,"hideBtns":0,"toggleBadge":0}
+  PASS - 繝√Ε繝・ヨ逕ｻ髱｢縺ｫ縲悟・騾夂衍縲阪・繧ｿ繝ｳ縺後↑縺・ｼ医・繝・ム繝ｼ繝ｻ繝｡繝・そ繝ｼ繧ｸ陦後・荳｡譁ｹ・・-> {"renotifyCount":0,"headerBtns":["繝｡繝ｳ繝舌・ (2蜷・"]}
+  PASS - 蜀埼夂衍繝上Φ繝峨Λ handleRenotifyAll 縺ｯ繧ｰ繝ｭ繝ｼ繝舌Ν縺ｫ蟄伜惠縺励↑縺・-> {"renotifyGlobal":"undefined"}
+  PASS - 縲梧悴隱ｭ: N蜷阪阪→繝｡繝ｳ繝舌・陦ｨ遉ｺ縺ｯ谿九ｊ縲∝承繝倥ャ繝繝ｼ縺ｮ縲梧里隱ｭ縺ｫ縺吶ｋ縲阪後Μ繧ｹ繝医°繧蛾撼陦ｨ遉ｺ縲阪・謦､蟒・-> {"headerBtns":["繝｡繝ｳ繝舌・ (2蜷・"],"hasUnreadListBtn":true,"hasMembersBtn":true,"hasMarkReadBtn":false}
+  PASS - 繧ｵ繧､繝峨ヰ繝ｼ縺ｮ縲梧磁邯夂憾諷・ 繧ｪ繝ｳ繝ｩ繧､繝ｳ縲阪・譁・ｭ励′縺ｪ縺・-> {"sidebarText":"閨ｷ蜩｡繝√Ε繝・ヨ 縲先ｱｺ陬∝鵠隴ｰ縲遷est豎ｺ陬∫筏隲・譛ｪ隱ｭ讀懆ｨｼ繧ｰ繝ｫ繝ｼ繝・譛ｪ隱ｭ讀懆ｨｼ繧ｰ繝ｫ繝ｼ繝・譛ｪ隱ｭ讀懆ｨｼ繧ｰ繝ｫ繝ｼ繝・譛ｪ隱ｭ讀懆ｨｼ繧ｰ繝ｫ繝ｼ繝・譛ｪ隱ｭ讀懆ｨｼ繧ｰ繝ｫ繝ｼ繝・搭 謨吝漁驛ｨ騾｣邨｡ ｧｭ 騾ｲ霍ｯ謖・ｰ朱｣邨｡ 繧ｰ繝ｫ繝ｼ繝嶺ｽ懈・"}
+  PASS - 繧ｰ繝ｫ繝ｼ繝嶺ｽ懈・繝懊ち繝ｳ縺ｯ繝輔ャ繧ｿ繝ｼ・医・繝・ム繝ｼ陦後↓縺ｯ縺ｪ縺・ｼ峨〒縲∫岼縺ｮ繝槭・繧ｯ縺ｮ髱櫁｡ｨ遉ｺ繝医げ繝ｫ繝懊ち繝ｳ縺後ヵ繝・ち繝ｼ縺ｫ縺ゅｋ -> {"createInFooter":true,"createInHeaderRow":false,"toggleText":"","toggleHasEyeIcon":true,"togglePressed":"false"}
+  PASS - 逶ｮ縺ｮ繝槭・繧ｯ繧呈款縺吝燕縺ｯ繧ｰ繝ｫ繝ｼ繝怜錐縺ｮ讓ｪ縺ｫ髱櫁｡ｨ遉ｺ繝懊ち繝ｳ縺悟・縺ｪ縺・-> {"hideBtns":0}
+unread-list-click = {"confirmCalls":0,"toast":"譛ｪ隱ｭ閠・ｼ・蜷搾ｼ・ 逕ｰ荳ｭ 蜈育函"}
+  PASS - 譛ｪ隱ｭ閠・け繝ｪ繝・け縺ｯ confirm 繧貞・縺輔★縲∵悴隱ｭ閠・ｸ隕ｧ繧偵ヨ繝ｼ繧ｹ繝医〒陦ｨ遉ｺ縺吶ｋ縺縺・-> {"confirmCalls":0,"toast":"譛ｪ隱ｭ閠・ｼ・蜷搾ｼ・ 逕ｰ荳ｭ 蜈育函"}
+  PASS - /chat/renotify 縺ｸ縺ｮ繝ｪ繧ｯ繧ｨ繧ｹ繝医・逋ｺ逕溘＠縺ｪ縺・ｼ・PI 蟒・ｭ｢・・-> []
+after-eye-on = {"hideBtns":8,"pressed":"true","visibleRows":8,"eyeInFooter":false}
+  PASS - 逶ｮ縺ｮ繝槭・繧ｯ繧貞ｮ溘け繝ｪ繝・け縺吶ｋ縺ｨ繧ｰ繝ｫ繝ｼ繝怜錐縺ｮ讓ｪ縺ｫ逶ｮ縺ｮ繝槭・繧ｯ縺ｮ髱櫁｡ｨ遉ｺ繝懊ち繝ｳ縺悟・繧具ｼ医ヵ繝・ち繝ｼ縺ｫ髱櫁｡ｨ遉ｺ繝懊ち繝ｳ縺ｯ蜃ｺ縺ｪ縺・ｼ・-> {"eyeClicked":true,"hideBtns":8,"pressed":"true","visibleRows":8,"eyeInFooter":false}
+eye-on-state = {"pressed":"true","inner":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" data-lucide=\"eye\" aria-hidden=\"true\" class=\"lucide lucide-eye w-4 h-4\"><path d=\"M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0\"></path><circle cx=\"12\" cy=\"12\" r=\"3\"></circle></svg>","bg":"color(srgb 0.977647 0.92 0.853529)","color":"color(srgb 0.23702 0.171608 0.112941)","border":"color(srgb 0.744108 0.595647 0.426971)","shadow":"color(srgb 0.705245 0.642549 0.573677) 0px 0px 0px 2px","hideBtns":8}
+  PASS - 逶ｮ縺ｮ繝槭・繧ｯ ON 縺ｧ縺ｯ繧｢繧､繧ｳ繝ｳ縺碁幕縺・◆逶ｮ・・ye・峨↓縺ｪ繧翫∬レ譎ｯ繝ｻ譁・ｭ苓牡繝ｻ譫繝ｻ蠖ｱ縺瑚ｭｦ蜻願牡縺ｸ騾｣蜍輔☆繧・-> {"initial":{"inner":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" data-lucide=\"eye-off\" aria-hidden=\"true\" class=\"lucide lucide-eye-off w-4 h-4\"><path d=\"M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49\"></path><path d=\"M14.084 14.158a3 3 0 0 1-4.242-4.242\"></path><path d=\"M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143\"></path><path d=\"m2 2 20 20\"></path></svg>","bg":"rgb(255, 255, 255)","color":"color(srgb 0.1 0.140314 0.205255)","border":"color(srgb 0.656667 0.701176 0.757059)"},"on":{"pressed":"true","inner":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" data-lucide=\"eye\" aria-hidden=\"true\" class=\"lucide lucide-eye w-4 h-4\"><path d=\"M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0\"></path><circle cx=\"12\" cy=\"12\" r=\"3\"></circle></svg>","bg":"color(srgb 0.977647 0.92 0.853529)","color":"color(srgb 0.23702 0.171608 0.112941)","border":"color(srgb 0.744108 0.595647 0.426971)","shadow":"color(srgb 0.705245 0.642549 0.573677) 0px 0px 0px 2px","hideBtns":8}}
+after-hide = {"targetGone":true,"hiddenSection":true,"badgeInToggle":0,"toggleText":"髱櫁｡ｨ遉ｺ繧ｰ繝ｫ繝ｼ繝・,"toast":"繧ｰ繝ｫ繝ｼ繝励後先ｱｺ陬∝鵠隴ｰ縲遷est豎ｺ陬∫筏隲九阪ｒ髱櫁｡ｨ遉ｺ縺ｫ縺励∪縺励◆・医ョ繝ｼ繧ｿ縺ｯ谿九▲縺ｦ縺・∪縺呻ｼ・,"hideBtns":7,"pressed":"true"}
+  PASS - 髱櫁｡ｨ遉ｺ繝懊ち繝ｳ・育岼縺ｮ繝槭・繧ｯ・峨ｒ螳溘け繝ｪ繝・け縺吶ｋ縺ｨ縺昴・繧ｰ繝ｫ繝ｼ繝励□縺鷹撼陦ｨ遉ｺ縺ｫ縺ｪ繧翫・撼陦ｨ遉ｺ繧ｻ繧ｯ繧ｷ繝ｧ繝ｳ縺ｫ莉ｶ謨ｰ繝舌ャ繧ｸ縺悟・縺ｪ縺・-> {"targetId":"chat_1794195718780_xlzw5","targetGone":true,"hiddenSection":true,"badgeInToggle":0,"toggleText":"髱櫁｡ｨ遉ｺ繧ｰ繝ｫ繝ｼ繝・,"toast":"繧ｰ繝ｫ繝ｼ繝励後先ｱｺ陬∝鵠隴ｰ縲遷est豎ｺ陬∫筏隲九阪ｒ髱櫁｡ｨ遉ｺ縺ｫ縺励∪縺励◆・医ョ繝ｼ繧ｿ縺ｯ谿九▲縺ｦ縺・∪縺呻ｼ・,"hideBtns":7,"pressed":"true"}
+after-eye-off = {"hideBtns":0,"pressed":"false","overlap":false}
+  PASS - 逶ｮ縺ｮ繝槭・繧ｯ繧貞・蠎ｦ謚ｼ縺吶→髱櫁｡ｨ遉ｺ繝懊ち繝ｳ縺梧ｶ医∴繧具ｼ医Δ繝ｼ繝・OFF・・-> {"eyeOffClicked":true,"hideBtns":0,"pressed":"false","overlap":false}
+eye-off-state = {"pressed":"false","inner":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" data-lucide=\"eye-off\" aria-hidden=\"true\" class=\"lucide lucide-eye-off w-4 h-4\"><path d=\"M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49\"></path><path d=\"M14.084 14.158a3 3 0 0 1-4.242-4.242\"></path><path d=\"M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143\"></path><path d=\"m2 2 20 20\"></path></svg>","bg":"rgb(255, 255, 255)","color":"color(srgb 0.1 0.140314 0.205255)","border":"color(srgb 0.656667 0.701176 0.757059)","shadow":"none","hideBtns":0}
+  PASS - 逶ｮ縺ｮ繝槭・繧ｯ OFF 縺ｧ縺ｯ繧｢繧､繧ｳ繝ｳ縺ｨ濶ｲ縺悟・譛溽憾諷九∈謌ｻ繧翫∬ｦ九◆逶ｮ縺後Δ繝ｼ繝峨↓騾｣蜍輔☆繧・-> {"initial":{"inner":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" data-lucide=\"eye-off\" aria-hidden=\"true\" class=\"lucide lucide-eye-off w-4 h-4\"><path d=\"M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49\"></path><path d=\"M14.084 14.158a3 3 0 0 1-4.242-4.242\"></path><path d=\"M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143\"></path><path d=\"m2 2 20 20\"></path></svg>","bg":"rgb(255, 255, 255)","color":"color(srgb 0.1 0.140314 0.205255)","border":"color(srgb 0.656667 0.701176 0.757059)"},"off":{"pressed":"false","inner":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" data-lucide=\"eye-off\" aria-hidden=\"true\" class=\"lucide lucide-eye-off w-4 h-4\"><path d=\"M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49\"></path><path d=\"M14.084 14.158a3 3 0 0 1-4.242-4.242\"></path><path d=\"M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143\"></path><path d=\"m2 2 20 20\"></path></svg>","bg":"rgb(255, 255, 255)","color":"color(srgb 0.1 0.140314 0.205255)","border":"color(srgb 0.656667 0.701176 0.757059)","shadow":"none","hideBtns":0}}
+restored = {"targetBack":true,"sectionGone":true}
+  PASS - 髱櫁｡ｨ遉ｺ繧ｻ繧ｯ繧ｷ繝ｧ繝ｳ縺ｮ逶ｮ縺ｮ繝槭・繧ｯ・亥・陦ｨ遉ｺ繝懊ち繝ｳ・峨〒蜈・↓謌ｻ縺帙ｋ -> {"targetId":"chat_1794195718780_xlzw5","targetBack":true,"sectionGone":true}
+probe-group-opened = {"groupId":"chat_1794196663423_si73y","probeOpened":true}
+  PASS - 讀懆ｨｼ逕ｨ繧ｰ繝ｫ繝ｼ繝励ｒ髢九＞縺ｦ謚慕ｨｿ蟇ｾ雎｡縺ｫ縺ｧ縺阪ｋ -> {"groupId":"chat_1794196663423_si73y"}
+rows-before-post = {"memberCount":3,"unreadRows":0}
+new-message-unread-ids = ["t-tanaka","t-sato"]
+  PASS - 繧ｵ繝ｼ繝舌・驟堺ｿ｡縺ｫ譁ｰ逹縺ｮ譛ｪ隱ｭ閠・錐邁ｿ・医Γ繝ｳ繝舌・縺ｮ縺・■騾∽ｿ｡閠・ｻ･螟厄ｼ峨′霈峨ｋ -> {"serverUnreadIds":["t-tanaka","t-sato"]}
+after-post = {"memberCount":3,"postedRow":{"id":"msg_1794196674227_bmdxj","body":"譛ｪ隱ｭ譌｢隱ｭ讀懆ｨｼ 1794196674223","allRead":false,"unread":2},"unreadRows":1}
+  PASS - 謚慕ｨｿ逶ｴ蠕後・閾ｪ蛻・・陦後・縲悟・蜩｡譌｢隱ｭ縲阪〒縺ｯ縺ｪ縺・譛ｪ隱ｭ: N蜷搾ｼ医Γ繝ｳ繝舌・謨ｰ-1・・-> {"postedRow":{"id":"msg_1794196674227_bmdxj","body":"譛ｪ隱ｭ譌｢隱ｭ讀懆ｨｼ 1794196674223","allRead":false,"unread":2},"memberCount":3}
+  PASS - 謚慕ｨｿ縺ｧ譌｢蟄倥Γ繝・そ繝ｼ繧ｸ縺御ｸ譁峨↓蜈ｨ蜩｡譌｢隱ｭ蛹悶＠縺ｪ縺・ｼ域悴隱ｭ陦後・菫晄戟縺輔ｌ繧具ｼ・-> {"before":0,"after":1}
+after-tanaka-mark-read = {"id":"msg_1794196674227_bmdxj","body":"譛ｪ隱ｭ譌｢隱ｭ讀懆ｨｼ 1794196674223","allRead":false,"unread":1}
+  PASS - 繝｡繝ｳ繝舌・縺碁夢隕ｧ縺吶ｋ縺ｨ譁ｰ逹縺ｮ譛ｪ隱ｭ閠・′1蜷榊㍼邂励＆繧後ｋ・域里隱ｭ蝗樊鴬縺梧悴隱ｭ閠・錐邁ｿ縺ｸ蜿肴丐・・-> {"expected":1,"afterReceipt":{"id":"msg_1794196674227_bmdxj","body":"譛ｪ隱ｭ譌｢隱ｭ讀懆ｨｼ 1794196674223","allRead":false,"unread":1}}
+group-reopened-after-reload = {"groupId":"chat_1794196663423_si73y","reopened":true}
+  PASS - 繝ｪ繝ｭ繝ｼ繝牙ｾ後↓讀懆ｨｼ逕ｨ繧ｰ繝ｫ繝ｼ繝励ｒ蜀阪・髢九￠繧・-> {"groupId":"chat_1794196663423_si73y"}
+after-reload = {"id":"msg_1794196674227_bmdxj","body":"譛ｪ隱ｭ譌｢隱ｭ讀懆ｨｼ 1794196674223","allRead":false,"unread":1}
+  PASS - 繝ｪ繝ｭ繝ｼ繝牙ｾ後・譛ｪ隱ｭ閠・焚縺ｯ譌｢隱ｭ繝ｭ繧ｰ縺ｨ荳閾ｴ縺吶ｋ・域悴隱ｭ閠・′菴募錐縺玖｡ｨ遉ｺ縺輔ｌ繧具ｼ・-> {"expected":1,"reloadRow":{"id":"msg_1794196674227_bmdxj","body":"譛ｪ隱ｭ譌｢隱ｭ讀懆ｨｼ 1794196674223","allRead":false,"unread":1}}
+unread-list-after-post = {"toast":"譛ｪ隱ｭ閠・ｼ・蜷搾ｼ・ 菴占陸 蜈育函"}
+  PASS - 譁ｰ逹陦後・譛ｪ隱ｭ閠・ｸ隕ｧ縺ｫ譛ｪ隱ｭ繝｡繝ｳ繝舌・蜷阪′陦ｨ遉ｺ縺輔ｌ繧具ｼ亥・蜩｡譌｢隱ｭ縺ｮ繝医・繧ｹ繝医↓縺ｪ繧峨↑縺・ｼ・-> {"toast":"譛ｪ隱ｭ閠・ｼ・蜷搾ｼ・ 菴占陸 蜈育函"}
+  PASS - chat.module.js 縺ｫ蜀埼夂衍縺ｮ API 蜻ｼ縺ｳ蜃ｺ縺励・繝懊ち繝ｳ ID繝ｻ繝上Φ繝峨Λ縺梧ｮ九▲縺ｦ縺・↑縺・-> {"apiCall":false,"btnId":false,"handler":false}
+  PASS - chat.module.js 縺ｮ譛ｪ隱ｭ閠・ｸ隕ｧ陦ｨ遉ｺ showUnreadersList 縺ｯ谿九▲縺ｦ繝懊ち繝ｳ縺ｫ繧よ磁邯壽ｸ医∩・域ｩ溯・縺ｯ list 陦ｨ遉ｺ縺ｮ縺ｿ・・-> {"listFn":true,"wired":true}
+  PASS - config.js 縺ｮ CHAT 縺ｫ UNREAD_RENOTIFY 縺後↑縺・  PASS - src/routes/index.js 縺ｫ router.post("/chat/renotify") 縺後↑縺・renotify-route-status = 404
+  PASS - 繧ｵ繝ｼ繝舌・縺ｮ /api/chat/renotify 縺ｯ 404・医Ν繝ｼ繝亥ｻ・ｭ｢・・-> 404
+tanaka-reply = {"replyText":"逶ｸ謇玖｡梧､懆ｨｼ 1794196681105","replyAck":{"success":true,"message":{"id":"msg_1794196681100_bqw14","channel_id":"chat_1794196663423_si73y","channelId":"chat_1794196663423_si73y","sender_id":"t-tanaka","senderId":"t-tanaka","sender_name":"逕ｰ荳ｭ 蜈育函","senderName":"逕ｰ荳ｭ 蜈育函","sender_avatar":null,"senderAvatar":null,"avatar_url":null,"message":"逶ｸ謇玖｡梧､懆ｨｼ 1794196681105","message_text":"逶ｸ謇玖｡梧､懆ｨｼ 1794196681105","text":"逶ｸ謇玖｡梧､懆ｨｼ 1794196681105","created_at":"2026-11-09 03:58:01","createdAt":"2026-11-09 03:58:01","unreaders":["謨吝漁 荳ｻ莉ｻ","菴占陸 蜈育函"],"unreadIds":["kyomu01","t-sato"],"readers":[],"readIds":[]}}}
+  PASS - 繝｡繝ｳ繝舌・・育伐荳ｭ蜈育函・峨′讀懆ｨｼ逕ｨ繧ｰ繝ｫ繝ｼ繝励∈霑比ｿ｡縺ｧ縺阪ｋ -> {"success":true,"message":{"id":"msg_1794196681100_bqw14","channel_id":"chat_1794196663423_si73y","channelId":"chat_1794196663423_si73y","sender_id":"t-tanaka","senderId":"t-tanaka","sender_name":"逕ｰ荳ｭ 蜈育函","senderName":"逕ｰ荳ｭ 蜈育函","sender_avatar":null,"senderAvatar":null,"avatar_url":null,"message":"逶ｸ謇玖｡梧､懆ｨｼ 1794196681105","message_text":"逶ｸ謇玖｡梧､懆ｨｼ 1794196681105","text":"逶ｸ謇玖｡梧､懆ｨｼ 1794196681105","created_at":"2026-11-09 03:58:01","createdAt":"2026-11-09 03:58:01","unreaders":["謨吝漁 荳ｻ莉ｻ","菴占陸 蜈育函"],"unreadIds":["kyomu01","t-sato"],"readers":[],"readIds":[]}}
+  PASS - 逶ｸ謇九°繧峨・譁ｰ逹陦後′蛻苓｡ｨ縺ｫ謠冗判縺輔ｌ繧・-> {"replyText":"逶ｸ謇玖｡梧､懆ｨｼ 1794196681105","replyRowVisible":true}
+node : file:///C:/Users/%E
+5%85%A5%E6%B1%9F%E7%94%B0%
+E3%80%80%E6%89%BF/Document
+s/%E3%83%97%E3%83%AD%E3%82
+%B0%E3%83%A9%E3%83%9F%E3%8
+3%B3%E3%82%B0/ISSystem/nod
+e_modules/puppeteer-core/l
+ib/puppeteer/util/assert.j
+s:15
+発生場所 行:1 文字:145
++ ... plication\chrome.exe
+'; node scripts/test-chat-
+unread.mjs 2>&1 | Out-F ..
+.
++                         
+   ~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~
+    + CategoryInfo        
+      : NotSpecified: (f  
+  ile:///C:/User...il/a   
+ ssert.js:15:String) [    
+], RemoteException
+    + FullyQualifiedError 
+   Id : NativeCommandErr  
+  or
+ 
+        throw new Error(me
+ssage);
+              ^
+
+Error: No element found fo
+r selector: #chat-send-btn
+    at assert (file:///C:/
+Users/%E5%85%A5%E6%B1%9F%E
+7%94%B0%E3%80%80%E6%89%BF/
+Documents/%E3%83%97%E3%83%
+AD%E3%82%B0%E3%83%A9%E3%83
+%9F%E3%83%B3%E3%82%B0/ISSy
+stem/node_modules/puppetee
+r-core/lib/puppeteer/util/
+assert.js:15:15)
+    at CdpFrame.click (fil
+e:///C:/Users/%E5%85%A5%E6
+%B1%9F%E7%94%B0%E3%80%80%E
+6%89%BF/Documents/%E3%83%9
+7%E3%83%AD%E3%82%B0%E3%83%
+A9%E3%83%9F%E3%83%B3%E3%82
+%B0/ISSystem/node_modules/
+puppeteer-core/lib/puppete
+er/api/Frame.js:753:17)
+    at async file:///C:/Us
+ers/%E5%85%A5%E6%B1%9F%E7%
+94%B0%E3%80%80%E6%89%BF/Do
+cuments/%E3%83%97%E3%83%AD
+%E3%82%B0%E3%83%A9%E3%83%9
+F%E3%83%B3%E3%82%B0/ISSyst
+em/scripts/test-chat-unrea
+d.mjs:526:1
+
+Node.js v24.17.0

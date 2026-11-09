@@ -5,11 +5,11 @@
  *  1. ピックアップ教育ニュースの「すべて見る」ボタン（dash-btn-news-more）は撤廃済み
  *  2. 「記事を共有」ボタン（dash-btn-news-share）が同じ位置に存在する
  *  3. クリックで #news-share-modal（モーダル規約: modal-overlay > modal-card > modal-header + modal-form + modal-footer）が開く
- *  4. 記事URLが空では送信しない（エラートースト表示、モーダルは開いたまま、POST 発生なし）
- *  5. URL入力 → 職員チャットへ共有（スキーマ無しは https:// を補完、チャンネル選択が効く）
- *  6. 共有後はモーダルが閉じ、成功トーストとチャットタブへ遷移、サーバー側にも実メッセージが残る
- *  7. 共有先を「掲示板」へ切り替えるとチャンネル選択は隠れ、掲示対象日（今日）が表示される
- *  8. 掲示板共有は「【参考記事】+URL+対象日」で POST され、掲示一覧に実データとして現れる
+ *  4. モーダルの入力欄は記事URLだけ（タイトル・ひとこと・共有先・チャンネル選択・掲示対象日は撤廃）
+ *  5. 記事URLが空では送信しない（エラートースト表示、モーダルは開いたまま、POST 発生なし）
+ *  6. URL入力 → 職員チャットへ共有（スキーマ無しは https:// を補完、本文は「【記事共有】+ドメイン名+URL」の2行）
+ *  7. 投稿先は閲覧中の職員チャットチャンネル（/api/chat/channels/:id/messages）
+ *  8. 共有後はモーダルが閉じ、成功トーストとチャットタブへ遷移、サーバー側にも実メッセージが残る
  *  9. フッター「閉じる」と ESC キーで閉じられる（全モーダル共通規約）
  * 10. 背景クリック規則: モーダル内で押し開始→背景で離すと閉じない、背景で押し開始→閉じる
  * 11. ボタン・モーダルの Lucide アイコンが SVG として実描画される
@@ -90,20 +90,20 @@ check('「すべて見る」ボタン（dash-btn-news-more）は撤廃済み', !
 check('「記事を共有」ボタンが同じ位置に存在する', btnInfo.shareExists && btnInfo.shareText.includes('記事を共有'), btnInfo);
 check('モーダル規約（X・フッター閉じる）が揃っている', btnInfo.modalExists && btnInfo.hasCloseX && btnInfo.footerCloseCount >= 1, btnInfo);
 
-// ---- 3. クリックでモーダルが開く ----
+// ---- 3,4. クリックでモーダルが開き、入力欄は記事URLだけ ----
 await page.click('#dash-btn-news-share');
 await sleep(600);
 const opened = await page.evaluate(() => ({
   open: !document.getElementById('news-share-modal').classList.contains('hidden'),
   urlPlaceholder: document.getElementById('news-share-url')?.placeholder,
-  channelOptionCount: document.querySelectorAll('#news-share-channel option').length,
-  channelHidden: document.getElementById('news-share-channel-wrap')?.classList.contains('hidden'),
-  dateHidden: document.getElementById('news-share-date-wrap')?.classList.contains('hidden'),
+  inputIds: [...document.querySelectorAll('#news-share-form input, #news-share-form select, #news-share-form textarea')].map((e) => e.id),
+  submitCount: document.querySelectorAll('#news-share-form button[type="submit"]').length,
   focusedId: document.activeElement?.id,
 }));
 check('クリックで共有モーダルが開く', opened.open, opened);
 check('URL入力欄がフォーカスされる', !!opened.urlPlaceholder && opened.focusedId === 'news-share-url', opened);
-check('チャットモードではチャンネル一覧が取得済み（対象日は隠れ）', opened.channelOptionCount > 0 && !opened.channelHidden && opened.dateHidden, opened);
+check('入力欄は記事URLだけ（タイトル・ひとこと・共有先・チャンネル選択・掲示対象日は撤廃）',
+  opened.inputIds.length === 1 && opened.inputIds[0] === 'news-share-url' && opened.submitCount === 1, opened);
 
 // ---- 4. URL 空の送信は禁止 ----
 await page.click('#news-share-form button[type="submit"]');
@@ -116,22 +116,24 @@ check('URL 空では POST が発生しない', posts.length === 0, posts);
 check('URL 空ではエラートースト表示、モーダルは開いたまま', afterEmpty.open && afterEmpty.toasts.some((t) => t.includes('URL')), afterEmpty);
 
 
-// ---- 5,6. 職員チャットへ共有（スキーマ無しURLは https:// 補完） ----
+// ---- 5,6,7,8. 職員チャットへ共有（スキーマ無しURLは https:// 補完・本文は2行・閲覧中チャンネルへ） ----
 await page.type('#news-share-url', 'mext.go.jp/b_menu/happou/20261107.html');
-await page.type('#news-share-title', '生成AI活用の新ガイドライン');
-await page.type('#news-share-note', '校内のICT整備の参考に');
 await page.click('#news-share-form button[type="submit"]');
 await sleep(1200);
 
 const chatPost = posts.find((p) => p.endpoint.includes('/chat/channels/'));
-check('URLが https:// に補完されタイトル・ひとこと共に本文化',
-  !!chatPost?.body?.messageText
-    && chatPost.body.messageText.includes('https://mext.go.jp/b_menu/happou/20261107.html')
-    && chatPost.body.messageText.includes('生成AI活用の新ガイドライン')
-    && chatPost.body.messageText.includes('校内のICT整備'),
+check('URLが https:// へ補完され、本文は「【記事共有】+ドメイン名+URL」の2行（ひとこと欄は無い）',
+  chatPost?.body?.messageText === '【記事共有】mext.go.jp\nhttps://mext.go.jp/b_menu/happou/20261107.html',
   chatPost?.body?.messageText);
-check('選択チャンネルへ送信（/api/chat/channels/:id/messages）',
-  !!chatPost && /^\/api\/chat\/channels\/[A-Za-z0-9_-]+\/messages$/.test(chatPost.endpoint), chatPost?.endpoint);
+
+// 投稿先は閲覧中の職員チャットチャンネル（チャットサイドバーの active なチャンネル）
+const activeChannelId = await page.evaluate(() =>
+  document.querySelector('#chat-channels-list [data-channel-id].active')?.getAttribute('data-channel-id') || null);
+const postChannelId = chatPost ? decodeURIComponent(chatPost.endpoint.split('/')[4]) : null;
+check('投稿先は閲覧中の職員チャットチャンネル（/api/chat/channels/:id/messages）',
+  !!chatPost && /^\/api\/chat\/channels\/[A-Za-z0-9_-]+\/messages$/.test(chatPost.endpoint)
+  && !!activeChannelId && postChannelId === activeChannelId,
+  { endpoint: chatPost?.endpoint, activeChannelId, postChannelId });
 
 const afterChat = await page.evaluate(() => ({
   open: !document.getElementById('news-share-modal').classList.contains('hidden'),
@@ -141,54 +143,15 @@ const afterChat = await page.evaluate(() => ({
 check('共有後モーダルが閉じチャットタブへ遷移・成功トースト',
   !afterChat.open && afterChat.activeView === 'view-chat' && afterChat.toasts.some((t) => t.includes('職員チャットへ記事を共有')), afterChat);
 
-const chatMsgs = await page.evaluate(async () => {
+const chatMsgs = await page.evaluate(async (cid) => {
   const m = await import('/js/api.js');
-  const res = await m.apiGet('/chat/channels/general/messages');
+  const res = await m.apiGet(`/chat/channels/${cid}/messages`);
   const list = res.messages || res.data || (Array.isArray(res) ? res : []);
   return list.map((x) => String(x.content || x.messageText || x.text || ''));
-});
+}, postChannelId);
 // メッセージは created_at 昇順なので共有メッセージは末尾側にある
-check('サーバー実データ: 職員全体チャットに共有メッセージが登録されている', chatMsgs.some((t) => t.includes('https://mext.go.jp/')), chatMsgs.slice(-2));
-
-// ---- 7,8. 掲示板モード ----
-await openShare();
-await page.select('#news-share-target', 'bulletin');
-await sleep(300);
-const fieldState = await page.evaluate(() => ({
-  channelHidden: document.getElementById('news-share-channel-wrap').classList.contains('hidden'),
-  dateHidden: document.getElementById('news-share-date-wrap').classList.contains('hidden'),
-  dateValue: document.getElementById('news-share-date').value,
-}));
-check('掲示板モードではチャンネル選択が隠れ、掲示対象日（今日）が表示',
-  fieldState.channelHidden && !fieldState.dateHidden && /^\d{4}-\d{2}-\d{2}$/.test(fieldState.dateValue), fieldState);
-
-await page.type('#news-share-url', 'https://www.nikkei.com/article/DGXZQOUC07TEST/');
-await page.type('#news-share-title', '教員の働き方改革のモデル事例');
-await page.click('#news-share-form button[type="submit"]');
-await sleep(1200);
-
-const bulPost = posts.find((p) => p.endpoint === '/api/bulletins');
-check('掲示板共有は「【参考記事】+URL+対象日」でPOST',
-  !!bulPost?.body?.title?.startsWith('【参考記事】')
-    && bulPost.body.content.includes('https://www.nikkei.com/')
-    && bulPost.body.targetDate === fieldState.dateValue,
-  bulPost?.body);
-
-const afterBul = await page.evaluate(() => ({
-  open: !document.getElementById('news-share-modal').classList.contains('hidden'),
-  activeView: document.querySelector('.tab-view:not(.hidden)')?.id,
-  toasts: [...document.querySelectorAll('#toast-container .toast')].map((t) => t.textContent.replace(/\s+/g, ' ').trim()),
-}));
-check('掲示板共有後モーダルが閉じ掲示板タブへ遷移・成功トースト',
-  !afterBul.open && afterBul.activeView === 'view-bulletin' && afterBul.toasts.some((t) => t.includes('掲示板へ記事を共有')), afterBul);
-
-const bulTitles = await page.evaluate(async () => {
-  const m = await import('/js/api.js');
-  const res = await m.apiGet('/bulletins', { limit: 20 });
-  const list = res.bulletins || (Array.isArray(res) ? res : []);
-  return list.slice(0, 6).map((b) => String(b.title || ''));
-});
-check('サーバー実データ: 掲示板一覧に共有記事が現れる', bulTitles.some((t) => t.includes('【参考記事】')), bulTitles.slice(0, 2));
+check('サーバー実データ: 閲覧中の職員チャットチャンネルに共有メッセージが登録されている',
+  chatMsgs.some((t) => t.includes('https://mext.go.jp/')), chatMsgs.slice(-2));
 
 // ---- 9. 閉じるボタン・ESC（全モーダル共通ルール） ----
 await openShare();

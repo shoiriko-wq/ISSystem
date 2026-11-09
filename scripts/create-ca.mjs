@@ -7,11 +7,15 @@
  * ルートCA・サーバー証明書の双方に SAN（SSL_HOSTS と同一のホスト名/IP）を付与する。
  *
  * 実行:  npm run cert:gen            # 未存在時のみ生成（冪等）
- *        npm run cert:gen -- --force # 既存があっても再生成
+ *        npm run cert:gen -- --force # 既存があっても CA も含め一切を再生成
+ *        npm run cert:gen -- --server-only # 既存ルートCAを再利用しサーバー証明書のみ再署名
+ *          （SAN=SSL_HOSTS 変更時に推奨。CA が変わらないため端末の信頼ストア設定は有効のまま）
  *
- * 環境変数:
+ * 環境変数（.env から読む。シェル環境変数が優先）:
  *   SSL_DIR   = 出力ディレクトリ (既定: ./certs)
  *   SSL_HOSTS = 証明書のSANに含めるホスト/IP (既定: localhost,issystem.local,127.0.0.1,::1)
+ *              LAN 端末が https://IP:3443 を開くにはその IPv4 を必ず含める必要がある
+ *              （SAN 不一致はブラウザが警告なしで接続を拒否する）。IP は静态化（DHCP固定）を推奨。
  */
 
 import { execFileSync } from 'node:child_process';
@@ -19,8 +23,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// .env を読む（シェル環境変数が優先: override: false）。
+// サーバー側の設定（config/default.js）と証明書 SAN（SSL_HOSTS）を单一来源に揃え、
+// `npm run cert:gen` が .env の LAN IP を SAN に反映できるようにする。
+dotenv.config({ path: path.join(ROOT, '.env'), override: false, quiet: true });
 const CERT_DIR = process.env.SSL_DIR ? path.resolve(ROOT, process.env.SSL_DIR) : path.join(ROOT, 'certs');
 
 const rawHosts = (process.env.SSL_HOSTS || 'localhost,issystem.local,issystem,127.0.0.1,::1')
@@ -109,6 +118,10 @@ const openssl = (args) => {
 
 const main = () => {
   const force = process.argv.includes('--force');
+  // --server-only: 既存のルートCA（issystem-ca.key / issystem-ca.crt）を再利用し、
+  // サーバー証明書だけを SAN（SSL_HOSTS）付きで再署名する。CA を再生成しないため
+  // 各端末の信頼ストア設定はそのまま有効（SAN 変更の推奨経路）。
+  const serverOnly = process.argv.includes('--server-only');
 
   console.log('====================================================');
   console.log('ISSystem プライベートCA / サーバー証明書 生成');
@@ -116,8 +129,16 @@ const main = () => {
   console.log(`出力ディレクトリ: ${CERT_DIR}`);
   console.log(`SANホスト: ${rawHosts.join(', ')}`);
 
-  if (fs.existsSync(CA_CRT) && fs.existsSync(SRV_PEM) && !force) {
-    console.log('✅ 証明書は既に存在します。再生成する場合は `npm run cert:gen -- --force` を実行してください。');
+  if (serverOnly && (!fs.existsSync(CA_KEY) || !fs.existsSync(CA_CRT))) {
+    console.error('❌ --server-only には既存のルートCA (certs/issystem-ca.key / issystem-ca.crt) が必要です。');
+    console.error('   初回は `npm run cert:gen` でルートCA とサーバー証明書を生成してください。');
+    process.exit(1);
+  }
+
+  if (fs.existsSync(CA_CRT) && fs.existsSync(SRV_PEM) && !force && !serverOnly) {
+    console.log('✅ 証明書は既に存在します。');
+    console.log('   SAN（SSL_HOSTS）だけ変更する: `npm run cert:gen -- --server-only`（CA は再利用）');
+    console.log('   一切を再生成する（CA も交換）: `npm run cert:gen -- --force`（全端末の信頼ストア再設定が必要）');
     printInfo();
     return;
   }
@@ -126,22 +147,26 @@ const main = () => {
   fs.chmodSync(CERT_DIR, 0o755);
 
   // 1. ルートCA（自己署名・CA拡張・SAN付き）
-  console.log('[1/4] ルートCA を生成中...');
-  openssl([
-    'req', '-x509', '-newkey', 'rsa:2048', '-sha256', '-days', String(CA_DAYS), '-nodes',
-    '-keyout', CA_KEY,
-    '-out', CA_CRT,
-    '-subj', CA_SUBJECT,
-    // SAN を CA にも付与する（サーバー証明書と同じホスト名/IP。信頼ストアや
-    // SAN を要求するツールが CA を拒否しないため）
-    '-addext', `subjectAltName=${sanItems.join(',')}`,
-    '-addext', 'basicConstraints=critical,CA:TRUE,pathlen:0',
-    '-addext', 'keyUsage=critical,keyCertSign,cRLSign',
-  ]);
-  fs.chmodSync(CA_KEY, 0o600);
-  fs.chmodSync(CA_CRT, 0o644);
-  // 旧来名 issystem-ca.pem は常に .crt と同一内容に保つ（古いCAの取り残しを防ぐ）
-  fs.copyFileSync(CA_CRT, CA_PEM);
+  if (serverOnly) {
+    console.log('[1/4] ルートCA は既存のまま再利用します（--server-only）');
+  } else {
+    console.log('[1/4] ルートCA を生成中...');
+    openssl([
+      'req', '-x509', '-newkey', 'rsa:2048', '-sha256', '-days', String(CA_DAYS), '-nodes',
+      '-keyout', CA_KEY,
+      '-out', CA_CRT,
+      '-subj', CA_SUBJECT,
+      // SAN を CA にも付与する（サーバー証明書と同じホスト名/IP。信頼ストアや
+      // SAN を要求するツールが CA を拒否しないため）
+      '-addext', `subjectAltName=${sanItems.join(',')}`,
+      '-addext', 'basicConstraints=critical,CA:TRUE,pathlen:0',
+      '-addext', 'keyUsage=critical,keyCertSign,cRLSign',
+    ]);
+    fs.chmodSync(CA_KEY, 0o600);
+    fs.chmodSync(CA_CRT, 0o644);
+    // 旧来名 issystem-ca.pem は常に .crt と同一内容に保つ（古いCAの取り残しを防ぐ）
+    fs.copyFileSync(CA_CRT, CA_PEM);
+  }
 
   // 2. サーバー鍵 + CSR
   console.log('[2/4] サーバー鍵・CSR を生成中...');
@@ -194,10 +219,16 @@ const main = () => {
 
   console.log('');
   console.log('【次のステップ】');
-  console.log(`  1. 端末の信頼ストアに ${path.relative(ROOT, CA_CRT)} をインストール（ブラウザ/OS/Node）`);
-  console.log('     - Windows: .crt をダブルクリック →「信頼されたルート」にインストール');
-  console.log('     - macOS:   開いて「環境」で常時信頼');
-  console.log('     - Node:    NODE_EXTRA_CA_CERTS=./certs/issystem-ca.crt');
+  if (serverOnly) {
+    console.log('  1. ルートCA は変更していません（指紋は不変）。各端末の信頼ストア設定は有効のまま。');
+    console.log(`     サーバー証明書 SAN: ${rawHosts.join(', ')}`);
+    console.log('     → サーバーを再起動し、ブラウザで https://<SANのホスト/IP>:3443/ を開く。');
+  } else {
+    console.log(`  1. 端末の信頼ストアに ${path.relative(ROOT, CA_CRT)} をインストール（ブラウザ/OS/Node）`);
+    console.log('     - Windows: .crt をダブルクリック →「信頼されたルート」にインストール');
+    console.log('     - macOS:   開いて「環境」で常時信頼');
+    console.log('     - Node:    NODE_EXTRA_CA_CERTS=./certs/issystem-ca.crt');
+  }
   console.log('  2. サーバーを起動: npm start （HTTPS: 3443, 非HTTPはCAダウンロードページを表示）');
 };
 

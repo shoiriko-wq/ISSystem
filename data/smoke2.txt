@@ -1,0 +1,56 @@
+LOGIN 200 KEYS success,message,token,user
+LOGIN_BODY {"success":true,"message":"ログインに成功しました。","token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6Imt5b211MDEiLCJzdGFmZl9jb2RlIjoiVDIwMjYwMDEiLCJuYW1lIjoi5pWZ5YuZIOS4u-S7uyIsInJvbGUiOiJLWU9NVSIsImlzX2t5b211Ijp0cnVlLCJkZXBhcnRtZW50Ijoi5pWZ5YuZ6YOoIiwic3ViamVjdHMiOltdLCJpYXQiOjE3OTQxOTk0NDIsImV4cCI6MTc5NDI4NTg0Mn0.j9ZEs8A-aD3MPyG49a6lJykX3cYAVgzpqVRfJLe5cF0","user":{"id":"kyomu01","staff_code":"T202600
+FACILITY_IDS fac_4,fac_1,fac_6,fac_5 (count=17)
+GET /facilities/daily-overview?date=2026-11-20 -> 200 {"success":true,"targetDate":"2026-11-20","facilitiesOverview":[{"facility":{"id":"fac_4","name":"応接室","category":"ROOM","sort_order":0,"facility_id":"fac_4","f
+GET /bulletins -> 200 {"success":true,"count":10,"data":[{"id":"post_2","title":"避難訓練の実施要項および各クラスの避難経路確認","content":"来週火曜日の6限に全校避難訓練を実施します。各担任の先生は事前に生徒へ非常口および避難経路の周知を行ってください。","autho
+GET /chat/channels -> 200 {"success":true,"count":7,"data":[{"id":"chat_1794197882995_v1p8p","name":"【決裁協議】Jest決裁申請","type":"WORKFLOW","members":[],"created_at":"2026-11-08T19:18:02.000Z
+GET /approvals -> 200 {"success":true,"count":6,"approvals":[{"id":"apr_1","title":"職員室用 大型プリンター導入 (10月)","category":"PURCHASE","description":"印刷コスト削減のためA3対応機を導入。2社相見積。","amount":"24
+POST /facilities/reservations -> 201 {"success":true,"message":"施設予約が完了しました。","reservation":{"id":"res_1794199442283_ppl04","resource_id":"fac_4","facility_id":"fac_4","user_id":"kyomu01","user_name":"教務 主任","title":"API確認予約","target_date":"2026-12-19","sta
+POST /facilities/reservations -> 409 {"success":false,"message":"指定された時間帯 (15:00〜16:00) は既存予約「API確認予約」（予約者: 教務 主任）と時間帯が重複しています。"}
+DELETE /facilities/reservations/res_1794199442283_ppl04 -> 200 {"success":true,"message":"予約をキャンセルしました。"}
+RESERVATION_CHECK OK (201 → 409)
+POST /auth/generate-invitation -> 201 {"success":true,"message":"招待コードを発行しました。(有効期限: 24時間 / 新規登録・パスワード再設定のどちらでも利用可能)","code":"9986E3547D6DDBAE21D7DCB1C83F5CA3","expiresAt":"2026-11-10T04:44:02.324Z","createdBy":"教務 主任","invitation":{"code":"9986E3547D6DDBAE2
+INVITATION_CODE_CHECK OK (9986E3547D6DDBAE21D7DCB1C83F5CA3)
+POST /auth/reset-password-invitation -> 404 {"success":false,"error":"この教職員番号のアカウントは登録されていません。「招待コードで新規登録」タブで登録してください。","stack":"ApiError: この教職員番号のアカウントは登録されていません。「招待コードで新規登録」タブで登録してください。\n at Object.resetPasswordWithInvitation (file:///C:/Users/%E5%85%A5%E6%B1%9F
+RESET_PASSWORD_CHECK OK (未登録教職員番号は 404)
+POST /approvals -> 201 {"success":true,"message":"決裁申請を起案しました。(協議専用チャットが自動生成されました)","approval":{"id":"approval_1794199442355_lnq75","title":"API決裁申請確認","category":"PURCHASE","description":"スモークテストによる自動生成申請","amount":"15000.00","applicant_id":"
+GET /approvals/approval_1794199442355_lnq75 -> 200 {"success":true,"approval":{"id":"approval_1794199442355_lnq75","title":"API決裁申請確認","category":"PURCHASE","description":"スモークテストによる自動生成申請","amount":"15000.00","
+PUT /approvals/approval_1794199442355_lnq75/process -> 200 {"success":true,"message":"決裁申請を承認しました。","approval":{"id":"approval_1794199442355_lnq75","title":"API決裁申請確認","category":"PURCHASE","description":"スモークテストによる自動生成申請","amount":"15000.00","applicant_id":"kyomu01","approver_i
+GET /auth/me -> 200 {"success":true,"user":{"id":"kyomu01","staff_code":"T2026001","name":"教務 主任","email":"","role":"KYOMU","is_kyomu":true,"department":"教務部","subjects":[],"status
+GET /users -> 200 {"success":true,"users":[{"id":"sys-admin","staff_code":"T2026000","email":"admin@school.ed.jp","name":"システム 管理者","role":"ADMIN","grade":"NONE","department":"シス
+GET /bulletins/post_1 -> 200 {"success":true,"data":{"id":"post_1","title":"【教務部】中間考査採点票の提出期限について","content":"中間考査の全科目採点票の最終締め切りは明後日17時です。未提出の教科・学年はお早めに教務部へご提出ください。","author_id":"kyomu01","
+GET /chat/channels/kyomu/messages -> 200 {"success":true,"count":2,"data":[{"id":"msg_1","channel_id":"kyomu","sender_id":"kyomu01","message":"先生方、お疲れ様です。本日の定例打ち合わせは16:30から第一会議室にて行います。","is_cancelled":
+GET /chat/channels/kyomu/members -> 200 {"success":true,"count":2,"data":[{"channel_id":"kyomu","user_id":"kyomu01","is_hidden":0,"joined_at":"2026-11-09T04:17:55.907Z","user_name":"教務 主任","role":"KYO
+GET /facilities/fac_4/reservations?date=2026-11-20 -> 200 {"success":true,"reservations":[],"data":[]}
+GET /schedules -> 200 {"success":true,"startDate":"2026-11-01","endDate":"2026-11-30","targetGrade":null,"categoryIds":[],"count":0,"data":[],"schedules":[]}
+GET /schedules/categories -> 200 {"success":true,"count":7,"data":[{"id":1,"name":"教務部","color_key":"ACCENT","sort_order":1,"event_count":1},{"id":2,"name":"生徒指導部","color_key":"DANGER","sort_or
+GET /schedules/today -> 200 {"success":true,"date":"2026-11-09","count":0,"data":[],"timeline":[]}
+GET /seating/layouts -> 200 {"success":true,"count":5,"layouts":[{"id":"staff_room","name":"職員室メイン配置図","rows":6,"cols":8,"is_active":true,"seats":[{"id":"seat_1","user_id":"kyomu01","desk_
+GET /seating/master -> 200 {"success":true,"count":5,"layouts":[{"id":"staff_room","name":"職員室メイン配置図","rows":6,"cols":8,"is_active":true,"seats":[{"id":"seat_1","user_id":"kyomu01","desk_
+GET /exam -> 200 {"success":true,"message":null,"data":{"master":{"id":"exam_2026_1","title":"2026年度 1学期中間考査","start_date":"2026-10-15","end_date":"2026-10-17","days_count":3,"d
+GET /exam/masters -> 200 {"success":true,"message":null,"data":[{"id":"exam_2026_1","title":"2026年度 1学期中間考査","start_date":"2026-10-15","end_date":"2026-10-17","days_count":3,"daily_slot
+GET /news/dashboard-widget -> 200 {"success":true,"data":{"educationNews":[{"id":"news_1","title":"文部科学省：令和8年度 ICT活用指導力向上のための教員研修ガイドライン改定","source":"文部科学省 ニュース","publishedAt":"2026-11-09T04:43:0
+GET /audit/logs -> 200 {"success":true,"logs":[{"id":"6671","user_id":"kyomu01","user_name":null,"action":"APPROVE_REQUEST","resource_type":"APPROVAL","resource_id":"approval_17941994
+POST /bulletins -> 201 {"success":true,"message":"掲示・回覧を新規投稿しました。","data":{"title":"API確認掲示","content":"スモークテストによる自動生成投稿","author_id":"kyomu01","authorId":"kyomu01","authorName":"教務 主任","author_name":"教務 主任","displayStart":"2026-11-09","displa
+POST /bulletins/post_1794199442666_ftarl/comments -> 201 {"success":true,"message":"コメントを投稿しました。","data":{"id":"cmt_1794199442684","bulletin_id":"post_1794199442666_ftarl","author_id":"kyomu01","author_name":"教務 主任","comment_text":"API確認コメント","created_at":"2026-11-09T04:44:02.
+PUT /bulletins/post_1/read -> 200 {"success":true,"message":"既読をつけました。","acknowledgedAt":"2026-11-09 04:44:02","ackCount":4,"ackPercentage":57,"data":{"success":true,"acknowledgedAt":"2026-11-09 04:44:02","ackCount":4,"ackPercentage":57}}
+PUT /bulletins/post_1794199442666_ftarl/approve -> 200 {"success":true,"message":"回覧内容を確認・承認しました。","acknowledgedAt":"2026-11-09 04:44:02","ackCount":1,"ackPercentage":14,"data":{"success":true,"acknowledgedAt":"2026-11-09 04:44:02","ackCount":1,"ackPercentage":14}}
+POST /chat/channels -> 201 {"success":true,"message":"チャットチャンネルを作成しました。","data":{"id":"chat_1794199442713_q37gs","name":"API確認チャンネル","type":"GROUP","created_at":"2026-11-09 04:44:02"},"channel":{"id":"chat_1794199442713_q37gs","name":"API確認チャンネル",
+POST /chat/channels/chat_1794199442713_q37gs/messages -> 201 {"success":true,"message":"メッセージを送信しました。","data":{"id":"msg_1794199442730_z1hk6","channel_id":"chat_1794199442713_q37gs","channelId":"chat_1794199442713_q37gs","sender_id":"kyomu01","senderId":"kyomu01","sender_name":"教務
+GET /chat/channels/chat_1794199442713_q37gs/messages -> 200 {"success":true,"count":1,"data":[{"id":"msg_1794199442730_z1hk6","channel_id":"chat_1794199442713_q37gs","sender_id":"kyomu01","message":"API確認メッセージ","is_cance
+PUT /chat/channels/chat_1794199442713_q37gs/read -> 200 {"success":true,"message":"既読状態を更新しました。","data":{"success":true,"channelId":"chat_1794199442713_q37gs","userId":"kyomu01","recorded":0,"unreadCount":0,"reader":{"id":"kyomu01","name":"教務 主任","avatar_url":null}},"unreadCo
+CATEGORIES 7 1:教務部:ACCENT 2:生徒指導部:DANGER 3:キャリアガイダンス部:INFO 4:特色推進部:PURPLE 5:１学年:SUCCESS 6:２学年:SLATE 7:３学年:WARNING
+CATEGORY_CREATE_BY_ADMIN 403 OK (ADMIN拒否)
+CATEGORY_CREATE_BY_KYOMU 201 OK
+CATEGORY_DELETE_BY_ADMIN 403 OK (ADMIN拒否)
+CATEGORY_UPDATE_BY_ADMIN 403 OK (ADMIN拒否)
+CATEGORY_DELETE_BY_KYOMU 200 OK
+POST /schedules -> 201 {"success":true,"message":"校内行事・スケジュールを登録しました。","data":{"id":"sch_1794199442919_3aatl","title":"API確認予定","description":"","event_date":"2026-12-01","start_time":null,"end_time":null,"category":"MEETING","target_grade":nu
+SCHEDULE_CATEGORY_IDS [1,2] OK (multi)
+GET /schedules?startDate=2026-12-01&endDate=2026-12-01&categoryIds=1 -> 200 {"success":true,"startDate":"2026-12-01","endDate":"2026-12-01","targetGrade":null,"categoryIds":["1"],"count":1,"data":[{"id":"sch_1794199442919_3aatl","title"
+GET /schedules?startDate=2026-12-01&endDate=2026-12-01&categoryIds=2 -> 200 {"success":true,"startDate":"2026-12-01","endDate":"2026-12-01","targetGrade":null,"categoryIds":["2"],"count":1,"data":[{"id":"sch_1794199442919_3aatl","title"
+CATEGORY_FILTER OK (OR条件で除外)
+PUT /schedules/sch_1794199442919_3aatl -> 200 {"success":true,"message":"校内行事・スケジュールを更新しました。","data":{"id":"sch_1794199442919_3aatl","title":"API確認予定(更新)","description":"","event_date":"2026-12-01","start_time":null,"end_time":null,"category":"MEETING","target_grade
+DELETE /schedules/sch_1794199442919_3aatl -> 200 {"success":true,"message":"スケジュールを削除しました。"}
+POST /facilities/reservations -> 201 {"success":true,"message":"施設予約が完了しました。","reservation":{"id":"res_1794199443001_94jak","resource_id":"fac_1","facility_id":"fac_1","user_id":"kyomu01","user_name":"教務 主任","title":"API確認予約B","target_date":"2026-12-05","st
+DELETE /facilities/reservations/res_1794199443001_94jak -> 200 {"success":true,"message":"予約をキャンセルしました。"}

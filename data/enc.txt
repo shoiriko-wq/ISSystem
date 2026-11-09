@@ -1,0 +1,39 @@
+== README.md
+README.md メールボックス false
+README.md 発言者 false
+README.md general チャット false
+README.md 追加の権限 false
+README.md 縦移動 false
+README.md 初回クリック false
+README.md UI十条 true
+README.md スクリーンショット false
+README.md 67.25px true
+README.md 16.3rem true
+README.md NODE_EXTRA_CA_CERTS true
+README.md 斜め移動 false
+== AGENTS.md
+AGENTS.md メールボックス false
+AGENTS.md 発言者 false
+AGENTS.md general チャット false
+AGENTS.md 追加の権限 false
+AGENTS.md 縦移動 false
+AGENTS.md 初回クリック false
+AGENTS.md UI十条 true
+AGENTS.md スクリーンショット false
+AGENTS.md 67.25px true
+AGENTS.md 16.3rem true
+AGENTS.md NODE_EXTRA_CA_CERTS false
+AGENTS.md 斜め移動 false
+== ISSystem仕様書.md
+ISSystem仕様書.md メールボックス false
+ISSystem仕様書.md 発言者 false
+ISSystem仕様書.md general チャット false
+ISSystem仕様書.md 追加の権限 false
+ISSystem仕様書.md 縦移動 false
+ISSystem仕様書.md 初回クリック true
+ISSystem仕様書.md UI十条 false
+ISSystem仕様書.md スクリーンショット false
+ISSystem仕様書.md 67.25px true
+ISSystem仕様書.md 16.3rem true
+ISSystem仕様書.md NODE_EXTRA_CA_CERTS true
+ISSystem仕様書.md 斜め移動 true

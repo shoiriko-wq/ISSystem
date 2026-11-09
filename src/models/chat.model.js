@@ -38,65 +38,69 @@ async function resolveSenderId(senderId) {
 
 export const chatModel = {
   /**
-   * チャンネルIDの正規化エイリアス変換
-   * (フロントエンドの 'chat-all' や 'all' を DB上の 'general' にマッピング)
+   * チャンネルIDの正規化
+   * ★ 2026/11/9 v3.1.2 職員全体（公開）チャット撤廃
+   *   全体チャンネルへのエイリアス変換（chat-all / all / chat_all）を廃止し、
+   *   個人が作成したグループIDのみを受け付ける。
+   * @param {string} channelId
+   * @returns {string}
    */
   normalizeChannelId(channelId) {
-    if (!channelId) return 'general';
-    if (channelId === 'chat-all' || channelId === 'all' || channelId === 'chat_all') return 'general';
     return channelId;
   },
 
   /**
-   * チャンネルIDによる詳細取得
+   * チャンネルIDによる詳細取得（個人作成グループのみ。存在しなければ null）
    * @param {string} channelId
    */
   async findChannelById(channelId) {
     const rawId = channelId;
     const targetId = this.normalizeChannelId(channelId);
 
+    if (!targetId) return null;
+
     if (mockChannels.has(targetId)) return mockChannels.get(targetId);
 
     try {
       const res = await query(`SELECT * FROM chat_channels WHERE id = $1 OR id = $2`, [targetId, rawId]);
-      return res.rows[0] || { id: rawId, name: '📢 全体チャット', type: 'PUBLIC' };
+      return res.rows[0] || null;
     } catch (error) {
-      return { id: rawId, name: '📢 全体チャット', type: 'PUBLIC' };
+      console.warn('[ChatModel] findChannelById fallback:', error.message);
+      return null;
     }
   },
 
   /**
-   * 特定ユーザーが参加・表示権限を持つチャンネル一覧の取得
+   * 特定ユーザーが参加・表示権限を持つグループ一覧の取得
+   * ★ 職員全体チャンネルは撤廃済み。メンバーであるグループのみを返す。
    * @param {string} userId
    */
   async listChannelsForUser(userId = 'kyomu01') {
+    if (!userId) return [];
     try {
       const res = await query(
-        `SELECT DISTINCT c.*, cm.is_hidden, cm.joined_at
+        `SELECT c.*, cm.is_hidden, cm.joined_at
          FROM chat_channels c
-         LEFT JOIN chat_channel_members cm ON c.id = cm.channel_id AND cm.user_id = $1
-         WHERE c.type = 'PUBLIC' OR (cm.user_id = $2 AND (cm.is_hidden IS NULL OR cm.is_hidden = 0))
-         ORDER BY c.created_at ASC`,
-        [userId, userId]
+         JOIN chat_channel_members cm ON c.id = cm.channel_id AND cm.user_id = $1
+         WHERE cm.is_hidden IS NULL OR cm.is_hidden = 0
+         ORDER BY c.created_at ASC, c.id ASC`,
+        [userId]
       );
-      const channels = res.rows;
-
-      if (channels && channels.length > 0) return channels;
+      return res.rows;
     } catch (error) {
       console.warn('[ChatModel PG Warning] listChannelsForUser fallback:', error.message);
     }
 
-    return [
-      { id: 'general', name: '📢 職員全体', type: 'PUBLIC' },
-      { id: 'chat-all', name: '📢 全体チャット', type: 'PUBLIC' },
-      { id: 'grade1', name: '🏫 1年学年部', type: 'GROUP' },
-      { id: 'kyomu', name: '📋 教務部連絡', type: 'GROUP' }
-    ];
+    return [];
   },
 
   /**
    * 新規チャットチャンネルの構築
    * @param {Object} channelData
+   */
+  /**
+   * チャンネル（個人作成グループ）の新規作成
+   * ★ 職員全体（PUBLIC）チャンネルは撤廃済み。既定タイプは GROUP のみ。
    */
   async createChannel(channelData) {
     const id = channelData.id || `chat_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -104,7 +108,7 @@ export const chatModel = {
     const newChannel = {
       id,
       name: channelData.name,
-      type: channelData.type || 'PUBLIC',
+      type: channelData.type || 'GROUP',
       created_at: nowStr
     };
 

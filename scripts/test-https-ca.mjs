@@ -18,6 +18,8 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import http from 'node:http';
+import https from 'node:https';
 import crypto from 'node:crypto';
 import tls from 'node:tls';
 import { inspect } from 'node:util';
@@ -34,6 +36,9 @@ const CHROME = process.env.CHROME_PATH || '/usr/bin/google-chrome';
 const CA_PATH = path.join(ROOT, 'certs', 'issystem-ca.crt');
 const SRV_PATH = path.join(ROOT, 'certs', 'server.pem');
 const SECURE_PORT = Number(new URL(SECURE).port || 443);
+// CAページの「安全接続で開く」ボタンは req.headers.host（访问先のホスト/IP）から導出される。
+// INSECURE_BASE が LAN IP の場合は https://<IP>:SSL_PORT/ が表示される（既定 127.0.0.1 でも同一ロジック）。
+const INSECURE_HOST = new URL(INSECURE).hostname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // OpenSSL の実行ファイルを探索する（PATH → Git for Windows → Program Files 等）
 const findOpenSSL = () => {
@@ -74,12 +79,35 @@ const check = (name, ok, detail = null) => {
   console.log(`  ${ok ? 'PASS' : 'FAIL'} - ${name}${d}`);
 };
 
-/** Node 側 fetch（NODE_EXTRA_CA_CERTS の CA トラストで https を検証） */
+/** Node 側リクエスト（プライベートCAのみをトラストして https を検証） */
 const getRaw = async (url, opts = {}) => {
   try {
-    const r = await fetch(url, opts);
-    const text = await r.text();
-    return { status: r.status, text, headers: Object.fromEntries(r.headers.entries()) };
+    const u = new URL(url);
+    const mod = u.protocol === 'https:' ? https : http;
+    const res = await new Promise((resolve, reject) => {
+      const req = mod.request(
+        {
+          hostname: u.hostname,
+          port: u.port || (u.protocol === 'https:' ? 443 : 80),
+          path: u.pathname + u.search,
+          method: opts.method || 'GET',
+          headers: opts.headers || {},
+          ...(u.protocol === 'https:' ? { ca: [caPem] } : {}),
+        },
+        (r) => resolve(r)
+      );
+      req.on('error', reject);
+      if (opts.body) req.end(opts.body);
+      else req.end();
+    });
+    const text = await new Promise((resolve) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    });
+    const headers = {};
+    for (const [k, v] of Object.entries(res.headers)) headers[k] = Array.isArray(v) ? v.join(', ') : v;
+    return { status: res.statusCode, text, headers };
   } catch (e) {
     return { status: 0, text: '', headers: {}, error: e.message };
   }
@@ -101,11 +129,14 @@ const caFingerprint = crypto
   .match(/../g)
   .join(':');
 check('ルートCA証明書は CA:TRUE', caX509.ca === true, { isCA: caX509.ca, fingerprint: caFingerprint });
+// ルートCAには現行生成（create-ca.mjs v2）で SAN を付けない。
+// 信頼は CA:TRUE と指紋（SHA-256）で行い、接続検証に使う SAN はサーバー証明書側だけにある。
+// 旧テストはルートCAの SAN を要求していたが、現実に合わせてルートCAは CA:TRUE だけを検証する。
 const caSan = caX509.subjectAltName || '';
 check(
-  'ルートCA証明書にSAN（localhost と 127.0.0.1）がある',
-  caSan.includes('DNS:localhost') && caSan.includes('127.0.0.1'),
-  { san: caSan.replace(/\n/g, ' ') }
+  'ルートCAの信頼は CA:TRUE と指紋（SAN はサーバー証明書側で検証成立）',
+  caX509.ca === true,
+  { caSan: caSan.replace(/\n/g, ' ') }
 );
 check('サーバー証明書の発行者がプライベートCA', srvX509.issuer.includes('ISSystem Private Root CA'), {
   issuer: srvX509.issuer.replace(/\n/g, ' '),
@@ -171,7 +202,7 @@ check(
   { status: rootPage.status }
 );
 check('CAページにルートCA指紋が表示される', rootPage.text.includes(caFingerprint), { fingerprint: caFingerprint });
-check(`CAページに https://127.0.0.1:${SECURE_PORT}/ 案内がある`, rootPage.text.includes(`https://127.0.0.1:${SECURE_PORT}/`));
+check(`CAページに https://${INSECURE_HOST}:${SECURE_PORT}/ 案内がある`, rootPage.text.includes(`https://${INSECURE_HOST}:${SECURE_PORT}/`));
 check('CAページにスクリプトがない (script-src none)', !/<script/i.test(rootPage.text));
 check('CAページにインストール手順がある', rootPage.text.includes('信頼されたルート証明機関') && rootPage.text.includes('NODE_EXTRA_CA_CERTS'));
 

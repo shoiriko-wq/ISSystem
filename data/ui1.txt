@@ -1,0 +1,41 @@
+
+> issystem@1.0.0 test:ui:https
+> node scripts/test-https-ca.mjs
+
+SECURE=https://127.0.0.1:3443  INSECURE=http://127.0.0.1:3000
+  PASS - CA証明書とサーバー証明書が存在する
+  PASS - ルートCA証明書は CA:TRUE -> {"isCA":true,"fingerprint":"1C:93:24:C5:E9:52:C2:30:35:2A:AE:DC:78:C8:B5:BC:0A:26:F7:A6:F2:51:59:97:A4:8E:B5:FE:7C:50:4B:BE"}
+  FAIL - ルートCA証明書にSAN（localhost と 127.0.0.1）がある -> {"san":""}
+  PASS - サーバー証明書の発行者がプライベートCA -> {"issuer":"C=JP O=ISSystem OU=Staff Room Net CN=ISSystem Private Root CA"}
+  PASS - サーバー証明書のSANに localhost と 127.0.0.1 -> {"san":"DNS:localhost, DNS:issystem.local, DNS:issystem, IP Address:127.0.0.1, IP Address:0:0:0:0:0:0:0:1, IP Address:172.29.128.50"}
+  PASS - openssl verify でサーバー証明書が OK -> {"verify":"C:\\Users\\入江田　承\\Documents\\プログラミング\\ISSystem\\certs\\server.pem: OK"}
+  PASS - TLS接続がプライベートCAのみで信頼される (authorized) -> {"authorized":true,"reason":null}
+  PASS - TLSチェーンの発行者がプライベートCA -> {"issuer":"[Object: null prototype] {   C: 'JP',   O: 'ISSystem',   OU: 'Staff Room Net',   CN: 'ISSystem Private Root CA' }"}
+  PASS - 提示されたサーバー証明書が certs/server.pem と一致 -> {"certMatches":true}
+  PASS - HTTPS health が CAトラストのみで 200 ONLINE -> {"status":200}
+  PASS - HTTPS でログインできる (CAトラストのみ) -> {"status":200}
+  PASS - 非HTTPのルートはCAダウンロードページを表示 -> {"status":200}
+  PASS - CAページにルートCA指紋が表示される -> {"fingerprint":"1C:93:24:C5:E9:52:C2:30:35:2A:AE:DC:78:C8:B5:BC:0A:26:F7:A6:F2:51:59:97:A4:8E:B5:FE:7C:50:4B:BE"}
+  PASS - CAページに https://127.0.0.1:3443/ 案内がある
+  PASS - CAページにスクリプトがない (script-src none)
+  PASS - CAページにインストール手順がある
+  PASS - 非HTTPのAPIは 426 Upgrade Required で拒否 -> {"status":426}
+  PASS - アプリ画面は非HTTPで提供されない (CAページへ置換) -> {"status":200}
+  PASS - CA証明書をHTTPでダウンロードできる -> {"status":200}
+  PASS - CAダウンロードは attachment ファイル名付き -> {"contentDisposition":"attachment; filename=issystem-ca.crt"}
+  PASS - ダウンロードCAがルートCAと完全一致
+  PASS - HTTPSでも /ca ページが利用できる -> {"status":200}
+  PASS - HTTPSでアプリ画面 (index.html) が表示される -> {"url":"https://127.0.0.1:3443/"}
+  PASS - ブラウザは wss://（WebSocket Secure）で接続している -> {"connected":true,"transport":"websocket","uri":"https://127.0.0.1:3443","proto":"https:"}
+  PASS - アプリ内のAPI呼び出しは https 相対で機能 -> {"status":200,"proto":"https:"}
+  PASS - 非HTTPポートでは plain ws/socket 接続が確立しない -> {"reason":"xhr poll error"}
+  PASS - ページに未捕获JSエラーがない -> {"pageErrors":[]}
+=== REPORT ===
+{
+  "secure": "https://127.0.0.1:3443",
+  "insecure": "http://127.0.0.1:3000",
+  "caFingerprint": "1C:93:24:C5:E9:52:C2:30:35:2A:AE:DC:78:C8:B5:BC:0A:26:F7:A6:F2:51:59:97:A4:8E:B5:FE:7C:50:4B:BE",
+  "failures": [
+    "ルートCA証明書にSAN（localhost と 127.0.0.1）がある"
+  ]
+}

@@ -48,17 +48,17 @@ const dummyAcknowledgements = [
   { id: 'ack_4', post_id: 'post_2', user_id: 'kyomu01', status: 'READ', comment: null, acknowledged_at: `${seedDay(0)} 16:05:00` }
 ];
 
-// 4. チャットチャンネル
+// 4. チャットチャンネル（★ 職員全体チャット撤廃 2026/11/9 v3.1.2: 個人が作成したグループのみ）
 const dummyChannels = [
-  { id: 'general', name: '📢 職員全体', type: 'PUBLIC', members: ['kyomu01', 't-tanaka', 't-sato', 't-suzuki', 't-takahashi'] },
   { id: 'grade1', name: '🏫 1年学年部', type: 'GROUP', members: ['t-tanaka', 't-takahashi'] },
-  { id: 'kyomu', name: '📋 教務部連絡', type: 'GROUP', members: ['kyomu01'] }
+  { id: 'kyomu', name: '📋 教務部連絡', type: 'GROUP', members: ['kyomu01', 't-tanaka'] },
+  { id: 'suisin', name: '🧭 進路指導連絡', type: 'GROUP', members: ['kyomu01', 't-sato'] }
 ];
 
 // 5. チャットメッセージ
 const dummyMessages = [
-  { id: 'msg_1', channel_id: 'general', sender_id: 'kyomu01', message: '先生方、お疲れ様です。本日の定例打ち合わせは16:30から第一会議室にて行います。', created_at: '2026-10-15 08:15:00' },
-  { id: 'msg_2', channel_id: 'general', sender_id: 't-tanaka', message: '了解いたしました。生徒指導部からの配付資料を持参いたします。', created_at: '2026-10-15 08:20:00' },
+  { id: 'msg_1', channel_id: 'kyomu', sender_id: 'kyomu01', message: '先生方、お疲れ様です。本日の定例打ち合わせは16:30から第一会議室にて行います。', created_at: '2026-10-15 08:15:00' },
+  { id: 'msg_2', channel_id: 'kyomu', sender_id: 't-tanaka', message: '了解いたしました。生徒指導部からの配付資料を持参いたします。', created_at: '2026-10-15 08:20:00' },
   { id: 'msg_3', channel_id: 'grade1', sender_id: 't-tanaka', message: '明日の1学年集会の移動経路について、体育館前廊下が混雑しないよう確認お願いします。', created_at: '2026-10-15 09:00:00' }
 ];
 

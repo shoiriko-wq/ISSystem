@@ -49,8 +49,9 @@ export const chatService = {
     const members = await chatModel.getMembers(channelId);
     const isMember = members.some((m) => m.user_id === userId);
 
-    if (!isMember && channel.type !== 'PUBLIC') {
-      throw new ApiError(403, 'このチャットチャンネルの閲覧権限がありません。');
+    // ★ 職員全体チャット撤廃（2026/11/9 v3.1.2）: グループメンバーのみが閲覧できる
+    if (!isMember) {
+      throw new ApiError(403, 'このチャットグループのメンバーではないため、閲覧権限がありません。');
     }
 
     const messages = await chatModel.getMessages(channelId, limit);
@@ -104,12 +105,12 @@ export const chatService = {
 
     const senderId = senderUser?.id || senderUser?.staff_code || messageData.sender_id || 'kyomu01';
 
-    // セキュリティ配慮：非公開（GROUP/WORKFLOW等）チャンネルの場合、送信者がメンバーに含まれているか検証
-    if (channel.type !== 'PUBLIC' && senderId !== 'SYSTEM') {
+    // ★ 職員全体チャット撤廃（2026/11/9 v3.1.2）: 個人作成グループのメンバーのみが送信できる
+    if (senderId !== 'SYSTEM') {
       const members = await chatModel.getMembers(channelId);
       const isMember = members.some((m) => m.user_id === senderId);
       if (!isMember) {
-        throw new ApiError(403, 'このプライベートチャットグループのメンバーではないため、メッセージを送信できません。');
+        throw new ApiError(403, 'このチャットグループのメンバーではないため、メッセージを送信できません。');
       }
     }
 
@@ -183,7 +184,7 @@ export const chatService = {
 
     const newChannel = await chatModel.createChannel({
       name: channelData.name.trim(),
-      type: channelData.type || 'PRIVATE',
+      type: channelData.type || 'GROUP',
       memberIds: Array.from(initialMembers),
     });
 
@@ -276,18 +277,14 @@ export const chatService = {
   },
 
   /**
-   * チャンネルの削除（公開チャンネルは削除不可、参加者・管理者のみ）
+   * チャンネル（個人作成グループ）の削除（参加者・管理者のみ）
+   * ★ 職員全体（公開）チャンネルは撤廃済み。全チャンネルが個人作成グループ。
    * @param {string} channelId
    * @param {Object} user - { id, name, role, is_kyomu }
    */
   async deleteChannel(channelId, user) {
     const targetId = chatModel.normalizeChannelId(channelId);
     const channel = await chatModel.findChannelById(targetId);
-    const channelType = (channel && channel.type) || 'PRIVATE';
-
-    if (targetId === 'general' || channelType === 'PUBLIC') {
-      throw new ApiError(400, '公開チャンネルは削除できません。');
-    }
 
     const members = await chatModel.getMembers(targetId);
     const isMember = members.some((m) => (m.user_id || m.id) === user.id);

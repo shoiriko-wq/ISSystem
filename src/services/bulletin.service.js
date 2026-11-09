@@ -436,14 +436,15 @@ export const bulletinService = {
     const reminderMessage = `【回覧板・確認リマインド】\n件名：「${detail.title}」\n未確認の先生方: ${unackNames}\nお手数ですが、ISSystemより内容をご確認の上、承認ボタンの押下をお願いいたします。`;
 
     // チャットチャンネルへの督促メッセージ投稿
+    // ★ 職員全体チャット撤廃（v3.1.2）: 既定の全体チャンネルは存在しない。
+    //   自分の参加グループがある時のみ投稿する（無ければ督促メッセージはリマインダー結果に含める）
     try {
       if (chatModel && typeof chatModel.listChannelsForUser === 'function') {
         const userChannels = await chatModel.listChannelsForUser(userId);
-        const targetChannel = userChannels.length > 0 ? userChannels[0] : { id: 'general' };
 
-        if (chatModel.sendMessage) {
+        if (chatModel.sendMessage && userChannels.length > 0) {
           await chatModel.sendMessage({
-            channel_id: targetChannel.id,
+            channel_id: userChannels[0].id,
             sender_id: userId,
             sender_name: userName,
             message_text: reminderMessage,

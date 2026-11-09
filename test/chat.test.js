@@ -22,16 +22,19 @@ describe('Chat API (/api/chat)', () => {
     const res = await request(app).get('/api/chat/channels').set('Authorization', bearer(token));
     expect(res.statusCode).toBe(200);
     expect(res.body.count).toBeGreaterThanOrEqual(2);
-    expect(res.body.data.some((c) => c.id === 'general')).toBe(true);
+    // ★ 職員全体チャット撤廃（2026/11/9 v3.1.2）: general / PUBLIC は存在しない
+    expect(res.body.data.some((c) => c.id === 'general')).toBe(false);
+    expect(res.body.data.some((c) => c.type === 'PUBLIC')).toBe(false);
   });
 
-  it('GET /api/chat/channels/general/members - シード済みメンバー一覧が返ること', async () => {
+  it('GET /api/chat/channels/kyomu/members - シード済みグループのメンバー一覧が返ること', async () => {
     const res = await request(app)
-      .get('/api/chat/channels/general/members')
+      .get('/api/chat/channels/kyomu/members')
       .set('Authorization', bearer(token));
     expect(res.statusCode).toBe(200);
-    expect(res.body.count).toBeGreaterThanOrEqual(5);
+    expect(res.body.count).toBeGreaterThanOrEqual(2);
     expect(res.body.data.some((m) => m.user_id === 'kyomu01')).toBe(true);
+    expect(res.body.data.some((m) => m.user_id === 't-tanaka')).toBe(true);
   });
 
   it('POST /api/chat/channels - 新規チャンネルを 201 で作成できること', async () => {
@@ -117,11 +120,20 @@ describe('Chat API (/api/chat)', () => {
     expect(res.body.success).toBe(true);
   });
 
-  it('DELETE /api/chat/channels/general - 公開チャンネルは削除不可 (400)', async () => {
+  it('GET /api/chat/channels/grade1/messages - 非メンバーはグループを閲覧不可 (403)', async () => {
+    // ★ 職員全体チャット撤廃（2026/11/9 v3.1.2）: PUBLIC の抜け道が無いためメンバーのみ閲覧できる
+    const res = await request(app)
+      .get('/api/chat/channels/grade1/messages')
+      .set('Authorization', bearer(token));
+    expect(res.statusCode).toBe(403);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('DELETE /api/chat/channels/general - 職員全体チャンネルは撤廃済み (404)', async () => {
     const res = await request(app)
       .delete('/api/chat/channels/general')
       .set('Authorization', bearer(token));
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(404);
     expect(res.body.success).toBe(false);
   });
 

@@ -57,6 +57,30 @@ page.on('request', (req) => {
   if (req.url().includes('/chat/renotify')) renotifyRequests.push(req.method() + ' ' + req.url());
 });
 
+// ★ 職員全体チャット撤廃（2026/11/9 v3.1.2）: general / PUBLIC は存在しない
+// ⇒ 個人が作成した 3 名グループを作りに検証する（田中先生が未読者として観測できる）
+const MY_ID = 'kyomu01';
+const GROUP_MEMBERS = [MY_ID, 't-tanaka', 't-sato'];
+const probeToken = await fetch(`${BASE}/api/auth/login`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ staff_code: USER, password: PASS }),
+}).then((r) => r.json()).then((j) => j.token);
+
+const probeGroup = await fetch(`${BASE}/api/chat/channels`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', Authorization: `Bearer ${probeToken}` },
+  body: JSON.stringify({
+    name: '未読検証グループ',
+    type: 'GROUP',
+    member_ids: GROUP_MEMBERS,
+    memberIds: GROUP_MEMBERS,
+  }),
+}).then((r) => r.json());
+const groupId = probeGroup?.data?.id || probeGroup?.id || probeGroup?.channel?.id;
+log('probe-group-created', { groupId, members: GROUP_MEMBERS });
+check('個人作成グループ（3名）を 201 で作成できる', Boolean(groupId), probeGroup);
+
 await page.setViewport({ width: 1280, height: 900 });
 await page.goto(`${BASE}/`, { waitUntil: 'networkidle2' });
 await page.type('#login-userid', USER);
@@ -73,6 +97,23 @@ await page.evaluate(() => {
 
 await page.evaluate(() => document.querySelector('a[data-tab="chat"]').click());
 await sleep(1400);
+
+// サイドバーのグループ行をクリックして閲覧先を切り替える（職員全体チャンネルは撤廃済み）
+const openChatGroup = async (gid) => {
+  const opened = await page.evaluate((id) => {
+    const row = document.querySelector(`#chat-channels-list [data-channel-id="${id}"]`);
+    if (!row) return false;
+    row.click();
+    return true;
+  }, gid);
+  await sleep(900);
+  return opened;
+};
+
+// シード済みグループ（教務部連絡＝kyomu01・田中先生がメンバー）を開いて未読者一覧等を検証する
+const seedGroupOpened = await openChatGroup('kyomu');
+log('seed-group-opened', { seedGroupOpened });
+check('シード済みグループ（教務部連絡）を開いて閲覧できる', seedGroupOpened === true, { seedGroupOpened });
 
 const chatView = await page.evaluate(() => {
   const buttons = [...document.querySelectorAll('#chat-messages button, #chat-header-actions button')];
@@ -312,8 +353,13 @@ await new Promise((resolve, reject) => {
   tanakaSocket.on('connect', resolve);
   tanakaSocket.on('connect_error', reject);
 });
-tanakaSocket.emit('chat:join_channel', 'general');
+tanakaSocket.emit('chat:join_channel', groupId);
 await sleep(400);
+
+// 未読・既読の検証は個人作成グループで行う（田中先生が未読者として観測できる）
+const probeOpened = await openChatGroup(groupId);
+log('probe-group-opened', { groupId, probeOpened });
+check('検証用グループを開いて投稿対象にできる', probeOpened === true, { groupId });
 
 const beforePost = await chatSnapshot();
 log('rows-before-post', { memberCount: beforePost.memberCount, unreadRows: beforePost.unreadRows });
@@ -364,7 +410,7 @@ check('投稿で既存メッセージが一斉に全員既読化しない（未�
   { before: beforePost.unreadRows, after: afterPost.unreadRows });
 
 // 田中先生がチャンネルを閲覧（既読位置更新）→ 新着の未読が1名减算されること
-tanakaSocket.emit('chat:mark_as_read', { channelId: 'general', lastReadMessageId: newId });
+tanakaSocket.emit('chat:mark_as_read', { channelId: groupId, lastReadMessageId: newId });
 
 let afterReceipt = null;
 for (let i = 0; i < 14; i++) {
@@ -393,6 +439,10 @@ if (!loggedInAfterReload) {
 }
 await page.evaluate(() => document.querySelector('a[data-tab="chat"]').click());
 await sleep(1600);
+// リロード後は先頭グループへ自動切替するため、検証用グループを再び開く
+const reopened = await openChatGroup(groupId);
+log('group-reopened-after-reload', { groupId, reopened });
+check('リロード後に検証用グループを再び開ける', reopened === true, { groupId });
 
 const reloaded = await chatSnapshot();
 const reloadRow = findPostedRow(reloaded.rows, marker);
@@ -439,10 +489,45 @@ check('src/routes/index.js に router.post("/chat/renotify") がない', !routeS
 const routeStatus = await fetch(`${BASE}/api/chat/renotify`, {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ channelId: 'general', targetUsers: ['X'] }),
+  body: JSON.stringify({ channelId: groupId, targetUsers: ['X'] }),
 }).then((r) => r.status);
 log('renotify-route-status', routeStatus);
 check('サーバーの /api/chat/renotify は 404（ルート廃止）', routeStatus === 404, routeStatus);
+
+// ===== 相手行を作る（メタ行・ホバーメニュー検証には相手行が必要） =====
+// 職員全体チャットは撤廃済み ⇒ 検証は常に個人作成グループ（groupId）で行う
+const tanakaSocket2 = io(BASE, { auth: { token: tanakaLogin.token } });
+await new Promise((resolve, reject) => {
+  tanakaSocket2.on('connect', resolve);
+  tanakaSocket2.on('connect_error', reject);
+});
+tanakaSocket2.emit('chat:join_channel', groupId);
+await sleep(300);
+const replyText = `相手行検証 ${Date.now()}`;
+const replyAck = await new Promise((resolve) => {
+  tanakaSocket2.emit('chat:send_message', { channelId: groupId, messageText: replyText }, (ack) => resolve(ack));
+});
+log('tanaka-reply', { replyText, replyAck });
+check('メンバー（田中先生）が検証用グループへ返信できる', replyAck?.success === true, replyAck);
+await sleep(1400);
+const replyRowVisible = await page.evaluate((text) => {
+  const rows = [...document.querySelectorAll('#chat-messages-container [data-msg-id]')];
+  return rows.some((r) => (r.querySelector('p')?.textContent || '').trim() === text);
+}, replyText);
+check('相手からの新着行が列表に描画される', replyRowVisible === true, { replyText, replyRowVisible });
+
+// ホバー検証は「後ろに行が続く」行を使うため、自分の行を1行追加して相手行を中段へ置く
+const followUpText = `追記検証 ${Date.now()}`;
+await page.evaluate((text) => {
+  const ta = document.getElementById('chat-input-message');
+  const form = document.getElementById('chat-send-form');
+  ta.value = text;
+  if (form.requestSubmit) form.requestSubmit();
+}, followUpText);
+await sleep(1200);
+const hoverRows = await page.evaluate(() => [...document.querySelectorAll('#chat-messages-container .chat-msg-row[data-msg-id]')].map((r) => r.getAttribute('data-own')));
+log('hover-rows-order', { followUpText, hoverRows });
+check('ホバー検証用の行が並ぶ（自分・相手・自分の順）', hoverRows.length === 3 && hoverRows[0] === 'true' && hoverRows[1] === 'false' && hoverRows[2] === 'true', { hoverRows });
 
 // ===== メタ行（アイコン・名前・年月日時間）の並び順と下揃え =====
 // 相手の行: 左から アイコン → 名前 → 年月日時間
@@ -660,6 +745,15 @@ await moveAwayFromChat();
 
 
 await browser.close();
+
+tanakaSocket2.close();
+// 検証用グループを削除して後片付けする（撤廃後は個人作成グループのみがチャット単位）
+const groupCleaned = await fetch(`${BASE}/api/chat/channels/${groupId}`, {
+  method: 'DELETE',
+  headers: { Authorization: `Bearer ${probeToken}` },
+}).then((r) => r.status);
+log('probe-group-cleanup', groupCleaned);
+check('検証用グループを削除して後片付けできる', groupCleaned === 200, groupCleaned);
 
 if (failures.length > 0) {
   console.log(`\n${failures.length} FAILURES`);

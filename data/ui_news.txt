@@ -1,0 +1,23 @@
+
+> issystem@1.0.0 test:ui:news-share
+> node scripts/test-news-share-modal.mjs
+
+  PASS - 「すべて見る」ボタン（dash-btn-news-more）は撤廃済み -> {"moreExists":false,"shareExists":true,"shareText":"記事を共有","modalExists":true,"hasCloseX":true,"footerCloseCount":1}
+  PASS - 「記事を共有」ボタンが同じ位置に存在する -> {"moreExists":false,"shareExists":true,"shareText":"記事を共有","modalExists":true,"hasCloseX":true,"footerCloseCount":1}
+  PASS - モーダル規約（X・フッター閉じる）が揃っている -> {"moreExists":false,"shareExists":true,"shareText":"記事を共有","modalExists":true,"hasCloseX":true,"footerCloseCount":1}
+  PASS - クリックで共有モーダルが開く -> {"open":true,"urlPlaceholder":"https://www.mext.go.jp/b_menu/happou/...","inputIds":["news-share-url"],"submitCount":1,"focusedId":"news-share-url"}
+  PASS - URL入力欄がフォーカスされる -> {"open":true,"urlPlaceholder":"https://www.mext.go.jp/b_menu/happou/...","inputIds":["news-share-url"],"submitCount":1,"focusedId":"news-share-url"}
+  PASS - 入力欄は記事URLだけ（タイトル・ひとこと・共有先・チャンネル選択・掲示対象日は撤廃） -> {"open":true,"urlPlaceholder":"https://www.mext.go.jp/b_menu/happou/...","inputIds":["news-share-url"],"submitCount":1,"focusedId":"news-share-url"}
+  PASS - URL 空では POST が発生しない -> []
+  PASS - URL 空ではエラートースト表示、モーダルは開いたまま -> {"open":true,"toasts":["ログインしました: 教務 主任 先生","記事URLの形式が正しくありません（http:// または https:// のURLを入力してください）"]}
+  PASS - URLが https:// へ補完され、本文は「【記事共有】+ドメイン名+URL」の2行（ひとこと欄は無い） -> "【記事共有】mext.go.jp\nhttps://mext.go.jp/b_menu/happou/20261107.html"
+  PASS - 投稿先は閲覧中の職員チャットチャンネル（/api/chat/channels/:id/messages） -> {"endpoint":"/api/chat/channels/chat_1794200080425_cmj1w/messages","activeChannelId":"chat_1794200080425_cmj1w","postChannelId":"chat_1794200080425_cmj1w"}
+  PASS - 共有後モーダルが閉じチャットタブへ遷移・成功トースト -> {"open":false,"activeView":"view-chat","toasts":["ログインしました: 教務 主任 先生","記事URLの形式が正しくありません（http:// または https:// のURLを入力してください）","職員チャットへ記事を共有しました"]}
+  PASS - サーバー実データ: 閲覧中の職員チャットチャンネルに共有メッセージが登録されている -> ["【記事共有】mext.go.jp\nhttps://mext.go.jp/b_menu/happou/20261107.html"]
+  PASS - フッターの「閉じる」ボタンで閉じられる
+  PASS - ESC キーで閉じられる
+  PASS - モーダル内で押し開始し背景で離すと閉じない（テキスト選択ドラッグのストレス回避） -> {"bgPoint":{"x":8,"y":8},"cardPoint":{"x":640,"y":450}}
+  PASS - 背景で押し開始して離すと閉じる
+  PASS - ボタン・モーダルのアイコンがSVGとして描画されている -> {"btn":true,"head":true,"closeX":true}
+---
+ALL OK

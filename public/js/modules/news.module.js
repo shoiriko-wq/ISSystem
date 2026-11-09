@@ -7,6 +7,7 @@ import { apiGet, apiPost } from '../api.js';
 import { formatDate, escapeHTML, refreshLucideIcons, openModal, closeModal, showToast } from '../ui-helpers.js';
 import { switchTab } from '../main.js';
 import { state } from '../state.js';
+import { getShareableChatChannelId, loadChannels } from './chat.module.js';
 
 let selectedNewsCategory = 'ALL';
 let newsCache = [];
@@ -173,6 +174,24 @@ function renderNewsList() {
 }
 
 /**
+ * 共有先として閲覧中の（または先頭の）職員チャットグループIDを返す
+ * ★ 職員全体チャットは撤廃済み（v3.1.2）⇒ チャットをまだ開いていない初回はグループ一覧を取得する
+ * @returns {Promise<string|null>}
+ */
+async function shareChatTarget() {
+  let id = getShareableChatChannelId();
+  if (!id) {
+    try {
+      await loadChannels();
+      id = getShareableChatChannelId();
+    } catch (e) {
+      id = null;
+    }
+  }
+  return id;
+}
+
+/**
  * チャットへワンタップ共有
  */
 async function shareToChat(newsId) {
@@ -181,16 +200,23 @@ async function shareToChat(newsId) {
 
   const shareText = `【教育ニュース共有】\n■ ${item.title}\n${item.summary}\n(詳細: ${item.url || '校内参照'})`;
 
+  const channelId = await shareChatTarget();
+  if (!channelId) {
+    showToast('共有先の職員チャットグループがありません。「職員チャット」でグループを作成してください', 'warning');
+    return;
+  }
+
   try {
-    await apiPost('/chat/channels/general/messages', {
-      text: shareText,
+    await apiPost(`/chat/channels/${channelId}/messages`, {
+      messageText: shareText,
       senderName: state.currentUser?.name || '自分'
     });
   } catch (e) {
-    // APIフォールバック
+    showToast(`共有に失敗しました: ${e.message}`, 'error');
+    return;
   }
 
-  showToast('全体職員チャットへニュースを共有しました', 'success');
+  showToast('職員チャットへニュースを共有しました', 'success');
   switchTab('chat');
 }
 

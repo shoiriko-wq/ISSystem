@@ -23,6 +23,8 @@ import {
   targetDayOf, markBulletinRead
 } from './bulletin.module.js';
 
+import { getShareableChatChannelId, loadChannels } from './chat.module.js';
+
 /**
  * JST の時刻帯 (5段階) と季節 (6区分) を返す
  * @param {Date} now
@@ -85,30 +87,57 @@ function dashWeekday(now = new Date()) {
   return map[wd] ?? 1;
 }
 
-/** 特別な日（祭日・学校の節目）の労いメッセージ。該当なしは null */
-const DASH_EVENT_MESSAGES = {
-  '12-23': '明日はクリスマスイブ、校内の灯りがきらめく季節です。',
-  '12-24': 'ほら、クリスマスイブ。校内の灯りがきらめく季節です。',
-  '12-25': 'クリスマス、子どもたちの笑顔が最高の贈り物です。',
-  '12-26': '終業式、前期修了おめでとう。冬休みはチャージの時間です。',
-  '12-31': '一年の終わり、大掃除は全員協力のリズムで軽やかに。',
-  '01-01': 'あけましておめでとうございます。新年のスタートは心軽く。',
-  '01-05': '仕事始め、新年の挨拶から軽やかに一日を始めてください。',
-  '04-01': '新年度スタート、新しい出合いが始まる日です。',
-  '07-20': '終業式、前期修了おめでとう。夏休みはチャージの時間です。',
-  '09-01': '２学期始業式、子どもたちの声が学校に戻ってきます。',
-};
-
-function dashEventMessage(now = new Date()) {
+/** JST の MM-DD (ゼロ埋め) を返す。ゼロ埋め MM-DD の文字列比較は日付順と一致する */
+function dashJstKey(now = new Date()) {
   const parts = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo', month: '2-digit', day: '2-digit' }).formatToParts(now);
   const pick = (t) => parts.find((p) => p.type === t)?.value;
-  return DASH_EVENT_MESSAGES[`${pick('month')}-${pick('day')}`] || null;
+  return `${pick('month')}-${pick('day')}`;
+}
+
+/**
+ * 特別な日（学校の節目・季節の節目）を「期間ウィンドウ」で保持する。
+ * 始業式・終業式・仕事始め・新年度は年度によって平日がずれるため、from/to の期間で捕捉し
+ * 同じ労い文を 3 日前後表示する（単日の項目は from === to）。
+ * fx は粒子アニメーションテーマ。label はプレビューセレクト表示用。
+ * 12/24–28 のように期間が重なる年は、先に定義した項目（クリスマス→第2学期終業式）を優先する。
+ * 日付は概算（年により ± 日）。学校で運用時は .env ではなくこの表で調整する。
+ */
+const DASH_EVENT_PERIODS = [
+  { key: '01-01..01-03', label: '年始 (1/1–1/3)', from: '01-01', to: '01-03', fx: 'newyear', msg: 'あけましておめでとうございます。新年のスタートは心軽く。' },
+  { key: '01-05..01-06', label: '仕事始め (1/5–1/6)', from: '01-05', to: '01-06', fx: 'newyear', msg: '仕事始め、新年の挨拶から軽やかに一日を始めてください。' },
+  { key: '01-07..01-09', label: '3学期始業式 (1/7–1/9)', from: '01-07', to: '01-09', fx: 'confetti', msg: '３学期始業式、学年の締めくくりが始まります。軽い歩幅で一日を過ごしましょう。' },
+  { key: '03-23..03-24', label: '3学期終業式 (3/23–3/24)', from: '03-23', to: '03-24', fx: 'confetti', msg: '終業式、修了おめでとう。次の年度への準備の季節です。' },
+  { key: '04-01..04-03', label: '新年度 (4/1–4/3)', from: '04-01', to: '04-03', fx: 'sakura', msg: '新年度スタート、新しい出合いが始まる日です。' },
+  { key: '04-08..04-10', label: '1学期始業式 (4/8–4/10)', from: '04-08', to: '04-10', fx: 'sakura', msg: '第1学期始業式、新しい学期のスタートです。新しい声と新しい名簿に慣れる三日間です。' },
+  { key: '07-17..07-20', label: '1学期終業式 (7/17–7/20)', from: '07-17', to: '07-20', fx: 'confetti', msg: '終業式、第1学期修了おめでとう。夏休みはチャージの時間です。' },
+  { key: '09-01..09-03', label: '2学期始業式 (9/1–9/3)', from: '09-01', to: '09-03', fx: 'confetti', msg: '２学期始業式、子どもたちの声が学校に戻ってきます。' },
+  { key: '12-23', label: 'クリスマスイブ前夜 (12/23)', from: '12-23', to: '12-23', fx: 'santa', msg: '明日はクリスマスイブ、校内の灯りがきらめく季節です。' },
+  { key: '12-24', label: 'クリスマスイブ (12/24)', from: '12-24', to: '12-24', fx: 'santa', msg: 'ほら、クリスマスイブ。校内の灯りがきらめく季節です。' },
+  { key: '12-25', label: 'クリスマス (12/25)', from: '12-25', to: '12-25', fx: 'santa', msg: 'クリスマス、子どもたちの笑顔が最高の贈り物です。' },
+  { key: '12-26..12-28', label: '2学期終業式 (12/26–12/28)', from: '12-26', to: '12-28', fx: 'santa', msg: '終業式、第2学期修了おめでとう。冬休みはチャージの時間です。' },
+  { key: '12-29..12-31', label: '年末・大掃除 (12/29–12/31)', from: '12-29', to: '12-31', fx: 'snow', msg: '一年の終わり、大掃除は全員協力のリズムで軽やかに。' },
+];
+
+/** 当日が属する特別な日期間を返す（該当なしは null）。単日項目は期間より先に評価する */
+function dashEventPeriod(now = new Date()) {
+  const key = dashJstKey(now);
+  return DASH_EVENT_PERIODS.find((p) => (p.from === p.to ? p.from === key : p.from <= key && key <= p.to)) || null;
+}
+
+/** 特別な日の労いメッセージ。該当なしは null */
+function dashEventMessage(now = new Date()) {
+  return dashEventPeriod(now)?.msg || null;
+}
+
+/** プレビューセレクトが選んだキー（期間 key）から労いメッセージを返す */
+function dashEventMessageByKey(key) {
+  return DASH_EVENT_PERIODS.find((p) => p.key === key)?.msg || null;
 }
 
 /** 労いメッセージ枠の軽量粒子アニメーションテーマ (CSS keyframes のみ・Canvas 不使用) */
 const DASH_FX = {
   sakura:    { motion: 'fall',    emojis: ['🌸', '🌸', '💮', '🌸', '🌺'] },
-  rain:      { motion: 'fall',    emojis: ['💧', '💧', '🌧️', '💧', '☂️'] },
+  rain:      { motion: 'rain', tilt: [14, 24], emojis: ['💧', '💧', '🌧️', '💧', '☂️'] },
   sun:       { motion: 'twinkle', emojis: ['✨', '🌞', '✨', '🕊️', '✨'] },
   sunhat:    { motion: 'twinkle', emojis: ['👒', '🌻', '✨', '🐚', '🍋'] },
   ocean:     { motion: 'twinkle', emojis: ['🌊', '🐠', '🩵', '🍉', '🐚'] },
@@ -122,15 +151,12 @@ const DASH_FX = {
   star:      { motion: 'twinkle', emojis: ['🌙', '✨', '⭐', '✨', '🌟'] },
 };
 
-/** 特別な日のアニメーションテーマ (mm-dd → theme) */
+/** 単日だけ有効な特別な日テーマ (mm-dd → theme)。期間ウィンドウの fx で補えない隙間日を表す */
 const DASH_FX_SPECIAL = {
   '10-31': 'halloween',
-  '12-23': 'santa', '12-24': 'santa', '12-25': 'santa', '12-26': 'santa',
-  '01-01': 'newyear', '01-02': 'newyear', '01-03': 'newyear', '01-04': 'newyear', '01-05': 'newyear',
-  '04-01': 'sakura', '04-02': 'sakura', '04-06': 'sakura',
   '07-07': 'tanabata',
-  '07-20': 'confetti',
-  '09-01': 'confetti',
+  '01-04': 'newyear',
+  '04-06': 'sakura',
 };
 
 /** 日付をシードにする決定論的乱数 (同日中は粒子配置が固定・翌日変化) */
@@ -166,13 +192,13 @@ function setDashFxDrop(layer) {
   if (h > 0) layer.style.setProperty('--fx-drop', `${Math.round(h + 26)}px`);
 }
 
-/** 時刻・季節・特別な日からアニメーションテーマを選ぶ (開発用 fxOverride があれば優先) */
+/** 時刻・季節・特別な日（期間ウィンドウ）からアニメーションテーマを選ぶ (開発用 fxOverride があれば優先) */
 function dashFxTheme(now = new Date(), fxOverride = null) {
   if (fxOverride) return fxOverride;
-  const parts = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo', month: '2-digit', day: '2-digit' }).formatToParts(now);
-  const pick = (t) => parts.find((p) => p.type === t)?.value;
-  const special = DASH_FX_SPECIAL[`${pick('month')}-${pick('day')}`] || null;
+  const special = DASH_FX_SPECIAL[dashJstKey(now)] || null;
   if (special) return special;
+  const period = dashEventPeriod(now);
+  if (period?.fx) return period.fx;
   const { slot, season } = dashTimeAndSeason(now);
   if (slot === 'NIGHT') return 'star';
   return { SPRING: 'sakura', RAIN: 'rain', EARLY_SUMMER: 'sun', SUMMER: 'ocean', AUTUMN: 'leaves', WINTER: 'snow' }[season];
@@ -194,7 +220,9 @@ function renderDashFx(now = new Date(), fxOverride = null) {
     const dur = 6 + rnd() * 6;
     const delay = rnd() * 9;
     const size = 12 + Math.round(rnd() * 14);
-    html += `<span class="dash-fx" style="left:${x.toFixed(1)}%;animation-duration:${dur.toFixed(1)}s;animation-delay:-${delay.toFixed(1)}s;font-size:${size}px">${emoji}</span>`;
+    // 降り注ぎ系 (梅雨) は傾き角を粒子ごとに 14〜24deg で決める。角度は進行中に変わらない（keyframes に回転はない）
+    const tilt = def.tilt ? Math.round(def.tilt[0] + rnd() * (def.tilt[1] - def.tilt[0])) : 0;
+    html += `<span class="dash-fx" style="left:${x.toFixed(1)}%;animation-duration:${dur.toFixed(1)}s;animation-delay:-${delay.toFixed(1)}s;font-size:${size}px;--fx-tilt:${tilt}deg">${emoji}</span>`;
   }
   layer.innerHTML = html;
   setDashFxDrop(layer);
@@ -221,11 +249,11 @@ function renderDashGreeting(now = new Date()) {
     h2.innerHTML = `お疲れ様です、<span id="dash-user-name" class="text-primary font-bold">${escapeHTML(name)} 先生</span>`;
   }
 
-  // 時刻帯・曜日・季節（特別な日はイベント文優先）を組み合わせた労いのメッセージ
+  // 時刻帯・曜日・季節（特別な日は期間ウィンドウの文を優先）を組み合わせた労いのメッセージ
   const wd = fxDevPreview.week ?? dashWeekday(sim);
   // 季節セレクトで季節を明示した時は特別な日の文を抑え、季節文を確実に表示する
   const evt = (fxDevPreview.season || fxDevPreview.noEvent) ? null
-    : (fxDevPreview.evt ? DASH_EVENT_MESSAGES[fxDevPreview.evt] : dashEventMessage(sim));
+    : (fxDevPreview.evt ? dashEventMessageByKey(fxDevPreview.evt) : dashEventMessage(sim));
   const msgEl = document.getElementById('dash-warm-message');
   if (msgEl) {
     msgEl.textContent = fxDevPreview.message || `${DASH_TIME_MESSAGES[slot]} ${DASH_WEEK_MESSAGES[wd]} ${evt ?? DASH_SEASON_MESSAGES[season]}`;
@@ -410,7 +438,7 @@ export function initDashboardModule() {
 
             </h3>
 
-            <button type="button" id="dash-btn-news-share" class="btn-secondary py-1 px-2.5 text-sm shrink-0 flex items-center gap-1.5" title="記事URLをチャット・掲示板へ共有">
+            <button type="button" id="dash-btn-news-share" class="btn-secondary py-1 px-2.5 text-sm shrink-0 flex items-center gap-1.5" title="記事URLを閲覧中の職員チャットチャンネルへ共有">
               <i data-lucide="share-2" class="w-3.5 h-3.5"></i> 記事を共有
             </button>
 
@@ -468,7 +496,7 @@ export function initDashboardModule() {
 
             <h3 class="font-bold text-sm text-main flex items-center gap-2">
 
-              <i data-lucide="calendar" class="w-4 h-4 text-accent-alt"></i> 今日の校内行事
+              <i data-lucide="calendar" class="w-4 h-4 text-accent-alt"></i> 本日の校内行事
 
             </h3>
 
@@ -566,19 +594,9 @@ export function initDashboardModule() {
         </div>
         <div class="flex flex-col gap-1">
           <label class="text-[10px] text-muted" for="fxp-event">特別な日</label>
-          <select id="fxp-event" class="input-field py-1 px-2 text-xs" title="特別な日の労いメッセージ">
+          <select id="fxp-event" class="input-field py-1 px-2 text-xs" title="特別な日の労いメッセージ（期間ウィンドウ）">
             <option value="">自動 (日付)</option>
             <option value="none">なし (季節文)</option>
-            <option value="12-23">12/23 クリスマスイブ前夜</option>
-            <option value="12-24">12/24 クリスマスイブ</option>
-            <option value="12-25">12/25 クリスマス</option>
-            <option value="12-26">12/26 終業式</option>
-            <option value="12-31">12/31 大掃除</option>
-            <option value="01-01">01/01 元旦</option>
-            <option value="01-05">01/05 仕事始め</option>
-            <option value="04-01">04/01 新年度</option>
-            <option value="07-20">07/20 終業式</option>
-            <option value="09-01">09/01 始業式</option>
           </select>
         </div>
         <div id="fxp-swatches" class="flex flex-wrap items-center gap-1.5 text-base leading-none" title="全テーマの粒子（静的表示）"></div>
@@ -696,13 +714,24 @@ function bindDashFxDevPanel() {
       .join('');
   }
 
+  // 特別な日セレクトは期間ウィンドウ表から生成する（労いカードの表示ロジックと单一来源。運用では使わない）
+  if (evtSel) {
+    evtSel.innerHTML = '<option value="">自動 (日付)</option><option value="none">なし (季節文)</option>'
+      + DASH_EVENT_PERIODS.map((p) => `<option value="${escapeHTML(p.key)}">${escapeHTML(p.label)}</option>`).join('');
+  }
+
   // 労いメッセージ文を一覧から直接選べる (時刻帯・曜日・季節・特別な日の全メッセージ)
   if (msgSel) {
-    const groups = [['時刻帯', DASH_TIME_MESSAGES], ['曜日', DASH_WEEK_MESSAGES], ['季節', DASH_SEASON_MESSAGES], ['特別な日', DASH_EVENT_MESSAGES]];
+    const groups = [
+      ['時刻帯', Object.entries(DASH_TIME_MESSAGES)],
+      ['曜日', Object.entries(DASH_WEEK_MESSAGES)],
+      ['季節', Object.entries(DASH_SEASON_MESSAGES)],
+      ['特別な日', DASH_EVENT_PERIODS.map((p) => [p.key, p.msg])],
+    ];
     let html = '<option value="">メッセージを選ぶ</option>';
     for (const [glabel, table] of groups) {
       html += `<optgroup label="${glabel}">`;
-      for (const [key, text] of Object.entries(table)) {
+      for (const [key, text] of table) {
         html += `<option value="${escapeHTML(text)}">${glabel} ${escapeHTML(String(key))}: ${escapeHTML(text.slice(0, 14))}…</option>`;
       }
       html += '</optgroup>';
@@ -1444,18 +1473,8 @@ export async function fetchWeatherData() {
 }
 
 // ============================================================
-// 記事共有モーダル（教育ニュースのURLをチャット・掲示板へ共有）
+// 記事共有モーダル（入力欄は記事URLのみ。閲覧中の職員チャットチャンネルへ共有）
 // ============================================================
-
-const SHARE_TARGET_LABELS = { chat: '職員チャット', bulletin: '掲示板' };
-
-// 投稿先チャンネルの選択肢は初回開時だけ取得する
-let shareChannelOptionsLoaded = false;
-
-/** JST の今日 (yyyy-mm-dd) を返す */
-function jstToday() {
-  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
-}
 
 /**
  * 入力URLを http(s) の絶対URLへ正規化する。解釈できない場合は null
@@ -1487,65 +1506,39 @@ function defaultShareTitle(url) {
 }
 
 /**
- * 投稿先チャンネルの選択肢を /chat/channels から生成する（初回のみ）
+ * 共有先：職員チャットの「閲覧中グループ」（chat.module.js の現在グループ）
+ * ★ 職員全体チャット撤廃（2026/11/9 v3.1.2）: 既定の全体チャンネルは存在しない。
+ *   チャットをまだ開いていない初回はグループ一覧を取得して先頭のグループを使い、
+ *   グループが未作成なら null を返す（共有は送らない）。
  */
-async function loadShareChannelOptions() {
-  const sel = document.getElementById('news-share-channel');
-  if (!sel) return;
+async function resolveShareChannelId() {
+  const id = getShareableChatChannelId();
+  if (id) return id;
   try {
-    const res = await apiGet('/chat/channels');
-    const list = res.channels || res.data || (Array.isArray(res) ? res : []);
-    sel.innerHTML = list
-      .map((ch) => `<option value="${escapeHTML(String(ch.id))}">${escapeHTML(String(ch.name || ch.id))}</option>`)
-      .join('');
-    const preferred = list.find((ch) => ch.id === 'general')
-      || list.find((ch) => ch.type === 'PUBLIC')
-      || list[0];
-    if (preferred) sel.value = String(preferred.id);
-    shareChannelOptionsLoaded = true;
+    await loadChannels();
   } catch (e) {
-    console.warn('[Dashboard] チャンネル一覧の取得に失敗:', e.message);
-    sel.innerHTML = '<option value="general">📢 職員全体</option>';
-    sel.value = 'general';
+    return null;
   }
+  return getShareableChatChannelId();
 }
 
 /**
- * 共有先（チャット / 掲示板）に応じて入力フィールドの表示を切り替える
+ * 記事共有モーダルを開く（入力欄は記事URLのみ、開いたら URL 欄へフォーカス）
  */
-function syncShareFields() {
-  const target = document.getElementById('news-share-target')?.value || 'chat';
-  const channelWrap = document.getElementById('news-share-channel-wrap');
-  const dateWrap = document.getElementById('news-share-date-wrap');
-  if (channelWrap) channelWrap.classList.toggle('hidden', target !== 'chat');
-  if (dateWrap) dateWrap.classList.toggle('hidden', target !== 'bulletin');
-}
-
-/**
- * 記事共有モーダルを開く（共有先の同期と対象日の初期化、チャンネル一覧の初回取得）
- */
-export async function openNewsShareModal() {
+export function openNewsShareModal() {
   if (!state.currentUser || !state.authToken) {
     showToast('記事を共有するにはログインが必要です', 'warning');
     return;
   }
-
-  const dateInput = document.getElementById('news-share-date');
-  if (dateInput && !dateInput.value) dateInput.value = jstToday();
-  syncShareFields();
-
-  if (!shareChannelOptionsLoaded) await loadShareChannelOptions();
 
   openModal('news-share-modal');
   refreshLucideIcons();
   document.getElementById('news-share-url')?.focus();
 }
 
-/** チャット投稿用のテキストを組み立てる */
-function buildShareMessage(title, url, note) {
-  const lines = [`【記事共有】${title}`, url];
-  if (note) lines.push(note);
-  return lines.join('\n');
+/** 職員チャット投稿用のテキストを組み立てる（【記事共有】+ドメイン名+URL の2行） */
+function buildShareMessage(url) {
+  return [`【記事共有】${defaultShareTitle(url)}`, url].join('\n');
 }
 
 /**
@@ -1555,8 +1548,6 @@ function bindNewsShareForm() {
   const form = document.getElementById('news-share-form');
   if (!form || form.dataset.shareBound === '1') return;
   form.dataset.shareBound = '1';
-
-  document.getElementById('news-share-target')?.addEventListener('change', syncShareFields);
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1568,9 +1559,11 @@ function bindNewsShareForm() {
       return;
     }
 
-    const title = (document.getElementById('news-share-title')?.value || '').trim() || defaultShareTitle(url);
-    const note = (document.getElementById('news-share-note')?.value || '').trim();
-    const target = document.getElementById('news-share-target')?.value || 'chat';
+    const channelId = await resolveShareChannelId();
+    if (!channelId) {
+      showToast('共有先の職員チャットグループがありません。「職員チャット」でグループを作成してください', 'warning');
+      return;
+    }
 
     const submitBtn = form.querySelector('button[type="submit"]');
     if (submitBtn) {
@@ -1579,31 +1572,16 @@ function bindNewsShareForm() {
     }
 
     try {
-      if (target === 'chat') {
-        const channelId = document.getElementById('news-share-channel')?.value || 'general';
-        await apiPost(`/chat/channels/${channelId}/messages`, {
-          messageText: buildShareMessage(title, url, note),
-          senderName: state.currentUser?.name || '教員'
-        });
-      } else {
-        const targetDate = document.getElementById('news-share-date')?.value || jstToday();
-        await apiPost('/bulletins', {
-          title: `【参考記事】${title}`,
-          content: `${url}\n\n${note}`.trim(),
-          category: 'GENERAL',
-          targetDate,
-          authorName: state.currentUser?.name || '教員'
-        });
-      }
+      await apiPost(`/chat/channels/${channelId}/messages`, {
+        messageText: buildShareMessage(url),
+        senderName: state.currentUser?.name || '教員'
+      });
 
       closeModal('news-share-modal');
       form.reset();
-      syncShareFields();
-      const dateInput = document.getElementById('news-share-date');
-      if (dateInput) dateInput.value = jstToday();
 
-      showToast(`${SHARE_TARGET_LABELS[target]}へ記事を共有しました`, 'success');
-      switchTab(target === 'chat' ? 'chat' : 'bulletin');
+      showToast('職員チャットへ記事を共有しました', 'success');
+      switchTab('chat');
     } catch (err) {
       // 失敗時はモーダルを開いたままエラー表示（入力内容は保持）
       showToast(`共有に失敗しました: ${err.message}`, 'error');

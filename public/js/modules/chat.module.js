@@ -8,12 +8,10 @@ import { formatDate, escapeHTML, refreshLucideIcons, showToast, openModal, close
 import { state, setUnreadCount } from '../state.js';
 import { socketClient } from '../socket.js';
 
-let currentChannelId = 'general';
-let chatChannels = [
-  { id: 'general', name: '📢 職員全体', icon: 'globe', unread: 0, type: 'PUBLIC' },
-  { id: 'grade1', name: '🏫 1年学年部', icon: 'users', unread: 0, type: 'GROUP' },
-  { id: 'kyomu', name: '📋 教務部連絡', icon: 'users', unread: 0, type: 'GROUP' }
-];
+// ★ 職員全体チャット撤廃（2026/11/9 v3.1.2）:
+//   初期チャンネルを持たない。自分の参加グループのみを表示し、グループが未作成なら空状態になる。
+let currentChannelId = null;
+let chatChannels = [];
 
 let messagesCache = {};
 
@@ -192,6 +190,7 @@ function applySelfRead(channelId, uptoMessageId = null) {
  * @param {string|null} lastReadMessageId
  */
 async function markChannelRead(channelId, lastReadMessageId = null) {
+  if (!channelId) return null;
   // 閲覧した範囲は即座に自分の未読扱いを解除して表示を一致させる
   applySelfRead(channelId, lastReadMessageId);
 
@@ -248,8 +247,8 @@ export async function initChatModule() {
         <!-- チャンネルヘッダー -->
         <div class="p-3 border-b border-divider bg-surface-strong flex items-center justify-between">
           <div class="flex items-center gap-2">
-            <i id="chat-active-icon" data-lucide="globe" class="w-4 h-4 text-accent"></i>
-            <h3 id="chat-active-title" class="font-bold text-sm text-main">全体職員連絡</h3>
+            <i id="chat-active-icon" data-lucide="users" class="w-4 h-4 text-accent"></i>
+            <h3 id="chat-active-title" class="font-bold text-sm text-main">職員チャット</h3>
           </div>
           <div class="flex items-center gap-2" id="chat-header-actions">
             <button id="chat-btn-members" class="btn-secondary py-1 px-2.5 text-[11px] flex items-center gap-1 text-main border-main bg-surface hover-surface-strong">
@@ -345,11 +344,6 @@ export async function initChatModule() {
 
   // socketリスナーは未接続時でも pending キューに登録され、connect 時に貼り付けられる
   setupSocketListeners();
-
-  if (state.currentUser && state.authToken) {
-    loadMessages(currentChannelId);
-    loadChannelMembers(currentChannelId);
-  }
 }
 
 /**
@@ -385,7 +379,9 @@ function bindEvents() {
 }
 
 /**
- * チャンネル一覧のロード
+ * グループ一覧のロード
+ * ★ 職員全体チャット撤廃（2026/11/9 v3.1.2）: 自分の参加グループのみを表示する。
+ *   グループが未作成・全部非表示の場合は空状態を描画し、メッセージ取得は走らせない。
  */
 export async function loadChannels() {
   // 非表示設定はユーザー個別 (id / staff_code キー) のため、ログイン後キーで再読み込みする
@@ -394,20 +390,33 @@ export async function loadChannels() {
   try {
     const res = await apiGet('/chat/channels');
     const list = res.channels || res.data || (Array.isArray(res) ? res : []);
-    if (list.length > 0) {
-      chatChannels = list.map(ch => ({
-        id: ch.id,
-        name: ch.name,
-        icon: ch.type === 'PUBLIC' ? 'globe' : 'users',
-        unread: ch.unread || 0,
-        type: ch.type || 'GROUP'
-      }));
-    }
+    chatChannels = list.map(ch => ({
+      id: ch.id,
+      name: ch.name,
+      icon: 'users',
+      unread: ch.unread || 0,
+      type: ch.type || 'GROUP'
+    }));
   } catch (e) {
     console.warn('[Chat] チャンネル一覧取得フォールバック:', e.message);
+    chatChannels = [];
   }
+
+  // 閲覧中のグループが非表示化・削除された場合は先頭のグループへ自動切替する
+  const visible = chatChannels.filter((c) => !hiddenChannels.has(c.id));
+  if (!visible.some((c) => String(c.id) === String(currentChannelId))) {
+    currentChannelId = visible.length > 0 ? visible[0].id : null;
+  }
+
   renderChannels();
   updateTotalUnread();
+
+  if (currentChannelId) {
+    await loadMessages(currentChannelId);
+    await loadChannelMembers(currentChannelId);
+  } else {
+    showEmptyChannelState();
+  }
 }
 
 /**
@@ -653,7 +662,7 @@ function channelRowHtml(ch, { hidden }) {
       </button>
       ${hidden
         ? `<button class="chat-unhide-btn text-success hover-text-success-strong p-1.5 rounded hover-surface" data-unhide-id="${ch.id}" title="このグループをリストに再表示する"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>`
-        : (hideEditMode && ch.type !== 'PUBLIC'
+        : (hideEditMode
           ? `<button class="chat-hide-btn text-muted hover-text-warning-strong p-1.5 rounded hover-surface" data-hide-id="${ch.id}" title="グループを非表示にする（削除はされません）"><i data-lucide="eye-off" class="w-3.5 h-3.5"></i></button>`
           : '')}
     </div>
@@ -678,11 +687,23 @@ function selectChannel(channelId) {
 }
 
 /**
- * 非表示ではない最初のチャンネルID
+ * 非表示ではない最初のグループID（グループが未作成なら null）
+ * ★ 職員全体チャンネルは撤廃済み
  */
 function visibleFallbackId() {
   const first = chatChannels.find(c => !hiddenChannels.has(c.id));
-  return first ? first.id : 'general';
+  return first ? first.id : null;
+}
+
+/**
+ * ダッシュボード・ニュース共有の投稿先として、閲覧中の（または先頭の）グループIDを返す
+ * @returns {string|null}
+ */
+export function getShareableChatChannelId() {
+  if (currentChannelId && chatChannels.some((c) => String(c.id) === String(currentChannelId) && !hiddenChannels.has(c.id))) {
+    return currentChannelId;
+  }
+  return visibleFallbackId();
 }
 
 /**
@@ -750,6 +771,14 @@ function renderChannels() {
 
   let html = visible.map((ch) => channelRowHtml(ch, { hidden: false })).join('');
 
+  if (visible.length === 0) {
+    html = `
+      <p class="px-1 py-2 text-[11px] leading-relaxed text-muted">
+        表示できるグループがありません。<br>「グループ作成」から新しいグループを作成してください。
+      </p>
+    `;
+  }
+
   if (hiddenList.length > 0) {
     html += `
       <div class="mt-2 pt-2 border-t border-divider">
@@ -794,11 +823,42 @@ function renderChannels() {
 }
 
 /**
+ * グループが未作成（または全部非表示）時の空状態を描画する
+ * ★ 職員全体チャット撤廃（2026/11/9 v3.1.2）
+ */
+function showEmptyChannelState() {
+  const titleEl = document.getElementById('chat-active-title');
+  const iconEl = document.getElementById('chat-active-icon');
+  const countEl = document.getElementById('chat-member-count');
+  const container = document.getElementById('chat-messages-container');
+
+  if (titleEl) titleEl.textContent = '職員チャット';
+  if (iconEl) iconEl.setAttribute('data-lucide', 'users');
+  if (countEl) countEl.textContent = '0';
+
+  if (container) {
+    container.innerHTML = `
+      <div class="text-center py-12 text-xs leading-relaxed text-muted">
+        <p>表示できるグループがありません。</p>
+        <p class="mt-1">「グループ作成」から新しいグループを作成してください。</p>
+      </div>
+    `;
+  }
+  refreshLucideIcons();
+}
+
+/**
  * メッセージのロード
  */
 export async function loadMessages(channelId = currentChannelId) {
   const container = document.getElementById('view-chat');
   if (!container) return;
+
+  // グループが未作成・全部非表示の場合は空状態を描画し、API调用は走らせない
+  if (!channelId) {
+    showEmptyChannelState();
+    return;
+  }
 
   // 該当チャンネルのWebSocketルームに参加 (join)
   if (socketClient && typeof socketClient.joinChannel === 'function') {
@@ -904,6 +964,8 @@ async function loadChannelMembers(channelId = currentChannelId) {
   const container = document.getElementById('chat-members-container');
   const countEl = document.getElementById('chat-member-count');
   if (!container) return;
+  // グループが未作成の場合はメンバー取得しない
+  if (!channelId) return;
 
   try {
     const res = await apiGet(`/chat/channels/${channelId}/members`);
@@ -1105,6 +1167,12 @@ async function sendMessage() {
   if (!textarea) return;
   const text = textarea.value.trim();
   if (!text) return;
+
+  // ★ 職員全体チャット撤廃（2026/11/9 v3.1.2）: 送信先グループが未作成の場合は送信しない
+  if (!currentChannelId) {
+    showToast('送信先のグループがありません。「グループ作成」からグループを作成してください', 'warning');
+    return;
+  }
 
   const hasApprovalCard = approvalCheck ? approvalCheck.checked : false;
 
@@ -1524,3 +1592,11 @@ window.selectChatChannel = (channelId) => {
     loadChannelMembers(currentChannelId);
   }
 };
+
+/**
+ * ダッシュボード「記事を共有」が投稿先として使う、閲覧中のチャンネルID
+ * （共有モーダルの入力欄は記事URLのみ、共有先はこのチャンネルに固定）
+ */
+export function getCurrentChatChannelId() {
+  return currentChannelId;
+}

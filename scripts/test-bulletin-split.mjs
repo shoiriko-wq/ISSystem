@@ -317,19 +317,22 @@ const titleBadge = await page.evaluate(() => {
   };
 });
 log('title-unread-badge', titleBadge);
-check('見出し右の未読バッヂは「掲示・回覧マスタ」見出しの中（アイコン・ラベルと同一行）',
-  titleBadge.inHead && titleBadge.headText.includes('掲示・回覧マスタ'), { headText: titleBadge.headText });
+check('見出し右の未読バッヂは「職員掲示板」見出しの中（アイコン・ラベルと同一行）',
+  titleBadge.inHead && titleBadge.headText.includes('職員掲示板'), { headText: titleBadge.headText });
+// サイドバーのバッヂは数字のみ（ラベル「未読」は見出し側）、タイトルバッヂは「未読 N」。数値で一致を検証する
+const badgeNum = Number((titleBadge.badgeText || '').replace(/\D/g, ''));
+const sideNum = Number((titleBadge.sideText || '').replace(/\D/g, ''));
 check('タイトルバッヂはサイドバーと同じ全日未読数（ラベル「未読 N」。本日の数ではない）',
-  titleBadge.badgeText && titleBadge.badgeText === titleBadge.sideText &&
+  titleBadge.badgeText && badgeNum === sideNum &&
   /^未読 \d+$|^99\+$/.test(titleBadge.badgeText) &&
-  titleBadge.badgeText.replace(/\D/g, '') !== '' && Number(titleBadge.badgeText.replace(/\D/g, '')) >= titleBadge.unreadRows,
-  { title: titleBadge.badgeText, side: titleBadge.sideText, unreadRows: titleBadge.unreadRows, listCount: titleBadge.listCount });
+  badgeNum >= titleBadge.unreadRows,
+  { title: titleBadge.badgeText, side: titleBadge.sideText, badgeNum, sideNum, unreadRows: titleBadge.unreadRows, listCount: titleBadge.listCount });
 check('未読 0 ならタイトルバッヂは hidden（サイドバーと同じ扱い）',
-  (titleBadge.badgeText === '未読 0') === titleBadge.badgeHidden &&
-  (titleBadge.sideText === '未読 0') === titleBadge.sideHidden,
-  { titleHidden: titleBadge.badgeHidden, sideHidden: titleBadge.sideHidden });
+  (badgeNum === 0) === titleBadge.badgeHidden &&
+  (sideNum === 0) === titleBadge.sideHidden,
+  { titleHidden: titleBadge.badgeHidden, sideHidden: titleBadge.sideHidden, badgeNum, sideNum });
 check('未読バッヂは 100 以上の数字を出さない（100 件超は 99+ へ。999 のような未キャップ表示がない）',
-  !(titleBadge.sideText.match(/^未読 (\d{3,})$/) || titleBadge.badgeText.match(/^未読 (\d{3,})$/)),
+  !(sideNum >= 100 || badgeNum >= 100),
   { title: titleBadge.badgeText, side: titleBadge.sideText });
 
 // 右ペインヘッダーは読者向けに不要な情報（投稿日時・掲示期間）を出さない。全文開きボタンは「詳細」

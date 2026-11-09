@@ -67,9 +67,12 @@ export const chatController = {
         channel: channelObj,
       });
     } catch (error) {
+      // ★ メンバーシップ拒否 (403) / 存在しないチャンネル (404) を 200 に潰さない（権限検証を応答に反映）
+      const statusCode = error?.statusCode || error?.status || 200;
       console.error('[ChatController getChannelMessages Error]', error.message);
-      return res.status(200).json({
-        success: true,
+      return res.status(statusCode).json({
+        success: false,
+        message: error.message || 'メッセージを取得できませんでした。',
         count: 0,
         data: [],
         messages: [],

@@ -1549,10 +1549,15 @@ span.dash-news-body { display: block; }
   filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.14));
   animation-timing-function: linear;
   animation-iteration-count: infinite;
+  /* 傾き角のフォールバック。実値は粒子ごとに inline の --fx-tilt (JS が 14〜24deg を粒子ごとに決める) */
+  --fx-tilt: 0deg;
 }
 
 /* 舞い降りる系: 桜・紅葉・雪・雨 */
 .dash-fx-layer.fx-fall .dash-fx { animation-name: dash-fx-fall; }
+
+/* 降り注ぎ系: 梅雨（絵文字は傾き固定・回転なし。進行方向は真下） */
+.dash-fx-layer.fx-rain .dash-fx { animation-name: dash-fx-rain; }
 
 /* 昇り上がる系: サンタ・かぼちゃ・打ち上げ・七夕短冊 */
 .dash-fx-layer.fx-rise .dash-fx {
@@ -1576,6 +1581,16 @@ span.dash-news-body { display: block; }
   45%  { transform: translate(14px, calc(var(--fx-drop, 160px) * 0.45)) rotate(160deg) scale(0.92); opacity: 0.9; }
   85%  { transform: translate(21px, calc(var(--fx-drop, 160px) * 0.82)) rotate(260deg) scale(0.88); opacity: 0.85; }
   100% { transform: translate(26px, var(--fx-drop, 160px)) rotate(320deg) scale(0.86); opacity: 0; }
+}
+
+/* 梅雨の降り注ぎ: 傾き角 var(--fx-tilt) は全 keyframe で同一（回転しない）。
+   Y は 0 から --fx-drop まで単調に下り、傾きに合わせた横漂移は 9px まで。大きさは変えない */
+@keyframes dash-fx-rain {
+  0%   { transform: translate(0, 0) rotate(var(--fx-tilt, 18deg)) scale(1); opacity: 0; }
+  10%  { transform: translate(1px, calc(var(--fx-drop, 160px) * 0.1)) rotate(var(--fx-tilt, 18deg)) scale(1); opacity: 0.9; }
+  45%  { transform: translate(4px, calc(var(--fx-drop, 160px) * 0.45)) rotate(var(--fx-tilt, 18deg)) scale(1); opacity: 0.9; }
+  85%  { transform: translate(7px, calc(var(--fx-drop, 160px) * 0.85)) rotate(var(--fx-tilt, 18deg)) scale(1); opacity: 0.85; }
+  100% { transform: translate(9px, var(--fx-drop, 160px)) rotate(var(--fx-tilt, 18deg)) scale(1); opacity: 0; }
 }
 
 /* 上昇系も同じ距離（カード上端に到達してから消える） */

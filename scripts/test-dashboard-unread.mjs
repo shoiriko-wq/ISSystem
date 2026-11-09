@@ -19,12 +19,15 @@
  * 実行: npm run test:ui:unread  （ISSystem サーバーが必要 / 3443。検証用投稿は CAPSIM 擬似キャッシュ中心で実 DB は本日記事と登録日前記事のみ）
  *  options: UI_BASE=https://127.0.0.1:3443 UI_USER=T2026001 UI_PASS=password123 CHROME_PATH=...
  */
+import fs from 'node:fs';
 import path from 'node:path';
+import https from 'node:https';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASE = process.env.UI_BASE || 'https://127.0.0.1:3443';
+const CA = fs.readFileSync(path.join(ROOT, 'certs', 'issystem-ca.crt'), 'utf8');
 const USER = process.env.UI_USER || 'T2026001';
 const PASS = process.env.UI_PASS || 'password123';
 const CHROME = process.env.CHROME_PATH || '/usr/bin/google-chrome';
@@ -52,12 +55,38 @@ const fmt = (n) => (n >= 100 ? '99+' : String(n));
 const fmtLabel = (n) => `未読 ${n >= 100 ? '99+' : n}`;
 
 async function api(pathname, { method = 'GET', body, token } = {}) {
-  const res = await fetch(`${BASE}${pathname}`, {
-    method,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
+  const u = new URL(BASE + pathname);
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(body ? { 'Content-Length': String(Buffer.byteLength(JSON.stringify(body))) } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        hostname: u.hostname,
+        port: u.port || 443,
+        path: u.pathname + u.search,
+        method,
+        headers,
+        ca: [CA],
+      },
+      (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+          } catch (e) {
+            reject(e);
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    if (body) req.end(JSON.stringify(body));
+    else req.end();
   });
-  return res.json();
 }
 
 // ===== サーバー側データ（登録日・掲示開始前の件数） =====

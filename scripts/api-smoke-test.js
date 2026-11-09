@@ -1,64 +1,95 @@
 /**
  * API 統合スモークテスト (PostgreSQL 連携検証)
- * 起動済みサーバーへログインし、主要 GET/POST/PUT/DELETE エンドポイントを実行する
- * 使用: npm run api:check  (API_BASE 環境変数で URL 指定, 既定 http://localhost:3100/api)
+ * 起動済みサーバー（`npm start` = HTTPS/WSS 3443）へログインし、主要 GET/POST/PUT/DELETE と全トップレベルAPIを実行する
+ * 使用: npm run api:check  (API_BASE 環境変数で URL 指定, 既定 https://127.0.0.1:3443/api)
+ * 証明書: CA を明示的に渡す（NODE_EXTRA_CA_CERTS も TLS検証の無効化も使わない — AGENTS.md 第12条）
  */
+import fs from 'node:fs';
+import path from 'node:path';
+import https from 'node:https';
+import { fileURLToPath } from 'node:url';
 
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const CA = [fs.readFileSync(path.join(ROOT, 'certs', 'issystem-ca.crt'))];
 const BASE = process.env.API_BASE || 'https://127.0.0.1:3443/api';
 
-const loginRes = await fetch(`${BASE}/auth/login`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ staff_code: 'T2026001', password: 'password123' }),
-});
+let token = '';
 
-const loginJson = await loginRes.json().catch(() => ({}));
-const token =
+// CA を明示した HTTPS リクエスト（fetch は自己署名証明書を弾くため node:https を使う）
+function req(method, p, bodyText, tok = token) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(BASE + p);
+    const h = { 'Content-Type': 'application/json' };
+    if (bodyText) h['Content-Length'] = String(Buffer.byteLength(bodyText));
+    if (tok) h.Authorization = `Bearer ${tok}`;
+    const r = https.request({ hostname: u.hostname, port: u.port || 443, path: u.pathname + u.search, method, headers: h, ca: CA }, (res) => {
+      let d = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => (d += c));
+      res.on('end', () => resolve({ status: res.statusCode, text: d }));
+    });
+    r.on('error', reject);
+    if (bodyText) r.write(bodyText);
+    r.end();
+  });
+}
+
+const loginRes = await req('POST', '/auth/login', JSON.stringify({ staff_code: 'T2026001', password: 'password123' }));
+const loginJson = JSON.parse(loginRes.text || '{}');
+token =
   loginJson.token ||
   loginJson.accessToken ||
   loginJson?.data?.token ||
   loginJson?.user?.token ||
-  (loginJson?.user && loginJson.user.token) ||
   loginJson?.result?.token;
 
 console.log('LOGIN', loginRes.status, 'KEYS', Object.keys(loginJson).join(','));
-console.log('LOGIN_BODY', JSON.stringify(loginJson).slice(0, 400));
-
-const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+console.log('LOGIN_BODY', loginRes.text.slice(0, 400));
 
 const show = (text, n = 160) => text.replace(/\s+/g, ' ').slice(0, n);
 
-async function get(path) {
-  const res = await fetch(`${BASE}${path}`, { headers });
-  const body = await res.text();
-  console.log(`GET ${path} -> ${res.status}`, show(body));
+async function get(p) {
+  const r = await req('GET', p);
+  console.log(`GET ${p} -> ${r.status}`, show(r.text));
 }
 
-async function getJson(path) {
-  const res = await fetch(`${BASE}${path}`, { headers });
-  return res.json().catch(() => ({}));
+async function getJson(p) {
+  const r = await req('GET', p);
+  try {
+    return JSON.parse(r.text);
+  } catch {
+    return {};
+  }
 }
 
-async function post(path, payload) {
-  const res = await fetch(`${BASE}${path}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload),
-  });
-  const json = await res.json().catch(() => ({}));
-  console.log(`POST ${path} -> ${res.status}`, show(JSON.stringify(json), 220));
-  return json;
+async function post(p, payload) {
+  const r = await req('POST', p, JSON.stringify(payload));
+  console.log(`POST ${p} -> ${r.status}`, show(r.text, 220));
+  try {
+    return JSON.parse(r.text);
+  } catch {
+    return {};
+  }
 }
 
-async function put(path, payload) {
-  const res = await fetch(`${BASE}${path}`, {
-    method: 'PUT',
-    headers,
-    body: JSON.stringify(payload),
-  });
-  const json = await res.json().catch(() => ({}));
-  console.log(`PUT ${path} -> ${res.status}`, show(JSON.stringify(json), 220));
-  return json;
+async function put(p, payload) {
+  const r = await req('PUT', p, JSON.stringify(payload));
+  console.log(`PUT ${p} -> ${r.status}`, show(r.text, 220));
+  try {
+    return JSON.parse(r.text);
+  } catch {
+    return {};
+  }
+}
+
+async function del(p) {
+  const r = await req('DELETE', p);
+  console.log(`DELETE ${p} -> ${r.status}`, show(r.text, 220));
+  try {
+    return JSON.parse(r.text);
+  } catch {
+    return {};
+  }
 }
 
 const facilitiesRes = await getJson('/facilities');
@@ -97,12 +128,11 @@ const inviteCode = invitation?.code || invitation?.invitation?.code;
 console.log('INVITATION_CODE_CHECK', inviteCode ? `OK (${inviteCode})` : 'NG (code がトップレベルで返っていない)');
 
 // 未登録の教職員番号でのパスワード再設定 -> 404 期待 (このコードは消費されない)
-const resetRes = await fetch(`${BASE}/auth/reset-password-invitation`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ invitationCode: inviteCode, staff_code: 'T99999999', newPassword: 'ResetPass123!' }),
-});
-const resetJson = await resetRes.json().catch(() => ({}));
+const resetRes = await req('POST', '/auth/reset-password-invitation', JSON.stringify({ invitationCode: inviteCode, staff_code: 'T99999999', newPassword: 'ResetPass123!' }), '');
+let resetJson = {};
+try {
+  resetJson = JSON.parse(resetRes.text);
+} catch {}
 console.log('POST /auth/reset-password-invitation ->', resetRes.status, show(JSON.stringify(resetJson), 220));
 console.log('RESET_PASSWORD_CHECK', resetRes.status === 404 ? 'OK (未登録教職員番号は 404)' : 'NG');
 
@@ -122,20 +152,14 @@ if (approvalId) {
   await put(`/approvals/${approvalId}/process`, { status: 'APPROVED', comment: 'スモークテスト承認' });
 }
 
-async function del(path) {
-  const res = await fetch(`${BASE}${path}`, { method: 'DELETE', headers });
-  const json = await res.json().catch(() => ({}));
-  console.log(`DELETE ${path} -> ${res.status}`, show(JSON.stringify(json), 220));
-  return json;
-}
-
 // --- 広域 GET 網羅 (モデル / サービスの整合確認) ---
 const sweep = [
   '/auth/me',
   '/users',
   '/bulletins/post_1',
-  '/chat/channels/general/messages',
-  '/chat/channels/general/members',
+  // ★ 職員全体チャット撤廃（v3.1.2）: general は存在しない。seed の参加グループ kyomu を叩く
+  '/chat/channels/kyomu/messages',
+  '/chat/channels/kyomu/members',
   `/facilities/${facilityIds[0] || 'fac_1'}/reservations?date=2026-11-20`,
   '/schedules',
   '/schedules/categories',
@@ -193,31 +217,26 @@ const categories = categoryRes.categories || categoryRes.data || [];
 console.log('CATEGORIES', categories.length, categories.map((c) => `${c.id}:${c.name}:${c.color_key}`).join(' '));
 
 // --- 部署カテゴリの権限検証 (追加・改名・削除は教務部 KYOMU のみ) ---
-const adminLogin = await fetch(`${BASE}/auth/login`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ staff_code: 'T2026000', password: 'password123' }),
-});
-const adminJson = await adminLogin.json().catch(() => ({}));
+const adminLoginRes = await req('POST', '/auth/login', JSON.stringify({ staff_code: 'T2026000', password: 'password123' }), '');
+const adminJson = JSON.parse(adminLoginRes.text || '{}');
 const adminToken = adminJson.token || adminJson?.data?.token || adminJson?.user?.token;
-const asAdmin = async (method, path, payload = null) => {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
-    body: payload ? JSON.stringify(payload) : undefined,
-  });
-  return { status: res.status, json: await res.json().catch(() => ({})) };
+const asAdmin = async (method, p, payload = null) => {
+  const r = await req(method, p, payload ? JSON.stringify(payload) : undefined, adminToken);
+  let j = {};
+  try {
+    j = JSON.parse(r.text);
+  } catch {}
+  return { status: r.status, json: j };
 };
 
 const adminCreate = await asAdmin('POST', '/schedules/categories', { name: 'API確認部署', color_key: 'SLATE', sort_order: 91 });
 console.log('CATEGORY_CREATE_BY_ADMIN', adminCreate.status, adminCreate.status === 403 ? 'OK (ADMIN拒否)' : 'NG');
 
-const kyomuCreateRes = await fetch(`${BASE}/schedules/categories`, {
-  method: 'POST',
-  headers,
-  body: JSON.stringify({ name: 'API確認部署', color_key: 'SLATE', sort_order: 91 }),
-});
-const kyomuCreate = await kyomuCreateRes.json().catch(() => ({}));
+const kyomuCreateRes = await req('POST', '/schedules/categories', JSON.stringify({ name: 'API確認部署', color_key: 'SLATE', sort_order: 91 }));
+let kyomuCreate = {};
+try {
+  kyomuCreate = JSON.parse(kyomuCreateRes.text);
+} catch {}
 const newCatId = kyomuCreate?.category?.id || kyomuCreate?.data?.id;
 console.log('CATEGORY_CREATE_BY_KYOMU', kyomuCreateRes.status, kyomuCreateRes.status === 201 ? 'OK' : 'NG');
 
@@ -226,7 +245,7 @@ if (newCatId) {
   console.log('CATEGORY_DELETE_BY_ADMIN', adminDel.status, adminDel.status === 403 ? 'OK (ADMIN拒否)' : 'NG');
   const adminPut = await asAdmin('PUT', `/schedules/categories/${newCatId}`, { name: 'API確認部署' });
   console.log('CATEGORY_UPDATE_BY_ADMIN', adminPut.status, adminPut.status === 403 ? 'OK (ADMIN拒否)' : 'NG');
-  const kyomuDelRes = await fetch(`${BASE}/schedules/categories/${newCatId}`, { method: 'DELETE', headers });
+  const kyomuDelRes = await req('DELETE', `/schedules/categories/${newCatId}`);
   console.log('CATEGORY_DELETE_BY_KYOMU', kyomuDelRes.status, kyomuDelRes.status === 200 ? 'OK' : 'NG');
 }
 
@@ -265,6 +284,23 @@ const reservationId = newRes?.reservation?.id || newRes?.data?.id;
 
 if (reservationId) {
   await del(`/facilities/reservations/${reservationId}`);
+}
+
+// --- 全トップレベルAPI被覆確認（読取専用 GET。各セグメントがスモークで叩かれる） ---
+// 読取のみでデータを変えない。ステータスを表示し、スモークが全APIセグメントを網羅していることを
+// node scripts/verify-docs.mjs が src/routes/index.js と突き合わせて検証する。
+const coveragePaths = [
+  '/subjects',
+  '/basic-info',
+  '/mail/account',
+  '/exam-survey-status',
+  '/staff/pool',
+  '/external/news',
+  '/external/weather',
+  '/absences',
+];
+for (const p of coveragePaths) {
+  await get(p);
 }
 
 process.exit(0);

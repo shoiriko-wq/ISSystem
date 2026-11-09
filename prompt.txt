@@ -1,107 +1,16 @@
 
-
-
-
-
-確定仕様案（v3.1 未読バッヂ）— ダッシュボードは「既読化のみ」で確定
-1. 未読の定義（単一の判定関数に統一）
-新規 isUnreadForMe(b) を bulletin.module.js に置き、ダッシュボード・タイトル・サイドバーが同じ関数を使う:
-
-
-未読 = ackStatus ∈ {UNREAD, REJECTED}                    ← 現行 isUnreadBulletin と同一
-     AND 投稿日(JST) ≧ ユーザ登録日                       ← 新規
-     AND 掲示期間が有効 (start 未設定/≦今日, end 未設定/≧今日)  ← 新規（着任前・掲示終了記事を除く）
-     AND target_scope に自分が含まれる                    ← 現行は常に ALL/ALL → noop。関数として持っておく
-     AND 非削除                                          ← サーバーの findAll が既に除外
-既存の isUnreadBulletin は ackStatus ベースなので、判定の土台はあります。追加は登録日・掲示期間の 2 条件です。
-
-2. サイドバーバッヂ（#bulletin-unread-count は既存要素を使用）
-値 = 全日未読（掲示期間が有効な物）。state.unreadCounts.bulletin
-0 → hidden（現行 rules 踏襲）、100 以上は 99+（ピルは 10px。現行 test:ui:sidebar は 999 を流すのでテスト更新が必要）
-更新: 一覧 load / markAsRead 成功 / bulletin:posted 受信 / ダッシュボード既読化
-3. メイン画面タイトルバッヂ
-ヘッダー h2「職員掲示板」直後に span#bulletin-title-unread を追加。値はサイドバーと同一（全日未読）
-左列各行の「未読」バッヂ（既存）は維持。右ペインヘッダーのバッヂは撤廃済みなので置かない
-既読化トリガは現行どおり（左列行クリック／↑↓／自動選択 = 右ペイン全文表示 = PUT /api/bulletins/:id/read）→ 追加実装なし
-4. ダッシュボード「本日の連絡」
-ヘッダー右側（flex justify-between の右側が現在空き）に span#dash-today-bulletin-unread ＝ 本日未読数
-記事カードを <button type="button" class="dash-news-item" data-bulletin-read="id" title="クリックで既読をつける"> へ変更（施設予約 data-facility-open と同慣習）
-未読カードに未読マーカー表示、既読カードはマーカーなし
-クリック = PUT /api/bulletins/:id/read のみ。タブ移動もモーダルもなし
-成功後: キャッシュの ackStatus='READ' → 未読再計算 → 本日のバッヂ減、カードの未読マーカー消去、サイドバー・タイトルバッヂも追従
-既読カードのクリックは API を叩かない（冪等）
-5. 登録日の供給（サーバー 2 箇所の変更が必要）
-auth.service.js (login return 180-194) と auth.controller.js (getProfile 181-198) に created_at を追加（現状どちらも返していない）
-state.currentUser.registeredAt に 'YYYY-MM-DD' (JST) を正規化して保持
-比較は日単位 JST。登録当日の記事は未読に含む（≧）
-localStorage の旧セッションに created_at が無い場合: 全期間カウント（制約なし）とし、次回ログインで解消
-6. リアルタイム
-socket.js:308 の bulletin:posted はトーストのみでバッヂが古い。受信中に新投稿をキャッシュへ反映し未読を再計算（掲示期間・登録日条件適用、自分の投稿は除く）。
-
-7. テスト（新規・拡張）
-jest: login/me 応答に created_at があること（auth.test.js）、PUT /read 後 ackStatus=READ かつ ack 行増加（bulletins.test.js）、新規 test/unread-count.test.js — 登録日より古い記事が未読数に含まれないこと（seed の created_at と posts を操作して SQL で検証）
-新規 scripts/test-dashboard-unread.mjs + npm run test:dashboard-unread: ① ダッシュボードバッヂ=本日未読、② カードクリックで PUT read 成功・バッヂ 1 減・マーカー消去、③ クリックでモーダルが開かずタブも切り替わらない、④ サイドバー=タイトル=全日未読、⑤ 99+ キャップ、⑥ 登録日前の記事はバッヂに含めない
-既存 test:ui:bulletin にタイトルバッヂ項目追加、test:ui:sidebar を 99+ へ更新、test:ui:nav(45件)・test:ui:scan 回帰、test:ui:all へ新規追加
-想定: jest 12 suite / 148 テスト、UI 新規 6 項目
-8. 実装ファイル
-auth.service.js、auth.controller.js、state.js（unreadCounts.bulletinToday 追加・型拡張）、bulletin.module.js、dashboard.module.js（subscribeState を import 追加）、socket.js、components.css（タイトルバッヂ・ダッシュボード未読マーカー・button 化）、scripts/test-dashboard-unread.mjs、test/unread-count.test.js、README.md、ISSystem仕様書.md、package.json
-
-残る判断点 2 つ（承認が必要）
-挨拶カード内の既存 dash-unread-bulletins は全日未読を表示中。新バッヂは本日未読なので二重表示になります。推奨: ラベルを「掲示板 未読連絡（全日）」へ変え両方維持（全日/本日を明示）。バッヂ統合も可能です。
-掲示期間が有効な物だけ数える規則に同意が必要。これがないと「掲示終了日の記事」が永遠に未読として残り、バッヂが下がりません。
-なお回答の末尾に lsof -i :3443 が付いていました。サーバーポート確認の依頼であれば実行します（nodemon が 3443 で稼働中です）。この 2 点と 99+ キャップを承認いただければ実装を開始します。
-
-
-
-
-調査結果
-「記入する」ボタン (#dash-btn-absence) の参照は 3 箇所だけでした:
-
-箇所	内容
-public/js/modules/dashboard.module.js:282-285	ボタン要素（btn-primary w-full + pen-line アイコン）
-public/js/modules/absence.module.js:86-87	openAbsenceModal('ALL') のバインド
-public/css/components.css:55-60	#dash-btn-absence { align-items: baseline; }（ボタン専用 CSS）
-テスト・ドキュメント・index.html からの参照はゼロ（grep -rn "dash-btn-absence" scripts/ test/ *.md public/index.html → 空）。
-
-機能は失われないことを確認しました:
-
-年休等タイル (#dash-absence-leave-tile) と出張タイル (#dash-absence-trip-tile) は role="button" tabindex="0" + keydown で、クリックで openAbsenceModal('LEAVE'/'TRIP') を開く（absence.module.js:89-103）
-モーダル内には記入フォームが常設（index.html:836-866）: 区分 select（年休等/出張）、対象教員、理由、#absence-btn-save「登録する」
-openAbsenceModal はフィルタを設定してモーダルを開きサマリーを読み込む（absence.module.js:258-269）
-タイルは 0名でもクリック可能（bindAbsenceTile は件数に依存しない）
-→ 「記入する」ボタンはタイル経由で完全に代替可能。削除して問題なし。
-
-削除プラン（4 ファイル）
-public/js/modules/dashboard.module.js
-
-282-285 のボタン要素を削除
-245 のコメントを「区分別人数タイルのクリックで登録・確認モーダルを開く（記入フォーム含む）」へ更新
-261 のタイルグリッドの mb-3 を削除（カードが flex flex-col justify-between なので、ボタン消失後底部余白が消える）
-タイルの title（264・273）を「クリックして本日の「年休等」の詳細リストと記入フォームを開く」へ更新 — 記入の入口がタイルであることを明示
-498 のコメント（記入ボタンのバインドを示す行）を削除
-public/js/modules/absence.module.js
-
-86-87（バインド + コメント）を削除
-ヘッダーコメント（3行目）を「区分別人数タイル・クリック詳細/記入モーダル」へ更新
-public/css/components.css
-
-#dash-btn-absence ブロック（55-60）とそのコメントを削除（死 CSS 化）
-ISSystem仕様書.md §16 changelog に UI 変更 1 行（仕様書は API/権限のみ記述でボタン記述なし。README のテスト表は影響なし）
-
-検証計画
-npm run lint
-既存 npm run test:ui:dashboard に 2 アサーション追加: ① #dash-btn-absence が存在しない、② 年休等タイルクリックで #absence-modal が開き #absence-form と #absence-type-select（LEAVE/TRIP）が見える。同ファイルに ③「0名でもタイルクリックでモーダルが開く」を追加
-npm run test:ui:contrast（contrast-scan.mjs:153 は absence-modal を開いてコントラストを見るため、モーダル経路の健全性の回帰確認になる）
-390px でのカード高さ確認（scan-frames.mjs は年休セクションを参照していないため、タイルグリッドの余白調整が横スクロールを生まないことを目視 + スクリーンショット）
-この削除を進めます（plan mode なので承認後に実行）。なお未読バッヂ仕様では 2 点（挨拶カードの全日未読表示の扱い、掲示期間フィルタ、99+ キャップ）の承認がまだ必要です。
-
-
-
 ダッシュボードの今日の校内行事の文言は、本日の校内行事に変えてください。
 ダッシュボードの記事を共有のモーダル内は、記事のURLだけで十分です。
-教員チャットの職員全体グループはなしにします。撤廃してください。個々でグループ作成したものだけとします。
+教員チャットの職員全体グループはなしにします。撤廃してください。グループは個々でグループ作成したものだけとします。
+ダッシュボードの挨拶枠のアニメーションですが、 陽光、日傘、海、お正月、夜の星は、現在枠の上部でのみ表示されていますが、枠全体で表示されるように変更してください。
 
 
+
+CAを--forceで再生成（全端末でCA再インストールが必要。）でお願いします。
+
+職員掲示板のメイン部分のタイトル部に未読バッジがついていますが、これはバッジというよりボタンに変更して検索ボックスの右に配置してください。全日の未読検索が行えるボタンとして機能させてください。検索ボックス内の文言を「タイトル・本文・投稿者名で検索」に変更してください。それから本日のボタンは削除してください。必要ならカレンダー内に配置してもいいかもしれません。職員掲示板のカレンダーの年月の部分は、スケジュールのカレンダーの年月部分と同じようにしてください。
+
+施設物品予約のメイン部のタイトル部の年月日選択ボタンの部分は、職員掲示板のメイン部分のタイトル部の年月日選択ボタンと同じようにしてください。
 
 
 定期考査のメニューを次のように変更します。

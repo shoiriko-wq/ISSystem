@@ -1,0 +1,101 @@
+=== ドキュメント検証レポート ===
+OK: README UI十条: 項目は正方形タイル
+OK: README UI十条: 寸法・位置は px（rem 併記）
+OK: README UI十条: 余白・隙間・縮小・見切れなし
+OK: README UI十条: 色分け・枠・影・角丸
+OK: README UI十条: ホバリングとフォーカスでせり出し
+OK: README UI十条: 収納はオーバーレイ（main の余白を常時確保）
+OK: README UI十条: 広幅（1100px以上）では main がせり出しへ追従
+NG: README UI十条: 縦移動・斜め移動なし
+NG: README UI十条: 初回クリックが有効
+OK: README UI十条: 検証スクリプト（寸法・位置・描画を px 実測）
+OK: README 禁则: テストの削除・スキップ禁止
+OK: README 禁则: UIテストは実測
+OK: README 禁则: UI十条
+OK: README 禁则: CA環境変数を npm script に埋め込まない
+OK: README 禁则: DB破壊禁止（テスト失敗時にテーブル・レコードを消すな）
+NG: README 禁则: general チャットは全廃（テスト・fixture にも残さない）
+NG: README 禁则: チャットは発言者以外が読み書き（server 側で members 検証）
+NG: README 禁则: メールはメールボックスのみ
+NG: README 禁则: 追加の権限なし（教務と校長のみ）
+OK: README 禁则: 検証の省略禁止
+OK: AGENTS.md 第4条（UI十条）: 1 項目は正方形タイル
+OK: AGENTS.md 第4条（UI十条）: 2 寸法・位置を px で実測
+OK: AGENTS.md 第4条（UI十条）: 3 余白・隙間・縮小・見切れなし
+OK: AGENTS.md 第4条（UI十条）: 4 色分け・枠・影・角丸
+OK: AGENTS.md 第4条（UI十条）: 5 ホバリング・フォーカスでせり出し
+OK: AGENTS.md 第4条（UI十条）: 6 オーバーレイと main の余白
+OK: AGENTS.md 第4条（UI十条）: 7 広幅では main がせり出しへ追従
+NG: AGENTS.md 第4条（UI十条）: 8 縦移動・斜め移動禁止
+NG: AGENTS.md 第4条（UI十条）: 9 初回クリックが有効
+NG: AGENTS.md 第4条（UI十条）: 10 スクリーンショット・CSS 阅读のみ禁止
+OK: AGENTS.md 第12条: Jest 直列（--runInBand）
+OK: AGENTS.md 第12条: pretest（init-db + seed）
+OK: AGENTS.md 第12条: test:ui:all を実行
+OK: AGENTS.md 第12条: api:check（サーバー起動後）
+OK: AGENTS.md 第12条: verify-docs を最終ゲートとして実行
+OK: AGENTS.md 第12条: 順序どおり・省略禁止
+OK: AGENTS.md 第12条: 共有DB衝突の警告
+NG: AGENTS.md 第12条: CA を npm script に埋め込まない
+OK: pretest が init-db + seed を実行
+OK: npm test は --runInBand（Jest を1プロセス直列）
+OK: api:check（api-smoke-test.js）
+NG: db:drop-general-chat（第11条）
+OK: npm script に NODE_EXTRA_CA_CERTS を埋め込まない
+OK: test:ui:all に test-block-ui.mjs → test:ui:block
+OK: test:ui:all に test-bulletin-search-all-days.mjs → test:ui:bulletin-search
+OK: test:ui:all に test-bulletin-split.mjs → test:ui:bulletin
+OK: test:ui:all に test-chat-unread.mjs → test:ui:chat
+OK: test:ui:all に test-dash-fx.mjs → test:ui:fx
+OK: test:ui:all に test-dashboard-unread.mjs → test:ui:unread
+OK: test:ui:all に test-exam-basic-columns.mjs → test:ui:exambasic
+OK: test:ui:all に test-facility-header-sticky.mjs → test:ui:facility-header-sticky
+OK: test:ui:all に test-facility-master.mjs → test:ui:facility
+OK: test:ui:all に test-facility-order.mjs → test:ui:facility-order
+OK: test:ui:all に test-facility-timeline.mjs → test:ui:timeline
+OK: test:ui:all に test-frame-rules.mjs → test:ui:frames
+OK: test:ui:all に test-header-frames.mjs → test:ui:header-frames
+OK: test:ui:all に test-https-ca.mjs → test:ui:https
+OK: test:ui:all に test-mail-setup.mjs → test:ui:mail
+OK: test:ui:all に test-modal-close.mjs → test:ui:modal
+OK: test:ui:all に test-news-share-modal.mjs → test:ui:news-share
+NG: test:ui:all に test-schedule-month-nav.mjs → test:ui:schedule
+OK: test:ui:all に test-sidebar-collapse.mjs → test:ui:sidebar
+NG: test:ui:all に test-sidebar-push.mjs → test:ui:sidebar-push
+OK: test:ui:all に test-ui-audit.mjs → test:ui:audit
+OK: test:ui:all に test-ui-seating.mjs → test:ui:seating
+OK: CSS 収納幅 67.25px !important
+OK: CSS main 余白 4.2rem（収納幅分を常時確保）
+OK: CSS せり出し 16.3rem（広幅の main 追従）
+OK: CSS #app-body は position: relative（オーバーレイ）
+OK: CSS は :hover と is-hover/is-focus を併用
+OK: JS は is-hover と is-focus を管理
+OK: README のサイドバー記述は現実（67.25px・16.3rem）
+OK: AGENTS.md のサイドバー記述は現実（67.25px・16.3rem）
+OK: API スモーク被覆 /api/auth
+OK: API スモーク被覆 /api/users
+OK: API スモーク被覆 /api/subjects
+OK: API スモーク被覆 /api/basic-info
+OK: API スモーク被覆 /api/bulletins
+OK: API スモーク被覆 /api/chat
+OK: API スモーク被覆 /api/facilities
+OK: API スモーク被覆 /api/mail
+OK: API スモーク被覆 /api/schedules
+OK: API スモーク被覆 /api/approvals
+OK: API スモーク被覆 /api/seating
+OK: API スモーク被覆 /api/exam
+OK: API スモーク被覆 /api/exam-survey-status
+OK: API スモーク被覆 /api/staff
+OK: API スモーク被覆 /api/news
+OK: API スモーク被覆 /api/external
+OK: API スモーク被覆 /api/absences
+OK: API スモーク被覆 /api/audit
+NG: health 実測（server 起動済み・200） → ERR ECONNREFUSED
+OK: 仕様書: 既知の課題
+OK: 仕様書: 意図された非実装
+OK: 仕様書: 改訂履歴
+OK: 仕様書: 検証の実行順序と制約
+NG: general チャット参照の完全除去 → scripts\verify-docs.mjs:157: if (/chat\/channels\/general|'general'|"general"|`general`/.test(line)) {
+NG: CHANGELOG.md がある
+
+合計 98 項目、失敗 16 項目

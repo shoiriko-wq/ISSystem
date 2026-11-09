@@ -139,10 +139,11 @@ CREATE INDEX IF NOT EXISTS idx_ack_post_user ON post_acknowledgements(post_id, u
 CREATE INDEX IF NOT EXISTS idx_ack_user_status ON post_acknowledgements(user_id, status);
 
 -- 4. 職員チャットチャンネル (chat_channels)
+-- ★ 職員全体（PUBLIC/general）チャットは撤廃済み（2026/11/9 v3.1.2）。個人作成グループのみ。
 CREATE TABLE IF NOT EXISTS chat_channels (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  type TEXT NOT NULL DEFAULT 'PUBLIC',
+  type TEXT NOT NULL DEFAULT 'GROUP',
   members TEXT DEFAULT '[]',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -351,6 +352,10 @@ CREATE TABLE IF NOT EXISTS editing_locks (
 -- 既存データベース向けマイグレーション (取得・ハートビート時刻カラム)
 ALTER TABLE editing_locks ADD COLUMN IF NOT EXISTS acquired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
 ALTER TABLE editing_locks ADD COLUMN IF NOT EXISTS last_accessed TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+-- 既存データベース向けマイグレーション (作成・更新時刻カラム。旧スキーマの DB では欠落し、
+-- INSERT が "created_at" is not a known column で失敗した → 2026/11/9 追加)
+ALTER TABLE editing_locks ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE editing_locks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
 
 -- 12b. フィールドセル値 (facility_cells) ※ facility.model.js の updateCells/getCells が使用
 CREATE TABLE IF NOT EXISTS facility_cells (
@@ -481,20 +486,22 @@ VALUES
   ('t-sato', 'T2026003', '佐藤 先生', 'sato@school.ed.jp', '$2b$10$UaPLuLuZtQ.5DG3P33kdl.iM0Rl140Ky9Gv8JWXomI8LiRUxA8SCC', 'TEACHER', '2', '進路指導部', '103')
 ON CONFLICT DO NOTHING;
 
+-- ★ 職員全体（PUBLIC）チャットは撤廃済み（2026/11/9 v3.1.2）。個人が作成したグループのみをseedする。
 INSERT INTO chat_channels (id, name, type, members)
 VALUES
-  ('general', '📢 職員全体', 'PUBLIC', '["kyomu01","t-tanaka","t-sato"]'),
-  ('grade1', '🏫 1年学年部', 'GROUP', '["t-tanaka"]'),
-  ('kyomu', '📋 教務部連絡', 'GROUP', '["kyomu01"]')
+  ('grade1', '🏫 1年学年部', 'GROUP', '["t-tanaka","t-takahashi"]'),
+  ('kyomu', '📋 教務部連絡', 'GROUP', '["kyomu01","t-tanaka"]'),
+  ('suisin', '🧭 進路指導連絡', 'GROUP', '["kyomu01","t-sato"]')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO chat_channel_members (channel_id, user_id, is_hidden)
 VALUES
-  ('general', 'kyomu01', 0),
-  ('general', 't-tanaka', 0),
-  ('general', 't-sato', 0),
   ('grade1', 't-tanaka', 0),
-  ('kyomu', 'kyomu01', 0)
+  ('grade1', 't-takahashi', 0),
+  ('kyomu', 'kyomu01', 0),
+  ('kyomu', 't-tanaka', 0),
+  ('suisin', 'kyomu01', 0),
+  ('suisin', 't-sato', 0)
 ON CONFLICT DO NOTHING;
 
 INSERT INTO posts (id, title, content, author_id, target_scope, display_start_date)
