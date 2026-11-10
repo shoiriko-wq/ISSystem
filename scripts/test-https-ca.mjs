@@ -13,7 +13,7 @@
  *  9. 非HTTPポートでは plain ws 接続が確立しない
  *
  * 実行: npm run test:ui:https   (NODE_EXTRA_CA_CERTS=./certs/issystem-ca.crt 付き)
- *  options: UI_BASE=https://127.0.0.1:3443  INSECURE_BASE=http://127.0.0.1:3000
+ *  options: UI_BASE=https://127.0.0.1:3443  INSECURE_BASE=http://127.0.0.1:3030
  *           UI_USER=T2026001  UI_PASS=password123  CHROME_PATH=/usr/bin/google-chrome
  */
 import fs from 'node:fs';
@@ -29,7 +29,7 @@ import { io } from 'socket.io-client';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const SECURE = process.env.UI_BASE || 'https://127.0.0.1:3443';
-const INSECURE = process.env.INSECURE_BASE || 'http://127.0.0.1:3000';
+const INSECURE = process.env.INSECURE_BASE || 'http://127.0.0.1:3030';
 const USER = process.env.UI_USER || 'T2026001';
 const PASS = process.env.UI_PASS || 'password123';
 const CHROME = process.env.CHROME_PATH || '/usr/bin/google-chrome';

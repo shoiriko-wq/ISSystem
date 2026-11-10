@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="referrer" content="strict-origin-when-cross-origin" />
+<title>ISSystem ｜ はじめに（証明書の設定）</title>
+<style>
+  :root { --bg:#F7FAFC; --card:#FFFFFF; --text:#0F172A; --muted:#64748B; --brand:#037A71; --ring:#CBD5E1; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:"Noto Sans JP","Hiragino Sans","Yu Gothic",system-ui,sans-serif; padding:2rem 1rem; }
+  .wrap { max-width:52rem; margin:0 auto; }
+  header { border-bottom:2px solid var(--brand); padding-bottom:.75rem; margin-bottom:1.25rem; }
+  .brand { font-size:1.25rem; font-weight:700; color:var(--brand); }
+  .sub { font-size:.875rem; color:var(--muted); margin-top:.25rem; }
+  .alert { border-radius:.75rem; padding:1rem 1.125rem; font-size:.9375rem; line-height:1.7; }
+  .alert.warn { border:1px solid #FECACA; background:#FEF2F2; color:#7F1D1D; }
+  .alert.ok { border:1px solid #A7F3D0; background:#ECFDF5; color:#065F46; }
+  .card { background:var(--card); border:1px solid var(--ring); border-radius:.75rem; padding:1.25rem; margin-top:1rem; }
+  h2 { font-size:1rem; margin:0 0 .75rem; }
+  h3 { font-size:.9375rem; margin:1rem 0 .5rem; color:var(--text); }
+  p, li { font-size:.9375rem; line-height:1.75; margin:.25rem 0; }
+  ol { margin:.25rem 0 .75rem; padding-left:1.5rem; }
+  code { background:#EEF2F7; border-radius:.25rem; padding:.1rem .35rem; font-size:.875rem; word-break:break-all; }
+  .actions { display:flex; flex-wrap:wrap; gap:.75rem; margin-top:.75rem; }
+  .btn { display:inline-block; background:var(--brand); color:#fff; text-decoration:none; border-radius:.5rem; padding:.875rem 1.5rem; font-size:.9375rem; font-weight:600; }
+  .btn.secondary { background:#334155; }
+  .btn.disabled { background:#94A3B8; color:#F1F5F9; }
+  .fp { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8125rem; background:#EEF2F7; border:1px solid var(--ring); border-radius:.5rem; padding:.75rem; letter-spacing:.05em; word-break:break-all; margin-top:.5rem; }
+  .note { border-radius:.75rem; padding:1rem 1.125rem; font-size:.9375rem; line-height:1.7; border:1px solid var(--ring); background:var(--card); }
+  .note.ok { border:1px solid #A7F3D0; background:#ECFDF5; color:#065F46; }
+  .muted { color:var(--muted); font-size:.875rem; }
+  .tabs { margin-top:1rem; }
+  .tabs input[type=radio] { position:absolute; width:1px; height:1px; opacity:0; }
+  .tablist { display:flex; flex-wrap:wrap; gap:.35rem; }
+  .tablist label { cursor:pointer; font-size:.875rem; padding:.5rem .8rem; border:1px solid var(--ring); border-bottom:none; border-radius:.5rem .5rem 0 0; background:#EEF2F7; color:var(--muted); }
+  .panels { border-top:2px solid var(--brand); }
+  .panel { display:none; padding-top:.9rem; }
+  #dev-win:checked ~ .tablist label[for=dev-win],
+  #dev-ios:checked ~ .tablist label[for=dev-ios],
+  #dev-android:checked ~ .tablist label[for=dev-android],
+  #dev-firefox:checked ~ .tablist label[for=dev-firefox],
+  #dev-node:checked ~ .tablist label[for=dev-node] { background:var(--brand); color:#fff; border-color:var(--brand); }
+  #dev-win:checked ~ .panels #p-win,
+  #dev-ios:checked ~ .panels #p-ios,
+  #dev-android:checked ~ .panels #p-android,
+  #dev-firefox:checked ~ .panels #p-firefox,
+  #dev-node:checked ~ .panels #p-node { display:block; }
+  footer { margin-top:1.5rem; font-size:.8125rem; color:var(--muted); line-height:1.7; }
+</style>
+</head>
+<body>
+
+<main class="wrap">
+  <header>
+    <div class="brand">ISSystem 職員室情報共有システムへようこそ</div>
+    <div class="sub">はじめて接続される方へ — 証明書の設定は一度だけ、安全に使えます。</div>
+  </header>
+
+  <p class="note">ISSystem は学校内ネットワーク用の証明書（プライベートCA）で安全にやり取りします。<br />はじめての方は、下の設定を一度だけ行えば、警告なく使えるようになります。</p>
+
+  <div class="card">
+    <h2>はじめ設定（3ステップ）</h2>
+    <div class="actions">
+      <a class="btn" href="/ca/issystem-ca.crt" download>ルートCA証明書をダウンロード</a>
+      <a class="btn secondary" href="https://127.0.0.1:3443/">ISSystem を開く</a>
+    </div>
+
+    <div class="tabs">
+      <input type="radio" name="dev" id="dev-win" checked>
+      <input type="radio" name="dev" id="dev-ios">
+      <input type="radio" name="dev" id="dev-android">
+      <input type="radio" name="dev" id="dev-firefox">
+      <input type="radio" name="dev" id="dev-node">
+      <div class="tablist">
+        <label for="dev-win">Windows</label>
+        <label for="dev-ios">iPhone / iPad</label>
+        <label for="dev-android">Android</label>
+        <label for="dev-firefox">Firefox</label>
+        <label for="dev-node">その他（開発・テスト）</label>
+      </div>
+      <div class="panels">
+        <div class="panel" id="p-win">
+          <ol>
+            <li>上の「証明書をダウンロード」を押す。</li>
+            <li><code>issystem-ca.crt</code> をダブルクリックし、<code>信頼されたルート証明機関</code> に「常時信頼する」で登録。</li>
+            <li>ブラウザを再起動し、<code>https://127.0.0.1:3443/</code> を開く。</li>
+          </ol>
+        </div>
+        <div class="panel" id="p-ios">
+          <ol>
+            <li>証明書をダウンロードし、「ファイル」アプリに保存。</li>
+            <li>その <code>.crt</code> をタップし、設定の「プロファイルとデバイス管理」でインストール。</li>
+            <li>設定 → 一般 → 証明書設定で <code>ISSystem CA</code> を「常時信頼」に設定し、Safari を再起動。</li>
+          </ol>
+        </div>
+        <div class="panel" id="p-android">
+          <ol>
+            <li>証明書をダウンロード。</li>
+            <li>設定 → セキュリティ → 認証情報の削除とインストール → CA証明書をインストール。</li>
+            <li>ブラウザを再起動して <code>https://127.0.0.1:3443/</code> を開く。</li>
+          </ol>
+        </div>
+        <div class="panel" id="p-firefox">
+          <ol>
+            <li>設定 → 個人情報保護 → 証明書 → 信頼されたルート →「証明書をインポート」で <code>.crt</code> を選び、「このCAによるWebサイトの信頼」を有効化。</li>
+            <li><code>https://127.0.0.1:3443/</code> を開く。</li>
+          </ol>
+        </div>
+        <div class="panel" id="p-node">
+          <ol>
+            <li>環境変数 <code>NODE_EXTRA_CA_CERTS=./certs/issystem-ca.crt</code> を設定して実行。</li>
+            <li>ヘッドレスブラウザ検証は <code>--ignore-certificate-errors</code> を使用。</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    <h3>指紋（SHA-256）</h3>
+    <div class="fp">1C:93:24:C5:E9:52:C2:30:35:2A:AE:DC:78:C8:B5:BC:0A:26:F7:A6:F2:51:59:97:A4:8E:B5:FE:7C:50:4B:BE</div>
+    <p class="muted">指紋が管理者の案内と一致することを確認してからインストールしてください。</p>
+  </div>
+
+  <footer>
+    <p>設定は一度だけ。数分で終わります。分からない時は職員室・管理者に気軽に声をかけてください。</p>
+    <p>サーバーと同じ機械で開くときは <code>https://127.0.0.1:3443/</code> でも開けます。</p>
+    <p>サーバー管理者: 証明書の生成は <code>npm run cert:gen</code>。</p>
+  </footer>
+</main>
+</body>
+</html>

@@ -91,7 +91,9 @@
 
 .btn-primary[disabled],
 .btn-secondary[disabled],
-.btn-danger[disabled] {
+.btn-danger[disabled],
+.btn-warning[disabled],
+.btn-success[disabled] {
   opacity: 0.7;
   cursor: not-allowed;
   box-shadow: none;
@@ -595,6 +597,40 @@
 #view-mail #mail-btn-refresh {
   width: 2.4rem;
   padding: 0;
+}
+
+/* 新規作成ボタン（接続テストと同じ寸法・文字サイズ） */
+#view-mail #mail-btn-compose {
+  height: 2.4rem;
+  padding: 0 0.8rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* ボックスタブ（受信ボックス / 送信ボックス）。1枚の実線枠、選択は青の下線と青文字。
+   ホバーは文字色と下線だけ変える（背景を塗り替えない） */
+#view-mail #mail-box-tabs .mail-tab-btn {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--text-soft);
+  border-bottom: 2px solid transparent;
+  transition: color var(--duration-fast), border-bottom-color var(--duration-fast);
+}
+#view-mail #mail-box-tabs .mail-tab-btn:hover {
+  color: var(--text-main);
+  border-bottom-color: var(--border-strong);
+}
+#view-mail #mail-box-tabs .mail-tab-btn[aria-selected="true"] {
+  color: var(--text-accent-strong);
+  border-bottom-color: var(--accent-primary);
+  background-color: var(--accent-soft);
+}
+#view-mail #mail-box-tabs .mail-tab-btn:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
 }
 
 /* 8.x スケジュール月ナビ（‹ [年月] › をグリッド中心直上に隣接配置。ラベルは年月选择メニューを開く） */

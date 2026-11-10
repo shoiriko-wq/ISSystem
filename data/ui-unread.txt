@@ -1,0 +1,20 @@
+登録日=2026-11-10 本日=2026-11-10 サーバー記事数=9 掲示開始前=1 客户端cache=9 客户端全日未読=2 本日カード=7 本日未読=1
+  PASS - 1: 「本日の連絡」カードは対象日が本日の掲示のみ（客户端キャッシュと件数一致） -> {"cards":7,"clientTodayCards":7}
+  PASS - 1: 未読カードに未読マーカー・既読カードにマーカーなし（マーカー数＝客户端本日未読数） -> {"markers":1,"clientTodayUnread":1}
+  PASS - 1: ヘッダー右の「本日の連絡」バッヂ＝本日未読数（未読 N ラベル） -> {"dash":"未読 1","clientTodayUnread":1}
+  PASS - 4: サイドバー＝全日未読数（サイドバーは数字のみ・タイトルバッヂは存在しない） -> {"side":"2","clientUnreadAll":2}
+  PASS - 1: 本日の未読カードは button 要素（クリックで既読が付く） -> {"tag":"BUTTON","markers":1}
+  PASS - 2: カードクリックで PUT /api/bulletins/:id/read（クリックしたカードの id） -> {"readReqs":["PUT https://127.0.0.1:3443/api/bulletins/post_1794286580782_gm4bw/read"],"clickedId":"post_1794286580782_gm4bw"}
+  PASS - 2: 本日バッヂが 1 減り、クリックしたカードの未読マーカーが消える -> {"dash":"未読 0","clientTodayUnread":0,"expected":0}
+  PASS - 2: サイドバーバッヂも 1 減（全日バッヂが連動） -> {"side":"1","clientUnreadAll":1,"expected":1}
+  PASS - 3: カードクリックでタブは切り替わらない（ダッシュボードのまま） -> {"activeTab":"dashboard"}
+  PASS - 3: カードクリックで掲示モーダルは開かない -> {"modalOpen":0}
+  PASS - 3: 既読カードの再クリックは既読 API を叩かない（冪等・マーカーなし維持） -> {"readReqs":[],"marker":false}
+  PASS - 3: 検証用本日記事の削除後はバッヂがクリック分だけ減った状態になる -> {"side":"1","clientUnreadAll":1,"expected":1}
+  PASS - 6: 登録日より古い記事は未読バッヂに含めない（本日有効・対象日=本日でも未読数外・マーカーなし） -> {"old":{"id":"post_1794289403771_bfz41","postedAt":"2026-11-09 09:00:00+09:00","target":"2026-11-10","activeToday":true,"unread":false},"regDay":"2026-11-10","oldDay":"2026-11-09","clientUnreadAll":1,"expected":1,"side":"1","cards":8,"expectedCards":8,"oldId":"post_1794289403771_bfz41"}
+  PASS - 6: 掲示開始前記事は未読バッヂに数えない（掲示期間が本日有効な記事だけを数える） -> {"futureFlags":[{"start":"2026-12-01","unread":false}],"serverFutureCount":1,"clientUnreadAll":1,"cacheLen":10}
+  PASS - 5: 客户端キャッシュ 100 件が未読ならサイドバー 99+・ダッシュボード 未読 99+（100 を出さない） -> {"cacheLen":100,"unreadAll":100,"side":"99+","dash":"未読 99+"}
+  PASS - 5: 擬似キャッシュ後は実キャッシュへ復帰して DOM バッジが実データへ追従する -> {"restoredSide":"1","restoredDash":"未読 0","expectedSide":"1","expectedDash":"未読 0"}
+  PASS - 5: 検証用投稿 (登録日前記事) の削除後はバッヂとカードが元に戻る -> {"side":"1","clientUnreadAll":1,"expected":1,"cards":7,"expectedCards":7}
+
+ALL PASSED

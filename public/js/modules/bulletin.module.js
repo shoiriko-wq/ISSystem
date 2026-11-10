@@ -845,7 +845,7 @@ function renderMiniCalendar() {
                 aria-label="前月（1ヶ月前へ）" title="前月（1ヶ月前へ）"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
         <h3 class="text-sm font-bold text-main" aria-live="polite">
           <button type="button" id="bulletin-month-menu-btn" data-cal-month-menu
-                  class="sched-month-label-btn flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-main bg-surface"
+                  class="sched-month-label-btn flex items-center gap-1 px-2.5 py-0.5 leading-4 rounded-lg border border-main bg-surface"
                   aria-haspopup="dialog" aria-expanded="false" aria-controls="bulletin-month-menu"
                   aria-label="${y}年${m}月（クリックで年月選択を開く）" title="クリックで年・月を直接選べます">
             ${y}年${m}月<i data-lucide="chevron-down" class="w-3.5 h-3.5 text-muted"></i>

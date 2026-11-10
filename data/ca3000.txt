@@ -1,0 +1,648 @@
+
+    <!DOCTYPE html>
+    <html lang="ja">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>配布・提出システム ポータル</title>
+        <style>
+            :root {
+                --primary: #2563eb;
+                --primary-hover: #1d4ed8;
+                --secondary: #059669;
+                --secondary-hover: #047857;
+                --bg: #f3f4f6;
+                --card-bg: #ffffff;
+                --text: #1f2937;
+                --text-muted: #4b5563;
+                --border: #e5e7eb;
+            }
+
+            body {
+                font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', sans-serif;
+                background-color: var(--bg);
+                color: var(--text);
+                margin: 0;
+                padding: 0;
+                min-height: 100vh;
+                display: flex;
+                flex-direction: column;
+            }
+
+            header {
+                background-color: var(--card-bg);
+                border-bottom: 1px solid var(--border);
+                padding: 15px 20px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            }
+
+            .logo {
+                font-size: 20px;
+                font-weight: bold;
+                color: var(--text);
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+
+            .back-to-menu-btn {
+                background: none;
+                border: 1px solid var(--border);
+                padding: 8px 16px;
+                border-radius: 6px;
+                cursor: pointer;
+                font-weight: 600;
+                color: var(--text-muted);
+                transition: all 0.2s;
+                display: none;
+            }
+
+            .back-to-menu-btn:hover {
+                background-color: #f9fafb;
+                color: var(--text);
+            }
+
+            main {
+                flex: 1;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 40px 20px;
+            }
+
+            .container {
+                max-width: 1000px;
+                width: 100%;
+                box-sizing: border-box;
+            }
+
+            .menu-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 30px;
+            }
+
+            @media (max-width: 768px) {
+                .menu-grid {
+                    grid-template-columns: 1fr;
+                }
+            }
+
+            .menu-card {
+                background: var(--card-bg);
+                border-radius: 12px;
+                padding: 40px;
+                text-align: center;
+                box-shadow: 0 10px 15px -3px rgba(0,0,0,0.05), 0 4px 6px -2px rgba(0,0,0,0.05);
+                border: 1px solid var(--border);
+                cursor: pointer;
+                transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                min-height: 320px;
+            }
+
+            .menu-card:hover {
+                transform: translateY(-5px);
+                box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04);
+            }
+
+            .menu-card.distribute-card {
+                border-top: 6px solid var(--secondary);
+            }
+            .menu-card.distribute-card:hover {
+                border-color: var(--secondary);
+            }
+            .menu-card.distribute-card .icon-circle {
+                background-color: #ecfdf5;
+                color: var(--secondary);
+            }
+            .menu-card.distribute-card button {
+                background-color: var(--secondary);
+            }
+            .menu-card.distribute-card button:hover {
+                background-color: var(--secondary-hover);
+            }
+
+            .menu-card.submit-card {
+                border-top: 6px solid var(--primary);
+            }
+            .menu-card.submit-card:hover {
+                border-color: var(--primary);
+            }
+            .menu-card.submit-card .icon-circle {
+                background-color: #eff6ff;
+                color: var(--primary);
+            }
+            .menu-card.submit-card button {
+                background-color: var(--primary);
+            }
+            .menu-card.submit-card button:hover {
+                background-color: var(--primary-hover);
+            }
+
+            .icon-circle {
+                width: 80px;
+                height: 80px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                margin-bottom: 24px;
+            }
+
+            .icon-circle svg {
+                width: 40px;
+                height: 40px;
+            }
+
+            .menu-card h2 {
+                margin: 0 0 12px 0;
+                font-size: 24px;
+                color: var(--text);
+            }
+
+            .menu-card p {
+                margin: 0 0 28px 0;
+                font-size: 15px;
+                color: var(--text-muted);
+                line-height: 1.5;
+                max-width: 280px;
+            }
+
+            .menu-btn {
+                padding: 12px 32px;
+                color: #ffffff;
+                border: none;
+                border-radius: 8px;
+                font-size: 16px;
+                font-weight: bold;
+                cursor: pointer;
+                transition: background-color 0.2s;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+
+            .content-section {
+                display: none;
+                background: var(--card-bg);
+                padding: 30px;
+                border-radius: 12px;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+                border: 1px solid var(--border);
+                max-width: 600px;
+                margin: 0 auto;
+                width: 100%;
+                box-sizing: border-box;
+            }
+
+            .section-title {
+                margin-top: 0;
+                margin-bottom: 24px;
+                font-size: 22px;
+                text-align: center;
+                border-bottom: 2px solid var(--border);
+                padding-bottom: 12px;
+            }
+
+            .file-list {
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+                margin-bottom: 20px;
+            }
+
+            .file-item {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 14px 18px;
+                background: #f9fafb;
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                transition: background-color 0.2s;
+            }
+
+            .file-item:hover {
+                background: #f3f4f6;
+            }
+
+            .file-info {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+                max-width: 70%;
+            }
+
+            .file-name {
+                font-weight: bold;
+                font-size: 14px;
+                color: var(--text);
+                word-break: break-all;
+            }
+
+            .file-meta {
+                font-size: 11px;
+                color: var(--text-muted);
+            }
+
+            .download-btn {
+                background-color: var(--secondary);
+                color: #fff;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                transition: background-color 0.2s;
+                text-decoration: none;
+            }
+
+            .download-btn:hover {
+                background-color: var(--secondary-hover);
+            }
+
+            .empty-list {
+                text-align: center;
+                padding: 40px 20px;
+                color: var(--text-muted);
+                font-size: 14px;
+            }
+
+            .form-group {
+                margin-bottom: 20px;
+            }
+
+            .form-group label {
+                display: block;
+                font-weight: 600;
+                margin-bottom: 8px;
+                color: var(--text-muted);
+            }
+
+            .radio-group {
+                display: flex;
+                gap: 20px;
+                margin-bottom: 12px;
+            }
+
+            .radio-label {
+                font-weight: normal;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                cursor: pointer;
+            }
+
+            .hint-text {
+                font-size: 11px;
+                color: var(--text-muted);
+                margin-top: 4px;
+                line-height: 1.4;
+            }
+
+            .message {
+                margin-top: 20px;
+                padding: 12px;
+                border-radius: 4px;
+                font-size: 14px;
+                display: none;
+                white-space: pre-wrap;
+                word-break: break-all;
+            }
+
+            .success {
+                background-color: #def7ec;
+                color: #03543f;
+                border: 1px solid #8fedc2;
+            }
+
+            .error {
+                background-color: #fde8e8;
+                color: #9b1c1c;
+                border: 1px solid #f8b4b4;
+            }
+
+            .preview-box {
+                margin-top: 8px;
+                max-height: 150px;
+                overflow-y: auto;
+                background: #f9fafb;
+                border: 1px solid var(--border);
+                padding: 8px;
+                border-radius: 4px;
+                font-size: 12px;
+                color: #4b5563;
+                display: none;
+            }
+        </style>
+    </head>
+    <body>
+        <header>
+            <div class="logo" id="headerLogo">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-graduation-cap"><path d="M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z"/><path d="M6 12v5c0 2 2 3 6 3s6-1 6-3v-5"/><path d="M21.5 12H16c-.5 0-1 .5-1 1v2c0 .5.5 1 1 1h5.5c.3 0 .5-.2.5-.5V12.5c0-.3-.2-.5-.5-.5z"/></svg>
+                配付・提出ポータル
+            </div>
+            <button class="back-to-menu-btn" id="backToMenuBtn">メニューに戻る</button>
+        </header>
+
+        <main>
+            <div class="container">
+                
+                <!-- 1. ポータルトップメニュー (2カラム分割レイアウト) -->
+                <div class="menu-grid" id="menuGrid">
+                    
+                    <!-- 配布（左側） -->
+                    <div class="menu-card distribute-card" id="toDistributeCard">
+                        <div class="icon-circle">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        </div>
+                        <h2>配布資料ダウンロード</h2>
+                        <p>授業資料や課題指示書、必要なサンプルSTLデータをこちらからダウンロードできます。</p>
+                        <button class="menu-btn">配布一覧を開く</button>
+                    </div>
+
+                    <!-- 提出（右側） -->
+                    <div class="menu-card submit-card" id="toSubmitCard">
+                        <div class="icon-circle">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        </div>
+                        <h2>課題・提出物アップロード</h2>
+                        <p>作成した課題ファイル（プログラム、動画、画像、STLフォルダなど）を安全に提出します。</p>
+                        <button class="menu-btn">提出フォームを開く</button>
+                    </div>
+
+                </div>
+
+                <!-- 2. 配布資料ダウンロードセクション -->
+                <div class="content-section" id="distributeSection">
+                    <h2 class="section-title" style="color: var(--secondary);">配布資料一覧</h2>
+                    <div class="file-list" id="distributeFileList">
+                        <div class="empty-list">読み込み中...</div>
+                    </div>
+                </div>
+
+                <!-- 3. 提出物アップロードセクション -->
+                <div class="content-section" id="submitSection">
+                    <h2 class="section-title" style="color: var(--primary);">提出物アップロード</h2>
+                    
+                    <form id="uploadForm">
+                        <div class="form-group">
+                            <label for="studentName">氏名（またはグループ名）</label>
+                            <input type="text" id="studentName" name="studentName" placeholder="鳴尾 太郎" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="assignmentName">対象の課題名</label>
+                            <select id="assignmentName" name="assignmentName" required>
+                                <option value="">選択してください</option>
+                                <option value="情報実習ＨＳＰ途中評価（作品）">情報実習ＨＳＰ途中評価（作品）</option>
+                                <option value="情報実習ＨＳＰ途中評価（相互評価）">情報実習ＨＳＰ途中評価（相互評価）</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>提出タイプ</label>
+                            <div class="radio-group">
+                                <label class="radio-label">
+                                    <input type="radio" name="submitMode" value="file" checked> ファイル単位
+                                </label>
+                                <label class="radio-label">
+                                    <input type="radio" name="submitMode" value="folder"> フォルダごと
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- ファイル提出用 -->
+                        <div class="form-group" id="fileInputGroup">
+                            <label for="file">提出ファイル (最大50MB)</label>
+                            <input type="file" id="file" name="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.zip,.stl,.exe,.hsp,.as,.blend,.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp,.mp4,.mov,.avi,.mkv,.webm,.mp3,.wav,.ogg,.m4a,.flac,.html,.htm,.css,.js,.ts,.jsx,.tsx,.json,.py,.java,.cpp,.c,.h,.cs,.rb,.go,.rs,.php">
+                            <div class="hint-text">
+                                対応: Blender(.blend), HSP(.hsp), 各種プログラム/WEB開発ファイル, 画像, 動画, 音声, ZIP, STL, EXE, 拡張子なしファイル
+                            </div>
+                        </div>
+
+                        <!-- フォルダ提出用 -->
+                        <div class="form-group" id="folderInputGroup" style="display: none;">
+                            <label for="folder">提出フォルダ (選択したフォルダ内のファイルを一括アップロードします)</label>
+                            <input type="file" id="folder" name="file" webkitdirectory directory multiple>
+                            <div id="folderPreview" class="preview-box"></div>
+                            <div class="hint-text">
+                                フォルダ構造、サブフォルダ、日本語ファイル、各種開発ファイルを元の構造のまま提出できます。
+                            </div>
+                        </div>
+
+                        <button type="submit">提出する</button>
+                    </form>
+                    <div id="messageBox" class="message"></div>
+                </div>
+
+            </div>
+        </main>
+
+        <script>
+            const menuGrid = document.getElementById('menuGrid');
+            const distributeSection = document.getElementById('distributeSection');
+            const submitSection = document.getElementById('submitSection');
+            const backToMenuBtn = document.getElementById('backToMenuBtn');
+            const headerLogo = document.getElementById('headerLogo');
+
+            const toDistributeCard = document.getElementById('toDistributeCard');
+            const toSubmitCard = document.getElementById('toSubmitCard');
+
+            const form = document.getElementById('uploadForm');
+            const messageBox = document.getElementById('messageBox');
+            const submitModeRadios = document.querySelectorAll('input[name="submitMode"]');
+            const fileInputGroup = document.getElementById('fileInputGroup');
+            const folderInputGroup = document.getElementById('folderInputGroup');
+            const fileInput = document.getElementById('file');
+            const folderInput = document.getElementById('folder');
+            const folderPreview = document.getElementById('folderPreview');
+            const distributeFileList = document.getElementById('distributeFileList');
+
+            function showMenu() {
+                menuGrid.style.display = 'grid';
+                distributeSection.style.display = 'none';
+                submitSection.style.display = 'none';
+                backToMenuBtn.style.display = 'none';
+                messageBox.style.display = 'none';
+            }
+
+            function showDistribute() {
+                menuGrid.style.display = 'none';
+                distributeSection.style.display = 'block';
+                submitSection.style.display = 'none';
+                backToMenuBtn.style.display = 'block';
+                fetchDistributeFiles();
+            }
+
+            function showSubmit() {
+                menuGrid.style.display = 'none';
+                distributeSection.style.display = 'none';
+                submitSection.style.display = 'block';
+                backToMenuBtn.style.display = 'block';
+            }
+
+            toDistributeCard.addEventListener('click', showDistribute);
+            toSubmitCard.addEventListener('click', showSubmit);
+            backToMenuBtn.addEventListener('click', showMenu);
+            headerLogo.addEventListener('click', showMenu);
+
+            async function fetchDistributeFiles() {
+                distributeFileList.innerHTML = '<div class="empty-list">読み込み中...</div>';
+                try {
+                    const response = await fetch('/api/distributes');
+                    const files = await response.json();
+
+                    if (!response.ok || !Array.isArray(files)) {
+                        distributeFileList.innerHTML = '<div class="empty-list">配布データの取得に失敗しました。</div>';
+                        return;
+                    }
+
+                    if (files.length === 0) {
+                        distributeFileList.innerHTML = '<div class="empty-list">現在、配布されている資料はありません。</div>';
+                        return;
+                    }
+
+                    distributeFileList.innerHTML = '';
+                    files.forEach(file => {
+                        const fileItem = document.createElement('div');
+                        fileItem.className = 'file-item';
+                        
+                        const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
+                        const displaySize = sizeMB >= 0.1 ? sizeMB + ' MB' : (file.size / 1024).toFixed(1) + ' KB';
+
+                        fileItem.innerHTML = `
+                            <div class="file-info">
+                                <span class="file-name">${file.name}</span>
+                                <span class="file-meta">サイズ: ${displaySize}</span>
+                            </div>
+                            <a href="/api/distributes/download/${encodeURIComponent(file.name)}" class="download-btn">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                ダウンロード
+                            </a>
+                        `;
+                        distributeFileList.appendChild(fileItem);
+                    });
+                } catch (error) {
+                    console.error(error);
+                    distributeFileList.innerHTML = '<div class="empty-list">通信エラーが発生しました。</div>';
+                }
+            }
+
+            submitModeRadios.forEach(radio => {
+                radio.addEventListener('change', (e) => {
+                    if (e.target.value === 'file') {
+                        fileInputGroup.style.display = 'block';
+                        folderInputGroup.style.display = 'none';
+                        fileInput.required = true;
+                        folderInput.required = false;
+                        folderInput.value = '';
+                        folderPreview.style.display = 'none';
+                    } else {
+                        fileInputGroup.style.display = 'none';
+                        folderInputGroup.style.display = 'block';
+                        fileInput.required = false;
+                        folderInput.required = true;
+                        fileInput.value = '';
+                    }
+                });
+            });
+
+            fileInput.required = true;
+
+            folderInput.addEventListener('change', (e) => {
+                const files = e.target.files;
+                if (files && files.length > 0) {
+                    folderPreview.innerHTML = '<strong>アップロード対象ファイル (' + files.length + '件):</strong>';
+                    const list = document.createElement('ul');
+                    list.style.margin = '4px 0 0 0';
+                    list.style.paddingLeft = '20px';
+                    
+                    const maxShow = Math.min(files.length, 5);
+                    for (let i = 0; i < maxShow; i++) {
+                        const li = document.createElement('li');
+                        li.textContent = files[i].webkitRelativePath || files[i].name;
+                        list.appendChild(li);
+                    }
+                    if (files.length > maxShow) {
+                        const li = document.createElement('li');
+                        li.textContent = '...ほか ' + (files.length - maxShow) + ' 件';
+                        list.appendChild(li);
+                    }
+                    folderPreview.appendChild(list);
+                    folderPreview.style.display = 'block';
+                } else {
+                    folderPreview.style.display = 'none';
+                }
+            });
+
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                messageBox.style.display = 'none';
+
+                const isFolderMode = document.querySelector('input[name="submitMode"]:checked').value === 'folder';
+                const selectedFiles = isFolderMode ? folderInput.files : fileInput.files;
+
+                if (!selectedFiles || selectedFiles.length === 0) {
+                    messageBox.className = 'message error';
+                    messageBox.textContent = '提出するファイルまたはフォルダを選択してください。';
+                    messageBox.style.display = 'block';
+                    return;
+                }
+
+                const formData = new FormData();
+                formData.append('studentName', document.getElementById('studentName').value);
+                formData.append('assignmentName', document.getElementById('assignmentName').value);
+
+                for (let i = 0; i < selectedFiles.length; i++) {
+                    const relativePath = selectedFiles[i].webkitRelativePath || selectedFiles[i].name;
+                    formData.append('paths', relativePath);
+                }
+
+                for (let i = 0; i < selectedFiles.length; i++) {
+                    formData.append('file', selectedFiles[i]);
+                }
+
+                try {
+                    messageBox.className = 'message';
+                    messageBox.style.backgroundColor = '#eff6ff';
+                    messageBox.style.color = '#1e40af';
+                    messageBox.style.border = '1px solid #bfdbfe';
+                    messageBox.textContent = 'アップロード中... 件数が多い場合や大容量の場合は時間がかかる場合があります。';
+                    messageBox.style.display = 'block';
+
+                    const response = await fetch('/api/submit', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const result = await response.json();
+
+                    if (response.ok) {
+                        messageBox.className = 'message success';
+                        messageBox.textContent = result.message;
+                        form.reset();
+                        folderPreview.style.display = 'none';
+                        document.querySelector('input[name="submitMode"][value="file"]').click();
+                    } else {
+                        messageBox.className = 'message error';
+                        messageBox.textContent = result.error || 'エラーが発生しました。';
+                    }
+                } catch (error) {
+                    messageBox.className = 'message error';
+                    messageBox.textContent = 'サーバーとの通信に失敗しました。';
+                }
+            });
+        </script>
+    </body>
+    </html>
+    

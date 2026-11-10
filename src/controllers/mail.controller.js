@@ -71,13 +71,47 @@ export const mailController = {
   },
 
   /**
-   * 受信箱の表示 (左：件名と日時、右：本文)
+   * ボックス表示 (folder=inbox 受信ボックス / folder=sent 送信ボックス)
    * GET /api/mail/messages
    */
   async getInbox(req, res, next) {
     try {
-      const { messages, unread } = await mailService.getInbox(req.user);
-      return res.status(200).json({ success: true, messages, unread });
+      const folder = req.query.folder === 'sent' ? 'sent' : 'inbox';
+      const { messages, unread } = await mailService.getInbox(req.user, folder);
+      return res.status(200).json({ success: true, folder, messages, unread });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * 受信ボックスの取得 (IMAP へ接続して新着をDB保存)
+   * POST /api/mail/inbox/refresh
+   */
+  async refreshInbox(req, res, next) {
+    try {
+      const result = await mailService.fetchInbox(req.user);
+      return res.status(200).json({
+        success: true,
+        message: `受信ボックスを更新しました（新規 ${result.added} 件）`,
+        ...result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * メール送信 (SMTP 送信 + 送信済みボックス保存)
+   * POST /api/mail/send
+   */
+  async sendMessage(req, res, next) {
+    try {
+      const result = await mailService.sendMessage(req.user, req.body || {});
+      const message = result.append_warning
+        ? `送信しました（${result.append_warning}）`
+        : '送信しました。';
+      return res.status(201).json({ success: true, message, message_row: result.message });
     } catch (error) {
       next(error);
     }

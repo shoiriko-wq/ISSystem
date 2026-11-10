@@ -1,27 +1,39 @@
 /**
  * ISSystem Mail Service
- * メール接続設定 (メールアドレス + パスワード) の検証・暗号化保存・監査ログ
+ * メール接続設定 (メールアドレス + パスワード + 暗号化モード) の検証・暗号化保存・監査ログ
  * 初回は未設定 (needs_setup) とし、UI でメールアドレスとパスワードを入力させる
+ * 受信ボックス (IMAP 取得) と送信ボックス (SMTP 送信 + IMAP APPEND) を実接続で扱う
  */
 
 import mailModel from '../models/mail.model.js';
 import auditModel from '../models/audit.model.js';
 import { ApiError } from '../middlewares/error.middleware.js';
-import { probeImap, probeSmtp, DEFAULT_TIMEOUT_MS } from './mail.transport.js';
+import {
+  probeImap, probeSmtp, imapFetchMessages, imapAppend, imapMarkSeen, smtpSend,
+  parseMessage, buildRawMessage,
+  normalizeTlsMode, DEFAULT_TIMEOUT_MS,
+} from './mail.transport.js';
 import config from '../../config/default.js';
 
 const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 const HOST_RE = /^[A-Za-z0-9.-]+$/;
 const MIN_PASSWORD = 5;
+const MAX_RECIPIENTS = 20;
 
-/** .env に保存されたメールサーバー初期値（GitHub にはコミットしない秘匿情報） */
+/** .env に保存されたメールサーバー初期値（GitHub にはコミットしない秘匿情報。暗号化の既定は TLS を使用しない） */
 function mailDefaults() {
   const m = config.mail || {};
   return {
     imap_host: m.imapHost ?? null,
     imap_port: m.imapPort ?? null,
+    imap_tls: normalizeTlsMode(m.imapTls),
+    imap_folder: m.inboxFolder ?? 'INBOX',
     smtp_host: m.smtpHost ?? null,
     smtp_port: m.smtpPort ?? null,
+    smtp_tls: normalizeTlsMode(m.smtpTls),
+    sent_folder: m.sentFolder ?? 'Sent',
+    display_name: m.displayName ?? null,
+    timeout_ms: m.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   };
 }
 
@@ -59,6 +71,43 @@ function normalizePort(raw, label) {
   return port;
 }
 
+/** 暗号化モード検証 ('none' = 暗号化なし / 'starttls' / 'tls' = TLS 直結。未指定なら既定値) */
+function normalizeTlsField(raw, label, fallback) {
+  const rawStr = raw === undefined || raw === null ? '' : String(raw).trim().toLowerCase();
+  if (!rawStr) return fallback;
+  const mode = normalizeTlsMode(rawStr);
+  if (mode !== rawStr) throw new ApiError(400, `${label}の暗号化モードが正しくありません（暗号化なし / STARTTLS / TLS 直結）。`);
+  return mode;
+}
+
+/** IMAP フォルダ名検証 (未入力なら既定値) */
+function normalizeFolder(raw, label, fallback) {
+  const rawStr = raw === undefined || raw === null ? '' : String(raw).trim();
+  if (!rawStr) return fallback;
+  if (rawStr.length > 128 || /[\r\n]/.test(rawStr)) throw new ApiError(400, `${label}のフォルダ名が正しくありません。`);
+  return rawStr;
+}
+
+/** 差出人名検証 (未入力なら null) */
+function normalizeDisplayName(raw) {
+  const rawStr = raw === undefined || raw === null ? '' : String(raw).trim();
+  if (!rawStr) return null;
+  if (rawStr.length > 120) throw new ApiError(400, '差出人名は120文字以内で入力してください。');
+  return rawStr;
+}
+
+/** 宛先一覧検証 (カンマ・スペース区切りのメールアドレス) */
+function normalizeRecipients(raw) {
+  const text = Array.isArray(raw) ? raw.join(',') : String(raw ?? '');
+  const list = text.split(/[,\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (list.length === 0) throw new ApiError(400, '宛先メールアドレスを入力してください。');
+  if (list.length > MAX_RECIPIENTS) throw new ApiError(400, `宛先は${MAX_RECIPIENTS}件までです。`);
+  for (const addr of list) {
+    if (!EMAIL_RE.test(addr)) throw new ApiError(400, `宛先「${addr}」の形式が正しくありません。`);
+  }
+  return list;
+}
+
 /** DB 行を UI へ返す形へ正規化 (パスワードは一切返さない。未設定時は .env の初期値を返す) */
 function toView(row, suggestedEmail = '') {
   const d = mailDefaults();
@@ -69,19 +118,27 @@ function toView(row, suggestedEmail = '') {
     status: row ? row.status : 'UNVERIFIED',
     imap_host: row?.imap_host ?? d.imap_host,
     imap_port: row?.imap_port ?? d.imap_port,
+    imap_tls: row?.imap_tls ?? d.imap_tls,
+    imap_folder: row?.imap_folder ?? d.imap_folder,
     smtp_host: row?.smtp_host ?? d.smtp_host,
     smtp_port: row?.smtp_port ?? d.smtp_port,
+    smtp_tls: row?.smtp_tls ?? d.smtp_tls,
+    sent_folder: row?.sent_folder ?? d.sent_folder,
+    display_name: row?.display_name ?? d.display_name,
     last_checked_at: row?.last_checked_at ?? null,
     updated_at: row ? row.updated_at : null,
   };
 }
 
-/** 受信箱メッセージを UI へ返す形へ正規化 */
+/** メッセージ行を UI へ返す形へ正規化 (folder = 'inbox' 受信 / 'sent' 送信) */
 function toMessageView(row) {
   return {
     id: row.id,
+    folder: row.folder,
+    uid: row.uid ?? null,
     sender_name: row.sender_name,
     sender_email: row.sender_email,
+    recipients: String(row.recipients || '').split(',').filter(Boolean),
     subject: row.subject,
     body: row.body,
     is_read: Number(row.is_read) === 1,
@@ -90,24 +147,35 @@ function toMessageView(row) {
 }
 
 /** 接続プローブ (テスト時に差し替え可能なシーム) */
-const probes = { imap: probeImap, smtp: probeSmtp };
+const probes = {
+  imap: probeImap,
+  smtp: probeSmtp,
+  fetch: imapFetchMessages,
+  append: imapAppend,
+  markSeen: imapMarkSeen,
+  send: smtpSend,
+};
 
 /**
- * 接続プローブの差し替え (検証専用。引数が空なら実装へ戻す)
- * @param {{imap?: Function, smtp?: Function}} overrides
+ * 接続プローブと送受信関数の差し替え (検証専用。引数が空なら実装へ戻す)
+ * @param {{imap?: Function, smtp?: Function, fetch?: Function, append?: Function, markSeen?: Function, send?: Function}} overrides
  */
 export function setProbeOverrides(overrides = {}) {
   probes.imap = overrides.imap ?? probeImap;
   probes.smtp = overrides.smtp ?? probeSmtp;
+  probes.fetch = overrides.fetch ?? imapFetchMessages;
+  probes.append = overrides.append ?? imapAppend;
+  probes.markSeen = overrides.markSeen ?? imapMarkSeen;
+  probes.send = overrides.send ?? smtpSend;
 }
 
-/** 接続設定から IMAP / SMTP をテストし status を決める */
-async function probeSettings({ email, password, imapHost, imapPort, smtpHost, smtpPort }) {
+/** 接続設定から IMAP / SMTP をテストし status を決める (暗号化モードは設定値を使う) */
+async function probeSettings({ email, password, imapHost, imapPort, imapTls, smtpHost, smtpPort, smtpTls }) {
   const timeoutMs = config.mail?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const imap = await probes.imap({
     host: imapHost,
     port: imapPort,
-    secure: Number(imapPort) === 993,
+    tlsMode: imapTls,
     user: email,
     password,
     timeoutMs,
@@ -115,7 +183,7 @@ async function probeSettings({ email, password, imapHost, imapPort, smtpHost, sm
   const smtp = await probes.smtp({
     host: smtpHost,
     port: smtpPort,
-    secure: Number(smtpPort) === 465,
+    tlsMode: smtpTls,
     user: email,
     password,
     timeoutMs,
@@ -124,53 +192,42 @@ async function probeSettings({ email, password, imapHost, imapPort, smtpHost, sm
 }
 
 
-/** 受信箱初期シード (設定保存直後に件名と日時が並ぶサンプルメッセージ) */
-function buildSeedMessages(userId) {
-  const base = Date.now();
-  const iso = (msAgo) => new Date(base - msAgo).toISOString();
-  return [
-    {
-      id: `mail_seed_${userId}_1`,
-      sender_name: 'システム管理室',
-      sender_email: 'system@issystem.example',
-      subject: 'システム定期点検のお知らせ',
-      body:
-        'いつも ISSystem をご利用いただきありがとうございます。\n\n' +
-        '以下の日程でシステムの定期点検を実施します。\n' +
-        '点検中は約30分間、すべての機能が利用できなくなります。\n\n' +
-        '  日時: 2026年11月12日 (木) 18:00 - 18:30\n' +
-        '  内容: サーバー定期保守・データバックアップ確認\n\n' +
-        '点検前に施設物品予約と考査結果の一時表示を確認してください。\n' +
-        'ご不明な点はシステム管理室までご連絡ください。',
-      received_at: iso(2 * 60 * 60 * 1000),
-    },
-    {
-      id: `mail_seed_${userId}_2`,
-      sender_name: '情報教育委員会',
-      sender_email: 'security@issystem.example',
-      subject: '情報セキュリティ月間のご案内',
-      body:
-        '11月は情報セキュリティ月間です。\n\n' +
-        '・メールパスワードの定期的な変更をお願いします。\n' +
-        '・共用端末からのログアウトを徹底してください。\n' +
-        '・不審なメール Received は開かず、システム管理室へ報告してください。\n\n' +
-        'ポスターと掲示用データは職員掲示板の添付ファイルから取得できます。',
-      received_at: iso(26 * 60 * 60 * 1000),
-    },
-    {
-      id: `mail_seed_${userId}_3`,
-      sender_name: '教務課',
-      sender_email: 'kyomu@issystem.example',
-      subject: '考査日程の変更について',
-      body:
-        '11月実施の定期考査について、日程が以下の通り変更になりました。\n\n' +
-        '・3年教室B: 11月19日 (金) 5限 美術 (50分)\n' +
-        '・3年教室C: 11月20日 (土) 4限 美術 (50分)\n\n' +
-        'スケジュールタブの時刻表と、施設物品予約の考査予定へ反映済みです。\n' +
-        '監督日程の印刷は簡易承認タブの Excel 出力をご利用ください。',
-      received_at: iso(50 * 60 * 60 * 1000),
-    },
-  ];
+
+/** 接続設定から送受信用のパラメータを作る (パスワードは復号して使う) */
+function transportParams(row) {
+  const password = mailModel.decryptPassword(row.password_enc);
+  if (!password) {
+    throw new ApiError(409, '登録済みパスワードを復号できません。再度入力して保存してください。');
+  }
+  const d = mailDefaults();
+  return {
+    email: row.email_address,
+    password,
+    imapHost: row.imap_host ?? d.imap_host,
+    imapPort: row.imap_port ?? d.imap_port,
+    imapTls: normalizeTlsMode(row.imap_tls ?? d.imap_tls),
+    imapFolder: row.imap_folder ?? d.imap_folder,
+    smtpHost: row.smtp_host ?? d.smtp_host,
+    smtpPort: row.smtp_port ?? d.smtp_port,
+    smtpTls: normalizeTlsMode(row.smtp_tls ?? d.smtp_tls),
+    sentFolder: row.sent_folder ?? d.sent_folder,
+    displayName: row.display_name ?? d.display_name ?? row.sender_name ?? null,
+    timeoutMs: d.timeout_ms,
+  };
+}
+
+/** 受信サーバーの必須チェック (未設定では受信箱を取得できない) */
+function requireImap(p) {
+  if (!p.imapHost || !p.imapPort) {
+    throw new ApiError(409, '受信サーバー (IMAP) が設定されていません。メール設定で入力してください。');
+  }
+}
+
+/** 送信サーバーの必須チェック (未設定ではメールを送れない) */
+function requireSmtp(p) {
+  if (!p.smtpHost || !p.smtpPort) {
+    throw new ApiError(409, '送信サーバー (SMTP) が設定されていません。メール設定で入力してください。');
+  }
 }
 
 export const mailService = {
@@ -181,7 +238,7 @@ export const mailService = {
     return toView(row, profileEmail || '');
   },
 
-  /** メール接続設定の登録 / 更新 (パスワードは暗号化して保存) */
+  /** メール接続設定の登録 / 更新 (パスワードは暗号化して保存。暗号化モードとフォルダも保存) */
   async saveAccount(payload, user) {
     const body = payload || {};
     const email = normalizeEmail(body.email_address ?? body.email);
@@ -189,8 +246,13 @@ export const mailService = {
     const d = mailDefaults();
     const imapHost = normalizeHost(body.imap_host ?? body.imapHost, '受信サーバー (IMAP)') ?? d.imap_host;
     const imapPort = normalizePort(body.imap_port ?? body.imapPort, '受信サーバー (IMAP)') ?? d.imap_port;
+    const imapTls = normalizeTlsField(body.imap_tls ?? body.imapTls, '受信サーバー (IMAP)', d.imap_tls);
+    const imapFolder = normalizeFolder(body.imap_folder ?? body.imapFolder, '受信フォルダ', d.imap_folder);
     const smtpHost = normalizeHost(body.smtp_host ?? body.smtpHost, '送信サーバー (SMTP)') ?? d.smtp_host;
     const smtpPort = normalizePort(body.smtp_port ?? body.smtpPort, '送信サーバー (SMTP)') ?? d.smtp_port;
+    const smtpTls = normalizeTlsField(body.smtp_tls ?? body.smtpTls, '送信サーバー (SMTP)', d.smtp_tls);
+    const sentFolder = normalizeFolder(body.sent_folder ?? body.sentFolder, '送信済みフォルダ', d.sent_folder);
+    const displayName = normalizeDisplayName(body.display_name ?? body.displayName);
 
     const saved = await mailModel.upsertAccount({
       user_id: user.id,
@@ -198,8 +260,13 @@ export const mailService = {
       password_enc: mailModel.encryptPassword(password),
       imap_host: imapHost,
       imap_port: imapPort,
+      imap_tls: imapTls,
+      imap_folder: imapFolder,
       smtp_host: smtpHost,
       smtp_port: smtpPort,
+      smtp_tls: smtpTls,
+      sent_folder: sentFolder,
+      display_name: displayName,
       status: 'UNVERIFIED',
     });
 
@@ -214,8 +281,13 @@ export const mailService = {
         email_address: saved.email_address,
         imap_host: saved.imap_host,
         imap_port: saved.imap_port,
+        imap_tls: saved.imap_tls,
+        imap_folder: saved.imap_folder,
         smtp_host: saved.smtp_host,
         smtp_port: saved.smtp_port,
+        smtp_tls: saved.smtp_tls,
+        sent_folder: saved.sent_folder,
+        display_name: saved.display_name,
       }),
     });
 
@@ -240,31 +312,183 @@ export const mailService = {
     return { ok: true };
   },
 
-  /** 受信箱の表示 (設定済みなら件名・日時一覧と本文を返す / 未設定は 409) */
-  async getInbox(user) {
+  /**
+   * ボックス表示 (folder='inbox' 受信ボックス / 'sent' 送信ボックス。DBに保存済みだけを返す)
+   * GET /api/mail/messages?folder=inbox|sent
+   */
+  async getInbox(user, folder = 'inbox') {
     const account = await mailModel.getAccount(user.id);
     if (!account) {
       throw new ApiError(409, 'メール接続設定が未登録です。最初にメールアドレスとパスワードを登録してください。');
     }
 
-    if ((await mailModel.countMessages(user.id)) === 0) {
-      await mailModel.seedMessages(user.id, buildSeedMessages(user.id));
-    }
-
-    const rows = await mailModel.listMessages(user.id);
+    const normalized = folder === 'sent' ? 'sent' : 'inbox';
+    const rows = await mailModel.listMessages(user.id, normalized);
     const messages = rows.map(toMessageView);
     const unread = messages.filter((m) => !m.is_read).length;
 
     // 最終確認時刻を記録 (監査ログ対象外)
     await mailModel.touchLastChecked(user.id);
 
-    return { messages, unread };
+    return { folder: normalized, messages, unread };
   },
 
-  /** メッセージを既読にする (自分の受信箱のみ) */
+  /**
+   * 受信ボックスの取得 (IMAP に接続し、まだ保存されていない新着をDBへ書き込んで一覧を返す)
+   * POST /api/mail/inbox/refresh
+   */
+  async fetchInbox(user) {
+    const account = await mailModel.getAccount(user.id);
+    if (!account) {
+      throw new ApiError(409, 'メール接続設定が未登録です。最初にメールアドレスとパスワードを登録してください。');
+    }
+
+    const p = transportParams(account);
+    requireImap(p);
+
+    const fetched = await probes.fetch({
+      host: p.imapHost,
+      port: p.imapPort,
+      tlsMode: p.imapTls,
+      user: p.email,
+      password: p.password,
+      mailbox: p.imapFolder,
+      timeoutMs: p.timeoutMs,
+    });
+
+    let added = 0;
+    for (const item of fetched) {
+      const existing = await mailModel.findInboxByUid(user.id, item.uid);
+      if (existing) continue;
+      const parsed = parseMessage(item.raw, item.internaldate);
+      const saved = await mailModel.upsertInboxMessage({
+        user_id: user.id,
+        sender_name: parsed.sender_name,
+        sender_email: parsed.sender_email,
+        subject: parsed.subject,
+        body: parsed.body,
+        received_at: parsed.received_at,
+        uid: item.uid,
+      });
+      if (saved) added += 1;
+    }
+
+    await mailModel.touchLastChecked(user.id);
+
+    const rows = await mailModel.listMessages(user.id, 'inbox');
+    const messages = rows.map(toMessageView);
+    return {
+      folder: 'inbox',
+      messages,
+      unread: messages.filter((m) => !m.is_read).length,
+      fetched: fetched.length,
+      added,
+    };
+  },
+
+  /**
+   * メール送信 (SMTP で送り、送信済みボックスへDB保存。IMAP が設定済みなら送信済みフォルダへも保存)
+   * POST /api/mail/send
+   */
+  async sendMessage(user, payload) {
+    const account = await mailModel.getAccount(user.id);
+    if (!account) {
+      throw new ApiError(409, 'メール接続設定が未登録です。最初にメールアドレスとパスワードを登録してください。');
+    }
+
+    const p = transportParams(account);
+    requireSmtp(p);
+
+    const recipients = normalizeRecipients(payload?.to ?? payload?.recipients);
+    const subject = String(payload?.subject ?? '').trim();
+    const bodyText = String(payload?.body ?? payload?.text ?? '').replace(/\r/g, '');
+    if (!subject) throw new ApiError(400, '件名を入力してください。');
+    if (!bodyText) throw new ApiError(400, '本文を入力してください。');
+
+    const raw = buildRawMessage({
+      from: p.email,
+      displayName: p.displayName,
+      to: recipients,
+      subject,
+      body: bodyText,
+    });
+
+    const sent = await probes.send({
+      host: p.smtpHost,
+      port: p.smtpPort,
+      tlsMode: p.smtpTls,
+      user: p.email,
+      password: p.password,
+      from: p.email,
+      to: recipients,
+      raw,
+      timeoutMs: p.timeoutMs,
+    });
+
+    if (!sent.ok) throw new ApiError(502, `送信に失敗しました: ${sent.message}`);
+
+    const row = await mailModel.addSentMessage({
+      user_id: user.id,
+      sender_email: p.email,
+      sender_name: p.displayName || '',
+      recipients,
+      subject,
+      body: bodyText,
+    });
+
+    // 送信済みフォルダへの保存は送信成功とは切り分ける (IMAP 未設定なら行わない)
+    let appendWarning = null;
+    if (p.imapHost && p.imapPort) {
+      try {
+        await probes.append({
+          host: p.imapHost,
+          port: p.imapPort,
+          tlsMode: p.imapTls,
+          user: p.email,
+          password: p.password,
+          mailbox: p.sentFolder,
+          raw,
+          timeoutMs: p.timeoutMs,
+        });
+      } catch (err) {
+        appendWarning = `送信済みフォルダに保存できませんでした: ${err.message}`;
+      }
+    }
+
+    await auditModel.logAction({
+      userId: user.id,
+      action: 'MAIL_SEND',
+      targetEntity: 'MAIL_MESSAGE',
+      targetId: row?.id ?? null,
+      changesJson: JSON.stringify({ recipients, subject }),
+    });
+
+    return { ok: true, message: toMessageView(row), append_warning: appendWarning };
+  },
+
+  /** メッセージを既読にする (自分のボックスのみ。受信ボックスでは IMAP 側にも既読フラグを立てる) */
   async markMessageRead(messageId, user) {
     const row = await mailModel.markRead(messageId, user.id);
     if (!row) throw new ApiError(404, 'メッセージが見つかりません。');
+
+    // IMAP の既読フラグは best-effort (サーバー側の失敗でDBの既読状態を巻き戻さない)
+    if (row.folder === 'inbox' && row.uid) {
+      try {
+        const p = transportParams(await mailModel.getAccount(user.id));
+        await probes.markSeen({
+          host: p.imapHost,
+          port: p.imapPort,
+          tlsMode: p.imapTls,
+          user: p.email,
+          password: p.password,
+          mailbox: p.imapFolder,
+          uid: row.uid,
+          timeoutMs: p.timeoutMs,
+        });
+      } catch (_err) {
+        // 既読はDBで記録済み。サーバー反映は次回以降に任せる
+      }
+    }
 
     await auditModel.logAction({
       userId: user.id,
@@ -301,8 +525,10 @@ export const mailService = {
     let row = null;
     let imapHost = null;
     let imapPort = null;
+    let imapTls = null;
     let smtpHost = null;
     let smtpPort = null;
+    let smtpTls = null;
 
     if (wantsProbe) {
       // フォーム入力値でのプレテスト (DB へ書き込まず status も変更しない)
@@ -310,8 +536,10 @@ export const mailService = {
       password = normalizePassword(body.password);
       imapHost = normalizeHost(body.imap_host ?? body.imapHost, '受信サーバー') ?? d.imap_host;
       imapPort = normalizePort(body.imap_port ?? body.imapPort, '受信ポート') ?? d.imap_port;
+      imapTls = normalizeTlsField(body.imap_tls ?? body.imapTls, '受信サーバー', d.imap_tls);
       smtpHost = normalizeHost(body.smtp_host ?? body.smtpHost, '送信サーバー') ?? d.smtp_host;
       smtpPort = normalizePort(body.smtp_port ?? body.smtpPort, '送信ポート') ?? d.smtp_port;
+      smtpTls = normalizeTlsField(body.smtp_tls ?? body.smtpTls, '送信サーバー', d.smtp_tls);
     } else {
       row = await mailModel.getAccount(user.id);
       if (!row) {
@@ -324,8 +552,10 @@ export const mailService = {
       email = row.email_address;
       imapHost = row.imap_host ?? d.imap_host;
       imapPort = row.imap_port ?? d.imap_port;
+      imapTls = normalizeTlsMode(row.imap_tls ?? d.imap_tls);
       smtpHost = row.smtp_host ?? d.smtp_host;
       smtpPort = row.smtp_port ?? d.smtp_port;
+      smtpTls = normalizeTlsMode(row.smtp_tls ?? d.smtp_tls);
     }
 
     if (!imapHost || !imapPort) {
@@ -340,8 +570,10 @@ export const mailService = {
       password,
       imapHost,
       imapPort,
+      imapTls,
       smtpHost,
       smtpPort,
+      smtpTls,
     });
 
     const result = {
@@ -352,8 +584,10 @@ export const mailService = {
       email_address: email,
       imap_host: imapHost,
       imap_port: imapPort,
+      imap_tls: imapTls,
       smtp_host: smtpHost,
       smtp_port: smtpPort,
+      smtp_tls: smtpTls,
     };
 
     // 保存済み設定のテスト時のみ status を更新し監査ログへ残す

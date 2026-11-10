@@ -313,7 +313,7 @@ function lastDayCoveredCtx(ctx) {
  * MRV(最少ドメイン)順序付け + 深さ優先探索
  * @returns {Map|null} 全実施単位を配置した placements（HARD 制約で不可なら null）
  */
-export function searchPlacements(blocks, ctx, nodeLimit = 120000) {
+export function searchPlacements(blocks, ctx, nodeLimit = 120000, deadline = null) {
   let nodes = 0;
 
   const candidatePositions = (block) => {
@@ -331,6 +331,8 @@ export function searchPlacements(blocks, ctx, nodeLimit = 120000) {
   };
 
   const dfs = (remaining) => {
+    // 時間予算（壁時計）を超えたら探索を打ち切る。大きい計画で応答が数十秒かかるのを防ぐ
+    if (deadline && Date.now() > deadline) return false;
     if (remaining.length === 0) return lastDayCoveredCtx(ctx);
 
     let bestIdx = 0;
@@ -719,9 +721,13 @@ export function solveTimetable(input) {
   const meta = { days, slots, rules, history };
   const options = solverOptions(input);
 
+  // 1回の試行あたりの時間予算（既定1800ms）。2試行でも合計3.6秒以内に収める
+  const budgetMs = Number.isFinite(Number(input.budget_ms)) ? Number(input.budget_ms) : 1800;
+  const firstDeadline = Date.now() + budgetMs;
+
   // 1. HARD 制約下での完全探索
   let ctx = createContext(blocks, grades, days, slots, rules, options);
-  let placements = searchPlacements(blocks, ctx);
+  let placements = searchPlacements(blocks, ctx, 120000, firstDeadline);
   let relaxed = false;
 
   // 2. 1限/最終日制約が満たせない場合は軟制約として再探索（その旨を診断に記録）
@@ -729,7 +735,8 @@ export function solveTimetable(input) {
     relaxed = true;
     const relaxedRules = { ...rules, first_period_all: false, last_day_all: false };
     ctx = createContext(blocks, grades, days, slots, relaxedRules, options);
-    placements = searchPlacements(blocks, ctx);
+    const remainingBudget = Math.max(Date.now() + budgetMs, firstDeadline);
+    placements = searchPlacements(blocks, ctx, 120000, remainingBudget);
     meta.rules = relaxedRules;
   }
 

@@ -431,9 +431,11 @@ function candidatePositions(ctx, block) {
 }
 
 /** MRV 順序付け + 深さ優先探索 */
-export function searchBlockPlacements(blocks, ctx, nodeLimit = 120000) {
+export function searchBlockPlacements(blocks, ctx, nodeLimit = 120000, deadline = null) {
   let nodes = 0;
   const dfs = (remaining) => {
+    // 時間予算（壁時計）を超えたら探索を打ち切る。大きい計画で応答が数十秒かかるのを防ぐ
+    if (deadline && Date.now() > deadline) return false;
     if (remaining.length === 0) return coverageOK(ctx, blocks);
 
     let bestIdx = 0;
@@ -654,15 +656,20 @@ export function solveBlockTimetable(input) {
   const options = buildBlockOptions(input, blocks);
   const meta = { history: input.history || [] };
 
+  // 1回の試行あたりの時間予算（既定1800ms）。2試行でも合計3.6秒以内に収める
+  const budgetMs = Number.isFinite(Number(input.budget_ms)) ? Number(input.budget_ms) : 1800;
+  const firstDeadline = Date.now() + budgetMs;
+
   let ctx = createBlockContext(blocks, rows, daySlots, slots, rules, { ...options, commandNames });
-  let placements = searchBlockPlacements(blocks, ctx);
+  let placements = searchBlockPlacements(blocks, ctx, 120000, firstDeadline);
   const relaxed = !placements;
 
   // 厳しすぎるハード条件（1限目全員・最終日全員）を緩めて再試行する
   if (!placements) {
     const relaxedRules = { ...rules, first_period_all: false, last_day_all: false };
     ctx = createBlockContext(blocks, rows, daySlots, slots, relaxedRules, { ...options, commandNames });
-    placements = searchBlockPlacements(blocks, ctx);
+    const remainingBudget = Math.max(Date.now() + budgetMs, firstDeadline);
+    placements = searchBlockPlacements(blocks, ctx, 120000, remainingBudget);
   }
 
   if (!placements) {

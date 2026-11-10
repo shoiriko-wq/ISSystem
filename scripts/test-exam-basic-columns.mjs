@@ -10,6 +10,10 @@
  *  R4. カード・テーブル・内容領域に水平スクロールが発生せず、保存/削除ボタンが操作列の右端を超えない。
  *  R5. チップをクリックすると選択（bg-accent-soft）になり、保存でサーバーへ class_course_ids が届いて
  *      再読み込み後も選択が維持される（Shift+クリックで範囲選択、解除して元へ戻す）。
+ *  R6. 「行を追加」は未入力の行を表の最上部に1件だけ出す（未入力の行の top は最初の保存済み行より上）。
+ *      未入力の行が1件表示されている間は「行を追加」ボタンは無効（disabled・aria-disabled）で、
+ *      2回押しても行は増えない。保存・破棄すると未入力の行は消え、ボタンは元通り使える。
+ *      保存済み行は通常の順（クラス=学年順・教科=登録順・科目=教科順）で並ぶ。
  *
  * 実行: npm run test:ui:exambasic  （ISSystem サーバーが必要）
  * options: UI_BASE=https://127.0.0.1:3443 UI_USER=T2026001 UI_PASS=password123
@@ -259,21 +263,60 @@ const addRow = async (kind) => {
   await page.click(`#basic-add-${kind}`);
   await sleep(300);
   return page.evaluate((k) => {
-    const rows = [...document.querySelectorAll(`#basic-body-${k} tr`)];
-    const last = rows[rows.length - 1];
+    const tbody = document.getElementById(`basic-body-${k}`);
+    const rows = [...tbody.querySelectorAll('tr')];
+    const blank = rows.find((r) => r.dataset.kind && !r.dataset.id);
+    const firstSaved = rows.find((r) => r.dataset.kind && r.dataset.id);
+    const topOf = (r) => (r ? Math.round(r.getBoundingClientRect().top) : -1);
+    const addBtn = document.getElementById(`basic-add-${k}`);
     return {
       count: rows.length,
-      lastId: last?.dataset.id ?? null,
-      hasSave: !!last?.querySelector('[data-act="save"]'),
-      hasDelete: !!last?.querySelector('[data-act="delete"]'),
+      blankCount: rows.filter((r) => r.dataset.kind && !r.dataset.id).length,
+      blankIsFirst: tbody.firstElementChild === blank,
+      blankTop: topOf(blank),
+      firstSavedTop: topOf(firstSaved),
+      hasSave: !!blank?.querySelector('[data-act="save"]'),
+      hasDelete: !!blank?.querySelector('[data-act="delete"]'),
+      addDisabled: addBtn.disabled === true,
+      addAriaDisabled: addBtn.getAttribute('aria-disabled') === 'true',
     };
   }, kind);
 };
 
+/** 未入力の行が1件表示中のときに「行を追加」をもう一度押す（機能してはいけない） */
+const clickAddAgain = async (kind) => {
+  await page.evaluate((k) => {
+    const b = document.getElementById(`basic-add-${k}`);
+    b.scrollIntoView({ block: 'center' });
+    b.click();   // disabled でも DOM のクリックは届く → ハンドラの防御確認も見る
+  }, kind);
+  await sleep(300);
+  return page.evaluate((k) => {
+    const rows = [...document.querySelectorAll(`#basic-body-${k} tr`)];
+    const addBtn = document.getElementById(`basic-add-${k}`);
+    return {
+      count: rows.length,
+      blankCount: rows.filter((r) => r.dataset.kind && !r.dataset.id).length,
+      addDisabled: addBtn.disabled === true,
+    };
+  }, kind);
+};
+
+/** テーブルの未入力の行数と「行を追加」ボタンの有効状態 */
+const basicState = (kind) =>
+  page.evaluate((k) => {
+    const rows = [...document.querySelectorAll(`#basic-body-${k} tr`)];
+    const addBtn = document.getElementById(`basic-add-${k}`);
+    return {
+      count: rows.length,
+      blankCount: rows.filter((r) => r.dataset.kind && !r.dataset.id).length,
+      addDisabled: addBtn.disabled === true,
+    };
+  }, kind);
+
 const fillRow = (kind, values) =>
   page.evaluate((k, vals) => {
-    const rows = [...document.querySelectorAll(`#basic-body-${k} tr`)];
-    const row = rows[rows.length - 1];
+    const row = document.querySelector(`#basic-body-${k} tr[data-kind="${k}"][data-id=""]`);
     for (const [key, val] of Object.entries(vals)) {
       const el = row.querySelector(`[data-f="${key}"]`);
       if (!el) continue;
@@ -282,11 +325,10 @@ const fillRow = (kind, values) =>
     }
   }, kind, values);
 
-const clickButtonInLastRow = async (kind, act, method) => {
+const clickButtonInBlankRow = async (kind, act, method) => {
   const resP = page.waitForResponse((r) => r.url().includes(API_PATH[kind]) && r.request().method() === method, { timeout: 6000 });
   await page.evaluate((k, a) => {
-    const rows = [...document.querySelectorAll(`#basic-body-${k} tr`)];
-    const btn = rows[rows.length - 1].querySelector(`[data-act="${a}"]`);
+    const btn = document.querySelector(`#basic-body-${k} tr[data-kind="${k}"][data-id=""] [data-act="${a}"]`);
     btn.scrollIntoView({ block: 'center' });
     btn.click();
   }, kind, act);
@@ -356,16 +398,26 @@ for (const c of addCases) {
   }
   const before = await rowInfo(c.kind);
   const added = await addRow(c.kind);
-  check(`${c.kind}: 「行を追加」で未保存行（保存・削除ボタン付き）が増える`,
-    added.count === before.count + 1 && added.lastId === '' && added.hasSave && added.hasDelete,
-    `count=${added.count} lastId="${added.lastId}" del=${added.hasDelete}`);
+  check(`${c.kind}: 「行を追加」で未入力の行が1件だけ最上部に出る（保存・削除ボタン付き・ボタンは無効）`,
+    added.count === before.count + 1 && added.blankCount === 1 && added.blankIsFirst &&
+    added.blankTop < added.firstSavedTop && added.hasSave && added.hasDelete &&
+    added.addDisabled && added.addAriaDisabled,
+    `count=${added.count} blank=${added.blankCount} first=${added.blankIsFirst} top=${added.blankTop}/${added.firstSavedTop} del=${added.hasDelete} disabled=${added.addDisabled}`);
+  const again = await clickAddAgain(c.kind);
+  check(`${c.kind}: 未入力の行が1件ある間「行を追加」は機能しない（行数・未入力の行数は変わらず・ボタンは無効のまま）`,
+    again.count === added.count && again.blankCount === 1 && again.addDisabled,
+    `count=${again.count} blank=${again.blankCount} disabled=${again.addDisabled}`);
   await fillRow(c.kind, c.fill);
-  const status = await clickButtonInLastRow(c.kind, 'save', 'POST');
+  const status = await clickButtonInBlankRow(c.kind, 'save', 'POST');
   const after = await rowInfo(c.kind);
   const savedId = await findRowId(c.kind, c.name);
+  const afterSave = await basicState(c.kind);
   check(`${c.kind}: 行を追加して保存（POST ${status}）すると入力内容が行として一覧に残る`,
     status === 201 && after.count === before.count + 1 && savedId && savedId !== '',
     `count=${after.count} id=${savedId}`);
+  check(`${c.kind}: 保存後は未入力の行が消え「行を追加」が使えるようになる`,
+    afterSave.blankCount === 0 && afterSave.addDisabled === false,
+    `blank=${afterSave.blankCount} disabled=${afterSave.addDisabled}`);
   const delStatus = await clickDeleteById(c.kind, savedId);
   const back = await rowInfo(c.kind);
   const gone = await findRowId(c.kind, c.name);
@@ -378,15 +430,15 @@ for (const c of addCases) {
 const beforeDiscard = await rowInfo('room');
 await addRow('room');
 await page.evaluate(() => {
-  const rows = [...document.querySelectorAll('#basic-body-room tr')];
-  const btn = rows[rows.length - 1].querySelector('[data-act="delete"]');
+  const btn = document.querySelector('#basic-body-room tr[data-kind="room"][data-id=""] [data-act="delete"]');
   btn.scrollIntoView({ block: 'center' });
   btn.click();
 });
 await sleep(400);
-const afterDiscard = await rowInfo('room');
-check('未保存行の削除はその行をUIから破棄する（サーバー変更なし）',
-  afterDiscard.count === beforeDiscard.count, `count=${afterDiscard.count}`);
+const afterDiscard = await basicState('room');
+check('未保存行の削除はその行をUIから破棄する（サーバー変更なし・行を追加は元通り使える）',
+  afterDiscard.count === beforeDiscard.count && afterDiscard.blankCount === 0 && afterDiscard.addDisabled === false,
+  `count=${afterDiscard.count} blank=${afterDiscard.blankCount} disabled=${afterDiscard.addDisabled}`);
 
 await browser.close();
 console.log(failures.length ? `\n=== ${failures.length} FAILURES ===\n${failures.join('\n')}` : '\n=== ALL PASSED ===');

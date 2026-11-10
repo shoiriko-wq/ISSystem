@@ -1,0 +1,108 @@
+
+> issystem@1.0.0 test:ui:bulletin
+> node scripts/test-bulletin-split.mjs
+
+pickedDay = {"opened":true,"expanded":"true","hasTodayButton":false,"hasAnyDayLabel":false,"hasDateInput":false,"monthBtns":2,"dayCells":30,"day":"2026-11-10","closedAfterPick":true}
+  PASS - ‹ › の間の日付クリックでミニカレンダーが開く（aria-expanded=true、日付選択で閉じる） -> {"opened":true,"expanded":"true","hasTodayButton":false,"hasAnyDayLabel":false,"hasDateInput":false,"monthBtns":2,"dayCells":30,"day":"2026-11-10","closedAfterPick":true}
+  PASS - ミニカレンダーに「今日」ボタンと「任意日へ」入力はない（月送り ‹ › と日付セルのみ。本日へはツールバーの本日/T キー） -> {"hasTodayButton":false,"hasAnyDayLabel":false,"hasDateInput":false,"monthBtns":2,"dayCells":30}
+after-day-select = {"rows":8,"activeIdx":0,"activeTitle":"避難訓練の実施要項および各クラスの避難経路確認","activeSelected":"true","activeBg":"color(srgb 0.811922 0.865412 0.982745)","unread":1,"titleCount":"8 件","paneTitle":"避難訓練の実施要項および各クラスの避難経路確認","paneHasBody":true,"paneOverflowX":0,"paneAnimations":0,"listAnimations":0,"activeRowAnimations":0,"paneFocused":false,"centerDate":"2026-11-10","readoutW":95,"calToggleGone":true,"nextX":1000,"prevX":863,"nextY":111,"prevY":111,"rootFs":17.5,"flexDir":"row","titlePaneW":280,"paneW":885,"splitH":620,"pageOverflowX":0,"overflowEls":[],"footerButtons":["詳細","送信"],"rowDeleteButtons":0,"paneDeleteButtons":0,"paneTab":"0","paneAriaLive":"polite","paneHeaderText":"避難訓練の実施要項および各クラスの避難経路確認 教 教務 主任 詳細","paneAuthorText":"教務 主任","paneAuthorHasIcon":true,"paneAuthorRightGap":104,"paneAuthorTitleGap":622,"paneHeaderHasUnread":false,"sendBtnW":106,"sendBtnRightGap":0,"textareaW":715,"borderStd":2,"paneBorderW":[2,2,2,2],"titlePaneBorderW":[2,2,2,2],"paneHeaderBorderW":2,"rowBorderW":2,"detailBtnText":"詳細"}
+  PASS - カレンダー単独ボタンは撤廃（#bulletin-cal-toggle は存在しない） -> {"calToggleGone":true}
+  PASS - 左右分割（左列 = 16rem 固定、右ペイン余り。ルートの font-size が変わっても rem 基準） -> {"titlePaneW":280,"paneW":885,"rootFs":17.5,"expectedRem16":280}
+  PASS - 1件目が選択され右ペインに全文が出る（aria-selected=true） -> {"activeTitle":"避難訓練の実施要項および各クラスの避難経路確認","paneTitle":"避難訓練の実施要項および各クラスの避難経路確認"}
+  PASS - 選択行は強調背景（accent） -> "color(srgb 0.811922 0.865412 0.982745)"
+  PASS - 右ペインは tabindex=0 / aria-live=polite -> {"paneTab":"0","paneAriaLive":"polite"}
+  PASS - 右ペイン・ページに横スクロールなし -> {"paneOverflowX":0,"pageOverflowX":0}
+title-row-style = {"rows":8,"timeInRow":[false,false,false,false,false,false,false,false],"badgeRows":1,"badgeRightGap":[9],"rowH":[40,40,40,40,40,40,40,40],"titleH":[23,23,23,23,23,23,23,23],"signifiers":8,"signifierColorUnread":["rgb(37, 99, 235)"],"signifierColorRead":["color(srgb 0.412843 0.444549 0.486431)"],"readHasBadge":false,"badgeText":["未読"],"badgePointer":"none"}
+  PASS - 左列タイトル行に時間の表記がない（タイトル文字列以外に HH:MM なし） -> [false,false,false,false,false,false,false,false]
+  PASS - 左列タイトル行は常に1行（行高<=40px、タイトルは1行分） -> {"rowH":[40,40,40,40,40,40,40,40],"titleH":[23,23,23,23,23,23,23,23]}
+  PASS - 左列・右ペインの枠と区切り線は共通の 2px（var(--border-width)。カード・ツールバー・入力欄と同じ太さ） -> {"borderStd":2,"paneBorderW":[2,2,2,2],"titlePaneBorderW":[2,2,2,2],"paneHeaderBorderW":2,"rowBorderW":2}
+  PASS - 未読バッチは行の右端に揃いて固定（右端からの差が全未読行で同じ）。既読行にバッチなし、バッチは行クリックを邪魔しない -> {"badgeRightGap":[9],"readHasBadge":false,"badgeText":["未読"],"badgePointer":"none"}
+  PASS - 全行にシグニファイア › があり、未読行の › は既読行と違うアクセント色（クリック誘導） -> {"signifiers":8,"rows":8,"signifierColorUnread":["rgb(37, 99, 235)"],"signifierColorRead":["color(srgb 0.412843 0.444549 0.486431)"]}
+title-unread-badge = {"headText":"職員掲示板","titleBadgeExists":false,"sideText":"2","sideHidden":false,"unreadRows":1,"listCount":8}
+  PASS - 見出しは「職員掲示板」ラベルのみ（見出しバッヂは廃止・未読数はサイドバーと未読ボタンだけ） -> {"headText":"職員掲示板","titleBadgeExists":false}
+  PASS - サイドバーバッヂは全日未読数（数字のみ。当日列表の未読行数以上・列表件数以下） -> {"side":"2","sideNum":2,"unreadRows":1,"listCount":8}
+  PASS - 全日未読 0 ならサイドバーバッヂは hidden -> {"sideHidden":false,"sideNum":2}
+  PASS - 未読バッヂは 100 以上の数字を出さない（100 件超は 99+ へ。999 のような未キャップ表示がない） -> {"side":"2"}
+  PASS - 右ペインヘッダーに投稿日時・掲示期間の表記がない -> {"paneHeaderText":"避難訓練の実施要項および各クラスの避難経路確認 教 教務 主任 詳細"}
+  PASS - 全文開きボタンは「詳細」にリネーム（右ペインヘッダーの右端） -> {"detailBtnText":"詳細"}
+  PASS - 左列タイトル行に削除ボタンがない（削除は詳細モーダル内のみ） -> {"rowDeleteButtons":0,"rows":8}
+  PASS - 右ペイン（ヘッダー・本文）に削除ボタンがない -> {"paneDeleteButtons":0,"footerButtons":["詳細","送信"]}
+comment-send = {"cls":"btn-primary py-2 px-4 h-[42px] font-bold text-xs flex items-center justify-center gap-1.5 flex-shrink-0","chatSendCls":"btn-primary py-2 px-4 h-[42px] font-bold text-xs flex items-center justify-center gap-1.5 flex-shrink-0","w":106,"h":42,"textareaW":715,"rightGap":0,"isPrimary":true,"bg":"color(srgb 0.136863 0.32 0.71451)","color":"rgb(255, 255, 255)","fontWeight":"700","icon":true,"label":"送信"}
+  PASS - コメント送信は入力欄の幅いっぱいに広がらない（入力欄の 60% 以下・内容幅で右端揃え） -> {"w":106,"textareaW":715,"rightGap":0}
+  PASS - コメント送信は送信系ボタンの統一デザイン（btn-primary・42px 高・太字・白文字・send アイコン・ラベル「送信」） -> {"isPrimary":true,"h":42,"fontWeight":"700","icon":true,"label":"送信","color":"rgb(255, 255, 255)"}
+  PASS - コメント送信はチャット送信ボタンと同一のクラス設計（デザイン統一） -> {"cls":"btn-primary py-2 px-4 h-[42px] font-bold text-xs flex items-center justify-center gap-1.5 flex-shrink-0","chatSendCls":"btn-primary py-2 px-4 h-[42px] font-bold text-xs flex items-center justify-center gap-1.5 flex-shrink-0"}
+detail-hover-ring = {"spread":4,"lift":2,"shadow":"color(srgb 0.145098 0.388235 0.921569 / 0.35) 0px 6px 18px 0","bodyRoom":{"top":5,"right":10,"left":753,"bottom":538},"paneRoom":{"top":21,"right":25,"left":769,"bottom":554}}
+  PASS - 「詳細」ボタンはホバリングで枠リングが見切れない（上下左右の余白がリング分以上） -> {"spread":4,"lift":2,"shadow":"color(srgb 0.145098 0.388235 0.921569 / 0.35) 0px 6px 18px 0","bodyRoom":{"top":5,"right":10,"left":753,"bottom":538},"paneRoom":{"top":21,"right":25,"left":769,"bottom":554}}
+send-hover-ring = {"spread":4,"lift":2,"shadow":"color(srgb 0.145098 0.388235 0.921569 / 0.35) 0px 6px 18px 0","bodyRoom":{"top":323,"right":10,"left":733,"bottom":219},"paneRoom":{"top":339,"right":25,"left":749,"bottom":235}}
+  PASS - コメント送信ボタンはホバリングで枠リングが見切れない（上下左右の余白がリング分以上） -> {"spread":4,"lift":2,"shadow":"color(srgb 0.145098 0.388235 0.921569 / 0.35) 0px 6px 18px 0","bodyRoom":{"top":323,"right":10,"left":733,"bottom":219},"paneRoom":{"top":339,"right":25,"left":749,"bottom":235}}
+  PASS - 右ペインタイトル行に投稿者名とアバターアイコンが表示されている -> {"paneAuthorText":"教務 主任","icon":true}
+  PASS - 投稿者表示はタイトル行の右側へ右寄せ（ヘッダー右端との差 220px 以内・タイトルより右） -> {"paneAuthorRightGap":104,"paneAuthorTitleGap":622}
+  PASS - 右ペインタイトル行の未読バッジは撤去（左列タイトル行の未読バッジは残る） -> {"paneHeaderHasUnread":false,"leftBadgeRows":1,"leftUnread":1}
+pane-author-data = {"paneTitle":"避難訓練の実施要項および各クラスの避難経路確認","paneAuthor":"教務 主任","real":"教務 主任","found":true,"ok":true}
+  PASS - 右ペインの投稿者名は表示記事の実際の投稿者名と一致 -> {"paneTitle":"避難訓練の実施要項および各クラスの避難経路確認","paneAuthor":"教務 主任","real":"教務 主任","found":true,"ok":true}
+long-title-row = {"rowH":40,"truncated":true,"titleEndsUnderBadge":true,"badgeOpaque":true,"titleRightGap":10,"badgeRightGap":9}
+  PASS - 長いタイトルは1行のまま右端バッチの下に潜って省略表示（行高1行・バッチは不透明） -> {"rowH":40,"truncated":true,"titleEndsUnderBadge":true,"badgeOpaque":true,"titleRightGap":10,"badgeRightGap":9}
+  PASS - 長いタイトルでも左列は 16rem のまま（列が押し広げられない） -> {"paneW":280,"listW":261,"rootFs":17.5}
+after-ArrowDown = {"rows":8,"activeIdx":1,"activeTitle":"【進路指導部】第2回進路希望調査集計報告","activeSelected":"true","activeBg":"color(srgb 0.811922 0.865412 0.982745)","unread":1,"titleCount":"8 件","paneTitle":"【進路指導部】第2回進路希望調査集計報告","paneHasBody":true,"paneOverflowX":0,"paneAnimations":1,"listAnimations":0,"activeRowAnimations":1,"paneFocused":false,"centerDate":"2026-11-10","readoutW":95,"calToggleGone":true,"nextX":1000,"prevX":863,"nextY":111,"prevY":111,"rootFs":17.5,"flexDir":"row","titlePaneW":280,"paneW":885,"splitH":620,"pageOverflowX":0,"overflowEls":[],"footerButtons":["詳細","送信"],"rowDeleteButtons":0,"paneDeleteButtons":0,"paneTab":"0","paneAriaLive":"polite","paneHeaderText":"【進路指導部】第2回進路希望調査集計報告 教 教務 主任 詳細","paneAuthorText":"教務 主任","paneAuthorHasIcon":true,"paneAuthorRightGap":104,"paneAuthorTitleGap":622,"paneHeaderHasUnread":false,"sendBtnW":106,"sendBtnRightGap":0,"textareaW":715,"borderStd":2,"paneBorderW":[2,2,2,2],"titlePaneBorderW":[2,2,2,2],"paneHeaderBorderW":2,"rowBorderW":2,"detailBtnText":"詳細"}
+rowIds = ["post_2","post_3","post_1","post_1794286610941_l01es","post_1794286580744_uyl53","post_1794286580782_gm4bw","post_1794286580819_8ubfw","post_1794286580737_lrr6t"]
+  PASS - ↑/↓ で選択行が移動し右ペイン全文が連動 -> {"activeIdx":1,"paneTitle":"【進路指導部】第2回進路希望調査集計報告"}
+  PASS - 選択切替は左列全体を動かさず右ペインはフェード1回 -> {"listAnimations":0,"paneAnimations":1}
+after-ArrowUp = {"rows":8,"activeIdx":0,"activeTitle":"避難訓練の実施要項および各クラスの避難経路確認","activeSelected":"true","activeBg":"color(srgb 0.811922 0.865412 0.982745)","unread":1,"titleCount":"8 件","paneTitle":"避難訓練の実施要項および各クラスの避難経路確認","paneHasBody":true,"paneOverflowX":0,"paneAnimations":2,"listAnimations":0,"activeRowAnimations":1,"paneFocused":false,"centerDate":"2026-11-10","readoutW":95,"calToggleGone":true,"nextX":1000,"prevX":863,"nextY":111,"prevY":111,"rootFs":17.5,"flexDir":"row","titlePaneW":280,"paneW":885,"splitH":620,"pageOverflowX":0,"overflowEls":[],"footerButtons":["詳細","送信"],"rowDeleteButtons":0,"paneDeleteButtons":0,"paneTab":"0","paneAriaLive":"polite","paneHeaderText":"避難訓練の実施要項および各クラスの避難経路確認 教 教務 主任 詳細","paneAuthorText":"教務 主任","paneAuthorHasIcon":true,"paneAuthorRightGap":104,"paneAuthorTitleGap":622,"paneHeaderHasUnread":false,"sendBtnW":106,"sendBtnRightGap":0,"textareaW":715,"borderStd":2,"paneBorderW":[2,2,2,2],"titlePaneBorderW":[2,2,2,2],"paneHeaderBorderW":2,"rowBorderW":2,"detailBtnText":"詳細"}
+active-row-anim = {"start":15.655,"end":0,"listElTransform":true}
+  PASS - ↑ で先頭行へ戻り右ペインも連動 -> {"activeIdx":0,"paneTitle":"避難訓練の実施要項および各クラスの避難経路確認"}
+  PASS - 選択枠は translateY スライドで移動（上移動は下から滑り込み、終点0・左列全体は動かない） -> {"start":15.655,"end":0,"listElTransform":true}
+unread-badge-flow = {"madeId":"post_1794288021363_eiax2","before":2,"after":1,"activeTitle":"UI検証バッジ用掲示","rowFound":true}
+  PASS - 選択行の未読バッジが消える（未読の掲示を選択するとバッジが1減り・選択行のバッジも消える） -> {"before":2,"after":1,"activeTitle":"UI検証バッジ用掲示","rowFound":true}
+unread-badge-cleanup = {"delStatus":200,"goneStatus":404,"rowsBefore":9,"rowsAfter":8}
+  PASS - 検証用掲示を削除して後片付けできる（API は 200→404、再読込した画面の行数が作成前の数へ戻る） -> {"delStatus":200,"goneStatus":404,"rowsBefore":9,"rowsAfter":8}
+Enter-paneFocused = true
+  PASS - Enter で右ペイン（全文）へフォーカス
+dateShift = {"c0":"2026-11-10","c1":"2026-11-11","c2":"2026-11-10","c3":"2026-11-11","c4":"2026-11-10"}
+  PASS - ←/→ キーは前日/翌日（1日分）ザッピング -> {"c0":"2026-11-10","c1":"2026-11-11","c2":"2026-11-10"}
+  PASS - › ‹ ボタンも 1日分ザッピング（中心日が1日ずつ移動） -> {"c2":"2026-11-10","c3":"2026-11-11","c4":"2026-11-10"}
+toolbar-order = {"prevNextIsRead":true,"readNextIsNext":true,"sameGroup":true,"readIsButton":true,"ariaControls":"bulletin-mini-cal","calToggleGone":true}
+  PASS - 中心日は ‹ › の間にある（‹ [日付] › が同一グループで隣接、日付はカレンダーを開くボタン） -> {"prevNextIsRead":true,"readNextIsNext":true,"sameGroup":true,"readIsButton":true,"ariaControls":"bulletin-mini-cal","calToggleGone":true}
+rapid-click = {"nextXs":[1000,1000,1000,1000,1000,1000,1000,1000,1000,1000],"readoutWs":[95,95,95,95,95,95,95,95,95,95],"day":"2026-11-10"}
+  PASS - › を 10 回連打しても › の x 位置は 1px も動かず、中心日表示の幅も一定 -> {"uniqX":[1000],"uniqW":[95]}
+  PASS - 5 日進・5 日戻りの連打で中心日は元の日に戻る -> {"c4":"2026-11-10","day":"2026-11-10"}
+cal-follow = {"center":"2026-12-20","header":"2026年12月","sel":"2026-12-20","restored":true,"expandedAfterClose":"false","expected":"2026年12月"}
+  PASS - ‹ › で月を跨ぐと開いているカレンダーの月表示・選択日が中心日に追従（日付クリックで閉じ、中心日は元へ） -> {"center":"2026-12-20","header":"2026年12月","sel":"2026-12-20","restored":true,"expandedAfterClose":"false","expected":"2026年12月"}
+  PASS - 1日ずれ（›）のアニメーションは小刻み（中心日<=6px・内容<=12px・薄くしすぎない・200ms以内） -> {"readout":{"maxPx":4,"minOpacity":0.62,"duration":150},"list":{"maxPx":5,"minOpacity":0.62,"duration":150},"pane":{"maxPx":0,"minOpacity":0.62,"duration":150}}
+arrow-pos-desktop = {"prevX":863,"prevY":111,"nextX":1000,"nextY":111}
+  PASS - ‹ › は同じ行に隣接して並び、連打できる -> {"prevX":863,"prevY":111,"nextX":1000,"nextY":111}
+detail-modal = {"open":true,"modalTitle":"避難訓練の実施要項および各クラスの避難経路確認","metaText":"投稿者: 教 教務 主任 対象日: 2026/11/10 投稿日時: 2026/11/10 15:10 掲示期間: 2026/11/10 〜 指定なし","hasDate":true,"hasTime":true,"hasPeriod":true,"hasAuthor":true,"contentLen":57,"attachText":"添付ファイルはありません。","isAuthor":false,"hasDelete":false,"footerButtons":["補足・コメント","閉じる"]}
+  PASS - 「詳細」ボタンで詳細モーダルが開く（aria-hidden=false） -> true
+  PASS - 詳細モーダルに投稿日時・掲示期間・投稿者・本文・添付の情報が揃う -> {"hasDate":true,"hasTime":true,"hasPeriod":true,"hasAuthor":true,"contentLen":57,"attachText":"添付ファイルはありません。"}
+  PASS - 他人の投稿の詳細モーダルに「削除」が出ない（フッターは 補足・コメント/閉じる の2つ） -> {"isAuthor":false,"hasDelete":false,"footerButtons":["補足・コメント","閉じる"]}
+modal-closed-via-ESC = true
+  PASS - ESC で閉じ aria-hidden も同期 -> true
+author-modal = {"found":true,"open":true,"mineTitle":"【教務部】中間考査採点票の提出期限について","hasDelete":true,"deleteLabel":"削除","rowDeleteButtons":0}
+  PASS - 自分の投稿の詳細モーダルにだけ「削除」が出る（モーダル内・投稿者のみ） -> {"found":true,"open":true,"mineTitle":"【教務部】中間考査採点票の提出期限について","hasDelete":true,"deleteLabel":"削除","rowDeleteButtons":0}
+created-post = {"createdId":"post_1794288039743_fqpxe","rowFound":true,"rows":9}
+  PASS - 自分の新投稿が左列に並ぶ（削除 E2E の準備） -> {"createdId":"post_1794288039743_fqpxe","rowFound":true,"rows":9}
+comment-post = [{"status":201,"body":"{\"success\":true,\"message\":\"コメントを投稿しました。\",\"data\":{\"id\":\"cmt_1794288040538\",\"bulletin_id\":\"post_1794288039743_fqpxe\",\"author_id\":\"kyomu01\",\"author_name\""}]
+comment-send-e2e = {"id":"post_1794288039743_fqpxe","before":0,"local":1,"itemsAfter":1,"heading":"投稿者への補足・コメント (1)","reselect":{"items":1,"dbg":[{"key":"post_2","serverKeys":0,"acks":2,"merged":0,"paneSel":true},{"key":"post_1794288039743_fqpxe","serverKeys":1,"acks":1,"merged":1,"paneSel":true}]},"detailStatus":200,"persisted":true}
+  PASS - コメント送信ボタンで送信が走る（即ローカル描画・成功トースト・入力欄は再描画で空） -> {"before":0,"local":1,"toasts":["掲示板に投稿しました","💬 教務 主任 が回覧・掲示板にコメントを追加しました","コメントを送信しました"]}
+  PASS - コメントは永続化される（API 詳細の comments に返り、右ペインの件数 1 と本文表示・選択し直しても残る） -> {"before":0,"itemsAfter":1,"heading":"投稿者への補足・コメント (1)","reselect":{"items":1,"dbg":[{"key":"post_2","serverKeys":0,"acks":2,"merged":0,"paneSel":true},{"key":"post_1794288039743_fqpxe","serverKeys":1,"acks":1,"merged":1,"paneSel":true}]},"detailStatus":200,"persisted":true}
+[console error] Failed to load resource: the server responded with a status of 404 (Not Found)
+after-delete = {"modal":true,"hasDelete":true,"rows":8,"toasts":["掲示板に投稿しました","💬 教務 主任 が回覧・掲示板にコメントを追加しました","コメントを送信しました","削除しました"],"apiStatus":404,"uiUser":"kyomu01","apiAuthor":null,"actions":"補足・コメント 削除 閉じる","meta":"投稿者: 教 教務 主任 対象日: 2026/11/10 投稿日時: 2026/11/10 05:20 掲示期間: 2026/11/10 〜 指定なし","storedUser":{"id":"kyomu01","staff_code":"T2026001","name":"教務 主任","email":"kyomu@school.ed.jp","role":"KYOMU","is_kyomu":true,"grade":"NONE","department":"教務部","subjects":[],"status":"PRESENT","created_at":"2026-11-10T04:56:07.896Z","registeredAt":"2026-11-10"},"paneId":null}
+  PASS - 詳細モーダルの「削除」で自分の掲示が消える（トースト・行数・API が全て消えた状態） -> {"hasDelete":true,"rowsBefore":9,"rowsAfter":8,"toasts":["掲示板に投稿しました","💬 教務 主任 が回覧・掲示板にコメントを追加しました","コメントを送信しました","削除しました"],"apiStatus":404}
+[console error] Failed to load resource: the server responded with a status of 403 (Forbidden)
+server-authority = {"status":403,"message":"掲示を削除できるのは投稿者本人だけです。","post2Status":200}
+  PASS - 他人の投稿の DELETE は 403 で拒否され投稿は残る（削除権限は投稿者本人） -> {"status":403,"message":"掲示を削除できるのは投稿者本人だけです。","post2Status":200}
+mobile-390 = {"rows":8,"activeIdx":0,"activeTitle":"避難訓練の実施要項および各クラスの避難経路確認","activeSelected":"true","activeBg":"color(srgb 0.811922 0.865412 0.982745)","unread":1,"titleCount":"8 件","paneTitle":"避難訓練の実施要項および各クラスの避難経路確認","paneHasBody":true,"paneOverflowX":0,"paneAnimations":1,"listAnimations":1,"activeRowAnimations":0,"paneFocused":false,"centerDate":"2026-11-10","readoutW":95,"calToggleGone":true,"nextX":265,"prevX":129,"nextY":200,"prevY":200,"rootFs":17.5,"flexDir":"column","titlePaneW":360,"paneW":360,"splitH":956,"pageOverflowX":0,"overflowEls":[],"footerButtons":["詳細","送信"],"rowDeleteButtons":0,"paneDeleteButtons":0,"paneTab":"0","paneAriaLive":"polite","paneHeaderText":"避難訓練の実施要項および各クラスの避難経路確認 教 教務 主任 詳細","paneAuthorText":"教務 主任","paneAuthorHasIcon":true,"paneAuthorRightGap":104,"paneAuthorTitleGap":98,"paneHeaderHasUnread":false,"sendBtnW":106,"sendBtnRightGap":0,"textareaW":191,"borderStd":2,"paneBorderW":[2,2,2,2],"titlePaneBorderW":[2,2,2,2],"paneHeaderBorderW":2,"rowBorderW":2,"detailBtnText":"詳細"}
+  PASS - モバイル（390）は縦 stacking -> "column"
+  PASS - モバイル（390）で横スクロールなし（ページ・右ペイン） -> {"pageOverflowX":0,"paneOverflowX":0}
+  PASS - モバイル（390）でもコメント送信は入力欄幅いっぱいに広がらない（右端に内容幅） -> {"sendBtnW":106,"textareaW":191,"rightGap":0}
+  PASS - モバイル（390）の左列は全幅でタイトルが 1 行に絞られる -> {"titlePaneW":360,"paneW":360}
+  PASS - モバイル（390）でも ‹ › は同じ行に隣接（ツールバーが ‹ › を分けて折り返さない） -> {"prevX":129,"nextX":265,"prevY":200,"nextY":200}
+mobile-320 = {"rows":8,"activeIdx":0,"activeTitle":"避難訓練の実施要項および各クラスの避難経路確認","activeSelected":"true","activeBg":"color(srgb 0.811922 0.865412 0.982745)","unread":1,"titleCount":"8 件","paneTitle":"避難訓練の実施要項および各クラスの避難経路確認","paneHasBody":true,"paneOverflowX":0,"paneAnimations":1,"listAnimations":1,"activeRowAnimations":0,"paneFocused":false,"centerDate":"2026-11-10","readoutW":95,"calToggleGone":true,"nextX":246,"prevX":110,"nextY":200,"prevY":200,"rootFs":17.5,"flexDir":"column","titlePaneW":290,"paneW":290,"splitH":929,"pageOverflowX":6,"overflowEls":["DIV.flex items-center gap-3 text-xs w=309","DIV.relative pl-2 border-l border-main w=124","BUTTON.flex items-center gap-2 hover:opacity-80 t w=114"],"footerButtons":["詳細","送信"],"rowDeleteButtons":0,"paneDeleteButtons":0,"paneTab":"0","paneAriaLive":"polite","paneHeaderText":"避難訓練の実施要項および各クラスの避難経路確認 教 教務 主任 詳細","paneAuthorText":"教務 主任","paneAuthorHasIcon":true,"paneAuthorRightGap":104,"paneAuthorTitleGap":28,"paneHeaderHasUnread":false,"sendBtnW":106,"sendBtnRightGap":0,"textareaW":121,"borderStd":2,"paneBorderW":[2,2,2,2],"titlePaneBorderW":[2,2,2,2],"paneHeaderBorderW":2,"rowBorderW":2,"detailBtnText":"詳細"}
+  PASS - モバイル（320）も縦 stacking・右ペイン内横スクロールなし -> {"flexDir":"column","paneOverflowX":0}
+  PASS - モバイル（320）でもコメント送信は入力欄幅いっぱいに広がらない（右端に内容幅） -> {"sendBtnW":106,"textareaW":121,"rightGap":0}
+  PASS - モバイル（320）でも ‹ › は同じ行に隣接 -> {"prevX":110,"nextX":246,"prevY":200,"nextY":200}
+baseline-320-dashboard = {"pageOverflowX":6,"overflowEls":["DIV.flex items-center gap-3 text-xs w=309","DIV.relative pl-2 border-l border-main w=124","BUTTON.flex items-center gap-2 hover:opacity-80 w=114","SPAN.dash-fx w=18"]}
+  PASS - 320 の横スクロールは既存アプリ起因（掲示の分割レイアウトで増えない） -> {"bulletin":6,"dashboard":6}
+reduced-motion = {"mq":true,"paneAnimations":0,"listAnimations":0,"activeIdx":1,"paneTitle":"【進路指導部】第2回進路希望調査集計報告"}
+  PASS - prefers-reduced-motion ではスライド移動なし（コンテンツ切り替えのみ） -> {"mq":true,"paneAnimations":0,"listAnimations":0,"activeIdx":1,"paneTitle":"【進路指導部】第2回進路希望調査集計報告"}
+
+ALL PASSED

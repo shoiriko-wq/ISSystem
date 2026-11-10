@@ -352,18 +352,17 @@ check('全行にシグニファイア › があり、未読行の › は既読
     && rowStyle.signifierColorRead.length === 1 && rowStyle.signifierColorUnread[0] !== rowStyle.signifierColorRead[0],
   { signifiers: rowStyle.signifiers, rows: rowStyle.rows, signifierColorUnread: rowStyle.signifierColorUnread, signifierColorRead: rowStyle.signifierColorRead });
 
-// 見出し右の未読バッヂ（全日未読数・サイドバーと一致・ラベル「未読 N」・99+ 対応）
+// 見出し右の未読バッヂは廃止（2026/11 現行 UI）。未読数はサイドバー #bulletin-unread-count と
+// 検索ボックス右の未読ボタン #bulletin-btn-unread だけが出す（全日未読）。見出しはラベルのみ。
 const titleBadge = await page.evaluate(() => {
   const h2 = document.querySelector('#view-bulletin h2');
-  const badge = document.getElementById('bulletin-title-unread');
+  const titleBadgeEl = document.getElementById('bulletin-title-unread');
   const side = document.getElementById('bulletin-unread-count');
   const unreadRows = [...document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]')]
     .filter((r) => r.dataset.unread === 'true').length;
   return {
     headText: h2 ? h2.textContent.replace(/\s+/g, ' ').trim() : null,
-    inHead: !!h2 && h2.contains(badge),
-    badgeText: badge ? badge.textContent.trim() : null,
-    badgeHidden: badge ? badge.classList.contains('hidden') : null,
+    titleBadgeExists: !!titleBadgeEl,
     sideText: side ? side.textContent.trim() : null,
     sideHidden: side ? side.classList.contains('hidden') : null,
     unreadRows,
@@ -371,23 +370,21 @@ const titleBadge = await page.evaluate(() => {
   };
 });
 log('title-unread-badge', titleBadge);
-check('見出し右の未読バッヂは「職員掲示板」見出しの中（アイコン・ラベルと同一行）',
-  titleBadge.inHead && titleBadge.headText.includes('職員掲示板'), { headText: titleBadge.headText });
-// サイドバーのバッヂは数字のみ（ラベル「未読」は見出し側）、タイトルバッヂは「未読 N」。数値で一致を検証する
-const badgeNum = Number((titleBadge.badgeText || '').replace(/\D/g, ''));
+check('見出しは「職員掲示板」ラベルのみ（見出しバッヂは廃止・未読数はサイドバーと未読ボタンだけ）',
+  titleBadge.headText && titleBadge.headText.includes('職員掲示板') && titleBadge.titleBadgeExists === false,
+  { headText: titleBadge.headText, titleBadgeExists: titleBadge.titleBadgeExists });
+// サイドバーのバッヂは数字のみ（全日未読）。見出しに数はない。数値で一致を検証する
 const sideNum = Number((titleBadge.sideText || '').replace(/\D/g, ''));
-check('タイトルバッヂはサイドバーと同じ全日未読数（ラベル「未読 N」。本日の数ではない）',
-  titleBadge.badgeText && badgeNum === sideNum &&
-  /^未読 \d+$|^99\+$/.test(titleBadge.badgeText) &&
-  badgeNum >= titleBadge.unreadRows,
-  { title: titleBadge.badgeText, side: titleBadge.sideText, badgeNum, sideNum, unreadRows: titleBadge.unreadRows, listCount: titleBadge.listCount });
-check('未読 0 ならタイトルバッヂは hidden（サイドバーと同じ扱い）',
-  (badgeNum === 0) === titleBadge.badgeHidden &&
+check('サイドバーバッヂは全日未読数（数字のみ。当日列表の未読行数以上・列表件数以下）',
+  /^\d+$|^99\+$/.test(titleBadge.sideText || '') &&
+  sideNum >= titleBadge.unreadRows && sideNum <= titleBadge.listCount,
+  { side: titleBadge.sideText, sideNum, unreadRows: titleBadge.unreadRows, listCount: titleBadge.listCount });
+check('全日未読 0 ならサイドバーバッヂは hidden',
   (sideNum === 0) === titleBadge.sideHidden,
-  { titleHidden: titleBadge.badgeHidden, sideHidden: titleBadge.sideHidden, badgeNum, sideNum });
+  { sideHidden: titleBadge.sideHidden, sideNum });
 check('未読バッヂは 100 以上の数字を出さない（100 件超は 99+ へ。999 のような未キャップ表示がない）',
-  !(sideNum >= 100 || badgeNum >= 100),
-  { title: titleBadge.badgeText, side: titleBadge.sideText });
+  !(sideNum >= 100),
+  { side: titleBadge.sideText });
 
 // 右ペインヘッダーは読者向けに不要な情報（投稿日時・掲示期間）を出さない。全文開きボタンは「詳細」
 check('右ペインヘッダーに投稿日時・掲示期間の表記がない',

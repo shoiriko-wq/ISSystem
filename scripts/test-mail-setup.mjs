@@ -12,17 +12,23 @@
  *      コントロール高さは 2.4rem に統一）。「はじめてご利用…暗号化して保存されます」の案内文は存在しない
  *  4a-test. ヘッダーの「接続テスト」で IMAP / SMTP を実接続テストし、結果パネルと status (接続失敗) が出る
  *  4f-2. フォーム内の「接続テスト（保存前に試す）」は未保存の入力値でテストし、フォームは残る
- *  5. ページ再読み込み後も設定済み状態 (フォームは出ない) が続き、テスト失敗状態も残る
+ *  4g. 受信/送信済みタブ: 検証用メッセージを DB へ直接登録し、タブ切替で受信3件・送信済み2件と
+ *      右本文を実測。左一覧の初期選択・未読バッジ (3->2) も実測
+ *  4g2. 「新規作成」モーダル: 宛先・件名・本文欄が並び、SMTP 到達不能で送信は失敗トースト、閉じるで消える
+ *  5. ページ再読み込み後も設定済み状態 (フォームは出ない) が続き、テスト失敗状態と既読状態 (未読2) が残る
  *  6. 「設定を削除」で初回フォームへ戻り、後続検証のため DB を未設定状態へ戻す
  * 実行: node scripts/test-mail-setup.mjs   （ISSystem サーバーが必要）
  *  options: UI_BASE  UI_USER  UI_PASS  CHROME_PATH
  * 出力: scripts/output/mail-setup.png  / NG が 1 件でもあれば exit code 1
+ *  注意: 実 IMAP/SMTP は外部サーバーなので検証では到達不能。一覧表示は検証用メッセージを
+ *        DB（mail_messages）へ直接登録して DB 読み出しの描画を実測する。
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 import config from '../config/default.js';
+import { query, pool } from '../config/database.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_DIR = path.join(ROOT, 'scripts', 'output');
@@ -69,6 +75,40 @@ const check = (name, ok, detail = null) => {
   console.log(`  ${ok ? 'PASS' : 'FAIL'} - ${name}${detail !== null ? ` -> ${JSON.stringify(detail)}` : ''}`);
 };
 
+/**
+ * 受信箱と送信済みボックスの検証用メッセージを DB (mail_messages) へ直接登録する。
+ * 実 IMAP は外部サーバーで検証では到達不能なため、一覧は DB 読み出しで表示される。
+ * folder = 'inbox'（受信）3件・'sent'（送信済み）2件。受信は全て未読 (is_read=0)。
+ * user_id はログイン staff_code T2026001 のユーザーレコード id 'kyomu01'（FK が users(id) を指すため）。
+ */
+async function seedMailMessages() {
+  await query(`DELETE FROM mail_messages WHERE user_id = 'kyomu01'`);
+  const inboxRows = [
+    ['mail_kyomu01_inbox_9001', '9001', '山田太郎', 'yamada@issystem.example', 'UI検証メール1',
+      '本文一: 左一覧の一番下に現れる受信検証メッセージです。右ペインの本文表示を確認する文章です。', 0, '2026-06-01 09:00:00'],
+    ['mail_kyomu01_inbox_9002', '9002', '佐藤花子', 'sato@issystem.example', 'UI検証メール2',
+      '本文二: 2件目の受信メッセージです。選んだメールが既読扱いになり未読バッジが減ることを確認します。', 0, '2026-06-02 10:00:00'],
+    ['mail_kyomu01_inbox_9003', '9003', '教務室', 'kyomu@issystem.example', 'UI検証メール3',
+      '本文三: 最新の受信メッセージです。初期選択で右ペインにこの本文が出ることを確認します。', 0, '2026-06-03 11:00:00'],
+  ];
+  for (const [id, uid, senderName, senderEmail, subject, body, isRead, receivedAt] of inboxRows) {
+    await query(
+      `INSERT INTO mail_messages (id, user_id, folder, uid, sender_name, sender_email, subject, body, is_read, received_at)
+       VALUES ('${id}', 'kyomu01', 'inbox', '${uid}', '${senderName}', '${senderEmail}', '${subject}', '${body}', ${isRead}, '${receivedAt}')`
+    );
+  }
+  const sentRows = [
+    ['mail_kyomu01_seed_sent1', '送信済みメール1', 'yamada@issystem.example', '本文一: 送信済みボックスの1件目です。タブ切替で表示されることを確認します。', '2026-06-01 15:00:00'],
+    ['mail_kyomu01_seed_sent2', '送信済みメール2', 'sato@issystem.example', '本文二: 送信済みボックスの2件目です。初期選択で右ペインに出ることを確認します。', '2026-06-02 16:00:00'],
+  ];
+  for (const [id, subject, recipients, body, receivedAt] of sentRows) {
+    await query(
+      `INSERT INTO mail_messages (id, user_id, folder, sender_name, sender_email, recipients, subject, body, is_read, received_at)
+       VALUES ('${id}', 'kyomu01', 'sent', '田中太郎', 'tanaka.ui@issystem.example', '${recipients}', '${subject}', '${body}', 1, '${receivedAt}')`
+    );
+  }
+}
+
 /** サイドメニューのラベル順・メールタブの状態スナップショット */
 const snapshot = (page) => page.evaluate(() => {
   const labels = [...document.querySelectorAll('.app-sidebar .nav-item')]
@@ -105,6 +145,28 @@ const snapshot = (page) => page.evaluate(() => {
     detailBody: (document.getElementById('mail-detail-body')?.textContent || '').trim(),
     unreadBadgeText: badge ? badge.textContent.trim() : '',
     unreadBadgeHidden: badge ? badge.classList.contains('hidden') : null,
+    tabs: (() => {
+      const ti = document.getElementById('mail-tab-inbox');
+      const ts = document.getElementById('mail-tab-sent');
+      const cb = document.getElementById('mail-btn-compose');
+      return {
+        inboxText: (ti?.textContent || '').trim(),
+        sentText: (ts?.textContent || '').trim(),
+        inboxActive: ti ? ti.getAttribute('aria-selected') === 'true' : null,
+        sentActive: ts ? ts.getAttribute('aria-selected') === 'true' : null,
+        composeText: (cb?.textContent || '').trim(),
+      };
+    })(),
+    modalOpen: (() => {
+      const m = document.getElementById('mail-compose-modal');
+      return !!m && !m.classList.contains('hidden');
+    })(),
+    modalFields: (() => {
+      const m = document.getElementById('mail-compose-modal');
+      if (!m) return false;
+      return !!m.querySelector('#mail-compose-to') && !!m.querySelector('#mail-compose-subject') &&
+        !!m.querySelector('#mail-compose-body') && !!m.querySelector('#mail-compose-form button[type="submit"]');
+    })(),
     headerText: (document.getElementById('view-mail')?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 160),
     fullViewText: document.getElementById('view-mail')?.textContent || '',
     headerInfo: (() => {
@@ -134,6 +196,10 @@ const snapshot = (page) => page.evaluate(() => {
     toasts,
   };
 });
+
+// 検証開始前に kyomu01（staff_code T2026001）のメール設定とメッセージを消し、既知の開始状態（未設定・受信箱空）を作る
+await query(`DELETE FROM mail_messages WHERE user_id = 'kyomu01'`);
+await query(`DELETE FROM mail_accounts WHERE user_id = 'kyomu01'`);
 
 fs.mkdirSync(OUT_DIR, { recursive: true });
 const browser = await puppeteer.launch({
@@ -220,6 +286,12 @@ await page.evaluate(() => {
   document.getElementById('mail-setup-form').requestSubmit();
 });
 await sleep(1500);
+// 検証用メッセージを DB へ登録し、再読み込みで「DB 読み出しの一覧表示」を实測する（実IMAPは到達不能）
+await seedMailMessages();
+await page.reload({ waitUntil: 'networkidle2' });
+await sleep(1200);
+await page.click('.app-sidebar [data-tab="mail"]');
+await sleep(1800);
 const configured = await snapshot(page);
 check('保存で受信箱へ切り替わる', configured.hasInbox === true && configured.hasForm === false, { hasInbox: configured.hasInbox, hasForm: configured.hasForm });
 check('ヘッダーにアドレス表示', configured.headerText.includes('tanaka.ui@issystem.example'), configured.headerText);
@@ -286,6 +358,44 @@ check('選んだメールが既読扱い (未読バッジ 3->2)',
   afterSelect.unreadBadgeText === '2' && afterSelect.unreadBadgeHidden === false,
   { badge: afterSelect.unreadBadgeText, dots: afterSelect.listItems.map((i) => (i.readDot ? 'read' : 'unread')) });
 
+// 4g. 受信/送信済みタブの切替（DB の folder='sent' 2件と右本文を表示する）
+await page.click('#mail-tab-sent');
+await sleep(600);
+const sentView = await snapshot(page);
+check('受信タブが受信3件・送信済みタブが2件を表示する',
+  sentView.tabs.sentActive === true && sentView.tabs.inboxActive === false &&
+  sentView.listItems.length === 2 &&
+  sentView.listItems.every((i) => i.subject.startsWith('送信済みメール')) &&
+  sentView.detailSubject.startsWith('送信済みメール'),
+  { items: sentView.listItems.map((i) => i.subject), detail: sentView.detailSubject, tabs: sentView.tabs });
+
+// 4g2. 「新規作成」モーダル（SMTP が到達不能なため送信は失敗トーストになり、モーダルは開いたまま）
+check('新規作成ボタンがある', sentView.tabs.composeText.includes('新規作成'), sentView.tabs.composeText);
+await page.click('#mail-btn-compose');
+await sleep(500);
+const composed = await snapshot(page);
+check('新規作成モーダルに宛先・件名・本文欄と送信ボタンが並ぶ',
+  composed.modalOpen === true && composed.modalFields === true,
+  { modalOpen: composed.modalOpen, fields: composed.modalFields });
+await page.evaluate(() => {
+  document.getElementById('mail-compose-to').value = 'yamada@issystem.example';
+  document.getElementById('mail-compose-subject').value = 'UI検証送信';
+  document.getElementById('mail-compose-body').value = '新規作成モーダルからの検証本文です。';
+  document.querySelector('#mail-compose-form button[type="submit"]').click();
+});
+await sleep(2500);
+const sendFailed = await snapshot(page);
+check('SMTP 到達不能で送信は失敗トーストになりモーダルは開いたまま',
+  sendFailed.toasts.some((t) => t.includes('送信できませんでした')) && sendFailed.modalOpen === true,
+  { toasts: sendFailed.toasts.slice(-1), modalOpen: sendFailed.modalOpen });
+await page.click('#mail-compose-modal button.modal-close');
+await sleep(400);
+const closed = await snapshot(page);
+check('閉じるボタンで新規作成モーダルが消える', closed.modalOpen === false, { modalOpen: closed.modalOpen });
+// 受信箱タブへ戻す（次のセクションは受信箱表示で検証する）
+await page.click('#mail-tab-inbox');
+await sleep(400);
+
 // 4f. 「メール設定」でフォームを開く -> 「変更しない」で受信箱へ戻る
 await page.click('#mail-btn-settings');
 await sleep(600);
@@ -331,6 +441,10 @@ check('再読み込み後も左一覧と右本文',
 check('接続テストの失敗状態 (status=FAILED) は再読み込み後もヘッダーに残る',
   reloaded.headerText.includes('接続失敗') && reloaded.testResultText === '',
   { headerText: reloaded.headerText.slice(0, 110), testResultText: reloaded.testResultText.slice(0, 60) });
+check('再読み込み後も既読状態が DB に残る (受信3件中1件既読・未読バッジ 2)',
+  reloaded.listItems.length === 3 && reloaded.unreadBadgeText === '2' &&
+  reloaded.listItems.filter((i) => i.readDot).length === 1,
+  { badge: reloaded.unreadBadgeText, dots: reloaded.listItems.map((i) => (i.readDot ? 'read' : 'unread')) });
 
 await page.screenshot({ path: path.join(OUT_DIR, 'mail-setup.png'), fullPage: false });
 
@@ -352,6 +466,10 @@ check('未設定の接続テストは登録案内の警告トースト',
   { toasts: unsetting.toasts.slice(-1) });
 
 await browser.close();
+
+// 後続検証のため kyomu01 のメール設定と検証用メッセージを DB から消す（設定は UI の削除で消えている）
+await query(`DELETE FROM mail_messages WHERE user_id = 'kyomu01'`);
+await pool.end();
 
 console.log('--- mail UI result ---');
 console.log(failures.length === 0 ? 'ALL PASS' : `NG: ${failures.join(', ')}`);

@@ -2,6 +2,8 @@
  * ISSystem 定期考査 基本情報マスタ UI (教務部 KYOMU)
  * 登録順：1. クラス・コース 2. 教科 3. 科目（教科・科目名・略称 × 実施クラス・コース） 4. 教室
  * クラスとコースは分離せず「1-1」「1-3理」「1-6看」「1-6保育」のような学校固有の名称を直接入力する。
+ * 「行を追加」は未入力の行を表の最上部に1件だけ出す（長い表で下までスクロールする必要がない）。
+ * 未入力の行が1件表示されている間は「行を追加」は押せない（ボタンは無効になる）。保存済み行は通常の順（学年順・教科順）で並ぶ。
  * 科目は登録済み教科を選択し、教科順にソートして表示する（学年・表示順・標準試験時間・標準教室の項目は持たない）。
  * 実施クラス・コースはクリック・長押しドラッグ（Shift+クリックで範囲）で連続選択する。
  * 変更は socket の basicinfo:changed / subjects:changed で考査計画・時間割・教室割・監督割へ cascade される。
@@ -231,6 +233,29 @@ function usageNote(counts) {
   return parts.join(' / ');
 }
 
+/** 未入力の行か（「行を追加」で作った行は data-id が空 = サーバーにまだ保存されていない） */
+function isBlankRow(tr) {
+  return Boolean(tr.dataset.kind) && !tr.dataset.id;
+}
+
+/** テーブルに未入力の行が1件表示されているか */
+function hasBlankRow(tbody) {
+  return [...tbody.querySelectorAll('tr[data-kind]')].some(isBlankRow);
+}
+
+/** 「行を追加」ボタンの状態を整える（未入力の行が1件出ている間は押しても機能しない＝無効化） */
+function syncAddButton(panel, kind) {
+  const btn = panel.querySelector(`#basic-add-${kind}`);
+  const tbody = panel.querySelector(`#basic-body-${kind}`);
+  if (!btn) return;
+  const blocked = tbody ? hasBlankRow(tbody) : false;
+  btn.disabled = blocked;
+  btn.setAttribute('aria-disabled', String(blocked));
+  btn.title = blocked
+    ? '未入力の行が1件表示中です。行の「保存」で登録すると行を追加できます'
+    : '未入力の行を1件、表の最上部に追加します';
+}
+
 const ROW_BUILDERS = {
   class: (d) => classRow({ grade: 1, name: '', short_name: '' }, d, true),
   group: (d) => groupRow({ name: '' }, d, true),
@@ -254,7 +279,7 @@ function tableHtml(kind, title, headCells, items, renderRow, kyomu, d, hint = ''
     icon,
     title,
     kyomu
-      ? `${hint} 右の「＋ 行を追加」→ 入力して「保存」。改名は考査計画・時間割・教室割・監督割へ cascade され、使用中の項目は削除できません。`
+      ? `${hint} 改名は考査計画・時間割・教室割・監督割へ cascade され、使用中の項目は削除できません。`
       : hint || '教務部の登録を読み出しています。',
     `<div class="overflow-x-auto"><table class="${colWidths ? 'table-fixed ' : ''}w-full text-[11px]">
       <thead><tr class="text-muted text-[10px]">${thHtml}</tr></thead>
@@ -301,15 +326,30 @@ export function bindBasicTab(container, reload) {
   if (!panel) return;
 
   Object.keys(ROW_BUILDERS).forEach((kind) => {
-    panel.querySelector(`#basic-add-${kind}`)?.addEventListener('click', () => {
+    const tbody = panel.querySelector(`#basic-body-${kind}`);
+    const addBtn = panel.querySelector(`#basic-add-${kind}`);
+    if (!tbody || !addBtn) return;
+    syncAddButton(panel, kind);
+    addBtn.addEventListener('click', () => {
+      // 未入力の行が1件表示されている間は機能しない（二重に枠を作らない）
+      if (hasBlankRow(tbody)) {
+        syncAddButton(panel, kind);
+        return;
+      }
       const d = masterData();
       // tr の innerHTML に <tr> 文字列を入れると属性が落ちる（tr[data-kind] が無くなり保存/削除が効かない）
       // → tbody でパースして <tr> をそのまま受け取る
       const frag = document.createElement('tbody');
       frag.innerHTML = ROW_BUILDERS[kind](d);
       const tr = frag.firstElementChild;
-      panel.querySelector(`#basic-body-${kind}`)?.appendChild(tr);
+      // 未入力の行は最上部に1件だけ（長い表で下までスクロールする手間をなくす）
+      const mainEl = document.querySelector('main');
+      const scrollYBefore = mainEl ? mainEl.scrollTop : 0;
+      tbody.prepend(tr);
       refreshLucideIcons();
+      syncAddButton(panel, kind);
+      // 画面常時スクロール禁止（UI十条7）: 新行が最上部に来たことで見出しや表の位置が動かないよう、見かけのスクロール位置を元へ戻す
+      if (mainEl) mainEl.scrollTop = scrollYBefore;
     });
   });
 
@@ -343,6 +383,7 @@ export function bindBasicTab(container, reload) {
         if (!id) {
           tr.remove();
           showToast(`${label}の未保存行を破棄しました。`, 'info');
+          syncAddButton(panel, kind);   // 未入力の行が消えたので「行を追加」を元に戻す
           return;
         }
         if (kind !== 'group') {

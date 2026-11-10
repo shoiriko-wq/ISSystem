@@ -1,0 +1,183 @@
+﻿
+> issystem@1.0.0 test:ui:mail
+> node scripts/test-mail-setup.mjs
+
+ｧｱ PostgreSQL 繧ｹ繧ｭ繝ｼ繝槭ｒ驕ｩ逕ｨ縺励∪縺励◆ (271 繧ｹ繝・・繝医Γ繝ｳ繝・/ C:\Users\蜈･豎溽伐縲謇ｿ\Documents\繝励Ο繧ｰ繝ｩ繝溘Φ繧ｰ\ISSystem\db\schema.sql)
+  PASS - 繧ｵ繧､繝峨Γ繝九Η繝ｼ縺ｮ鬆・ｺ・-> ["繝繝・す繝･繝懊・繝・,"閨ｷ蜩｡謗ｲ遉ｺ譚ｿ","閨ｷ蜩｡繝√Ε繝・ヨ","繝｡繝ｼ繝ｫ","繧ｹ繧ｱ繧ｸ繝･繝ｼ繝ｫ","譁ｽ險ｭ迚ｩ蜩∽ｺ育ｴ・,"邁｡譏捺価隱・,"蠎ｧ蟶ｭ陦ｨ","螳壽悄閠・渊"]
+  PASS - 繝｡繝ｼ繝ｫ繧ｿ繝冶｡ｨ遉ｺ -> true
+  PASS - 蛻晏屓縺ｯ險ｭ螳壹ヵ繧ｩ繝ｼ繝 -> {"hasForm":true,"passwordField":true}
+  PASS - 繝｡繝ｼ繝ｫ繧｢繝峨Ξ繧ｹ縺ｯ繝ｦ繝ｼ繧ｶ繝ｼ諠・ｱ縺九ｉ繝励Μ繝輔ぅ繝ｫ -> "kyomu@school.ed.jp"
+  PASS - IMAP/SMTP 蛻晄悄蛟､縺ｯ .env 縺ｮ遘伜諺險ｭ螳壹°繧峨・繝ｪ繝輔ぅ繝ｫ -> {"expected":{"imapHost":"mail.hyogo-c.ed.jp","imapPort":143,"smtpHost":"mail.hyogo-c.ed.jp","smtpPort":25},"imap":"mail.hyogo-c.ed.jp:143","smtp":"mail.hyogo-c.ed.jp:25"}
+  PASS - 繝｡繝ｼ繝ｫ繝倥ャ繝繝ｼ縺ｯ繝・・繝ｫ繝舌・髱｢・・g-surface-strong + 螳滓棧縲Ｄard 譫縺ｧ縺ｯ縺ｪ縺・ｼ・-> {"toolbar":true,"isCard":false}
+  PASS - 繝｡繝ｼ繝ｫ繧ｿ繧､繝医Ν縺ｯ text-base 縺ｨ w-4 繧｢繧､繧ｳ繝ｳ -> {"h2Text":"繝｡繝ｼ繝ｫ","h2Class":"text-base font-bold text-main flex items-center gap-2 shrink-0","h2Size":22.4,"iconClass":"lucide lucide-mail w-4 h-4 text-info"}
+  PASS - 蛻晏屓縺ｮ譯亥・譁・ｼ医・縺倥ａ縺ｦ縺泌茜逕ｨ窶ｦ證怜捷蛹悶＠縺ｦ菫晏ｭ倥＆繧後∪縺呻ｼ峨・陦ｨ遉ｺ縺輔ｌ縺ｪ縺・-> {"fullViewText":"\n    \n      \n        \n           繝｡繝ｼ繝ｫ\n        \n        \n      \n      \n        險ｭ螳壻ｿ晏ｭ俶ｸ医∩・域悴謗･邯夂｢ｺ隱搾ｼ噂n        \n           譁ｰ隕丈ｽ懈・\n    "}
+  PASS - 繝悶Λ繧ｦ繧ｶ蛛ｴ縺ｧ荳肴ｭ｣繝｡繝ｼ繝ｫ繧帝∽ｿ｡block -> {"htmlInvalid":true,"hasForm":true}
+  PASS - 繧ｵ繝ｼ繝舌・讀懆ｨｼ縺ｧ繧ｨ繝ｩ繝ｼ繝医・繧ｹ繝・-> ["繝ｭ繧ｰ繧､繝ｳ縺励∪縺励◆: 謨吝漁 荳ｻ莉ｻ 蜈育函","繝｡繝ｼ繝ｫ繧｢繝峨Ξ繧ｹ縺ｮ蠖｢蠑上′豁｣縺励￥縺ゅｊ縺ｾ縺帙ｓ縲・]
+  PASS - 荳肴ｭ｣繝｡繝ｼ繝ｫ蠕後・繝輔か繝ｼ繝邯ｭ謖・-> {"hasForm":true,"hasInbox":false}
+node.exe : 
+C:\Users\蜈･
+豎溽伐縲謇ｿ\Doc
+uments\繝励Ο繧
+ｰ繝ｩ繝溘Φ繧ｰ\IS
+System\node
+_modules\pg
+-pool\index
+.js:45
+発生場所 行:1 文字
+:1
++ & "C:\Pro
+gram Files\
+nodejs/node
+.exe" "C:\P
+rogram File
+s\nodejs/no
+de_mo ...
++ ~~~~~~~~~
+~~~~~~~~~~~
+~~~~~~~~~~~
+~~~~~~~~~~~
+~~~~~~~~~~~
+~~~~~~~~~~~
+~~~~~
+    + Cate 
+   goryIn  
+  fo       
+           
+: NotS    p
+ecifi    ed
+: (C    :\U
+ser    s\蜈･
+豎溽    伐縲...
+o    ol\ind
+    ex.js: 
+   45:Str  
+  ing) [   
+ ], Rem    
+oteExc    e
+ption
+    + Full 
+   yQuali  
+  fiedEr   
+ rorId     
+: Nati    v
+eComm    an
+dErr    or
+ 
+    Error.c
+aptureStack
+Trace(err)
+          ^
+
+error: 繝・・繝
+悶Ν"mail_mes
+sages"縺ｸ縺ｮ謖
+ｿ蜈･縲∵峩譁ｰ縺ｯ螟
+夜Κ繧ｭ繝ｼ蛻ｶ邏・m
+ail_message
+s_user_id_f
+key"縺ｫ驕募渚縺励
+※縺・∪縺・
+    at C:\U
+sers\蜈･豎溽伐縲
+謇ｿ\Documen
+ts\繝励Ο繧ｰ繝ｩ繝
+溘Φ繧ｰ\ISSyst
+em\node_mod
+ules\pg-poo
+l\index.js:
+45:11
+    at proc
+ess.process
+TicksAndRej
+ections (no
+de:internal
+/process/ta
+sk_queues:1
+04:5)
+    at asyn
+c seedMailM
+essages (fi
+le:///C:/Us
+ers/%E5%85%
+A5%E6%B1%9F
+%E7%94%B0%E
+3%80%80%E6%
+89%BF/Docum
+ents/%E3%83
+%97%E3%83%A
+D%E3%82%B0%
+E3%83%A9%E3
+%83%9F%E3%8
+3%B3%E3%82%
+B0/ISSystem
+/scripts/te
+st-mail-set
+up.mjs:94:5
+)
+    at asyn
+c file:///C
+:/Users/%E5
+%85%A5%E6%B
+1%9F%E7%94%
+B0%E3%80%80
+%E6%89%BF/D
+ocuments/%E
+3%83%97%E3%
+83%AD%E3%82
+%B0%E3%83%A
+9%E3%83%9F%
+E3%83%B3%E3
+%82%B0/ISSy
+stem/script
+s/test-mail
+-setup.mjs:
+286:1 {
+  length: 3
+09,
+  severity:
+ 'ERROR',
+  code: '23
+503',
+  detail: '
+繝・・繝悶Ν"user
+s"縺ｫ繧ｭ繝ｼ(us
+er_id)=(T20
+26001)縺後≠繧翫
+∪縺帙ｓ',
+  hint: und
+efined,
+  position:
+ undefined,
+  internalP
+osition: un
+defined,
+  internalQ
+uery: undef
+ined,
+  where: un
+defined,
+  schema: '
+public',
+  table: 'm
+ail_message
+s',
+  column: u
+ndefined,
+  dataType:
+ undefined,
+  constrain
+t: 'mail_me
+ssages_user
+_id_fkey',
+  file: 'ri
+_triggers.c
+',
+  line: '27
+83',
+  routine: 
+'ri_ReportV
+iolation'
+}
+
+Node.js v24
+.17.0

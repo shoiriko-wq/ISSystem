@@ -5,10 +5,10 @@
  *  1. 「本日の連絡」カードは対象日が本日の掲示のみ（既読・未読問わず）。未読カードに未読マーカー、既読カードにマーカーなし。
  *     ヘッダー右 #dash-today-bulletin-unread = 本日未読数、カードは button 要素
  *  2. カードクリックで PUT /api/bulletins/:id/read が発火し、本日バッヂが 1 減りマーカーが消え、
- *     サイドバー・タイトルバッヂも連動する
+ *     サイドバーバッヂも連動する
  *  3. カードクリックでタブは切り替わらずモーダルも開かない。既読カードの再クリックは API を叩かない（冪等）
- *  4. サイドバー #bulletin-unread-count（数字のみ）＝タイトル #bulletin-title-unread（未読 N）＝全日未読数
- *  5. 未読 100 件超は 99+ にキャップ（サイドバー 99+ ／タイトル・ダッシュボード 未読 99+。100 を出さない）。
+ *  4. サイドバー #bulletin-unread-count（数字のみ）＝全日未読数（見出し・タイトルバッヂは廃止済み）
+ *  5. 未読 100 件超は 99+ にキャップ（サイドバー 99+ ／ダッシュボード 未読 99+。100 を出さない）。
  *     客户端キャッシュは最新 100 件が上限なので擬似キャッシュ (CAPSIM) で 100 件未読を再現する。
  *     実 DB で 110 件作ると掲示初期化 (autoSelect＝全文表示時点で既読化) が 1 件を既読化して 99 になるため使わない。
  *     擬似キャッシュ後は実キャッシュへ復帰して DOM バッジが実データへ追従することも検証する
@@ -160,7 +160,6 @@ const snap = () => page.evaluate(async () => {
   return {
     dash: read('dash-today-bulletin-unread'),
     side: read('bulletin-unread-count'),
-    title: read('bulletin-title-unread'),
     cards: [...document.querySelectorAll('#dash-pinned-bulletins [data-bulletin-read]')].map((el) => ({
       id: el.getAttribute('data-bulletin-read'),
       tag: el.tagName,
@@ -213,12 +212,11 @@ check('1: 未読カードに未読マーカー・既読カードにマーカー�
 check('1: ヘッダー右の「本日の連絡」バッヂ＝本日未読数（未読 N ラベル）',
   first.dash.text === fmtLabel(first.todayUnread), { dash: first.dash.text, clientTodayUnread: first.todayUnread });
 
-// 4. サイドバー（数字のみ）＝タイトル（未読 N）＝全日未読数
-check('4: サイドバー＝タイトル＝全日未読数（サイドバーは数字のみ、タイトルは「未読 N」）',
+// 4. サイドバー（数字のみ）＝全日未読数（タイトルバッヂは廃止済み）
+check('4: サイドバー＝全日未読数（サイドバーは数字のみ・タイトルバッヂは存在しない）',
   /^\d+$/.test(first.side.text) &&
-  Number(first.side.text) === first.unreadAll &&
-  first.title.text === fmtLabel(first.unreadAll),
-  { side: first.side.text, title: first.title.text, clientUnreadAll: first.unreadAll });
+  Number(first.side.text) === first.unreadAll,
+  { side: first.side.text, clientUnreadAll: first.unreadAll });
 
 // 2. カードクリック：PUT read 発火 → 本日バッヂ 1 減・マーカー消去・サイドバー/タイトル追従
 const unreadCard = first.cards.find((c) => c.marker);
@@ -242,10 +240,9 @@ if (!unreadCard) {
     after.dash.text === fmtLabel(after.todayUnread) && after.todayUnread === first.todayUnread - 1 &&
       after.cards.find((c) => c.id === clickedId).marker === false,
     { dash: after.dash.text, clientTodayUnread: after.todayUnread, expected: first.todayUnread - 1 });
-  check('2: サイドバー・タイトルバッヂも 1 減（全日バッヂが連動）',
-    Number(after.side.text) === after.unreadAll && after.unreadAll === first.unreadAll - 1 &&
-      after.title.text === fmtLabel(after.unreadAll),
-    { side: after.side.text, title: after.title.text, clientUnreadAll: after.unreadAll, expected: first.unreadAll - 1 });
+  check('2: サイドバーバッヂも 1 減（全日バッヂが連動）',
+    Number(after.side.text) === after.unreadAll && after.unreadAll === first.unreadAll - 1,
+    { side: after.side.text, clientUnreadAll: after.unreadAll, expected: first.unreadAll - 1 });
 
   // 3. クリックでタブは切り替わらない・モーダルは開かない。既読カードの再クリックは API を叩かない（冪等）
   check('3: カードクリックでタブは切り替わらない（ダッシュボードのまま）',
@@ -269,9 +266,9 @@ await page.evaluate(() => document.querySelector('a[data-tab="dashboard"]').clic
 await sleep(1600);
 const base = await snap();
 check('3: 検証用本日記事の削除後はバッヂがクリック分だけ減った状態になる',
-  base.side.text === fmt(base.unreadAll) && base.title.text === fmtLabel(base.unreadAll) &&
+  base.side.text === fmt(base.unreadAll) &&
     base.unreadAll === first.unreadAll - 1,
-  { side: base.side.text, title: base.title.text, clientUnreadAll: base.unreadAll, expected: first.unreadAll - 1 });
+  { side: base.side.text, clientUnreadAll: base.unreadAll, expected: first.unreadAll - 1 });
 
 // 6. 登録日より古い記事は未読バッヂに含めない
 // 登録日より古い posted_at の記事は客户端キャッシュ（最新 100 件）に挟まれないため、
@@ -304,11 +301,11 @@ check('6: 登録日より古い記事は未読バッヂに含めない（本日�
   Boolean(old) && String(old.postedAt).slice(0, 10) === oldDay && oldDay < regDay &&
     old.activeToday === true && old.unread === false &&
     withOld.unreadAll === base.unreadAll &&
-    withOld.side.text === fmt(base.unreadAll) && withOld.title.text === fmtLabel(base.unreadAll) &&
+    withOld.side.text === fmt(base.unreadAll) &&
     withOld.cards.filter((c) => c.marker).length === base.todayUnread &&
     withOld.cards.length === base.cards.length + 1,
   { old, regDay, oldDay, clientUnreadAll: withOld.unreadAll, expected: base.unreadAll,
-    side: withOld.side.text, title: withOld.title.text, cards: withOld.cards.length,
+    side: withOld.side.text, cards: withOld.cards.length,
     expectedCards: base.cards.length + 1, oldId });
 
 // 6. 掲示開始前・掲示終了記事はバッヂに数えない（キャッシュ上の掲示開始前全件が未読数外）
@@ -346,26 +343,24 @@ const capSim = await page.evaluate(async () => {
     cacheLen: mod.bulletinsSnapshot().length,
     unreadAll: mod.bulletinsSnapshot().filter((b) => mod.isUnreadForMe(b)).length,
     side: g('bulletin-unread-count'),
-    title: g('bulletin-title-unread'),
     dash: g('dash-today-bulletin-unread'),
   };
   // 実キャッシュへ復帰して DOM バッジが実データへ追従するか
   const res = await apiGet('/bulletins', { limit: 100 });
   mod.setBulletinCache(res.data || res.bulletins || []);
   out.restoredSide = g('bulletin-unread-count');
-  out.restoredTitle = g('bulletin-title-unread');
   out.restoredDash = g('dash-today-bulletin-unread');
   return out;
 });
-check('5: 客户端キャッシュ 100 件が未読ならサイドバー 99+・タイトル/ダッシュボード 未読 99+（100 を出さない）',
+check('5: 客户端キャッシュ 100 件が未読ならサイドバー 99+・ダッシュボード 未読 99+（100 を出さない）',
   capSim.cacheLen === 100 && capSim.unreadAll >= 100 &&
-    capSim.side === '99+' && capSim.title === '未読 99+' && capSim.dash === '未読 99+',
+    capSim.side === '99+' && capSim.dash === '未読 99+',
   { cacheLen: capSim.cacheLen, unreadAll: capSim.unreadAll, side: capSim.side,
-    title: capSim.title, dash: capSim.dash });
+    dash: capSim.dash });
 check('5: 擬似キャッシュ後は実キャッシュへ復帰して DOM バッジが実データへ追従する',
-  capSim.restoredSide === fmt(base.unreadAll) && capSim.restoredTitle === fmtLabel(base.unreadAll)
+  capSim.restoredSide === fmt(base.unreadAll)
     && capSim.restoredDash === fmtLabel(base.todayUnread),
-  { restoredSide: capSim.restoredSide, restoredTitle: capSim.restoredTitle, restoredDash: capSim.restoredDash,
+  { restoredSide: capSim.restoredSide, restoredDash: capSim.restoredDash,
     expectedSide: fmt(base.unreadAll), expectedDash: fmtLabel(base.todayUnread) });
 
 // 後片付け: 検証用の登録日前の記事 (oldId) を削除してバッヂとカードを元に戻す
@@ -377,10 +372,9 @@ await sleep(1600);
 const restored = await snap();
 check('5: 検証用投稿 (登録日前記事) の削除後はバッヂとカードが元に戻る',
   restored.side.text === fmt(restored.unreadAll) &&
-    restored.title.text === fmtLabel(restored.unreadAll) &&
     restored.unreadAll === base.unreadAll &&
     restored.cards.length === base.cards.length,
-  { side: restored.side.text, title: restored.title.text,
+  { side: restored.side.text,
     clientUnreadAll: restored.unreadAll, expected: base.unreadAll,
     cards: restored.cards.length, expectedCards: base.cards.length });
 

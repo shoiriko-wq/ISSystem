@@ -1,0 +1,2 @@
+﻿raw head: From: =?UTF-8?B?55Sw5LitIOWkqumDjg==?= <tanaka@school.ed.jp> | To: kyomu@school.ed.jp, seo@school.ed.jp | Subject: =?UTF-8?B?6ICD5p+75pel56iL44Gu5aSJ5pu0?= | Date: Tue, 10 Nov 2026 12:20:24 +0900 | Message-ID: <mwa4h521-9eq3y8@issystem> | MIME-Version: 1.0
+{"from_name":"逕ｰ荳ｭ 螟ｪ驛・,"from_email":"tanaka@school.ed.jp","subject":"閠・渊譌･遞九・螟画峩","body":"縺顔夢繧梧ｧ倥〒縺吶・n11譛・9譌･縺ｮ5髯舌ｒ螟画峩縺励∪縺吶・n.\n莉･荳・,"date":"2026-11-10T03:20:24.000Z"}

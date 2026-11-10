@@ -62,18 +62,27 @@ export const mailModel = {
   },
 
   /** メール接続設定の登録 / 更新 (user_id は UNIQUE なので UPSERT) */
-  async upsertAccount({ id, user_id, email_address, password_enc, imap_host, imap_port, smtp_host, smtp_port, status }) {
+  async upsertAccount({
+    id, user_id, email_address, password_enc,
+    imap_host, imap_port, imap_tls, imap_folder,
+    smtp_host, smtp_port, smtp_tls, sent_folder, display_name, status,
+  }) {
     const rowId = id || `mail_${String(user_id)}`;
     const res = await query(
-      `INSERT INTO mail_accounts (id, user_id, email_address, password_enc, imap_host, imap_port, smtp_host, smtp_port, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO mail_accounts (id, user_id, email_address, password_enc, imap_host, imap_port, imap_tls, imap_folder, smtp_host, smtp_port, smtp_tls, sent_folder, display_name, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (user_id) DO UPDATE SET
          email_address = EXCLUDED.email_address,
          password_enc  = EXCLUDED.password_enc,
          imap_host     = EXCLUDED.imap_host,
          imap_port     = EXCLUDED.imap_port,
+         imap_tls      = EXCLUDED.imap_tls,
+         imap_folder   = EXCLUDED.imap_folder,
          smtp_host     = EXCLUDED.smtp_host,
          smtp_port     = EXCLUDED.smtp_port,
+         smtp_tls      = EXCLUDED.smtp_tls,
+         sent_folder   = EXCLUDED.sent_folder,
+         display_name  = EXCLUDED.display_name,
          status        = EXCLUDED.status,
          updated_at    = CURRENT_TIMESTAMP
        RETURNING *`,
@@ -84,8 +93,13 @@ export const mailModel = {
         String(password_enc),
         imap_host ?? null,
         imap_port ?? null,
+        imap_tls || 'none',
+        imap_folder || 'INBOX',
         smtp_host ?? null,
         smtp_port ?? null,
+        smtp_tls || 'none',
+        sent_folder || 'Sent',
+        display_name ?? null,
         status || 'UNVERIFIED',
       ]
     );
@@ -113,44 +127,90 @@ export const mailModel = {
     return res.rows[0] || null;
   },
 
-  /** 受信箱のメッセージ一覧 (新しい順) */
-  async listMessages(userId, limit = 50) {
+  /** メッセージ一覧 (folder = 'inbox' 受信ボックス / 'sent' 送信ボックス / 新しい順) */
+  async listMessages(userId, folder = 'inbox', limit = 50) {
     const res = await query(
-      `SELECT * FROM mail_messages WHERE user_id = ? ORDER BY received_at DESC LIMIT ?`,
-      [String(userId), Number(limit)]
+      `SELECT * FROM mail_messages WHERE user_id = ? AND folder = ? ORDER BY received_at DESC LIMIT ?`,
+      [String(userId), String(folder), Number(limit)]
     );
     return res.rows;
   },
 
-  /** メッセージ件数 (受信箱初期シード判定用) */
-  async countMessages(userId) {
-    const res = await query('SELECT COUNT(*) AS count FROM mail_messages WHERE user_id = ?', [String(userId)]);
+  /** 未読件数 (受信ボックス) */
+  async countUnread(userId) {
+    const res = await query(
+      "SELECT COUNT(*) AS count FROM mail_messages WHERE user_id = ? AND folder = 'inbox' AND is_read = 0",
+      [String(userId)]
+    );
     return Number(res.rows[0]?.count || 0);
   },
 
-  /** メッセージの初期シード挿入 (既存なら何もしない) */
-  async seedMessages(userId, messages) {
-    for (const msg of messages) {
-      await query(
-        `INSERT INTO mail_messages (id, user_id, sender_name, sender_email, subject, body, is_read, received_at)
-         VALUES (?, ?, ?, ?, ?, ?, 0, ?)
-         ON CONFLICT (id) DO NOTHING`,
-        [String(msg.id), String(userId), String(msg.sender_name), String(msg.sender_email), String(msg.subject), String(msg.body), msg.received_at]
-      );
-    }
-    return messages.length;
+  /** 受信ボックスへメールを保存する (IMAP UID で重複挿入を防ぐ) */
+  async upsertInboxMessage({ user_id, uid, sender_name, sender_email, subject, body, is_read, received_at }) {
+    const res = await query(
+      `INSERT INTO mail_messages (id, user_id, folder, uid, sender_name, sender_email, subject, body, is_read, received_at)
+       VALUES (?, ?, 'inbox', ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (user_id, folder, uid) DO UPDATE SET
+         sender_name = EXCLUDED.sender_name,
+         sender_email = EXCLUDED.sender_email,
+         subject = EXCLUDED.subject,
+         body = EXCLUDED.body,
+         is_read = EXCLUDED.is_read,
+         received_at = EXCLUDED.received_at
+       RETURNING *`,
+      [
+        `mail_${String(user_id)}_inbox_${String(uid)}`,
+        String(user_id),
+        String(uid),
+        String(sender_name),
+        String(sender_email),
+        String(subject),
+        String(body),
+        is_read ? 1 : 0,
+        received_at,
+      ]
+    );
+    return res.rows[0] || null;
   },
 
-  /** メッセージを既読にする (そのユーザーのメッセージのみ) */
+  /** 送信ボックスへ送信記録を追加する */
+  async addSentMessage({ user_id, recipients, sender_name, sender_email, subject, body }) {
+    const res = await query(
+      `INSERT INTO mail_messages (id, user_id, folder, uid, sender_name, sender_email, recipients, subject, body, is_read, received_at)
+       VALUES (?, ?, 'sent', NULL, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+       RETURNING *`,
+      [
+        `mail_${crypto.randomUUID()}`,
+        String(user_id),
+        String(sender_name),
+        String(sender_email),
+        String(recipients),
+        String(subject),
+        String(body),
+      ]
+    );
+    return res.rows[0] || null;
+  },
+
+  /** メッセージを既読にする (そのユーザーの受信ボックスのみ) */
   async markRead(messageId, userId) {
     const res = await query(
-      `UPDATE mail_messages SET is_read = 1 WHERE id = ? AND user_id = ? RETURNING *`,
+      `UPDATE mail_messages SET is_read = 1 WHERE id = ? AND user_id = ? AND folder = 'inbox' RETURNING *`,
       [String(messageId), String(userId)]
     );
     return res.rows[0] || null;
   },
 
-  /** 受信箱最終確認時刻を更新 */
+  /** uid から受信ボックスのレコードを探す (既読マークの同期用) */
+  async findInboxByUid(userId, uid) {
+    const res = await query(
+      "SELECT * FROM mail_messages WHERE user_id = ? AND folder = 'inbox' AND uid = ?",
+      [String(userId), String(uid)]
+    );
+    return res.rows[0] || null;
+  },
+
+  /** 受信ボックス最終確認時刻を更新 */
   async touchLastChecked(userId) {
     const res = await query(
       `UPDATE mail_accounts SET last_checked_at = CURRENT_TIMESTAMP WHERE user_id = ? RETURNING *`,

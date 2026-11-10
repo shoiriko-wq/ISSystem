@@ -1266,8 +1266,13 @@ CREATE TABLE IF NOT EXISTS mail_accounts (
   password_enc TEXT NOT NULL,
   imap_host TEXT,
   imap_port INTEGER,
+  imap_tls TEXT NOT NULL DEFAULT 'none',
+  imap_folder TEXT NOT NULL DEFAULT 'INBOX',
   smtp_host TEXT,
   smtp_port INTEGER,
+  smtp_tls TEXT NOT NULL DEFAULT 'none',
+  sent_folder TEXT NOT NULL DEFAULT 'Sent',
+  display_name TEXT,
   status TEXT NOT NULL DEFAULT 'UNVERIFIED',
   last_checked_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1278,14 +1283,18 @@ CREATE TABLE IF NOT EXISTS mail_accounts (
 CREATE INDEX IF NOT EXISTS idx_mail_accounts_user ON mail_accounts(user_id);
 
 -- ==========================================
--- 23. メッセージ受信箱 (mail_messages) — mail.model.js / mail.service.js 用
--- 件名と日時を一覧化し、本文 (body) を詳細ペインへ表示する
+-- 23. メールメッセージ (mail_messages) — mail.model.js / mail.service.js 用
+-- folder = 'inbox'（受信ボックス）/ 'sent'（送信ボックス）
+-- uid = IMAP の UID（受信メッセージのみ。送信ボックスのレコードは uid = NULL）
 -- ==========================================
 CREATE TABLE IF NOT EXISTS mail_messages (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
+  folder TEXT NOT NULL DEFAULT 'inbox',
+  uid TEXT,
   sender_name TEXT NOT NULL,
   sender_email TEXT NOT NULL,
+  recipients TEXT,
   subject TEXT NOT NULL,
   body TEXT NOT NULL,
   is_read INTEGER DEFAULT 0,
@@ -1296,4 +1305,5 @@ CREATE TABLE IF NOT EXISTS mail_messages (
 
 CREATE INDEX IF NOT EXISTS idx_mail_messages_user_time ON mail_messages(user_id, received_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mail_messages_unread ON mail_messages(user_id, is_read);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_mail_messages_uid ON mail_messages(user_id, folder, uid);
 

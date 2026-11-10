@@ -202,16 +202,20 @@ describe('Exam API Endpoints (/api/exam)', () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it('POST /api/exam/:id/timetable - 教務主任は時間割を自動作成できること', async () => {
+  it('POST /api/exam/:id/timetable - 教務主任の時間割自動作成は科目数がコマ数を超えると「組めない」診断になること', async () => {
     const res = await request(app).post(`/api/exam/${examId}/timetable`).set('Authorization', `Bearer ${kyomuToken}`);
 
     expect(res.statusCode).toBe(200);
     expect(res.body.success).toBe(true);
+    // 新カリキュラムマスタ（63科目）は学年あたり24コマ（8時限×3日）に収まらない。
+    // ソルバーは時間予算内に「組めない」診断と未割当の一覧を返す（保存はされない）。
+    expect(res.body.data.feasible).toBe(false);
+    expect(res.body.data.unassigned.length).toBeGreaterThan(0);
 
     const slots = await request(app).get(`/api/exam/${examId}/slots`).set('Authorization', `Bearer ${kyomuToken}`);
     expect(slots.statusCode).toBe(200);
     expect(Array.isArray(slots.body.data.slots)).toBe(true);
-    expect(slots.body.data.slots.length).toBeGreaterThan(0);
+    expect(slots.body.data.slots.length).toBe(0); // 組めないので保存されたコマは0
     expect(slots.body.data.is_kyomu).toBe(true);
   });
 

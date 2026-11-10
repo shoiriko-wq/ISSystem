@@ -2,7 +2,7 @@
  * ログイン画面 (未ログイン) およびリロード時の 401 / 認証警告が発生しないことを検証する。
  *
  * 実行: node scripts/verify-login-console.mjs
- * options: UI_BASE=http://127.0.0.1:3000  UI_USER=T2026001  UI_PASS=password123  CHROME_PATH=...
+ * options: UI_BASE=http://127.0.0.1:3030  UI_USER=T2026001  UI_PASS=password123  CHROME_PATH=...
  */
 import puppeteer from 'puppeteer-core';
 

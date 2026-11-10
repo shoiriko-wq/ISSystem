@@ -13,6 +13,15 @@ const toInt = (value, fallback) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+// メール暗号化モードの許可値 (none = 暗号化なし, starttls, tls = TLS 直結)
+const MAIL_TLS_MODES = ['none', 'starttls', 'tls'];
+
+/** .env の暗号化モード値を許可値へ正規化する（不正値は fallback（既定 'none'）） */
+function normalizeTlsMode(value, fallback = 'none') {
+  const v = String(value ?? '').trim().toLowerCase();
+  return MAIL_TLS_MODES.includes(v) ? v : fallback;
+}
+
 // 2026/11/8 監査 Critical 対策: 既知の既定値 secret を起動時に拒否（fail-fast）。
 // JWT_SECRET / MAIL_ENC_SECRET は 32文字以上のランダム値（openssl rand -hex 32）必須。
 const KNOWN_INSECURE_SECRETS = new Set([
@@ -132,10 +141,16 @@ const config = {
     imapPort: toInt(process.env.MAIL_IMAP_PORT, null),
     smtpHost: process.env.MAIL_SMTP_HOST || null,
     smtpPort: toInt(process.env.MAIL_SMTP_PORT, null),
-    // 143 / 25 は平文ポート = STARTTLS、993 / 465 は TLS 直接続とみなす
-    imapSecureTls: toInt(process.env.MAIL_IMAP_PORT, null) === 993,
-    smtpSecureTls: toInt(process.env.MAIL_SMTP_PORT, null) === 465,
-    // 接続テストの接続・応答タイムアウト (既定 12 秒)
+    // 暗号化モードの初期値 (none = 暗号化なし / starttls / tls = TLS 直結)
+    // 既定は 'none'（TLS を使用しない）。実値は .env 秘匿情報で Git にコミットしない。
+    imapTls: normalizeTlsMode(process.env.MAIL_IMAP_TLS, 'none'),
+    smtpTls: normalizeTlsMode(process.env.MAIL_SMTP_TLS, 'none'),
+    // 受信フォルダと送信済みフォルダの初期値 (IMAP フォルダ名)
+    inboxFolder: process.env.MAIL_INBOX_FOLDER || 'INBOX',
+    sentFolder: process.env.MAIL_SENT_FOLDER || 'Sent',
+    // 差出人名の初期値 (SMTP 送信時の表示名)
+    displayName: process.env.MAIL_DISPLAY_NAME || '',
+    // 接続テスト・送受信のタイムアウト (既定 12 秒)
     timeoutMs: toInt(process.env.MAIL_TIMEOUT_MS, 12000),
   },
 
@@ -187,4 +202,4 @@ if (config.db.type !== 'postgres') {
 }
 
 export default config;
-export { config };
+export { config, MAIL_TLS_MODES };
