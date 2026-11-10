@@ -4,6 +4,8 @@
  */
 
 import auditModel from '../models/audit.model.js';
+import newsLinkModel from '../models/news-link.model.js';
+import { ApiError } from '../middlewares/error.middleware.js';
 
 // キャッシュ保持期間設定 (ミリ秒)
 const NEWS_CACHE_TTL_MS = 30 * 60 * 1000;    // 教育ニュース: 30分
@@ -152,6 +154,163 @@ const mockWeatherData = {
     },
   ],
 };
+
+// ============================================================
+// ピノックアップ教育ニュースの共有リンク（news_links）
+// 「記事を共有」はチャットへ投稿しない。リンクを1件追加するだけ。
+// ページタイトルは server がURLをfetchって <title> を取得する（取れればページタイトル、取れなければドメイン名）。
+// ============================================================
+
+const TITLE_FETCH_TIMEOUT_MS = 8000;   // タイトル取得の時間上限（8秒）
+const TITLE_MAX_BYTES = 400 * 1024;     // 読むHTMLの量上限（400KB）
+const TITLE_MAX_CHARS = 120;            // タイトルの文字数上限
+
+/**
+ * 内部アドレス（localhost・私網・.local）を拒否する（server 側のfetchで内部設備を叩かない＝SSRF防御）
+ * @param {string} hostname
+ */
+function isPrivateHost(hostname) {
+  const h = String(hostname).toLowerCase();
+  if (h === 'localhost' || h.endsWith('.local') || h.endsWith('.internal')) return true;
+  if (/^(127\.|0\.|10\.|192\.168\.)/.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  if (/^169\.254\./.test(h)) return true;
+  if (h === '::1' || h.startsWith('fe80:') || h === 'metadata.google.internal') return true;
+  return false;
+}
+
+/**
+ * 共有URLを http/https の完全URLへ正規化する
+ * スキーマ無し（例: mext.go.jp/...）は https:// を補完し、ドットを含まない hostname（例: foo）は拒否する。
+ * @param {string} raw
+ * @returns {string|null}
+ */
+function normalizeLinkUrl(raw) {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return null;
+
+  const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed.replace(/^\/+/, '')}`;
+
+  let u;
+  try {
+    u = new URL(candidate);
+  } catch (e) {
+    return null;
+  }
+
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  if (!u.hostname.includes('.')) return null;
+  if (isPrivateHost(u.hostname)) return null;
+
+  return u.toString();
+}
+
+/** HTML実体参照を元へ戻す（タイトル表示用。全部を網羅しない ＝ よく使う10種と数値参照だけ） */
+function decodeHtmlEntities(text) {
+  const named = {
+    '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'",
+    '&nbsp;': ' ', '&copy;': '©', '&trade;': '™', '&mdash;': '—', '&ndash;': '–', '&hellip;': '…'
+  };
+  return text.replace(/&#x?[0-9a-fA-F]+;|&[a-zA-Z]+;/gi, (m) => {
+    if (named[m]) return named[m];
+    const body = m.slice(1, -1);
+    try {
+      if (/^#[0-9]+$/.test(body)) return String.fromCodePoint(parseInt(body.slice(1), 10));
+      if (/^#x[0-9a-fA-F]+$/.test(body)) return String.fromCodePoint(parseInt(body.slice(2), 16));
+    } catch (e) {
+      return m;
+    }
+    return m;
+  });
+}
+
+/** HTML文字列から <title> を抽出する（見つからなければ null） */
+function extractPageTitle(html) {
+  const m = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(String(html || ''));
+  if (!m) return null;
+  const t = decodeHtmlEntities(m[1]).replace(/\s+/g, ' ').trim();
+  if (!t) return null;
+  return t.length > TITLE_MAX_CHARS ? t.slice(0, TITLE_MAX_CHARS) : t;
+}
+
+/** レスポンス本文を400KBまで読み出す（charset が Shift-JIS のページも TextDecoder で直す） */
+async function readBoundedHtml(res) {
+  const charsetRaw = (res.headers.get('content-type') || '').match(/charset=([^;]+)/i)?.[1];
+  let decoder;
+  try {
+    decoder = new TextDecoder(charsetRaw || 'utf-8');
+  } catch (e) {
+    decoder = new TextDecoder('utf-8');
+  }
+
+  if (res.body && typeof res.body.getReader === 'function') {
+    const reader = res.body.getReader();
+    const chunks = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      chunks.push(value);
+      total += value.length;
+      if (total >= TITLE_MAX_BYTES) {
+        if (typeof reader.cancel === 'function') reader.cancel();
+        break;
+      }
+    }
+    const merged = new Uint8Array(total);
+    let pos = 0;
+    for (const c of chunks) {
+      merged.set(c, pos);
+      pos += c.length;
+    }
+    return decoder.decode(merged);
+  }
+
+  const text = await res.text();
+  return String(text).slice(0, TITLE_MAX_BYTES);
+}
+
+/**
+ * ページHTMLをfetchする（リダイレクトの各ホップも同じ検証を通す ＝ 内部アドレスへ逃がさない）
+ * @param {string} startUrl
+ * @returns {Promise<string|null>}
+ */
+async function fetchHtmlGuarded(startUrl) {
+  let current = startUrl;
+
+  for (let hop = 0; hop < 6; hop += 1) {
+    const res = await fetch(current, {
+      redirect: 'manual',
+      signal: AbortSignal.timeout(TITLE_FETCH_TIMEOUT_MS),
+      headers: { 'user-agent': 'ISSystem/3.1 (校内システムのタイトル取得)' },
+    });
+
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get('location');
+      if (!loc) return null;
+      let next;
+      try {
+        next = new URL(loc, current).toString();
+      } catch (e) {
+        return null;
+      }
+      const checked = normalizeLinkUrl(next);   // リダイレクト先にも同じ規則（http/https・ドット・内部アドレス拒否）
+      if (!checked) return null;
+      current = checked;
+      continue;
+    }
+
+    if (!res.ok) return null;
+
+    const ct = res.headers.get('content-type') || '';
+    if (!/text\/html|application\/xml/i.test(ct)) return null;
+
+    return await readBoundedHtml(res);
+  }
+
+  return null;
+}
 
 export const newsService = {
   /**
@@ -309,6 +468,64 @@ export const newsService = {
         weather: weatherData,
       };
     }
+  },
+
+  /**
+   * 共有リンクの一覧（新しい順）
+   * @param {number} limit
+   */
+  async getSharedLinks({ limit = 50 } = {}) {
+    const links = await newsLinkModel.listNewsLinks({ limit });
+    return { links };
+  },
+
+  /**
+   * 記事を共有する ＝ ピノックアップ教育ニュースへリンクを1件追加する（チャット投稿はしない）
+   * ページタイトルは server がURLをfetchって取得し、取れないときはドメイン名をタイトルにする。
+   * @param {object} { url, user }
+   */
+  async addSharedLink({ url, user }) {
+    const norm = normalizeLinkUrl(url);
+    if (!norm) {
+      throw new ApiError(400, '記事URLの形式が正しくありません（http:// または https:// のURLを入力してください）');
+    }
+
+    const existing = await newsLinkModel.findNewsLinkByUrl(norm);
+    if (existing) {
+      throw new ApiError(409, '同じURLはピノックアップ教育ニュースに共有済みです');
+    }
+
+    const domain = new URL(norm).hostname.replace(/^www\./, '');
+
+    let title = null;
+    let titleFrom = 'domain';
+    try {
+      const html = await fetchHtmlGuarded(norm);
+      const pageTitle = html ? extractPageTitle(html) : null;
+      if (pageTitle) {
+        title = pageTitle;
+        titleFrom = 'page';
+      }
+    } catch (e) {
+      // ページが開けない・タイトルが無い場合はそのままドメイン名で登録する（共有は成功させる）
+    }
+
+    const item = await newsLinkModel.createNewsLink({
+      url: norm,
+      title: title || domain,
+      domain,
+      addedBy: user?.id || null,
+      addedByName: user?.name || '教員',
+    });
+
+    await auditModel.logAction({
+      userId: user?.id || null,
+      action: 'ADD_NEWS_LINK',
+      target: `news_links:${item.id}`,
+      details: { url: norm, titleFrom },
+    });
+
+    return { item, titleFrom };
   },
 
   /**

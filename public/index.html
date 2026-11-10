@@ -458,7 +458,7 @@
       </div>
     </div>
 
-    <!-- 記事共有モーダル（入力欄は記事URLのみ。閲覧中の職員チャットチャンネルへ共有） -->
+    <!-- 記事共有モーダル（入力欄は記事URLのみ。サーバーがページタイトルを取得し、ピノックアップ教育ニュースへリンクとして追加する。チャット投稿はしない） -->
     <div id="news-share-modal" class="modal-overlay hidden">
       <div class="modal-card">
         <div class="modal-header">
@@ -474,7 +474,7 @@
               <input type="url" id="news-share-url" name="news-share-url" aria-label="記事URL"
                      class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main"
                      placeholder="https://mext.go.jp/...（スキーマ無しは https:// を補完）"
-                     title="URLを入力します。スキーマが無い場合は https:// を補完し、タイトルはURLのドメイン名になります。閲覧中の職員チャットチャンネルへ投稿します。"
+                     title="URLを入力します。スキーマが無い場合は https:// を補完し、ページタイトルをサーバーが取得してピノックアップ教育ニュースへリンクとして追加します。"
                      autocomplete="off" required>
             </div>
           </div>

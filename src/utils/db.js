@@ -17,8 +17,13 @@ export function todayJst() {
   return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
 }
 
+/**
+ * 現在の壁時計を 'YYYY-MM-DD HH:MM:SS' の JST 文字列で返す。
+ * ※ 保存は JST 壁時計で行う（TIMESTAMP 型はタイムゾーンを持たないため、UTC の壁時計を
+ *   入れると JST 0時以降（UTC 15時）で日付が1日ずれる）。投稿日・掲示期間の既定日は JST 基準。
+ */
 export function nowIso() {
-  return new Date().toISOString().replace('T', ' ').substring(0, 19);
+  return new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Tokyo' }).replace('T', ' ').substring(0, 19);
 }
 
 export function parseJson(value, fallback) {

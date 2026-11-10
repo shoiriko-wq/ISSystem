@@ -6,6 +6,7 @@
 import { apiGet, apiPost, apiPut, apiDelete } from '../api.js';
 import { formatDate, escapeHTML, refreshLucideIcons, openModal, closeModal, showToast, userAvatarHtml } from '../ui-helpers.js';
 import { state } from '../state.js';
+import { createFacilityCalendar } from './facility-calendar.js';
 
 /**
  * JST 基準の今日 (YYYY-MM-DD) を返す
@@ -15,6 +16,34 @@ function todayJst() {
 }
 
 let selectedDate = todayJst();
+
+// ★ ミニカレンダー（職員掲示板と同一の形。‹ [日付読み上げ] › の日付クリック・C キーで開閉）
+const facilityCalendar = createFacilityCalendar({
+  getDay: () => selectedDate,
+  // 日付セルクリック・「本日へ」・T キー → 表示日を選んでタイムラインを再読込（カレンダーは閉じる）
+  pickDay: (d) => {
+    selectedDate = d;
+    loadReservations();
+  },
+  todayKey: () => todayJst(),
+});
+
+/** 施設タブのキーボード操作（C=カレンダー開閉、T=本日へ、Escape=メニュー/カレンダーを閉じる）。
+ *  ←/→ はタイムラインの横スクロールに譲る（日付ナビは ‹ › ボタン） */
+function facilityKeyHandler(e) {
+  if (state.currentTab !== 'facility') return;
+  const view = document.getElementById('view-facility');
+  if (!view || view.classList.contains('hidden')) return;
+  // 入力中のキー入力を邪魔しない
+  const tag = (e.target && e.target.tagName) || '';
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
+  // モーダル開時はキーボード操作をモーダル側に譲る
+  const openModals = Array.from(document.querySelectorAll('.modal-overlay'))
+    .filter((m) => !m.classList.contains('hidden'));
+  if (openModals.length > 0) return;
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') return;
+  facilityCalendar.keyHandler(e);
+}
 
 // 施設マスター（API の resources テーブルをキャッシュ。マスタ管理UIとタイムラインで共用）
 let facilities = [];
@@ -148,24 +177,27 @@ export function initFacilityModule() {
   if (!container) return;
 
   container.innerHTML = `
-    <!-- ヘッダー・日付コントロール（検索・日付ナビ・本日・新規予約・施設管理の高さを 2.4rem に統一） -->
+    <!-- ヘッダー・日付コントロール（日付ナビ・新規予約・施設管理の高さを 2.4rem に統一）。
+         ‹ [日付読み上げ] › は職員掲示板と同一の形（クリックでミニカレンダーを開閉、C キー）。
+         ツールバーの「本日」ボタンは撤廃済み＝本日へは年月選択メニューの「本日へ」と T キーで戻る。
+         native の date input は使わない（日付読み上げボタンとミニカレンダーで日を選ぶ） -->
     <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-surface-strong p-3 rounded-xl border border-divider">
       <h2 class="text-base font-bold text-main flex items-center gap-2 shrink-0">
         <i data-lucide="building-2" class="w-4 h-4 text-success"></i> 施設物品予約
       </h2>
 
       <div class="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
+        <!-- ★ ‹ [日付] › を同一グループで隣接（職員掲示板と同一慣習）。日付は固定幅なので › を連打しても › が動かない -->
         <div class="flex items-center bg-surface rounded-lg border border-main shrink-0" id="facility-day-group">
-          <button type="button" id="facility-prev-day" class="icon-btn icon-btn-fixed text-soft" aria-label="前日" title="前日">
-            <i data-lucide="chevron-left" class="w-4 h-4"></i>
-          </button>
-          <input type="date" id="facility-date-picker" class="day-date-input" value="${selectedDate}" aria-label="表示日">
-          <button type="button" id="facility-next-day" class="icon-btn icon-btn-fixed text-soft" aria-label="翌日" title="翌日">
-            <i data-lucide="chevron-right" class="w-4 h-4"></i>
-          </button>
+          <button type="button" id="facility-prev-day" class="icon-btn icon-btn-fixed text-soft"
+                  aria-label="前日（‹ ボタン）" title="前日（‹ ボタン）"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
+          <button type="button" id="facility-day-current" class="day-readout day-nav-btn" data-day="${selectedDate}"
+                  aria-expanded="false" aria-controls="facility-mini-cal"
+                  aria-label="表示日（クリックでカレンダーを開く）" title="カレンダーを開く（C キー）"></button>
+          <button type="button" id="facility-next-day" class="icon-btn icon-btn-fixed text-soft"
+                  aria-label="翌日（› ボタン）" title="翌日（› ボタン）"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
         </div>
 
-        <button type="button" id="facility-btn-today" class="btn-secondary shrink-0" title="本日">本日</button>
         <button type="button" id="facility-btn-create" class="btn-primary font-bold flex items-center gap-1.5 shrink-0">
           <i data-lucide="plus" class="w-4 h-4"></i> 新規予約
         </button>
@@ -175,6 +207,10 @@ export function initFacilityModule() {
         </button>` : ''}
       </div>
     </div>
+
+    <!-- ★ ミニカレンダー（予約件数打点付き。年月部分はスケジュールのカレンダーと同じ形）。
+         日付クリック（C キー）で開閉。年月ラベルクリックで年月選択メニュー（年 ‹ › + 12ヶ月 + 「本日へ」）がラベル直下に出る -->
+    <div id="facility-mini-cal" class="hidden mt-2 mb-2 bg-surface-strong border border-divider rounded-xl p-3"></div>
 
     <!-- タイムラインマトリクス表示エリア (時間帯バンド表示) -->
     <div class="card p-4 overflow-hidden mt-4">
@@ -265,6 +301,8 @@ export function initFacilityModule() {
   `;
 
   bindEvents();
+  // ‹ › の間の日付読み上げを本日から書き出す（native date input は撤廃済み）
+  facilityCalendar.updateReadout();
   // ホイールは表の縦スクロールに使う（時間ヘッダー行と施設名称列は sticky で固定。横スクロールバーは Drag/バー操作で動かす）
   // マスタ管理モーダル (教務部) を初期生成し追加フォームを紐付ける
   ensureFacilityMasterDom();
@@ -278,20 +316,17 @@ export function initFacilityModule() {
 }
 
 function bindEvents() {
-  const picker = document.getElementById('facility-date-picker');
-  picker?.addEventListener('change', (e) => {
-    selectedDate = e.target.value;
-    loadReservations();
-  });
-
+  // ‹ [日付読み上げ] ›（職員掲示板と同一）。日付クリック（または C キー）でミニカレンダーを開閉
+  // カレンダーは施設タブ自身の `facilityCalendar`（`facility-calendar.js`）が持つ。bulletin.module.js の関数は使わない（使えば未定義で落ちる）
+  document.getElementById('facility-day-current')?.addEventListener('click', () => facilityCalendar.toggle());
   document.getElementById('facility-prev-day')?.addEventListener('click', () => changeDate(-1));
   document.getElementById('facility-next-day')?.addEventListener('click', () => changeDate(1));
 
-  document.getElementById('facility-btn-today')?.addEventListener('click', () => {
-    selectedDate = todayJst();
-    if (picker) picker.value = selectedDate;
-    loadReservations();
-  });
+  // ミニカレンダー（日付セル・年月 ‹ ›・年月選択メニュー）の操作紐付け
+  facilityCalendar.bind();
+
+  // キーボード操作（施設タブがアクティブな時のみ。C=カレンダー開閉、T=本日へ、Escape=閉じる）
+  document.addEventListener('keydown', facilityKeyHandler);
 
   document.getElementById('facility-btn-create')?.addEventListener('click', () => {
     const dateInput = document.getElementById('facility-date-input');
@@ -347,8 +382,8 @@ function changeDate(days) {
   const base = new Date(`${selectedDate}T12:00:00+09:00`);
   base.setDate(base.getDate() + days);
   selectedDate = base.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
-  const picker = document.getElementById('facility-date-picker');
-  if (picker) picker.value = selectedDate;
+  facilityCalendar.updateReadout();
+  facilityCalendar.syncMonth();   // カレンダーが開いていれば表示月・選択セルを表示日へ追従
   loadReservations();
 }
 
@@ -435,6 +470,8 @@ export async function loadReservations() {
     console.warn('[Facility] 予約データ取得例外:', err.message);
   }
 
+  // 表示日の予約件数をカレンダーの件数キャッシュへ反映（● が実件数へ追従）
+  facilityCalendar.markDayCount(selectedDate, reservationsCache.length);
   renderMatrix();
 }
 
@@ -743,8 +780,8 @@ async function handleCreateReservation(e) {
     document.getElementById('facility-form')?.reset();
     
     selectedDate = date;
-    const picker = document.getElementById('facility-date-picker');
-    if (picker) picker.value = selectedDate;
+    facilityCalendar.updateReadout();
+    facilityCalendar.syncMonth();   // カレンダーが開いていれば表示日へ追従
     await loadReservations();
   } catch (err) {
     console.error('[Facility] 予約投稿エラー:', err);

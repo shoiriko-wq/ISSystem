@@ -1,5 +1,0 @@
-﻿{"port":25,"mode":"smtp-plain","msg":"error ENOTFOUND","detail":""}
-{"port":465,"mode":"smtp-tls","msg":"error ENOTFOUND","detail":""}
-{"port":587,"mode":"smtp-plain","msg":"error ENOTFOUND","detail":""}
-{"port":143,"mode":"imap-plain","msg":"error ENOTFOUND","detail":""}
-{"port":993,"mode":"imap-tls","msg":"error ENOTFOUND","detail":""}

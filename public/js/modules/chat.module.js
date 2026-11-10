@@ -696,17 +696,6 @@ function visibleFallbackId() {
 }
 
 /**
- * ダッシュボード・ニュース共有の投稿先として、閲覧中の（または先頭の）グループIDを返す
- * @returns {string|null}
- */
-export function getShareableChatChannelId() {
-  if (currentChannelId && chatChannels.some((c) => String(c.id) === String(currentChannelId) && !hiddenChannels.has(c.id))) {
-    return currentChannelId;
-  }
-  return visibleFallbackId();
-}
-
-/**
  * グループを非表示にする（削除はしない）
  * @param {string} channelId
  */

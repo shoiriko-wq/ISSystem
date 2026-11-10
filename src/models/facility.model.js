@@ -327,6 +327,35 @@ export const facilityModel = {
   },
 
   /**
+   * 1ヶ月分の日別予約件数（施設予約ミニカレンダーの「●」打点用）
+   * 指定日を含む月（JST）の全日付をキーに、有効予約の件数を並べる（キャンセルは数えない）
+   * @param {string} date - 当月内の任意日 YYYY-MM-DD
+   */
+  async getMonthCounts(date) {
+    const anchor = normalizeDate(date) || todayJst();
+    const y = Number(anchor.slice(0, 4));
+    const m = Number(anchor.slice(5, 7));
+    const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();   // 当月の末日
+    const mm = String(m).padStart(2, '0');
+    const start = `${y}-${mm}-01`;
+    const end = `${y}-${mm}-${String(lastDay).padStart(2, '0')}`;
+
+    const res = await query(
+      `SELECT target_date AS day, COUNT(*) AS n
+       FROM reservations
+       WHERE target_date >= $1 AND target_date <= $2
+         AND COALESCE(is_cancelled, 0) = 0
+       GROUP BY target_date
+       ORDER BY target_date`,
+      [start, end]
+    );
+
+    const counts = {};
+    for (const row of res.rows) counts[String(row.day)] = Number(row.n);
+    return { month: start.slice(0, 7), start, end, counts };
+  },
+
+  /**
    * 指定日に利用可能な施設一覧
    */
   async listAvailable(filters = {}) {
@@ -586,6 +615,7 @@ export const deleteFacility = (...args) => facilityModel.deleteFacility(...args)
 export const countReservations = (...args) => facilityModel.countReservations(...args);
 export const getReservationsByDate = (...args) => facilityModel.getReservationsByDate(...args);
 export const getDailyOverview = (...args) => facilityModel.getDailyOverview(...args);
+export const getMonthCounts = (...args) => facilityModel.getMonthCounts(...args);
 export const createReservation = (...args) => facilityModel.createReservation(...args);
 export const findReservationById = (...args) => facilityModel.findReservationById(...args);
 export const cancelReservation = (...args) => facilityModel.cancelReservation(...args);

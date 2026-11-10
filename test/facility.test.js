@@ -51,7 +51,50 @@ describe('Facility Reservation API (/api/facilities)', () => {
     expect(res.body.facilitiesOverview.every((f) => 'facility' in f && 'available' in f)).toBe(true);
   });
 
-  it('POST /api/facilities/reservations - 新規予約を 201 で登録できること', async () => {
+  it('GET /api/facilities/month-counts - 月内の各日の予約件数を返すこと', async () => {
+    const res = await request(app)
+      .get('/api/facilities/month-counts?date=2026-10-15')
+      .set('Authorization', bearer(token));
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.month).toBe('2026-10');
+    expect(res.body.start).toBe('2026-10-01');
+    expect(res.body.end).toBe('2026-10-31');
+    // seed の予約（2026-10-15 と 2026-10-16 に各1件）
+    expect(res.body.counts['2026-10-15']).toBe(1);
+    expect(res.body.counts['2026-10-16']).toBe(1);
+    expect(res.body.counts['2026-10-20']).toBeUndefined();
+  });
+
+  it('GET /api/facilities/month-counts - 予約を作成・キャンセルすると件数が動くこと', async () => {
+    const before = await request(app)
+      .get('/api/facilities/month-counts?date=2027-02-15')
+      .set('Authorization', bearer(token));
+    expect(before.body.counts['2027-02-15'] || 0).toBe(0);
+    const created = await request(app)
+      .post('/api/facilities/reservations')
+      .set('Authorization', bearer(token))
+      .send({ facility_id: 'fac_2', title: '件数確認予約', target_date: '2027-02-15', start_time: '13:00', end_time: '14:00' });
+    expect(created.statusCode).toBe(201);
+    const mid = await request(app)
+      .get('/api/facilities/month-counts?date=2027-02-15')
+      .set('Authorization', bearer(token));
+    expect(mid.body.counts['2027-02-15']).toBe(1);
+    const del = await request(app)
+      .delete(`/api/facilities/reservations/${pickId(created.body)}`)
+      .set('Authorization', bearer(token));
+    expect(del.statusCode).toBe(200);
+    const after = await request(app)
+      .get('/api/facilities/month-counts?date=2027-02-15')
+      .set('Authorization', bearer(token));
+    expect(after.body.counts['2027-02-15'] || 0).toBe(0);
+  });
+
+  it('GET /api/facilities/month-counts - トークンなしでは 401 になること', async () => {
+    const res = await request(app).get('/api/facilities/month-counts?date=2026-10-15');
+    expect(res.statusCode).toBe(401);
+  });
+  it('POST /api/facilities/reservations - 予約を作成できること', async () => {
     const res = await request(app)
       .post('/api/facilities/reservations')
       .set('Authorization', bearer(token))

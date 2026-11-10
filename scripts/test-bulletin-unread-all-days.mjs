@@ -401,13 +401,21 @@ while (cur.rows > 0 && cur.state.unreadMode === true && guard < N) {
   consumed.push(items.find((b) => String(b.id) === row.id));
   log('row-click-' + guard, { clickedId: row.id, rowsBefore: cur.rows, rowsAfter: s.rows, sidebarCount: s.sidebarCount, unreadText: s.unreadText, paneTitle: s.paneTitle, unreadMode: s.state.unreadMode });
   const last = cur.rows === 1;
-  check('行クリック ' + guard + ': クリックした行は列表から消え、列表・ラベル・サイドバーが1件ずつ減る、右ペインはその行の全文（最後の1件を読むと未読表示は閉じて本日列表へ自動復帰）',
+  // 右ペインは読んだ行の全文を出す（クリックした行のまま）。最後の1件を読むと未読表示は閉じて本日列表へ自動復帰する。
+  //   復帰した本日列表に読んだ行が残る（＝対象日が本日）なら右ペインはその行のまま。
+  //   残らない（対象日が本日でない）なら本日列表の最上位が自動選択される。
+  const paneExpect = last
+    ? (startRowsApi.some((b) => String(b.id) === row.id) ? row.title : startRowsApi[0].title)
+    : row.title;
+  check('行クリック ' + guard + ': クリックした行は列表から消え、列表・ラベル・サイドバーが1件ずつ減る、右ペインは読んだ行の全文（最後の1件を読むと未読表示は閉じて本日列表へ自動復帰し、右ペインは本日列表の最上位）',
     (last ? (s.rows === startCount && s.state.unreadMode === false)
           : (s.rows === cur.rows - 1 && !s.rowIds.includes(row.id)))
     && s.sidebarCount === cur.sidebarCount - 1
     && s.unreadText === '未読 ' + (cur.rows - 1)
-    && s.paneTitle === row.title,
-    { clickedId: row.id, rowsBefore: cur.rows, rowsAfter: s.rows, sidebarCount: s.sidebarCount, unreadText: s.unreadText, paneTitle: s.paneTitle, unreadMode: s.state.unreadMode, last });
+    && s.paneTitle === paneExpect,
+    { clickedId: row.id, rowsBefore: cur.rows, rowsAfter: s.rows, sidebarCount: s.sidebarCount,
+      unreadText: s.unreadText, paneTitle: s.paneTitle, expectPane: paneExpect,
+      unreadMode: s.state.unreadMode, last });
   cur = s;
 }
 check('未読全件（N 件）が行クリックで既読化された（base-mode 最上位の自動既読1件＋未読モードの自動選択1件＋列表クリック N-2 件）', consumed.length === N && Number(start.sidebarCount) === N - 1, { consumedIds: consumed.map((b) => b.id), N, uiCount: Number(start.sidebarCount) });
@@ -611,6 +619,24 @@ const stepMonth = async (delta) => {
 
 const todayMonthLabel = year + '年' + (month + 1) + '月';
 
+/** 今日から n 日ずれの日付キー YYYY-MM-DD（日付の期待値を今日基準で組み立て、カレンダー日が進むと落ちるようにしないため） */
+const shiftKey = (k, n) => {
+  const [y, m, d] = k.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + n));
+  return dt.toISOString().slice(0, 10);
+};
+/** 日付キーの年月ラベル（例 2026年11月） */
+const labelOfKey = (k) => {
+  const [y, m] = k.split('-').map(Number);
+  return y + '年' + m + '月';
+};
+/** 日付キーの月の日数 */
+const daysOfKey = (k) => {
+  const [y, m] = k.split('-').map(Number);
+  return daysInMonth(y, m - 1);
+};
+const prevDay = shiftKey(today, -1);   // ‹（前日ボタン）で中心日が動く日
+
 await openCal();
 const m0 = await snapshot(page);
 check('C キーでミニカレンダーが開く（メニューは閉じ、今月のボタンは aria-expanded="false"、今日が選択、今月ぶんだけの日ボタン、ラベルは本日月、readout は本日の日付）',
@@ -670,16 +696,16 @@ check('C キーでミニカレンダーが開く（アンカーは本日へリ�
 await page.evaluate(() => { const b = document.querySelector('#view-bulletin #bulletin-day-prev'); if (b) b.click(); });
 await sleep(400);
 const m8 = await snapshot(page);
-check('‹（前日ボタン）で中心日が1日前へ（center は 2026-11-09、ラベルは中心日の月 2026年11月、選択セルは 2026-11-09、30日ぶんのセル、カレンダーは開いたまま）',
-  m8.centerDate === '2026-11-09' && m8.monthLabel === '2026年11月' &&
-  m8.calSelected === '2026-11-09' && m8.calDayBtns === daysInMonth(2026, 10) &&
+check('‹（前日ボタン）で中心日が1日前へ（center は前日、ラベルは中心日の月、選択セルは前日、当月ぶんのセル、カレンダーは開いたまま）',
+  m8.centerDate === prevDay && m8.monthLabel === labelOfKey(prevDay) &&
+  m8.calSelected === prevDay && m8.calDayBtns === daysOfKey(prevDay) &&
   m8.calOpen === true, m8);
 
 // C キーで閉じてから T キーで本日へ戻す（section 10 は本日列表で受ける）
 await press(page, 'c');
 const m9 = await snapshot(page);
-check('C キーでミニカレンダーが閉じる（center は 2026-11-09 のまま、ラベルは 2026年11月、ラベルボタン expanded=false）',
-  m9.calOpen === false && m9.centerDate === '2026-11-09' && m9.monthLabel === '2026年11月' &&
+check('C キーでミニカレンダーが閉じる（center は前日のまま、ラベルは前日の月、ラベルボタン expanded=false）',
+  m9.calOpen === false && m9.centerDate === prevDay && m9.monthLabel === labelOfKey(prevDay) &&
   m9.menuBtnExpanded === 'false', m9);
 
 await press(page, 't');

@@ -305,7 +305,15 @@ const main = async () => {
   const s5 = await snapshot(page);
   const cal2 = await calState(page);
   const todayCount = await apiFetch(page, 'GET', '/bulletins', null);
-  const mineToday = (todayCount.json?.bulletins || []).filter((b) => String(b.target_date || '').slice(0, 10) === today).length;
+  // 掲示期間が本日を含む記事だけを数える（掲示期間外の記事は列表に出ない＝UI と同じ条件）
+  const mineToday = (todayCount.json?.bulletins || []).filter((b) => {
+    if (String(b.target_date || '').slice(0, 10) !== today) return false;
+    const s = String(b.display_start_date || '').slice(0, 10);
+    const e = String(b.display_end_date || '').slice(0, 10);
+    if (s && s > today) return false;
+    if (e && e < today) return false;
+    return true;
+  }).length;
   log('cleared', { centerDate: s5.centerDate, countText: s5.countText, rows: s5.rows, readoutText: s5.readoutText, navDisabled: s5.navDisabled, calHits: cal2.hits });
   check('検索語を消すと通常表示（件数「N 件」・中心日表示は本日の日付・‹ ›・日付クリックが enabled・カレンダー閉じない）',
     s5.centerDate === today && /^\d+ 件$/.test(s5.countText || '') && s5.rows === mineToday

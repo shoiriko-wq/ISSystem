@@ -27,26 +27,41 @@ await sleep(1000);
 await page.evaluate(() => document.querySelector('a[data-tab="facility"]').click());
 await sleep(1500);
 
-// ヘッダー操作群の高さ・フォント、sticky ヘッダー、スクロール挙動
+// ヘッダー操作群の高さ・フォント（日付読み上げは職員掲示板と同一寸法）、sticky ヘッダー、スクロール挙動
 const geom = await page.evaluate(() => {
   const cs = (el) => getComputedStyle(el);
   const header = document.getElementById('facility-time-header');
   const cont = document.querySelector('.timeline-scroll-container');
   const title = document.querySelector('#view-facility h2');
-  const dateInput = document.getElementById('facility-date-picker');
+  const readout = document.getElementById('facility-day-current');
   const prevBtn = document.getElementById('facility-prev-day');
-  const todayBtn = document.getElementById('facility-btn-today');
+  const nextBtn = document.getElementById('facility-next-day');
   const createBtn = document.getElementById('facility-btn-create');
+  const manageBtn = document.getElementById('facility-btn-manage');
+  const cal = document.getElementById('facility-mini-cal');
+  const group = document.getElementById('facility-day-group');
   return {
     titleFs: cs(title).fontSize,
-    dateH: Math.round(dateInput.getBoundingClientRect().height),
-    dateFs: cs(dateInput).fontSize,
-    dateIconFs: cs(dateInput, '::webkit-calendar-picker-indicator').fontSize,
+    readoutH: Math.round(readout.getBoundingClientRect().height),
+    readoutW: Math.round(readout.getBoundingClientRect().width),
+    readoutFs: cs(readout).fontSize,
+    readoutText: readout.textContent.trim(),
+    readoutControls: readout.getAttribute('aria-controls'),
+    readoutExpanded: readout.getAttribute('aria-expanded'),
+    readoutBw: [cs(readout).borderTopWidth, cs(readout).borderBottomWidth],
+    groupH: Math.round(group.getBoundingClientRect().height),
+    groupBorder: cs(group).borderTopWidth,
     prevH: Math.round(prevBtn.getBoundingClientRect().height),
-    todayH: Math.round(todayBtn.getBoundingClientRect().height),
+    prevW: Math.round(prevBtn.getBoundingClientRect().width),
+    nextH: Math.round(nextBtn.getBoundingClientRect().height),
+    nextW: Math.round(nextBtn.getBoundingClientRect().width),
     createH: Math.round(createBtn.getBoundingClientRect().height),
-    todayFs: cs(todayBtn).fontSize,
     createFs: cs(createBtn).fontSize,
+    manageH: manageBtn ? Math.round(manageBtn.getBoundingClientRect().height) : 42,
+    dateInputExists: !!document.getElementById('facility-date-picker'),
+    todayBtnExists: !!document.getElementById('facility-btn-today'),
+    calExists: !!cal,
+    calHidden: cal ? cal.classList.contains('hidden') : null,
     hintEl: cs(document.querySelector('#view-facility .card span.text-muted')).fontSize,
     contMaxH: cs(cont).maxHeight,
     contOverflowY: cs(cont).overflowY,
@@ -56,10 +71,19 @@ const geom = await page.evaluate(() => {
   };
 });
 log('facility-geom', geom);
-check('ヘッダーの操作群（日付入力・日付ナビ・本日・新規予約）の高さが 2.4rem(42px) で揃い、文字サイズも 1.02rem(17.85px) に統一、時間ラベルも同じサイズ',
-  geom.dateH === 42 && geom.prevH === 42 && geom.todayH === 42 && geom.createH === 42
-  && geom.dateFs === '17.85px' && geom.dateIconFs === '17.85px' && geom.todayFs === '17.85px' && geom.createFs === '17.85px'
+check('ヘッダーの操作群（日付読み上げ・日付ナビ・新規予約・施設管理）の高さが 2.4rem(42px) で揃い、日付読み上げは 5.4rem(95px) 幅・1.02rem(17.85px) 文字、新規予約も同じ文字、時間ラベル・説明文も 1.0rem(17.5px) 文字',
+  geom.readoutH === 42 && geom.readoutW === 95 && geom.prevH === 42 && geom.prevW === 42
+  && geom.nextH === 42 && geom.nextW === 42 && geom.createH === 42 && geom.manageH === 42
+  && geom.groupH === 42 && geom.readoutFs === '17.85px' && geom.createFs === '17.85px'
   && geom.headerLabelFs === '17.5px' && geom.hintEl === '17.5px', geom);
+check('日付読み上げは MM/DD (曜) 表記で aria-controls がミニカレンダー、aria-expanded=false、‹ [日付読み上げ] › を囲むグループが 2px 実線枠（border-main）',
+  /^\d{2}\/\d{2} \([日月火水木金土]\)$/.test(geom.readoutText)
+  && geom.readoutControls === 'facility-mini-cal' && geom.readoutExpanded === 'false'
+  && geom.groupBorder === '2px', geom);
+check('native date input とツールバーの「本日」ボタンは撤廃済み、ミニカレンダーはinitial非表示（日付クリック・C キーで開く）',
+  geom.dateInputExists === false && geom.todayBtnExists === false
+  && geom.calExists === true && geom.calHidden === true,
+  { dateInputExists: geom.dateInputExists, todayBtnExists: geom.todayBtnExists, calExists: geom.calExists, calHidden: geom.calHidden });
 check('タイムラインの枠は縦スクロール主体（overflow-y auto・max-height 65vh = 585px）で、時間ヘッダー行は sticky（本文バンドより上層 z-50）',
   geom.contOverflowY === 'auto' && geom.contMaxH === '585px'
   && geom.headerPos === 'sticky' && geom.headerZ === '50',

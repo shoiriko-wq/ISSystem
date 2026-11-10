@@ -485,8 +485,9 @@
 }
 
 /* ===== 職員掲示板ヘッダーのコントロール統一 =====
-   検索・日付ナビ（‹ 日付 ›）・本日・キー操作・新規投稿を 2.4rem 高・0.875rem 文字に揃え、
-   ヘッダー内で見た目の大きさがばらつかないようにする。 */
+   検索ボックス・検索ボックス右の全日未読ボタン・日付ナビ（‹ 日付 ›）・キー操作・新規投稿を
+   2.4rem 高・1.02rem 文字に揃え、ヘッダー内で見た目の大きさがばらつかないようにする。
+   （ツールバーの「本日」ボタンは撤廃済み＝本日へは年月選択メニューの「本日へ」と T キー） */
 #view-bulletin #bulletin-search-input {
   height: 2.4rem;
   padding: 0 0.6rem 0 2.1rem;
@@ -511,11 +512,11 @@
   font-size: 1.02rem;
 }
 
-/* 検索中は中心日が列表表示に影響しないため、‹ ›・本日・日付クリック（カレンダー開閉）を止める。
-   寸法（2.4rem 高・5.4rem 幅）は固定のまま減光だけなので、検索語の入出力で ‹ › の位置は動かず「全日」表示も中心日と同じ枠に収まる。 */
+/* 全日表示（検索語・未読表示）中は中心日が列表表示に影響しないため、‹ ›・日付クリック（カレンダー開閉）を止める。
+   寸法（2.4rem 高・5.4rem 幅）は固定のまま減光だけなので、検索語の入出力で ‹ › の位置は動かず「全日」表示も中心日と同じ枠に収まる。
+   「本日」ボタンは撤廃済み＝本日へは年月選択メニューの「本日へ」と T キー。 */
 #view-bulletin #bulletin-day-prev:disabled,
 #view-bulletin #bulletin-day-next:disabled,
-#view-bulletin #bulletin-btn-today:disabled,
 #view-bulletin #bulletin-day-current.day-readout:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -524,7 +525,7 @@
   color: var(--text-muted);
 }
 
-#view-bulletin #bulletin-btn-today,
+#view-bulletin #bulletin-btn-unread,
 #view-bulletin #bulletin-btn-create {
   height: 2.4rem;
   padding: 0 0.8rem;
@@ -534,7 +535,9 @@
   gap: 0.35rem;
 }
 
-/* ===== 施設物品予約ヘッダーのコントロール統一（掲示板と同じ 2.4rem 高・0.875rem 文字） ===== */
+/* ===== 施設物品予約ヘッダーのコントロール統一（職員掲示板と同一の寸法） =====
+   ‹ [日付読み上げ] › は職員掲示板と同一（2.4rem 高・5.4rem 幅・1.02rem 文字）。
+   native date input とツールバーの「本日」ボタンは撤廃済み＝本日へは年月選択メニューの「本日へ」と T キーで戻る */
 #view-facility #facility-day-group {
   height: 2.4rem;
 }
@@ -546,26 +549,12 @@
   padding: 0;
 }
 
-#view-facility .day-date-input {
+#view-facility #facility-day-current.day-readout {
   height: 2.4rem;
-  width: 8.8rem;
-  /* 右パディングで webkit カレンダーアイコン分の余白を予約し、
-     「日」(YYYY-MM-DD の右端) がアイコンに隠れないようにする */
-  padding: 0 1.5rem 0 0.35rem;
+  width: 5.4rem;
   font-size: 1.02rem;
-  font-weight: 700;
-  background-color: transparent;
-  border: none;
-  outline: none;
-  color: var(--text-main);
-}
-#view-facility .day-date-input::-webkit-calendar-picker-indicator {
-  font-size: 1.02rem;
-  opacity: 1;
-  filter: invert(1);
 }
 
-#view-facility #facility-btn-today,
 #view-facility #facility-btn-create,
 #view-facility #facility-btn-manage {
   height: 2.4rem;
@@ -1140,9 +1129,10 @@
   word-break: break-word;
 }
 
-/* ===== v3.1 未読バッヂ（タイトル・ダッシュボード「本日の連絡」・カード未読マーカー） =====
-   サイドバーの nav-badge と同一色系。0 件は .hidden で非表示、100 以上は 99+ にキャップする。 */
-.bulletin-title-unread,
+/* ===== v3.1 未読バッヂ（ダッシュボード「本日の連絡」・カード未読マーカー） =====
+   サイドバーの nav-badge と同一色系。0 件は .hidden で非表示、100 以上は 99+ にキャップする。
+   掲示画面見出し右の未読バッヂ（.bulletin-title-unread）は撤廃済み＝全日未読はサイドバーの数字と
+   検索ボックス右の未読ボタン #bulletin-btn-unread（ラベル「未読 N」）だけが出す。 */
 .dash-today-unread-badge,
 .dash-news-unread-marker {
   padding: 0.15rem 0.45rem;
@@ -1155,8 +1145,6 @@
   border: 1px solid var(--danger-border-soft);
   white-space: nowrap;
 }
-
-.bulletin-title-unread { margin-left: 0.25rem; }
 
 .dash-news-unread-marker { flex: 0 0 auto; }
 
@@ -1313,8 +1301,10 @@ span.dash-news-body { display: block; }
 .comment-form-row > .flex-1 { min-width: 0; }
 
 /* 中心日読取（‹ › の間。連打しても幅が動かず › の位置がずれない固定幅・等幅数字。
-   クリックでミニカレンダーを開くボタン。aria-expanded=true で開いていることを着色で示す） */
-#bulletin-day-current.day-readout {
+   クリックでミニカレンダーを開くボタン。aria-expanded=true で開いていることを着色で示す。
+   職員掲示板と施設物品予約が同一形（施設は #facility-day-current） */
+#bulletin-day-current.day-readout,
+#facility-day-current.day-readout {
   display: inline-flex;
   align-items: center;
   justify-content: center;

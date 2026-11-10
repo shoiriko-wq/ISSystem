@@ -101,7 +101,7 @@
   background-color: var(--bg-main);
 }
 
-/* 7.1 Bulletin マスタ・ディテール分割（左=タイトル列 16rem 固定、右=全文ペインが余り。ヘッダー・日付ナビ・検索バー分を引く） */
+/* 7.1 Bulletin マスタ・ディテール分割（左=タイトル列は画面幅に応じて広がる、右=全文ペインが余り。ヘッダー・日付ナビ・検索バー分を引く） */
 .bulletin-split {
   display: flex;
   flex-direction: row;
@@ -116,9 +116,15 @@
   .bulletin-split { height: calc(100vh - 16rem); }
 }
 
-/* 左列（16rem 固定。flex の min-width:auto を解除し、長いタイトルで列が押し広げられない） */
+/* 左列（タイトル列表。幅は画面に応じて広がる — 床 16rem、画面幅の 26%、上限 24rem）。
+   16rem 固定だとタイトル文字が約195pxしか使えず、23文字のタイトルが途中で切れていた。
+   実測: ルート font-size 17.5px で、768px→280px(16rem)、1100px→286px(16.34rem)、
+   1280px→332.8px(19.0rem)、1440px→374.4px(21.4rem)、1600px→416px(23.77rem)、
+   1750px以上→420px(24rem)で打ち止め。右ペインは余り（768pxでは約315px）。
+   flex の min-width:auto を解除するので、長いタイトルで列が押し広げられることはない。
+   shrink を 0 にする（768px で列が縮んで床の16remを下回ると右ペインが列を圧し、床が崩れる） */
 .bulletin-title-pane {
-  flex: 0 0 16rem;
+  flex: 0 0 clamp(16rem, 26vw, 24rem);
   min-width: 0;
   display: flex;
   flex-direction: column;

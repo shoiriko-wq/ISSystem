@@ -203,21 +203,43 @@ describe('Exam API Endpoints (/api/exam)', () => {
   });
 
   it('POST /api/exam/:id/timetable - 教務主任の時間割自動作成は科目数がコマ数を超えると「組めない」診断になること', async () => {
-    const res = await request(app).post(`/api/exam/${examId}/timetable`).set('Authorization', `Bearer ${kyomuToken}`);
+    // 「組めない」診断専用の考査を作る（8時限×3日で1学年24コマ、そこに1学年25科目を計画させる）。
+    // 現行カリキュラムマスタ（8科目）では学年あたり24コマに収まるため、この診断は計画を意図的に増やして起こす。
+    const diagExam = await request(app)
+      .post('/api/exam')
+      .set('Authorization', `Bearer ${kyomuToken}`)
+      .send({ title: '組めない診断専用考査2099', start_date: '2099-11-01', end_date: '2099-11-03', days_count: 3, daily_slots: 8, grades: [1, 2, 3] });
+    expect(diagExam.statusCode).toBe(200);
+    const diagId = diagExam.body.data.id;
+
+    // 実施科目調査を開始してプランを種付けし、1学年に25科目を追加する（24コマに収まらない）
+    await request(app).post(`/api/exam/${diagId}/subject-survey/start`).set('Authorization', `Bearer ${kyomuToken}`);
+    for (let i = 1; i <= 25; i++) {
+      const add = await request(app)
+        .post(`/api/exam/${diagId}/subject-row`)
+        .set('Authorization', `Bearer ${kyomuToken}`)
+        .send({ subject_name: `診断科目${i}`, grade: 1, scope: 'GRADE', stream: 'OTHER', duration_slots: 1, duration_minutes: 50 });
+      expect(add.statusCode).toBe(200);
+    }
+
+    const res = await request(app).post(`/api/exam/${diagId}/timetable`).set('Authorization', `Bearer ${kyomuToken}`);
 
     expect(res.statusCode).toBe(200);
     expect(res.body.success).toBe(true);
-    // 新カリキュラムマスタ（63科目）は学年あたり24コマ（8時限×3日）に収まらない。
     // ソルバーは時間予算内に「組めない」診断と未割当の一覧を返す（保存はされない）。
     expect(res.body.data.feasible).toBe(false);
     expect(res.body.data.unassigned.length).toBeGreaterThan(0);
 
-    const slots = await request(app).get(`/api/exam/${examId}/slots`).set('Authorization', `Bearer ${kyomuToken}`);
+    const slots = await request(app).get(`/api/exam/${diagId}/slots`).set('Authorization', `Bearer ${kyomuToken}`);
     expect(slots.statusCode).toBe(200);
     expect(Array.isArray(slots.body.data.slots)).toBe(true);
     expect(slots.body.data.slots.length).toBe(0); // 組めないので保存されたコマは0
     expect(slots.body.data.is_kyomu).toBe(true);
-  });
+
+    // 診断専用考査は後続テストに残さない（cascade でプラン・コマ・監査も消える）
+    await query('DELETE FROM exam_masters WHERE id = ?', [diagId]);
+    await query('DELETE FROM audit_logs WHERE resource_id = ?', [diagId]);
+  }, 20000);
 
   // 8-5. ×（使用不能コマ）: 全学年共通 × は暦日グリッド / 学年固有 × は実施日グリッド
   it('GET /api/exam/:id/schedule-cells - 一般教員は×グリッドを閲覧できること', async () => {

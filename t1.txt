@@ -1,1 +1,0 @@
-﻿transport OK probeImap,probeSmtp,imapFetchMessages,imapAppend,imapMarkSeen,smtpSend,parseMessage,buildRawMessage

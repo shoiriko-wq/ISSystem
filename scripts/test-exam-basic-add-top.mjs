@@ -26,7 +26,13 @@ const OUT_DIR = path.join(ROOT, 'scripts', 'output');
 const BASE = process.env.UI_BASE || 'https://127.0.0.1:3443';
 const USER = process.env.UI_USER || 'T2026001';
 const PASS = process.env.UI_PASS || 'password123';
-const CHROME = process.env.CHROME_PATH || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
+// ブラウザはローカルの Chrome/Chromium を探す（Windows の Edge パスはこの環境に存在しないので落とさない）
+const CHROME = (() => {
+  const candidates = [process.env.CHROME_PATH, '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium', '/usr/bin/chromium-browser'].filter(Boolean);
+  for (const p of candidates) if (fs.existsSync(p)) return p;
+  throw new Error('Chrome/Chromium が見つかりません。CHROME_PATH 環境変数でパスを指定してください。');
+})();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const failures = [];

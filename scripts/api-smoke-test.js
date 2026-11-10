@@ -97,6 +97,15 @@ const facilities = facilitiesRes.data || facilitiesRes.facilities || [];
 const facilityIds = facilities.map((f) => f.id);
 console.log('FACILITY_IDS', facilityIds.slice(0, 4).join(','), `(count=${facilityIds.length})`);
 await get('/facilities/daily-overview?date=2026-11-20');
+// 月別予約件数（ミニカレンダーの「●」打点用）。seed の 2026-10 と今月の両方を叩く
+const monthCounts = await getJson('/facilities/month-counts?date=2026-10-15');
+const mcCounts = monthCounts.counts || {};
+console.log(
+  'MONTH_COUNTS_CHECK',
+  monthCounts.month === '2026-10' && mcCounts['2026-10-15'] >= 1 && mcCounts['2026-10-16'] >= 1
+    ? `OK (2026-10-15=${mcCounts['2026-10-15']}, 2026-10-16=${mcCounts['2026-10-16']})`
+    : `NG (${JSON.stringify(mcCounts)})`
+);
 await get('/bulletins');
 await get('/chat/channels');
 await get('/approvals');

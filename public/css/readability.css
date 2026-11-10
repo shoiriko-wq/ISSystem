@@ -162,6 +162,35 @@ textarea.input-field {
   padding-left: 2.5rem !important;
 }
 
+/* 全日未読ボタン（検索ボックスの右）は検索ボックスと同一設計にする。
+   components.css の btn-secondary は使わない（btn-secondary が 1.02rem !important を張るため、
+   ここ（読みやすさ用の最終ファイル）で検索ボックスと同じ 1.05rem・700・角丸 0.5rem・
+   2px 実線 1枚の border-main を直接張る。影は出さない（影はホバーのリング目的だけ）。
+   disabled（全日表示中）は中心日読み上げと同じ見た目に揃える。 */
+#view-bulletin #bulletin-btn-unread.bulletin-unread-btn.border.border-main {
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--text-main);
+  border-radius: 0.5rem;
+  border-width: var(--border-width-thick);
+  border-style: solid;
+  border-color: var(--border-main);
+  background-color: var(--bg-input);
+  box-shadow: none;
+}
+
+#view-bulletin #bulletin-btn-unread.bulletin-unread-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  color: var(--text-muted);
+}
+
+/* ホバーで 3px 浮く（影はホバーのリング目的だけ。リング = outline 3px + offset 2px = 5px） */
+#view-bulletin #bulletin-btn-unread.bulletin-unread-btn:hover {
+  transform: translateY(-3px);
+}
+
 input[type="checkbox"],
 input[type="radio"] {
   width: 1.15rem;

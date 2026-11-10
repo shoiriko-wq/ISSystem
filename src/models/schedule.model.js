@@ -4,7 +4,7 @@
  * ※ 1行事は複数カテゴリを持ち、複数カテゴリ選択時は「いずれか1つ以上」を含む行事を返す
  */
 
-import { openDb } from '../utils/db.js';
+import { openDb, nowIso } from '../utils/db.js';
 import { query } from '../../config/database.js';
 
 async function getDb() {
@@ -360,7 +360,7 @@ export const scheduleModel = {
    */
   async create(data) {
     const id = data.id || `sch_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const nowStr = nowIso();   // JST 壁時計（UTC 壁時計だと JST 0時以降に1日ずれる）
     const eventDate = data.event_date || data.date || data.target_date || data.targetDate
       || new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
     const categoryIds = normalizeCategoryIds(data.category_ids ?? data.categoryIds) || [];
@@ -406,7 +406,7 @@ export const scheduleModel = {
    * 行事・予定の更新（category_ids 指定でカテゴリ紐付けも差し替え）
    */
   async update(id, data) {
-    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const nowStr = nowIso();   // JST 壁時計（UTC 壁時計だと JST 0時以降に1日ずれる）
     const item = await this.findById(id);
 
     if (item) {

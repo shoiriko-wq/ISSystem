@@ -114,6 +114,48 @@ export const newsController = {
       next(error);
     }
   },
+
+  /**
+   * 共有リンク一覧の取得（ピノックアップ教育ニュースに共有された記事URLとタイトル）
+   * GET /api/news/links
+   */
+  async getSharedLinks(req, res, next) {
+    try {
+      const limit = req.query.limit ? parseInt(req.query.limit, 10) : 50;
+
+      const result = await newsService.getSharedLinks({ limit });
+
+      return res.status(200).json({
+        success: true,
+        count: result.links.length,
+        links: result.links,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * 記事を共有する（ピノックアップ教育ニュースへリンクを追加する。チャット投稿はしない）
+   * POST /api/news/links
+   */
+  async addSharedLink(req, res, next) {
+    try {
+      const url = req.body?.url || req.body?.articleUrl || req.body?.article_url;
+
+      const { item, titleFrom } = await newsService.addSharedLink({ url, user: req.user });
+
+      return res.status(201).json({
+        success: true,
+        data: item,
+        link: item,
+        titleFrom,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
 };
 
 export default newsController;

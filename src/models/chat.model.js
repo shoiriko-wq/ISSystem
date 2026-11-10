@@ -414,7 +414,7 @@ export const chatModel = {
         [targetId, channelId, userId]
       );
 
-      const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
+      const nowStr = nowIso();   // JST 壁時計（UTC 壁時計だと JST 0時以降に1日ずれる）
       let recorded = 0;
       for (const m of messages) {
         if (uptoDate && m.created_at > uptoDate) continue;

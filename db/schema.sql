@@ -1280,6 +1280,14 @@ CREATE TABLE IF NOT EXISTS mail_accounts (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- 旧DB（2026/11/7 以前）の mail_accounts に無い列を冪等に足す（暗号化モード・フォルダ・表示名）
+-- CREATE TABLE IF NOT EXISTS は既存テーブルを拡張しないため、既存環境ではこの ALTER で列を補う
+ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS imap_tls TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS imap_folder TEXT NOT NULL DEFAULT 'INBOX';
+ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS smtp_tls TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS sent_folder TEXT NOT NULL DEFAULT 'Sent';
+ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS display_name TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_mail_accounts_user ON mail_accounts(user_id);
 
 -- ==========================================
@@ -1303,7 +1311,30 @@ CREATE TABLE IF NOT EXISTS mail_messages (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- 旧DB（2026/11/7 以前）の mail_messages に無い列を冪等に足す（フォルダ・IMAP UID・宛先）
+ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS folder TEXT NOT NULL DEFAULT 'inbox';
+ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS uid TEXT;
+ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS recipients TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_mail_messages_user_time ON mail_messages(user_id, received_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mail_messages_unread ON mail_messages(user_id, is_read);
 CREATE UNIQUE INDEX IF NOT EXISTS uniq_mail_messages_uid ON mail_messages(user_id, folder, uid);
+
+-- -------------------------------------------------------------
+-- 20. ピックアップ教育ニュースの共有リンク (news_links)
+-- ダッシュボード「記事を共有」で追加した記事URLとページタイトルを保持する。
+-- ★ 共有はリンクの追加だけ（チャット投稿はしない）。同一URLは1件だけ（小文字比較で重複拒否）。
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS news_links (
+  id TEXT PRIMARY KEY,
+  url TEXT NOT NULL,
+  title TEXT NOT NULL,
+  domain TEXT NOT NULL,
+  added_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  added_by_name TEXT NOT NULL,
+  added_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  is_deleted INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_news_links_added_at ON news_links(added_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_news_link_url ON news_links(lower(url)) WHERE is_deleted = 0;
 

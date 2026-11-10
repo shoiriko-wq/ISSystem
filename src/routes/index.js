@@ -139,6 +139,8 @@ router.delete('/chat/messages/:messageId', authenticateToken, safe(chatControlle
 // ==========================================
 router.get('/facilities', authenticateToken, safe(facilityController?.getAllFacilities));
 router.get('/facilities/daily-overview', authenticateToken, safe(facilityController?.getDailyOverview));
+// ミニカレンダーの「●」打点用（月内の各日の予約件数）。':facilityId' に食われないよう前に置く
+router.get('/facilities/month-counts', authenticateToken, safe(facilityController?.getMonthCounts));
 router.get('/facilities/:facilityId/reservations', authenticateToken, safe(facilityController?.getReservations));
 router.post('/facilities/reservations', authenticateToken, safe(facilityController?.createReservation));
 router.put('/facilities/reservations/:reservationId', authenticateToken, safe(facilityController?.updateReservation));
@@ -346,6 +348,9 @@ router.get('/external/weather', authenticateToken, safe(newsController?.getWeath
 router.get('/news/dashboard-widget', authenticateToken, safe(newsController?.getDashboardWidgetFeed));
 router.get('/news/health', safe(newsController?.checkHealth));
 router.post('/news/cache/clear', authenticateToken, requireKyomuRole, safe(newsController?.clearCache));
+// ★ 「記事を共有」はチャットへ投稿しない。共有リンクを1件追加するだけ（news_links）
+router.get('/news/links', authenticateToken, safe(newsController?.getSharedLinks));
+router.post('/news/links', authenticateToken, safe(newsController?.addSharedLink));
 
 // ==========================================
 // 10. 年休等・出張 欠席登録 API (/api/absences)

@@ -387,7 +387,7 @@ export const bulletinModel = {
    */
   async updateAcknowledgement(postId, userId, status = 'APPROVED', comment = null) {
     const id = `ack_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const acknowledgedAt = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const acknowledgedAt = nowIso();   // JST 壁時計で保存（UTC 壁時計だと JST 0時以降に1日ずれる）
 
     try {
       const db = await getDb();

@@ -129,11 +129,27 @@ const createReservation = (page, { facilityName, date, start, end, purpose }) =>
   return 'OK';
 }, facilityName, date, start, end, purpose);
 
-/** 日付ピッカーの値を変えて再読込させる */
-const setFacilityDate = (page, date) => page.evaluate((d) => {
-  const picker = document.getElementById('facility-date-picker');
-  picker.value = d;
-  picker.dispatchEvent(new Event('change'));
+/** ミニカレンダーで表示日を選ぶ（‹ [日付読み上げ] › は職員掲示板と同一。native date input は撤廃済み）。
+ *  月をまたぐ対象日は ‹ › ボタンで表示月を進めてから日付セルをクリックする */
+const setFacilityDate = (page, date) => page.evaluate(async (d) => {
+  const readout = document.getElementById('facility-day-current');
+  const cal = document.getElementById('facility-mini-cal');
+  if (cal.classList.contains('hidden')) readout.click();
+  await new Promise((r) => setTimeout(r, 400));
+  const targetMonth = d.slice(0, 7);   // 'YYYY-MM'
+  for (let i = 0; i < 26; i++) {
+    const cell = document.querySelector(`#facility-mini-cal [data-cal-date="${d}"]`);
+    if (cell) { cell.click(); return 'OK'; }
+    const label = document.querySelector('#facility-mini-cal .sched-month-label-btn').textContent.trim();
+    const m = label.match(/(\d{4})年(\d{1,2})月/);
+    const curKey = `${m[1]}-${String(Number(m[2])).padStart(2, '0')}`;
+    const diff = (Number(targetMonth.slice(0, 4)) - Number(curKey.slice(0, 4))) * 12
+      + (Number(targetMonth.slice(5, 7)) - Number(curKey.slice(5, 7)));
+    const dir = diff > 0 ? 1 : -1;
+    document.querySelector(`#facility-mini-cal [data-cal-month="${dir}"]`).click();
+    await new Promise((r) => setTimeout(r, 350));
+  }
+  return 'MONTH_NOT_REACHED';
 }, date);
 
 

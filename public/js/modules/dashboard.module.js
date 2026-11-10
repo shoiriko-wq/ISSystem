@@ -23,7 +23,8 @@ import {
   targetDayOf, markBulletinRead
 } from './bulletin.module.js';
 
-import { getShareableChatChannelId, loadChannels } from './chat.module.js';
+// ★ チャット投稿は撤廃（v3.1.7）: 「記事を共有」はピノックアップ教育ニュースへリンクを追加するだけなので、
+//   chat.module.js を読み込まない（職員チャットへ投稿しない）。
 
 /**
  * JST の時刻帯 (5段階) と季節 (6区分) を返す
@@ -445,7 +446,7 @@ export function initDashboardModule() {
 
             </h3>
 
-            <button type="button" id="dash-btn-news-share" class="btn-secondary py-1 px-2.5 text-sm shrink-0 flex items-center gap-1.5" title="記事URLを閲覧中の職員チャットチャンネルへ共有">
+            <button type="button" id="dash-btn-news-share" class="btn-secondary py-1 px-2.5 text-sm shrink-0 flex items-center gap-1.5" title="記事URLをピノックアップ教育ニュースへ共有（リンク追加）">
               <i data-lucide="share-2" class="w-3.5 h-3.5"></i> 記事を共有
             </button>
 
@@ -1027,7 +1028,11 @@ export async function loadDashboardData() {
 
 
 
-  // ★ 2. 本日の施設物品予約（daily-overview は施設単位のグループ { facility, reservations } を返す。
+  // ★ 2. ピノックアップ教育ニュース（共有リンク news_links）
+  //    「記事を共有」で追加した記事だけを並べる（チャット投稿は撤廃済み＝v3.1.7）
+  await loadSharedNewsLinks();
+
+  // ★ 3. 本日の施設物品予約（daily-overview は施設単位のグループ { facility, reservations } を返す。
   //   予約だけをフラット化して開始時間順に並べ、行クリックで施設タブへ飛べるようにする）
 
   const todayStr = new Date().toISOString().split('T')[0];
@@ -1103,7 +1108,7 @@ export async function loadDashboardData() {
 
 
 
-  // 3. 要対応タスク数（未処理承認・未読掲示）の更新
+  // ★ 4. 要対応タスク数（未処理承認・未読掲示）の更新
 
   // 年休等・出張サマリー (absence.module.js) を読み込み人数表示
 
@@ -1513,20 +1518,76 @@ function defaultShareTitle(url) {
 }
 
 /**
- * 共有先：職員チャットの「閲覧中グループ」（chat.module.js の現在グループ）
- * ★ 職員全体チャット撤廃（2026/11/9 v3.1.2）: 既定の全体チャンネルは存在しない。
- *   チャットをまだ開いていない初回はグループ一覧を取得して先頭のグループを使い、
- *   グループが未作成なら null を返す（共有は送らない）。
+ * ★ チャット投稿は撤廃（v3.1.7）: 職員チャットへの共有投稿経路（チャンネル解決・投稿テキスト組み立て）は
+ *   コードに存在しない。共有の行き先は「ピノックアップ教育ニュース」の共有リンク（server の news_links）だけ。
  */
-async function resolveShareChannelId() {
-  const id = getShareableChatChannelId();
-  if (id) return id;
-  try {
-    await loadChannels();
-  } catch (e) {
-    return null;
+
+// 共有リンクの控え（ウィジェット描画用。loadDashboardData と共有成功時に更新する）
+let sharedLinks = [];
+
+/** 共有リンクのスナップショット（描画・UI テスト用。元配列は渡さない） */
+export function sharedLinksSnapshot() {
+  return sharedLinks.slice();
+}
+
+/**
+ * 「ピノックアップ教育ニュース」ウィジェットを描画する（共有リンクを新しい順に並べる）
+ * カードは 2px 実線の1枚の枠（readability.css R3/R4 でホバーリング・浮き上がり）。
+ * 元記事は新タブで開く（target="_blank"・rel="noopener noreferrer"）。常設説明文は置かない（UI十条9）。
+ */
+function renderDashNewsSummary() {
+  const el = document.getElementById('dash-news-summary');
+  if (!el) return;
+
+  if (sharedLinks.length === 0) {
+    el.innerHTML = '<div class="text-xs text-muted py-4 text-center col-span-2">共有された記事はまだありません。</div>';
+    refreshLucideIcons();
+    return;
   }
-  return getShareableChatChannelId();
+
+  el.innerHTML = sharedLinks.map((l) => {
+    const rawUrl = String(l.url || '');
+    const safeUrl = /^https?:\/\//i.test(rawUrl) ? rawUrl : '#';
+    const title = escapeHTML(String(l.title || l.domain || '共有記事'));
+    const domain = escapeHTML(String(l.domain || defaultShareTitle(rawUrl)));
+    const day = String(l.addedDay || l.added_day || '').substring(0, 10);
+    const by = escapeHTML(String(l.addedByName || l.added_by_name || '教員'));
+
+    return `
+      <div class="p-3 rounded-lg bg-surface-strong border border-divider flex flex-col gap-1.5">
+        <div class="flex items-center justify-between gap-2">
+          <span class="badge badge-info truncate">${domain}</span>
+          <span class="text-[10px] text-muted font-mono shrink-0">${escapeHTML(day)}</span>
+        </div>
+        <a href="${escapeHTML(safeUrl)}" target="_blank" rel="noopener noreferrer"
+           class="text-xs font-bold text-accent hover:underline flex items-center gap-1 leading-snug"
+           aria-label="元記事を開く">
+          ${title} <i data-lucide="external-link" class="w-3 h-3 shrink-0"></i>
+        </a>
+        <span class="text-[10px] text-muted">共有: ${by} 教員</span>
+      </div>
+    `;
+  }).join('');
+
+  refreshLucideIcons();
+}
+
+/**
+ * 共有リンク一覧を取得して描画する（ダッシュボード読み込み時）
+ */
+export async function loadSharedNewsLinks() {
+  const el = document.getElementById('dash-news-summary');
+  if (!el) return;
+
+  try {
+    const res = await apiGet('/news/links', { limit: 8 });
+    sharedLinks = res.links || (Array.isArray(res) ? res : []);
+  } catch (e) {
+    console.warn('[Dashboard] 共有リンクの取得に失敗:', e.message);
+    sharedLinks = [];
+  }
+
+  renderDashNewsSummary();
 }
 
 /**
@@ -1543,13 +1604,10 @@ export function openNewsShareModal() {
   document.getElementById('news-share-url')?.focus();
 }
 
-/** 職員チャット投稿用のテキストを組み立てる（【記事共有】+ドメイン名+URL の2行） */
-function buildShareMessage(url) {
-  return [`【記事共有】${defaultShareTitle(url)}`, url].join('\n');
-}
-
 /**
  * 共有モーダルのフォームイベント登録（初期化時に1回だけ）
+ * ★ 送信先は POST /api/news/links（共有リンクを1件追加するだけ）。チャットには投稿しない。
+ *   ページタイトルは server がURLをfetchって取得する（取れない日はドメイン名がタイトルになる）。
  */
 function bindNewsShareForm() {
   const form = document.getElementById('news-share-form');
@@ -1566,12 +1624,6 @@ function bindNewsShareForm() {
       return;
     }
 
-    const channelId = await resolveShareChannelId();
-    if (!channelId) {
-      showToast('共有先の職員チャットグループがありません。「職員チャット」でグループを作成してください', 'warning');
-      return;
-    }
-
     const submitBtn = form.querySelector('button[type="submit"]');
     if (submitBtn) {
       submitBtn.disabled = true;
@@ -1579,16 +1631,20 @@ function bindNewsShareForm() {
     }
 
     try {
-      await apiPost(`/chat/channels/${channelId}/messages`, {
-        messageText: buildShareMessage(url),
-        senderName: state.currentUser?.name || '教員'
-      });
+      const res = await apiPost('/news/links', { url });
+      const item = res?.link || res?.data || null;
 
       closeModal('news-share-modal');
       form.reset();
 
-      showToast('職員チャットへ記事を共有しました', 'success');
-      switchTab('chat');
+      const title = (item && item.title) ? item.title : defaultShareTitle(url);
+      showToast(`ピノックアップ教育ニュースへ「${title}」を共有しました`, 'success');
+
+      // ウィジェットへ即反映（server へ再取得を頼まず、追加した1件を先頭に足す）
+      if (item) {
+        sharedLinks = [item, ...sharedLinks];
+        renderDashNewsSummary();
+      }
     } catch (err) {
       // 失敗時はモーダルを開いたままエラー表示（入力内容は保持）
       showToast(`共有に失敗しました: ${err.message}`, 'error');

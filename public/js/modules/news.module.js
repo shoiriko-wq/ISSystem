@@ -1,13 +1,13 @@
 /**
  * ISSystem News Module
- * 教育ニュース速報・ワンタップチャット/掲示板共有コントローラー
+ * 教育ニュース速報・ワンタップ共有コントローラー
+ * ★ チャット投稿は撤廃（v3.1.7）: 共有はピノックアップ教育ニュース（news_links）と掲示板だけ。職員チャットへは投稿しない。
  */
 
 import { apiGet, apiPost } from '../api.js';
 import { formatDate, escapeHTML, refreshLucideIcons, openModal, closeModal, showToast } from '../ui-helpers.js';
 import { switchTab } from '../main.js';
 import { state } from '../state.js';
-import { getShareableChatChannelId, loadChannels } from './chat.module.js';
 
 let selectedNewsCategory = 'ALL';
 let newsCache = [];
@@ -34,7 +34,7 @@ export function initNewsModule() {
         <h2 class="text-lg font-bold text-main flex items-center gap-2">
           <i data-lucide="newspaper" class="w-5 h-5 text-accent"></i> 最新教育動向 & ニュース速報
         </h2>
-        <p class="text-xs text-muted">文科省発表・教育技術トレンド記事の閲覧および職員チャット・掲示板へのワンタップ共有を行えます。</p>
+        <p class="text-xs text-muted">文科省発表・教育技術トレンド記事の閲覧およびピノックアップ教育ニュース・掲示板へのワンタップ共有を行えます。</p>
       </div>
 
       <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
@@ -142,8 +142,8 @@ function renderNewsList() {
         </a>
 
         <div class="flex items-center gap-2">
-          <button class="btn-share-chat py-1 px-2.5 bg-surface hover-surface-strong text-main border border-main rounded text-[11px] flex items-center gap-1 transition-colors" data-news-id="${item.id}">
-            <i data-lucide="message-square" class="w-3.5 h-3.5 text-accent"></i> チャットへ共有
+          <button class="btn-share-link py-1 px-2.5 bg-surface hover-surface-strong text-main border border-main rounded text-[11px] flex items-center gap-1 transition-colors" data-news-id="${item.id}">
+            <i data-lucide="newspaper" class="w-3.5 h-3.5 text-accent"></i> ピノックアップへ共有
           </button>
 
           <button class="btn-share-bulletin py-1 px-2.5 bg-surface hover-surface-strong text-main border border-main rounded text-[11px] flex items-center gap-1 transition-colors" data-news-id="${item.id}">
@@ -154,11 +154,11 @@ function renderNewsList() {
     </div>
   `).join('');
 
-  // チャット共有ボタンイベント
-  container.querySelectorAll('.btn-share-chat').forEach(btn => {
+  // 共有リンクボタンイベント（ピノックアップ教育ニュースへリンクを追加する。チャットには投稿しない）
+  container.querySelectorAll('.btn-share-link').forEach(btn => {
     btn.addEventListener('click', () => {
       const id = btn.getAttribute('data-news-id');
-      shareToChat(id);
+      shareToNewsLinks(id);
     });
   });
 
@@ -174,50 +174,26 @@ function renderNewsList() {
 }
 
 /**
- * 共有先として閲覧中の（または先頭の）職員チャットグループIDを返す
- * ★ 職員全体チャットは撤廃済み（v3.1.2）⇒ チャットをまだ開いていない初回はグループ一覧を取得する
- * @returns {Promise<string|null>}
+ * ピノックアップ教育ニュースへワンタップ共有（共有リンクを1件追加するだけ＝チャット投稿はしない）
  */
-async function shareChatTarget() {
-  let id = getShareableChatChannelId();
-  if (!id) {
-    try {
-      await loadChannels();
-      id = getShareableChatChannelId();
-    } catch (e) {
-      id = null;
-    }
-  }
-  return id;
-}
-
-/**
- * チャットへワンタップ共有
- */
-async function shareToChat(newsId) {
+async function shareToNewsLinks(newsId) {
   const item = newsCache.find(n => String(n.id) === String(newsId));
   if (!item) return;
 
-  const shareText = `【教育ニュース共有】\n■ ${item.title}\n${item.summary}\n(詳細: ${item.url || '校内参照'})`;
-
-  const channelId = await shareChatTarget();
-  if (!channelId) {
-    showToast('共有先の職員チャットグループがありません。「職員チャット」でグループを作成してください', 'warning');
+  const url = String(item.url || '').trim();
+  if (!url) {
+    showToast('共有する記事のURLが見つかりません', 'warning');
     return;
   }
 
   try {
-    await apiPost(`/chat/channels/${channelId}/messages`, {
-      messageText: shareText,
-      senderName: state.currentUser?.name || '自分'
-    });
+    const res = await apiPost('/news/links', { url });
+    const added = res?.link || res?.data || null;
+    showToast(`ピノックアップ教育ニュースへ「${added?.title || item.title}」を共有しました`, 'success');
   } catch (e) {
     showToast(`共有に失敗しました: ${e.message}`, 'error');
     return;
   }
-
-  showToast('職員チャットへニュースを共有しました', 'success');
-  switchTab('chat');
 }
 
 /**

@@ -31,6 +31,21 @@ export const facilityController = {
   },
 
   /**
+   * 月別予約件数取得 (GET /api/facilities/month-counts)
+   * ミニカレンダーの「●」（予約のある日）打点用。対象月の各日付の件数を counts で返す
+   */
+  async getMonthCounts(req, res) {
+    try {
+      const targetDate = req.query.date || new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+      const result = await facilityModel.getMonthCounts(targetDate);
+      return res.status(200).json({ success: true, ...result });
+    } catch (err) {
+      console.error('[FacilityController MonthCounts Error]:', err);
+      return res.status(200).json({ success: true, month: '', start: '', end: '', counts: {} });
+    }
+  },
+
+  /**
    * 指定日時のタイムライン概要取得 (GET /api/facilities/daily-overview)
    */
   async getDailyOverview(req, res) {

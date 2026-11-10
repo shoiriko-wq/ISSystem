@@ -2,7 +2,9 @@
  * 掲示マスタ・ディテール（左=タイトル列／右=全文ペイン）の実ブラウザ検証
  *
  * 検証項目:
- *  1. 日付選択で左列にタイトルが出右ペインに全文が出る（選択行 = 右ペインの表示）
+ *  1. 日付選択で左列にタイトルが出右ペインに全文が出る（選択行 = 右ペインの表示）。
+ *     左列の幅は画面幅に応じて広がる（clamp(16rem, 26vw, 24rem)。左列幅の全画面幅実測は
+ *     scripts/test-bulletin-title-pane-width.mjs（npm run test:ui:bulletin-title-pane））
  *  2. ↑/↓ で選択枠(選択行)だけが移動し、左列全体は動かない。右ペイン全文は連動してフェードイン程度
  *     （位置移動・フラッシュなし）。選択行の未読バッジが消える
  *  3. Enter で右ペインへフォーカス
@@ -31,6 +33,16 @@ const USER = process.env.UI_USER || 'T2026001';
 const PASS = process.env.UI_PASS || 'password123';
 const CHROME = process.env.CHROME_PATH || '/usr/bin/google-chrome';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** サーバーが返す日時（ISO・JST 壁時計）を日本の日付 YYYY-MM-DD に直す */
+const jstDayOf = (v) => {
+  if (v === null || v === undefined) return null;
+  const s = String(v);
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T00:00:00+09:00`) : new Date(s);
+  if (Number.isNaN(d.getTime())) return null;
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(d);
+};
+const todayJst = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(new Date());
 
 /** 本日へ戻る（ツールバーの「本日」ボタンは撤廃済み＝T キーで本日へ。未読表示中は閉じて本日へ）。
  *   入力欄にフォーカスがあると T キーが効かないので、フォーカスを外してから押す */
@@ -93,6 +105,15 @@ const check = (name, ok, detail = null) => {
   if (!ok) failures.push(name);
   console.log(`  ${ok ? 'PASS' : 'FAIL'} - ${name}${detail !== null ? ` -> ${JSON.stringify(detail)}` : ''}`);
 };
+
+// ★ 未読バッジの検証は「全掲示が未読」の状態に依存する。
+//   npm test と API スモークが既読レコードを作るため、開始時に既読レコードを空へ戻す
+//   （scripts/test-bulletin-unread-all-days.mjs と同じ慣習）。DB を作り直さない。
+const { query, pool } = await import('../config/database.js');
+await query('DELETE FROM post_acknowledgements');
+const ackLeft = Number((await query('SELECT COUNT(*) AS c FROM post_acknowledgements')).rows[0].c);
+log('db-reset', { ackLeft });
+check('既読リセットで post_acknowledgements が 0 件（全掲示が未読に戻る）', ackLeft === 0, { ackLeft });
 
 /** 2026-11-02 のような YYYY-MM-DD に ±n 日を加えた文字列 */
 const shiftDate = (iso, days) => {
@@ -178,6 +199,9 @@ const snapshot = (page) => page.evaluate(() => {
     titlePaneW: Math.round(titlePane.getBoundingClientRect().width),
     paneW: Math.round(pane.getBoundingClientRect().width),
     splitH: Math.round(split.getBoundingClientRect().height),
+    splitW: Math.round(split.getBoundingClientRect().width),
+    vw: window.innerWidth,
+    expectedPaneW: Math.min(Math.max(16 * parseFloat(getComputedStyle(document.documentElement).fontSize), 0.26 * window.innerWidth), 24 * parseFloat(getComputedStyle(document.documentElement).fontSize)),
     pageOverflowX: document.documentElement.scrollWidth - window.innerWidth,
     overflowEls: [...document.querySelectorAll('*')]
       .filter((el) => el.getBoundingClientRect().right > window.innerWidth + 1)
@@ -291,12 +315,14 @@ const snap1 = await snapshot(page);
 log('after-day-select', snap1);
 check('カレンダー単独ボタンは撤廃（#bulletin-cal-toggle は存在しない）',
   snap1.calToggleGone === true, { calToggleGone: snap1.calToggleGone });
-check('左右分割（左列 = 16rem 固定、右ペイン余り。ルートの font-size が変わっても rem 基準）',
+check('左右分割（左列は画面幅に応じて広がる — clamp(16rem, 26vw, 24rem)、右ペインは余り。ルートの font-size が変わっても rem 基準）',
   snap1.flexDir === 'row'
-    && snap1.titlePaneW >= snap1.rootFs * 15.5
-    && snap1.titlePaneW <= snap1.rootFs * 16.5
+    && Math.abs(snap1.titlePaneW - snap1.expectedPaneW) <= 2
+    && snap1.titlePaneW >= snap1.rootFs * 16
+    && snap1.titlePaneW <= snap1.rootFs * 24
     && snap1.paneW > snap1.titlePaneW,
-  { titlePaneW: snap1.titlePaneW, paneW: snap1.paneW, rootFs: snap1.rootFs, expectedRem16: snap1.rootFs * 16 });
+  { titlePaneW: snap1.titlePaneW, paneW: snap1.paneW, rootFs: snap1.rootFs, vw: snap1.vw,
+    expectedPaneW: Math.round(snap1.expectedPaneW), floorRem16: snap1.rootFs * 16, capRem24: snap1.rootFs * 24 });
 check('1件目が選択され右ペインに全文が出る（aria-selected=true）',
   snap1.rows > 0 && snap1.activeIdx === 0 && snap1.activeSelected === 'true' && snap1.paneTitle === snap1.activeTitle,
   { activeTitle: snap1.activeTitle, paneTitle: snap1.paneTitle });
@@ -373,12 +399,31 @@ log('title-unread-badge', titleBadge);
 check('見出しは「職員掲示板」ラベルのみ（見出しバッヂは廃止・未読数はサイドバーと未読ボタンだけ）',
   titleBadge.headText && titleBadge.headText.includes('職員掲示板') && titleBadge.titleBadgeExists === false,
   { headText: titleBadge.headText, titleBadgeExists: titleBadge.titleBadgeExists });
-// サイドバーのバッヂは数字のみ（全日未読）。見出しに数はない。数値で一致を検証する
+// サイドバーのバッヂは数字のみ（全日未読）。見出しに数はない。数値で一致を検証する。
+// 期待値はクライアントと同じ計算で出す（クライアントキャッシュ＝最新100件）:
+//   ・未読（ackStatus が READ でない）
+//   ・登録日以降に投稿された（登録日より古い記事は数えない）
+//   ・本日が掲示期間内（掲示開始前・掲示終了後の記事は数えない）
+// DB には過去の検証で残った掲示も残るので、本日列表の件数との上下限では比べられない
+const meRes = await apiFetch(page, 'GET', '/auth/me');
+const regDay = jstDayOf(meRes.json?.me?.created_at ?? meRes.json?.user?.created_at ?? null);
+const bulletinsRes = await apiFetch(page, 'GET', '/bulletins?limit=100');
+const cacheItems = (bulletinsRes.json?.bulletins || []).slice(0, 100);
+const expectedSide = cacheItems.filter((b) => {
+  if ((b.ackStatus ?? b.ack_status) === 'READ') return false;
+  const postedDay = jstDayOf(b.postedAt ?? b.posted_at ?? b.createdAt ?? b.created_at);
+  if (regDay && postedDay && postedDay < regDay) return false;
+  const start = String(b.displayStart ?? b.display_start ?? '');
+  const end = String(b.displayEnd ?? b.display_end ?? '');
+  if (start && start > todayJst) return false;
+  if (end && end < todayJst) return false;
+  return true;
+}).length;
 const sideNum = Number((titleBadge.sideText || '').replace(/\D/g, ''));
-check('サイドバーバッヂは全日未読数（数字のみ。当日列表の未読行数以上・列表件数以下）',
+check('サイドバーバッヂは全日未読数（数字のみ。キャッシュの未読・登録日以降・本日掲示有効と一致し、本日列表の未読行数以上）',
   /^\d+$|^99\+$/.test(titleBadge.sideText || '') &&
-  sideNum >= titleBadge.unreadRows && sideNum <= titleBadge.listCount,
-  { side: titleBadge.sideText, sideNum, unreadRows: titleBadge.unreadRows, listCount: titleBadge.listCount });
+  sideNum >= titleBadge.unreadRows && sideNum === Math.min(expectedSide, 99),
+  { side: titleBadge.sideText, sideNum, unreadRows: titleBadge.unreadRows, expectedSide, cacheItems: cacheItems.length });
 check('全日未読 0 ならサイドバーバッヂは hidden',
   (sideNum === 0) === titleBadge.sideHidden,
   { sideHidden: titleBadge.sideHidden, sideNum });
@@ -564,7 +609,8 @@ log('long-title-row', longRow);
 check('長いタイトルは1行のまま右端バッチの下に潜って省略表示（行高1行・バッチは不透明）',
   longRow && longRow.truncated && longRow.titleEndsUnderBadge && longRow.rowH <= 40 && longRow.badgeOpaque, longRow);
 
-/* 左列の幅はタイトル内容で広がらない（flex の min-width:auto 解除。長いタイトルは truncate） */
+/* 左列の幅はタイトル内容で広がらない（flex の min-width:auto を解除。長いタイトルは truncate）。
+   幅は画面幅に応じて広がる値（clamp(16rem, 26vw, 24rem)）のまま */
 const longTitleW = await page.evaluate(() => {
   const row = document.querySelector('.bulletin-title-row');
   const label = row?.querySelector('.bulletin-row-title');
@@ -572,11 +618,14 @@ const longTitleW = await page.evaluate(() => {
   label.textContent = '極めて長いタイトルです'.repeat(8);
   const w = Math.round(document.querySelector('.bulletin-title-pane').getBoundingClientRect().width);
   const listW = Math.round(document.getElementById('bulletin-list-container').clientWidth);
-  return { paneW: w, listW, rootFs: parseFloat(getComputedStyle(document.documentElement).fontSize) };
+  const fs = parseFloat(getComputedStyle(document.documentElement).fontSize);
+  const expectedPaneW = Math.min(Math.max(16 * fs, 0.26 * window.innerWidth), 24 * fs);
+  return { paneW: w, listW, rootFs: fs, expectedPaneW };
 });
-check('長いタイトルでも左列は 16rem のまま（列が押し広げられない）',
-  longTitleW && longTitleW.paneW >= longTitleW.rootFs * 15.5 && longTitleW.paneW <= longTitleW.rootFs * 16.5,
-  longTitleW);
+check('極めて長いタイトルでも左列は期待幅 clamp(16rem, 26vw, 24rem) のまま（列が押し広げられない）',
+  longTitleW && Math.abs(longTitleW.paneW - longTitleW.expectedPaneW) <= 2
+    && longTitleW.paneW >= longTitleW.rootFs * 16 && longTitleW.paneW <= longTitleW.rootFs * 24,
+  { paneW: longTitleW.paneW, expectedPaneW: Math.round(longTitleW.expectedPaneW), rootFs: longTitleW.rootFs });
 
 await page.screenshot({ path: '/tmp/bulletin-split-desktop.png' });
 
@@ -736,19 +785,27 @@ const rapid = await page.evaluate(async () => {
   const nap = (ms) => new Promise((r) => setTimeout(r, ms));
   const nextXs = [];
   const readoutWs = [];
+  const cssWs = [];
   const sample = () => {
+    const read = document.getElementById('bulletin-day-current');
     nextXs.push(Math.round(document.getElementById('bulletin-day-next').getBoundingClientRect().x));
-    readoutWs.push(Math.round(document.getElementById('bulletin-day-current').getBoundingClientRect().width));
+    readoutWs.push(Math.round(read.getBoundingClientRect().width));
+    // CSS の指定幅（5.4rem = 94.5px）は固定。描画実測は文字幅の差で 1px 動か（¼px の丸め）
+    cssWs.push(parseFloat(getComputedStyle(read).width));
   };
   for (let i = 0; i < 5; i++) { document.getElementById('bulletin-day-next').click(); await nap(160); sample(); }
   for (let i = 0; i < 5; i++) { document.getElementById('bulletin-day-prev').click(); await nap(160); sample(); }
-  return { nextXs, readoutWs, day: document.getElementById('bulletin-day-current').dataset.day };
+  return { nextXs, readoutWs, cssWs, day: document.getElementById('bulletin-day-current').dataset.day };
 });
 log('rapid-click', rapid);
 const uniqX = [...new Set(rapid.nextXs)];
 const uniqW = [...new Set(rapid.readoutWs)];
-check('› を 10 回連打しても › の x 位置は 1px も動かず、中心日表示の幅も一定',
-  uniqX.length === 1 && uniqW.length === 1, { uniqX, uniqW });
+const uniqCssW = [...new Set(rapid.cssWs)];
+const wMax = Math.max(...rapid.readoutWs);
+const wMin = Math.min(...rapid.readoutWs);
+check('› を 10 回連打しても › の x 位置は 1px も動かず、中心日表示の幅は CSS 指定 5.4rem（94.5px）のまま（描画実測は1px以内で揺れる）',
+  uniqX.length === 1 && uniqCssW.length === 1 && Math.abs(uniqCssW[0] - 94.5) < 0.01 && wMax - wMin <= 1,
+  { uniqX, uniqW, uniqCssW, wMax, wMin });
 check('5 日進・5 日戻りの連打で中心日は元の日に戻る', rapid.day === c4, { c4, day: rapid.day });
 
 // 開いているカレンダーは中心日に追従（‹ › で月を跨ぐと月表示と選択日が中心日と同じ月・同じ日）
@@ -1089,6 +1146,7 @@ check('prefers-reduced-motion ではスライド移動なし（コンテンツ�
   rm.mq === true && rm.paneAnimations === 0 && rm.listAnimations === 0 && rm.activeIdx === 1, rm);
 await b2.close();
 
+await pool.end();
 console.log(`\n${failures.length === 0 ? 'ALL PASSED' : `${failures.length} FAILURES`}`);
 process.exit(failures.length === 0 ? 0 : 1);
 

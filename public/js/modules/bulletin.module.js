@@ -150,13 +150,16 @@ export function initBulletinModule() {
         </div>
         <!-- ★ 全日未読ボタン（検索ボックスの右。ラベル「未読 N」＝サイドバーと同一の全日未読数、100 以上は 99+。
              クリックで左列が全日の未読一覧（対象日見出し付き）になり中心日表示は「未読」になる。
-             もう一度押すと日付表示へ戻る。未読 0 件は main.js が hidden にする＝押せない） -->
-        <button type="button" id="bulletin-btn-unread" class="btn-secondary bulletin-unread-btn shrink-0 hidden"
+             全日表示中はこのボタンは押せない（disabled）。閉じて本日へ戻るには T キー
+             （または年月選択ラベルクリック・ミニカレンダー・「本日へ」）。未読 0 件は main.js が hidden にする＝押せない。
+             枠・文字は検索ボックスと同一（1.05rem・700・角丸 0.5rem・border + border-main の 2px 実線 1枚。
+             btn-secondary は使わず readability.css が直接張る） -->
+        <button type="button" id="bulletin-btn-unread" class="bulletin-unread-btn border border-main shrink-0 hidden"
                 aria-pressed="false" aria-label="全日の未読検索（未読 0 件）" title="全日の未読を検索（クリックで全日の未読一覧を表示）">未読 0</button>
         <!-- ★ ‹ [日付] › を同一グループで隣接（一緒に折り返す。施設予約と同じ慣習）。
              中心日は ‹ › の間。日付は固定幅なので › を連打しても › の位置が動かない（「全日」「未読」も同幅）。
              日付クリック（または C キー）でミニカレンダーを開閉。カレンダー単独ボタンは撤廃。
-             検索中・未読表示中は中心日が列表表示に影響しないため ‹ ›・日付クリックは止まる（検索語を消す／未読ボタンをもう一度押すと元の日へ復帰）。 -->
+             検索中・未読表示中は中心日が列表表示に影響しないため ‹ ›・日付クリックは止まる（検索語を消す／T キーで元の日へ復帰）。 -->
         <div class="flex items-center bg-surface rounded-lg border border-main shrink-0" id="bulletin-day-group">
           <button type="button" id="bulletin-day-prev" class="icon-btn icon-btn-fixed text-soft"
                   aria-label="前日（← キー）" title="前日（← キー）"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
@@ -433,6 +436,10 @@ function bulletinKeyHandler(e) {
     .filter((m) => !m.classList.contains('hidden'));
   if (openModals.length > 0) return;
 
+  // 年月選択メニューが開いている間はメニュー側の keydown（矢印で月焦点・Esc で閉じてラベルへ）だけに譲る。
+  // ここで ←/→ を読むと中心日が動いてミニカレンダーが再描画され、メニューの焦点が消える。
+  if (calMonthMenuOpen) return;
+
   const ids = bulletinRowIds();
 
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -564,9 +571,10 @@ function dayCounts() {
   return map;
 }
 
-/** 対象日が中心日と一致するか（対象日未設定のレコードは投稿日で判定） */
+/** 対象日が中心日と一致し、掲示期間（表示開始日・終了日）が中心日で有効か（対象日未設定のレコードは投稿日で判定） */
 function matchesDay(b) {
-  return targetDayOf(b) === (currentDayDate || dayKey(0));
+  const day = currentDayDate || dayKey(0);
+  return targetDayOf(b) === day && isDisplayActiveOn(b, day);
 }
 
 /** 2つの YYYY-MM-DD キーの日数差 (b - a) */
@@ -698,11 +706,13 @@ function setDayNavEnabled(enabled) {
  *   ツールバー側の同じ id のボタンはモジュール側で active 表示する（2 つあるため querySelectorAll で揃える） */
 export function syncUnreadButtonToState() {
   const fullMode = isFullMode();
-  const side = document.querySelector('#app-body #bulletin-btn-unread');
-  if (side) {
-    side.disabled = fullMode;
-    side.setAttribute('aria-disabled', String(fullMode));
-  }
+  // 未読ボタンはツールバーのボタンとサイドバー項目の 2 つ（同じ id）。両方を全日表示状態へ揃える：
+  //   全日表示（検索語・未読表示）中は中心日を動かす操作を止めるので、未読ボタンも押せない（disabled）。
+  //   閉じて本日へ戻るには T キー（main.js の refreshBulletinControls と同じ条件）。
+  document.querySelectorAll('#bulletin-btn-unread').forEach((btn) => {
+    btn.disabled = fullMode;
+    btn.setAttribute('aria-disabled', String(fullMode));
+  });
 }
 
 /** 全日表示中か（検索語・未読表示＝中心日が列表表示に影響しない表示モード）。main.js の refreshBulletinControls が同じ条件で控件を揃える */

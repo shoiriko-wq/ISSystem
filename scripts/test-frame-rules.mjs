@@ -216,23 +216,28 @@ const dashArticleHovers = [];
 for (const sel of dashArticleSelectors) {
   const el = await page.$(`${sel} > div.rounded-lg`);
   if (!el) { dashArticleHovers.push({ sel, missing: true }); continue; }
-  await page.mouse.move(5, 5);
-  await el.hover();
+  // ホバーが座標吸収で見失うことがある（スクロール後の座標がずれる）。:hover 確認してから描画を実測する
+  let hovered = false;
+  for (let i = 0; i < 6 && !hovered; i++) {
+    await el.hover();
+    await new Promise((r) => setTimeout(r, 120));
+    hovered = await page.evaluate((node) => node.matches(':hover'), el);
+  }
   await new Promise((r) => setTimeout(r, 400));
-  dashArticleHovers.push(await page.evaluate((node, selName) => {
+  dashArticleHovers.push(await page.evaluate((node, selName, hov) => {
     const cs = getComputedStyle(node);
     return {
       sel: selName, outline: cs.outlineStyle, transform: cs.transform,
       cursor: cs.cursor, top: parseFloat(cs.borderTopWidth),
-      borderColor: cs.borderTopColor
+      borderColor: cs.borderTopColor, hovered: hov
     };
-  }, el, sel));
+  }, el, sel, hovered));
 }
 const liftedTransform = (t) => /^matrix\(1, 0, 0, 1, 0, -\d+(\.\d+)?\)$/.test(t);
 check('article cards in the 4 dashboard sections lift + draw a hover ring like the top article cards',
-  dashArticleHovers.length === 4 && dashArticleHovers.every((r) => !r.missing
+  dashArticleHovers.length === 4 && dashArticleHovers.every((r) => !r.missing && r.hovered === true
     && r.outline === 'solid' && liftedTransform(r.transform) && r.cursor === 'pointer' && r.top === FRAME_W),
-  dashArticleHovers.map((r) => `${r.sel} outline=${r.outline} transform=${r.transform} cursor=${r.cursor} border=${r.top}`).join(' | '));
+  dashArticleHovers.map((r) => `${r.sel} hover=${r.hovered} outline=${r.outline} transform=${r.transform} cursor=${r.cursor} border=${r.top}`).join(' | '));
 
 await page.mouse.move(5, 5);
 
