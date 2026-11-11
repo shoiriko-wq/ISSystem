@@ -1,9 +1,0 @@
-PASS - API スモークスクリプト scripts/api-smoke-test.js がある
-PASS - サーバー health が応答する（npm start が起動済み） health=200
-PASS - ISSystem仕様書.md に「既知の課題」「意図された非実装」「改訂履歴」の節がある
-PASS - 職員全体チャット general への参照がコードに残っていない
-FAIL - README に UI十条（10項目）が揃っている items=0
-FAIL - サイドバーは 68px（広げ 220px）でアプリ本体をプッシュする [object Object]
-FAIL - CHANGELOG.md がある
-3 FAILURES
-Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 94

@@ -82,7 +82,8 @@ PGPASSWORD='otome601' psql -h localhost -p 5432 -U postgres -d issystem
 | --- | --- |
 | `npm start` / `npm run dev` | サーバー起動 (HTTPS/WSS + Cron + CA配布用HTTP) |
 | `npm run cert:gen` | プライベートCAとサーバー証明書を生成（既存があればスキップ。`--force` で再発行） |
-| `npm test` | jest 統合テスト (12スイート / 150テスト、stack 秘匿 4項目 (error.middleware) + bcrypt ハッシュ非露出 (auth 8c) 含む。各スイートで pg プールを close するため `--forceExit` 不要) |
+| `npm test` | jest 統合テスト (12スイート / 150テスト、stack 秘匿 4項目 (error.middleware) + bcrypt ハッシュ非露出 (auth 8c) 含む。各スイートで pg プールを close するため `--forceExit` 不要。`pretest` がDBを作り直すので全ゲート用) |
+| `npm run test:one -- test/<file>.test.js` | 開発中の単スイート実行（`--runInBand` 直列・`pretest` を踏まない＝DB再構築しない）。既存の seed データのまま1スイートだけ回す速い経路 |
 | `npm run api:check` | API スモークテスト (HTTPS の GET/POST/PUT/DELETE を実行しステータスを検証) |
 | `npm run test:socket-auth` | Socket 接続権限検証 (tokenless / garbage / demoトークン / 外部Origin の拒否、KYOMU・ADMIN gate、ロック自保持限定、chat メンバーシップ、職員全体グループが一覧に出ないことの 21項目。サーバー起動後に実行。Node 側通信は `ca: [certs/issystem-ca.crt]` を明示) |
 | `npm run test:rbac` | RBAC 権限検証 (`/api/users` 一覧のロール別最小化・追加 KYOMU のみ role=TEACHER 固定・削除 ADMIN のみ、招待コード発行 KYOMU/ADMIN、チャンネル削除 KYOMU/ADMIN の 17項目。TEACHER の権限昇格は 403。サーバー起動後に実行) |
@@ -98,7 +99,7 @@ PGPASSWORD='otome601' psql -h localhost -p 5432 -U postgres -d issystem
 | `npm run test:ui:bulletin` | 職員掲示板の左右分割・列表・未読バッヂ UI 検証 (開始時に `post_acknowledgements` を空にして前回の検証の結果を引き継がない / 本日にサーバー登録の記事が本日列表へ出る・中心日ラベルは CSS 指定 5.4rem(94.5px) 固定で › の x は 1px も動かず描画実測は 1px 以内 / ‹ › と ←/→・T・C キーは 1日分ザッピング / 左列幅 clamp(16rem,26vw,24rem) 実測 / 右ペインの著者・詳細・添付・送信ボタン・ホバーリング（1px リング＋3px 浮き）/ 詳細モーダル・削除・他人投稿の DELETE 403 / 390px と 320px のレイアウト / サイドバーの全日未読数はクライアントと同じ計算（キャッシュ最新100件の未読・登録日以降・本日掲示有効）と一致 / reduced-motion でアニメ 0 の 68項目) |
 | `npm run test:ui:bulletin-unread` | 職員掲示板の全日未読列表 UI 検証 (日付は今日から動的に導出（今日・今日-3・今日-6・今日+3 の fixture を API で作り、週ラベル期待値も今日から計算）。全日未読列表は登録日以降・対象日が今日の順（同一日は投稿時刻の降順）、週セパレータラベルは「先週 6 件」「2 週間前 3 件」など週数で出、ラベル左端 x は全行と同一・見出し左端より左へ出ない（右端は列幅 316px 超でよい）、行高さ 40px、サイドバーの未読ボタンは全日表示中は disabled、後片付け（DELETE→未読 2 減・ボタン hidden・本日列表復帰）の 98項目) |
 | `npm run test:ui:bulletin-unread-btn-pos` | 職員掲示板の全日未読ボタンとミニカレンダー年月部の実ブラウザ寸法検証 (未読ボタンはツールバーの検索ボックスの真右で同一の高さ2.4rem(42px)・同一文字1.05rem(18.375px)・700・角丸0.5rem(8.75px)・枠2px実線1枚・bg-input・影なし（btn-secondary は使わず readability.css が張る）、ラベル「未読 N」はサイドバーの数字と同一、見出し右の未読バッヂは無し・ツールバーの「本日」ボタンも無し、年月部はスケジュールのカレンダーと同一設計（‹ [年月] ›）、ラベルクリックで年月選択メニュー（年 ‹ › + 12ヶ月 + 「本日へ」）はラベルの真下に中央揃え（左右余白9px・下4px・幅308px・ラベル中央＝メニュー中央）で開き focus は月ボタンへ、矢印キーで月焦点（メニュー開中は ←/→ は中心日を動かさない）、Esc で閉じて焦点はラベルへ、外クリックで閉じる、› で1ヶ月送り（中心日は本日まま）、「本日へ」で本日へ移動しメニューとカレンダーが閉じる、クリックで全日の未読一覧（中心日表示「未読」・‹ › と中心日クリックと年月ラベルと C キーが停止、未読ボタン自身も disabled）、T キーで閉じて本日へ戻る、後片付け（DELETE→未読数2減・未読ラベルとボタン hidden・列表は本日列表）の12項目) |
-| `npm run test:ui:news-share` | ダッシュボード「記事を共有」UI 検証 (「すべて見る」撤廃 / 共有モーダルの開閉とURL入力 / **モーダルの中身は記事URL入力欄だけ（常設説明文なし＝`p` 0・本文はラベル「記事URL *」だけ。補完規則はプレースホルダーと `title` のみで伝える＝UI十条9・禁则6）** / **URL入力の7条件を computed style で実測（type・id・name・`autocomplete=off`・`aria-label`・`label[for]`・`border-main` 2px実線＝UI十条3・禁则8）** / URL空・不正の拒否 / スキーマ無しの `https://` 補完 / 職員チャットへ `【記事共有】+ドメイン名+URL` の2行投稿（**投稿先は閲覧中の職員チャットチャンネル**＝チャットサイドバー `.active` と一致、URL入力欄のみ・チャンネル選択なし）/ サーバー実データへの登録 / 背景クリック・ESC・閉じるボタン・アイコン描画の 20項目) |
+| `npm run test:ui:news-share` | ダッシュボード「記事を共有」UI 検証 (「すべて見る」撤廃 / 共有モーダルの開閉とURL入力 / **モーダルの中身は記事URL入力欄だけ（常設説明文なし＝`p` 0・本文はラベル「記事URL *」だけ。補完規則はプレースホルダーと `title` のみで伝える＝UI十条9・禁则6）** / **URL入力の7条件を computed style で実測（type・id・name・`autocomplete=off`・`aria-label`・`label[for]`・`border-main` 2px実線＝UI十条3・禁则8）** / URL空・不正の拒否 / スキーマ無しの `https://` 補完 / **共有の行き先は `POST /api/news/links`（`news_links`）だけ＝職員チャットへの投稿は発生しない（v3.1.7・禁则16）、タブはダッシュボードのまま** / サーバー実データ（`news_links`）への登録 / **後片付け（このテストが作った共有リンクを DB から消す。実行ごとに一意なURLで共有済み 409 を防ぐ）** / 背景クリック・ESC・閉じるボタン・アイコン描画の 21項目) |
 | `npm run test:ui:chat` | 職員チャット UI 検証 (「再通知」ボタン・`handleRenotifyAll`・再通知 API 廃止 / 未読者一覧トーストと既読更新 / 投稿直後の未読数（メンバー数-1）/ サーバー配信の未読名簿 / 別メンバー閲覧で未読 1 減 / リロード後の未読数一致 / 「目のマーク」非表示モードの連動 / メタの左右整列（相手=左からアイコン・名前・日時、自分=右から）/ ホバー時のプルダウンメニュー（実マウスで押せる・レイアウトシフトなし）/ **サーバーのチャンネル一覧は参加グループだけ（タイプは GROUP / DM / WORKFLOW のみ＝職員全体グループは0件。実測 types は `GROUP` と `WORKFLOW` のみ）** / **サイドバーのグループ行は参加グループだけ（行のIDはサーバーのグループ一覧の中に入り・「全体」の文字なし＝v3.1.4、実測 names「📋 教務部連絡」「🧭 進路指導連絡」+作成グループ）** / 検証用グループの削除後片付け。Node 側は `ca: [certs/issystem-ca.crt]` で TLS を通す) |
 
 | `npm run test:ui:fx` | ダッシュボード労いカード（粒子アニメーション）＋開発・QA 用プレビューパネル UI 検証 (落下・上昇距離がカード高さ実測の `--fx-drop` に比例し ResizeObserver で再計算 / 年休等・出張の「記入する」ボタン撤廃 / パネルは常時表示され開閉バーが残る / テーマセレクト（自動+全13）と前・次で粒子テーマとモーションが切替 / 静的スウォッチ 13 (prefers-reduced-motion でも確認) / 疑似日付 2026-12-24→サンタ+クリスマスイブ文・季節セレクト（冬→夏）で季節文が即時切替・時刻帯5・曜日7・特別な日 13 期間ウィンドウ（年始 1/1–1/3・仕事始め 1/5–1/6・3学期始業式 1/7–1/9・3学期終業式 3/23–3/24・新年度 4/1–4/3・1学期始業式 4/8–4/10・1学期終業式 7/17–7/20・2学期始業式 9/1–9/3・クリスマス 12/23・12/24・12/25・2学期終業式 12/26–12/28・年末 12/29–12/31。セレクトは期間表 `DASH_EVENT_PERIODS` から自動生成）がすべて出る / 期間ウィンドウ算法（年度で ± 日がずれる学校の節目を期間で捕捉し同じ文を 3 日前後表示：疑似日付 2026-04-08・2026-04-10→第1学期始業式文+桜、2026-01-08→3学期始業式+紙吹雪、2026-03-24・2026-07-17→終業式+紙吹雪、2026-12-27→第2学期修了+サンタ、2026-12-29→大掃除+雪）/ 全メッセージセレクト（4組31文）で選んだ文がそのまま出る / 校内行事カードの見出しは「本日の校内行事」（「今日の」表記は出ない） / 復帰で全セレクト自動・実日時へ / `--fx-drop` ≥ カード高さ / 390px で横スクロールなし・全コントロールに label.for と枠線 / 人数タイルのクリックと Enter で年休等・出張の登録・確認モーダルが開きフィルタが効く（記入フォームはモーダル内常設、件数ラベル n名、bindAbsenceTile は件数非依存＝0名表示のタイルでもクリックで開く）/ 梅雨は降り注ぎ系 `fx-rain`（絵文字は傾き固定・回転なし・進行方向は下。JS が粒子ごとに 14〜24deg の `--fx-tilt` を振り、keyframes の角度は全 keyframe 同一、Y が 20%→50%→80% で単調に下がることを deg と px で実測）/ 瞬き系（陽光・日傘・海・お正月・夜の星）は粒子ごとに inline の top を 4% + i*7% + 0〜5% の帯で振って枠全体に広がる（CSS の top:8% はフォールバック。枠高249px で top 実測 30〜180px（8.8〜68.6%）、上端と下端の差 149〜150px（枠高さの60%）、下半分に4個、keyframes 50% の最下点 200px は枠内、全10粒子が枠内を px で実測）の 54項目) |
@@ -151,29 +152,39 @@ PGPASSWORD='otome601' psql -h localhost -p 5432 -U postgres -d issystem
 6. 「〜してください」等の操作説明を画面内に置く慣例禁止
 7. モーダルの高さ上限なし・余白なし中央寄せ禁止
 8. 入力の `label`・`aria-label`・`autocomplete` 省略禁止
-9. `!important` 上書き禁止（`chat.module.js` のレイアウト修正は例外）
+9. `!important` はレイアウト寸法の確定に使う（`layouts.css` §6 のサイドバー寸法と `chat.module.js` のレイアウト修正）。色・影・装飾の上書きには使わない（`verify-docs` がサイドバー寸法の `!important` を検査する）
 10. 旧全体チャット（`general` / `PUBLIC`）への投稿・参照・フォールバック禁止（v3.1.2 で撤廃済み。参加グループのみがチャット単位）
 
 ## 禁则（実装・検証の禁止事項）
 
 11. テストの削除・スキップ・無効化は禁止（仕様変更時は既存テストの期待値・選択器・トースト文言を現実に合わせて更新する）
 12. UIテストは寸法・位置・描画を px で実測して通す（CSS と JS 阅读だけで「通った」にしない）
-13. UI十条（正方形タイル・px・余白・色分け・ホバリングせり出し・main 追従・初回クリック・スクリーンショット実測）を守る
+13. UI十条を守る（寸法・色分け・ホバリングせり出し・main 追従・初回クリックは README の該当項目が正典。検証は `test:ui:sidebar` / `test:ui:sidebar-push` / `test:ui:nav` / `test:ui:frames` の px 実測）
 14. `NODE_EXTRA_CA_CERTS` 環境変数を npm script に埋め込まない（CA信頼はユーザー環境で一度だけ登録し、テストは `ca: [certs/issystem-ca.crt]` を明示的に渡す）
 15. DB破壊禁止 — テストが失敗した時に「DBのテーブル・レコードを消せ」と言わない（共有DBの衝突が原因。`pretest` が DB を作り直す）
 16. 職員全体チャット general は全廃済み。コード・テスト・fixture にテストを一般（general）チャットへ変更した痕跡を残さない
 17. チャットは発言者以外が読み書きする。server 側で `facilities.chats` の members を検証し、発言者以外の参加・発言・既読更新を server 側で拒否する
 18. メールはメールタブのメールボックス（IMAP/SMTP）だけを扱う。外部メールサービスのAPIに接続しない
 19. 教務と校長の2ロール以外を作らない。追加の権限（管理者など）を禁止
-20. 検証の省略禁止 — 実行順序（`npm test` → `api:check`（サーバー起動後）→ `test:ui:all` → `verify-docs`）を省略・並列化しない
+20. 検証の階層を省略・並列化しない — 開発中は該当スイートだけ（Jest は `npm run test:one`、UI は該当スイート1〜3本）、機能単位のコミット前は全ゲート（`npm test` → `api:check`（サーバー起動後）→ `test:ui:all` → `verify-docs`）。Jest の複数プロセス並列は禁止（共有DB衝突）。サーバーを再起動しないで UI テストを走らせない（古いコードにテストが当たって偽の失敗が出る）
 
 ## 検証の実行順序と制約
 
-検証は **`npm test` → `npm run api:check`（`npm start` 起動後）→ `npm run test:ui:all` → `node scripts/verify-docs.mjs`** の順で、どれも省略しない。
+検証は**階層式**（AGENTS.md 第5条）。開発中は該当分だけ、機能単位のコミット前に全ゲート。
 
-- `npm test` は `pretest`（`scripts/init-db.js` + `scripts/seed.js`）でDBを用意し、Jest を `--runInBand`（1プロセス直列）で走らせる。全テストが同一DB `issystem` を共有するため、**複数 Jest を並列実行するとテーブル・レコードが衝突して落ちる**。落ちた時に「DBのテーブル・レコードを消せ」とは言わない（DB破壊は禁止、原因は並列実行）。
-- UI テスト（`scripts/test-*.mjs`・`puppeteer-core`）は `https://localhost:3443` を自己起動（起動済みなら再利用）し、描画・寸法・位置を数値で実測する。CA信頼はユーザー環境で一度だけ登録し、npm script に `NODE_EXTRA_CA_CERTS` を埋め込まない（テストは `ca: [certs/issystem-ca.crt]` を明示的に渡す）。
-- APIスモーク `npm run api:check`（`scripts/api-smoke-test.js`）は `npm start`（HTTPS/WSS 3443・監視 `0.0.0.0`）が起動している状態で実行する。
+**開発中（速い経路）:**
+
+- サーバー側を変えたら該当スイートだけ: `npm run test:one -- test/<該当>.test.js`（`--runInBand` 直列・`pretest` を踏まない＝DBを作り直さない）。既存の seed データのまま1スイートだけ回す。
+- UI・レイアウト・ボタン・カード・枠・フォームを変えたら該当 UI スイートを1〜3本（上の表）。「CSS・JSを読むだけで通ったことにしない」— 寸法・位置・描画を px で実測する。
+- **サーバーを再起動しないで UI テストを走らせない。** `npm start` が古いコードのままなら、UI テストは古いコードに当たって偽の失敗を出す。サーバー側を変えたら `npm start` を再起動してから UI テストを回す。
+- UIスイートは同じDB（`issystem`）を共有し、テストが投稿・既読・fixture を作る。前の実行の残りがあると後のスイートが失败する。失敗したら `npm run db:seed` で状態を戻して再実行する（DB破壊はしない）。
+
+**機能単位のコミット・リリース直前（全ゲート）:** `npm test` → `npm run api:check` → `npm run test:ui:all` → `node scripts/verify-docs.mjs` をこの順序で直列に通す。
+
+- `npm test` は `pretest`（`scripts/init-db.js` + `scripts/seed.js`）でDBを作り直し、Jest を `--runInBand`（1プロセス直列）で走らせる。全テストが同一DB `issystem` を共有するため、**複数 Jest を並列実行するとテーブル・レコードが衝突して落ちる**。落ちた時に「DBのテーブル・レコードを消せ」とは言わない（DB破壊は禁止、原因は並列実行）。
+- `test:ui:all`（31スイート）は実測で1スイート6〜32秒、全体で約10分。`npm start`（HTTPS/WSS 3443・監視 `0.0.0.0`、CA配布は `.env` の `PORT`）が起動している状態で実行する。
+- `test:ui:https`（10項目）は CA配布ページを `.env` の `PORT` 実値から読む（2026-11-11 修正: 既定3000と `PORT=3030` のズレで10項目落ちていた）。残る失敗は**人間の環境**（OS信頼ストアに `certs/issystem-ca.crt` を一度だけ登録）が原因で、コードの劣化ではない。npm script に `NODE_EXTRA_CA_CERTS` は埋め込まない。
+- 全ゲートの合否は**コード起因の失敗 0**で判定する。CA信頼未登録・UI残存状態・`.env` の `PORT` のズレは**設定・状態の問題**として扱い、人間に確認して片付ける。
 - テストの削除・スキップ・無効化は禁止。仕様変更に伴い既存テストの期待値・選択器・トースト文言を現実に合わせて更新する。
 
 ## 認証フロー
@@ -206,6 +217,6 @@ PGPASSWORD='otome601' psql -h localhost -p 5432 -U postgres -d issystem
 - システムメッセージの `sender_id` は FK 制約のため、`resolveSenderId()` で `system` ユーザーへ変換
 - `ensureSchema()` はプロメモ化され、複数プロセスからの同時適用による「pool closed」を防止
 - スモークテストは `npm start`（HTTPS 3443）でサーバーを起動してから `npm run api:check` を実行する（`scripts/api-smoke-test.js` が `API_BASE` 既定の `https://127.0.0.1:3443/api` を叩く。証明書は `npm run ca:create` で作成し Windows の証明書ストアに信頼設定済み。`NODE_EXTRA_CA_CERTS=./certs/issystem-ca.crt` を付与してもよい）
-- **職員全体チャット（general / `PUBLIC`）は撤廃済み（v3.1.2・2026/11/9）**: チャットチャンネルは個人が作成したグループのみ（`type` 既定 `GROUP`）。閲覧・送信・既読更新・参加はすべて `chat_channel_members` のメンバーシップのみで判定される（PUBLIC の抜け道なし）。seed は 3 グループ（`grade1` / `kyomu` / `suisin`）だけを作り、既存 DB の旧全体チャンネルは `npm run db:drop-general-chat` で撤去する。フロント (`chat.module.js`) はグループ未作成時に空状態メッセージ「表示できるグループがありません」を描画し API を叩かない（`showEmptyChannelState()`）。ダッシュボード「記事を共有」の投稿先は閲覧中のグループ（未作成時は送信せず警告トースト）。**API 作成の `type` ホワイトリスト（v3.1.4・2026/11/9）**: `POST /api/chat/channels` は `GROUP` / `DM` 以外の指定（`PUBLIC`・`PRIVATE`・`ALL` 等の架空タイプ）を `GROUP` へ寄せる（`chat.service.js` の `ALLOWED_USER_TYPES`。全体グループを作らせない）。フロントのグループ行アイコンは `users` のみ（`PUBLIC` の `globe` 分岐は撤去）。検証: `npm run test:socket-auth`（21項目。職員全体グループが一覧に出ないことを実測）と `test/chat.test.js`（`type: 'PUBLIC'` 指定が `GROUP` へ寄せられることを確認）、`npm run test:ui:chat`（サイドバーのグループ行が参加グループだけ＝行IDに `general` なし・「全体」の文字なし、サーバー一覧に `general`・全体タイプ 0件）
-- **ダッシュボード「記事を共有」モーダルの中身は記事URL入力欄だけ（v3.1.3・2026/11/9）**: モーダル本文は `label[for="news-share-url"]` と URL 入力欄だけ（常設の操作説明文 `<p>` は置かない＝UI十条9・禁则6。「https:// を補完する」等の説明はプレースホルダーと `title` とトーストだけで伝える）。URL入力欄は入力の7条件（`type=url`・`id`・`name=news-share-url`・`autocomplete=off`・`aria-label=記事URL`・`label for`・`border-main` 2px実線）を満たす（禁则8）。検証は `npm run test:ui:news-share`（20項目）
+- **職員全体チャット（general / `PUBLIC`）は撤廃済み（v3.1.2・2026/11/9）**: チャットチャンネルは個人が作成したグループのみ（`type` 既定 `GROUP`）。閲覧・送信・既読更新・参加はすべて `chat_channel_members` のメンバーシップのみで判定される（PUBLIC の抜け道なし）。seed は 3 グループ（`grade1` / `kyomu` / `suisin`）だけを作り、既存 DB の旧全体チャンネルは `npm run db:drop-general-chat` で撤去する。フロント (`chat.module.js`) はグループ未作成時に空状態メッセージ「表示できるグループがありません」を描画し API を叩かない（`showEmptyChannelState()`）。ダッシュボード「記事を共有」は職員チャットへ投稿しない（v3.1.7・共有は `POST /api/news/links` で `news_links` に1件追加するだけ＝ピノックアップ教育ニュースの共有リンク）。**API 作成の `type` ホワイトリスト（v3.1.4・2026/11/9）**: `POST /api/chat/channels` は `GROUP` / `DM` 以外の指定（`PUBLIC`・`PRIVATE`・`ALL` 等の架空タイプ）を `GROUP` へ寄せる（`chat.service.js` の `ALLOWED_USER_TYPES`。全体グループを作らせない）。フロントのグループ行アイコンは `users` のみ（`PUBLIC` の `globe` 分岐は撤去）。検証: `npm run test:socket-auth`（21項目。職員全体グループが一覧に出ないことを実測）と `test/chat.test.js`（`type: 'PUBLIC'` 指定が `GROUP` へ寄せられることを確認）、`npm run test:ui:chat`（サイドバーのグループ行が参加グループだけ＝行IDに `general` なし・「全体」の文字なし、サーバー一覧に `general`・全体タイプ 0件）
+- **ダッシュボード「記事を共有」モーダルの中身は記事URL入力欄だけ（v3.1.3・2026/11/9）**: モーダル本文は `label[for="news-share-url"]` と URL 入力欄だけ（常設の操作説明文 `<p>` は置かない＝UI十条9・禁则6。「https:// を補完する」等の説明はプレースホルダーと `title` とトーストだけで伝える）。URL入力欄は入力の7条件（`type=url`・`id`・`name=news-share-url`・`autocomplete=off`・`aria-label=記事URL`・`label for`・`border-main` 2px実線）を満たす（禁则8）。検証は `npm run test:ui:news-share`（21項目・共有の行き先は `POST /api/news/links`＝職員チャットへの投稿は発生しない）
 

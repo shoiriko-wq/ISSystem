@@ -161,10 +161,12 @@ if (approvalId) {
   await put(`/approvals/${approvalId}/process`, { status: 'APPROVED', comment: 'スモークテスト承認' });
 }
 
-// --- 広域 GET 網羅 (モデル / サービスの整合確認) ---
+// --- 広域 GET 網羅 (モデル / サービスの整合確認・全トップレベルAPIを叩く＝第7条) ---
 const sweep = [
   '/auth/me',
   '/users',
+  '/subjects',
+  '/basic-info',
   '/bulletins/post_1',
   // ★ 職員全体チャット撤廃（v3.1.2）: general は存在しない。seed の参加グループ kyomu を叩く
   '/chat/channels/kyomu/messages',
@@ -175,9 +177,22 @@ const sweep = [
   '/schedules/today',
   '/seating/layouts',
   '/seating/master',
+  '/seating/matrix',
+  '/seating/students/search?name=%E8%99%88',
   '/exam',
   '/exam/masters',
+  '/exam-survey-status',
+  '/staff/pool',
+  '/news',
+  '/news/weather',
+  '/news/health',
+  // ★ 「記事を共有」の行き先は news_links（チャット投稿はしない＝v3.1.7）。共有リンク一覧を叩く
+  '/news/links',
   '/news/dashboard-widget',
+  '/absences',
+  '/absences/teachers',
+  '/mail/account',
+  '/mail/messages',
   '/audit/logs',
 ];
 

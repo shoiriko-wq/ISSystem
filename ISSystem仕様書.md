@@ -401,7 +401,7 @@
 - **未使用コード:** `src/sockets/socketEvents.js` / `src/sockets/socketClient.js`（§8.3）、`facility.model.js` の `updateCells()`/`getCells()`（`facility_cells` への書き込み経路が未接続、§7.4）。
 - **旧データ互換:** `curriculum_courses`（運用廃止、表のみ）、`classes.course_ids`（`'[]'` 維持）、`posts.post_type`/`priority`（カラム削除済み）、`invitation_codes` 二重定義、`audit_logs` と `system_audit_logs` の併存。
 - **DB 永続化なし:** 教育ニュース・天気（インメモリキャッシュのみ）。
-- `news` タブは無い（ダッシュボードウィジェット）。ウィジェット本文 `#dash-news-summary` は現状読み込み関数が無く「ニュースを取得中...」のまま（共有ボタン `#dash-btn-news-share` とは独立。共有は手入力URLで `/news` 取得に依存しない）。
+- `news` タブは無い（ダッシュボードウィジェット）。ウィジェット本文 `#dash-news-summary` は共有リンク（`news_links`＝`GET /api/news/links`）だけを新しい順に描画する（`loadSharedNewsLinks()`）。共有は手入力URLの `POST /api/news/links`（server がページタイトルを取得し、取れない日はドメイン名がタイトル）。職員チャットへは投稿しない（v3.1.7・禁则16）。検証は `npm run test:ui:news-share`（21項目・テストが作った共有リンクは後片付けで消す）。
 - 単一HTML構成・NAS配置のみでの運用は現行アーキテクチャ（Express + PostgreSQL + TLS）**では成立しない**（旧 UI/UX 仕様書の記述は廃止）。
 
 ---
@@ -410,7 +410,7 @@
 
 **コマンド**（詳細は `README.md`）: `npm run db:create` / `db:init` / `db:seed` / `cert:gen` / `npm start`（`npm run dev` = nodemon）/ `npm test` / `npm run api:check` / `npm run db:tables` / `npm run db:drop-general-chat` / `npm run test:socket-auth` / `node scripts/verify-docs.mjs`。
 
-**テスト実行の順序と制約（AGENTS.md 第12条、2026/11/9）:** 検証は `npm test` → `npm run api:check`（`npm start` 起動後）→ `npm run test:ui:all` → `node scripts/verify-docs.mjs` の順で**省略しない**。`npm test` は `pretest`（`init-db` + `seed`）後、Jest を `--runInBand`（1プロセス直列）で実行する。全テストが同一DB `issystem` を共有するため、複数 Jest を並列実行するとテーブル・レコードが衝突して失敗する（失敗時に「DBのテーブル・レコードを消せ」と言わない。DB破壊は禁止）。UI テストは `https://localhost:3443` を自己起動（起動済みなら再利用）して寸法・位置・描画を実測する。CA信頼はユーザー環境で一度だけ登録し、npm script に `NODE_EXTRA_CA_CERTS` は埋め込まない（テストは `ca: [certs/issystem-ca.crt]` を明示的に渡す）。テストの削除・スキップ・無効化は禁止（仕様変更時は期待値を現実へ更新）。
+**テスト実行の順序と制約（AGENTS.md 第5条・第6条、2026-11-11 改訂）:** 検証は**階層式**。開発中は該当分だけ — サーバー側は `npm run test:one -- test/<該当>.test.js`（`--runInBand` 直列・`pretest` を踏まない＝DBを作り直さない）、UI・レイアウトは該当 UI スイートを1〜3本。機能単位のコミット・リリース直前は全ゲート `npm test` → `npm run api:check`（`npm start` 起動後）→ `npm run test:ui:all` → `node scripts/verify-docs.mjs` をこの順序で直列に回す。全テストが同一DB `issystem` を共有するため、複数 Jest を並列実行するとテーブル・レコードが衝突して失敗する（失敗時に「DBのテーブル・レコードを消せ」と言わない。DB破壊は禁止）。UI テストは `npm start`（HTTPS/WSS 3443）が起動している状態で実行し、**サーバー側のコードを変えたらサーバーを再起動してから回す**（古いコードに当たって偽の失敗が出る）。UIスイートは共有DBの状態（投稿・既読・fixture）を作るため、前実行の残りで後スイートが失败することがあり、`npm run db:seed` で状態を戻して再実行する（DB破壊はしない）。CA信頼はユーザー環境で一度だけ登録し、npm script に `NODE_EXTRA_CA_CERTS` は埋め込まない（テストは `ca: [certs/issystem-ca.crt]` を明示的に渡す）。全ゲートの合否はコード起因の失敗 0 で判定し、CA信頼未登録・UI残存状態・`.env` の `PORT` ズレは設定・状態の問題として人間に確認する。テストの削除・スキップ・無効化は禁止（仕様変更時は期待値を現実へ更新）。UI十条の正典は `README.md` に置き、AGENTS.md は要点参照（寸法・色分け・せり出し・追従・初回クリックの検証は `test:ui:sidebar` / `test:ui:sidebar-push` / `test:ui:nav` / `test:ui:frames` の px 実測）。検証用一時成果物（`data/`・`ui*.txt`・`t*.txt`・`vd*.txt`・`api*.txt`・`nohup.out` 等）は `.gitignore` で無視し Git に追跡しない（AGENTS.md 第10条）。`verify-docs` は文書の文言一致を検査せず、被覆・寸法・機能・追跡状態だけを検査する（2026-11-11 改訂）。
 
 **Jest 統合テスト:** 12スイート・150テスト（`--experimental-vm-modules --runInBand`、`pretest` が `init-db` + `seed` を実行）。共通ヘルパー `test/helpers.js`（`loginToken`, `bearer`, `pickId`, `closePool`）。スイート: `auth`, `facility`, `approvals`, `bulletins`, `chat`, `invitation`, `exam`, `absence`, `schedules`, `mail`, `unread-count`, `error-middleware`。jest は `<rootDir>/test/**/*.test.js` を対象し `/node_modules/` と `<rootDir>/.kilo/` を無視（`.kilo` は削除済み＝無害な履歴設定）。
 

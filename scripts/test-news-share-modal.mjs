@@ -10,9 +10,10 @@
  *  6. URL入力は7条件（type・id・name・autocomplete・aria-label・label[for]・border-main 2px実線）＝UI十条3・禁则8。
  *     URLの補完規則はプレースホルダーと title だけで伝える
  *  7. 記事URLが空では送信しない（エラートースト表示、モーダルは開いたまま、POST 発生なし）
- *  8. URL入力 → 職員チャットへ共有（スキーマ無しは https:// を補完、本文は「【記事共有】+ドメイン名+URL」の2行）
- *  9. 投稿先は閲覧中の職員チャットチャンネル（/api/chat/channels/:id/messages）
- * 10. 共有後はモーダルが閉じ、成功トーストとチャットタブへ遷移、サーバー側にも実メッセージが残る
+ *  8. URL入力 → POST /api/news/links へ共有（スキーマ無しは https:// を補完、送信は url 1項目だけ）
+ *  9. 共有の行き先はピノックアップ教育ニュース（news_links）だけ＝職員チャットへの投稿は発生しない（v3.1.7・禁则16の運用）
+ * 10. 共有後はモーダルが閉じ、成功トースト「ピノックアップ教育ニュースへ…」が出てダッシュボードに残り、サーバー実データ（news_links）にも登録される
+ *     ※ URLは実行ごとに一意なクエリを付けて共有済み(409)を防ぎ、最後に共有リンクを掃除する
  * 11. フッター「閉じる」と ESC キーで閉じられる（全モーダル共通規約）
  * 12. 背景クリック規則: モーダル内で押し開始→背景で離すと閉じない、背景で押し開始→閉じる
  * 13. ボタン・モーダルの Lucide アイコンが SVG として実描画される
@@ -23,14 +24,37 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
+import { query } from '../config/database.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-process.env.NODE_EXTRA_CA_CERTS ||= path.join(ROOT, 'certs', 'issystem-ca.crt');
+// CA の信頼は OS の証明書ストアで一度だけ登録する（NODE_EXTRA_CA_CERTS はコードに書かない＝第12条）。
+// 実測は headless Chrome の ignoreHTTPSErrors と --ignore-certificate-errors で TLS を通す。
 const BASE = process.env.UI_BASE || 'https://127.0.0.1:3443';
 const USER = process.env.UI_USER || 'T2026001';
 const PASS = process.env.UI_PASS || 'password123';
-const CHROME = process.env.CHROME_PATH || '/usr/bin/google-chrome';
+const CHROME = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// 実行ごとに一意なURL（同一URLの共有は server が 409 で拒否するためクエリで一意化し、最後に掃除する）
+const RUN_TAG = Date.now();
+const TYPED_URL = `mext.go.jp/b_menu/happou/20261107.html?uictl=${RUN_TAG}`;
+const EXPECT_URL = `https://mext.go.jp/b_menu/happou/20261107.html?uictl=${RUN_TAG}`;
+// このテストが作った共有リンクだけ掃除する（テストの残りを DB に溜めない）
+const CLEAN_PREFIX = 'https://mext.go.jp/b_menu/happou/20261107.html?uictl=%';
+const cleanNewsLinks = async () => (await query('DELETE FROM news_links WHERE lower(url) LIKE ?', [CLEAN_PREFIX])).rowCount;
+// server はページタイトルを取りに行く（最大8秒）ので固定sleepでは落とす。条件が揃うまで待つ
+const waitFor = async (fn, timeoutMs = 12000, stepMs = 200) => {
+  const t0 = Date.now();
+  for (;;) {
+    const v = await fn();
+    if (v) return v;
+    if (Date.now() - t0 > timeoutMs) return v;
+    await sleep(stepMs);
+  }
+};
+
+// 前実行の残りを掃除してから走る（共有済みURLの蓄積で 409 にならないため）
+console.log(`掃除(開始前): 共有リンク ${await cleanNewsLinks()} 件`);
 
 const failures = [];
 const check = (name, ok, detail = null) => {
@@ -46,12 +70,12 @@ const browser = await puppeteer.launch({
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log(`  [page js error] ${e.message}`));
 
-// 共有投稿の POST を記録（送信先と本文を検証するため）
+// 共有 POST を記録する（/api/news/links が行き先。チャット POST は「出ないこと」を確認するため捕まえる）
 const posts = [];
 page.on('request', (req) => {
   const url = req.url();
   if (req.method() !== 'POST') return;
-  if (/\/api\/chat\/channels\/[^/]+\/messages$/.test(url) || /\/api\/bulletins$/.test(url)) {
+  if (/\/api\/news\/links$/.test(url) || /\/api\/chat\/channels\/[^/]+\/messages$/.test(url) || /\/api\/bulletins$/.test(url)) {
     let body = null;
     try { body = JSON.parse(req.postData() || '{}'); } catch (e) { body = null; }
     posts.push({ endpoint: url.replace(BASE, ''), body });
@@ -148,42 +172,41 @@ check('URL 空では POST が発生しない', posts.length === 0, posts);
 check('URL 空ではエラートースト表示、モーダルは開いたまま', afterEmpty.open && afterEmpty.toasts.some((t) => t.includes('URL')), afterEmpty);
 
 
-// ---- 6,7,8,9. 職員チャットへ共有（スキーマ無しURLは https:// 補完・本文は2行・閲覧中チャンネルへ） ----
-await page.type('#news-share-url', 'mext.go.jp/b_menu/happou/20261107.html');
+// ---- 8,9,10. ピノックアップ教育ニュースへ共有（https:// 補完・リンク1件だけ・チャット投稿はしない） ----
+await page.type('#news-share-url', TYPED_URL);
 await page.click('#news-share-form button[type="submit"]');
-await sleep(1200);
 
+// server はページタイトルを取りに行く（最大8秒）ので、モーダルが閉じるまで待つ
+const afterShare = await waitFor(() => page.evaluate(() => {
+  if (document.getElementById('news-share-modal').classList.contains('hidden')) {
+    return {
+      activeView: document.querySelector('.tab-view:not(.hidden)')?.id,
+      toasts: [...document.querySelectorAll('#toast-container .toast')].map((t) => t.textContent.replace(/\s+/g, ' ').trim()),
+    };
+  }
+  return null;
+}), 12000);
+
+const newsPost = posts.find((p) => p.endpoint === '/api/news/links');
 const chatPost = posts.find((p) => p.endpoint.includes('/chat/channels/'));
-check('URLが https:// へ補完され、本文は「【記事共有】+ドメイン名+URL」の2行（ひとこと欄は無い）',
-  chatPost?.body?.messageText === '【記事共有】mext.go.jp\nhttps://mext.go.jp/b_menu/happou/20261107.html',
-  chatPost?.body?.messageText);
+check('URLスキーマ無しは https:// へ補完され、送信は url 1項目だけ',
+  newsPost?.body?.url === EXPECT_URL && Object.keys(newsPost?.body || {}).length === 1, newsPost?.body);
+check('共有の行き先は /api/news/links（職員チャットへの投稿は発生しない＝v3.1.7・禁则16）',
+  !!newsPost && !chatPost, { newsPost: newsPost?.endpoint, chatPost: chatPost?.endpoint });
+check('共有後はモーダルが閉じ、成功トースト「ピノックアップ教育ニュースへ…」',
+  !!afterShare && afterShare.toasts.some((t) => t.includes('ピノックアップ教育ニュースへ')), afterShare);
+check('タブはダッシュボードのまま（チャットタブへ遷移しない）',
+  afterShare?.activeView === 'view-dashboard', afterShare?.activeView);
 
-// 投稿先は閲覧中の職員チャットチャンネル（チャットサイドバーの active なチャンネル）
-const activeChannelId = await page.evaluate(() =>
-  document.querySelector('#chat-channels-list [data-channel-id].active')?.getAttribute('data-channel-id') || null);
-const postChannelId = chatPost ? decodeURIComponent(chatPost.endpoint.split('/')[4]) : null;
-check('投稿先は閲覧中の職員チャットチャンネル（/api/chat/channels/:id/messages）',
-  !!chatPost && /^\/api\/chat\/channels\/[A-Za-z0-9_-]+\/messages$/.test(chatPost.endpoint)
-  && !!activeChannelId && postChannelId === activeChannelId,
-  { endpoint: chatPost?.endpoint, activeChannelId, postChannelId });
-
-const afterChat = await page.evaluate(() => ({
-  open: !document.getElementById('news-share-modal').classList.contains('hidden'),
-  activeView: document.querySelector('.tab-view:not(.hidden)')?.id,
-  toasts: [...document.querySelectorAll('#toast-container .toast')].map((t) => t.textContent.replace(/\s+/g, ' ').trim()),
-}));
-check('共有後モーダルが閉じチャットタブへ遷移・成功トースト',
-  !afterChat.open && afterChat.activeView === 'view-chat' && afterChat.toasts.some((t) => t.includes('職員チャットへ記事を共有')), afterChat);
-
-const chatMsgs = await page.evaluate(async (cid) => {
+// サーバー実データ: news_links に共有URLが登録される（server のタイトル取得を待つ）
+const sharedUrls = await waitFor(() => page.evaluate(async (u) => {
   const m = await import('/js/api.js');
-  const res = await m.apiGet(`/chat/channels/${cid}/messages`);
-  const list = res.messages || res.data || (Array.isArray(res) ? res : []);
-  return list.map((x) => String(x.content || x.messageText || x.text || ''));
-}, postChannelId);
-// メッセージは created_at 昇順なので共有メッセージは末尾側にある
-check('サーバー実データ: 閲覧中の職員チャットチャンネルに共有メッセージが登録されている',
-  chatMsgs.some((t) => t.includes('https://mext.go.jp/')), chatMsgs.slice(-2));
+  const res = await m.apiGet('/news/links', { limit: 50 });
+  const urls = (res.links || []).map((x) => String(x.url || ''));
+  return urls.some((x) => x.toLowerCase() === u.toLowerCase()) ? urls : null;
+}, EXPECT_URL), 12000);
+check('サーバー実データ: ピノックアップ教育ニュースに共有URLが登録されている',
+  Array.isArray(sharedUrls), sharedUrls?.slice(0, 2));
 
 // ---- 11. 閉じるボタン・ESC（全モーダル共通ルール） ----
 await openShare();
@@ -235,6 +258,10 @@ const icons = await page.evaluate(() => {
   };
 });
 check('ボタン・モーダルのアイコンがSVGとして描画されている', icons.btn && icons.head && icons.closeX, icons);
+
+// このテストが作った共有リンクを掃除して終わる（DB にテストの残りを溜めない）
+const cleaned = await cleanNewsLinks();
+console.log(`掃除(終了): 共有リンク ${cleaned} 件`);
 
 await browser.close();
 console.log('---');
