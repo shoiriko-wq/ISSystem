@@ -1035,8 +1035,46 @@ html[data-theme-mode='light'] .btn-success {
        --text-warning-strong (warning + light text-tint), which clears 4.5:1 on
        the dark card. Filled .bg-warning surfaces keep the dark ink via section 12.
    -------------------------------------------------------------------------- */
-html[data-theme-mode='dark'] .btn-warning {
-  color: var(--text-warning-strong) !important;
-  text-shadow: none !important;
+/* --------------------------------------------------------------------------
+   14. ピノックアップ教育ニュースの共有リンクカード（1行表示）
+       行は「タイトルリンク（1行・長さは末尾 … で切る・ホバーで全文）＋右端の小さな日付」だけ。
+       共有者名・ドメインバッチは出さない。カード本体（#dash-news-summary > div.rounded-lg）が
+       1px リング＋3px 浮きを描くので、中のリンクは二重リングを出さない（UI十条5）。
+       寸法は px で実測する（npm run test:ui:news-share と test:ui:frames）。
+   -------------------------------------------------------------------------- */
+.news-link-card {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  min-width: 0 !important;
+}
+
+.news-link-card__title {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  line-height: 1.35 !important;
+  color: var(--text-main) !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+.news-link-card__date {
+  flex: 0 0 auto !important;
+  font-size: 10px !important;
+  color: var(--text-muted) !important;
+}
+
+/* カード内のリンクは自分だけのリング・下線・影・下地を張らない（カードがホバーリングを描く） */
+.news-link-card__title,
+.news-link-card__title:hover,
+.news-link-card__title:focus-visible {
+  outline: none !important;
+  text-decoration: none !important;
+  box-shadow: none !important;
+  background-color: transparent !important;
+  color: var(--text-main) !important;
 }
 

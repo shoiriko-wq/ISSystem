@@ -163,7 +163,14 @@ const mockWeatherData = {
 
 const TITLE_FETCH_TIMEOUT_MS = 8000;   // タイトル取得の時間上限（8秒）
 const TITLE_MAX_BYTES = 400 * 1024;     // 読むHTMLの量上限（400KB）
-const TITLE_MAX_CHARS = 120;            // タイトルの文字数上限
+const TITLE_MAX_CHARS = 120;            // タイトルの文字数上限（DBにこの長さで保存し、画面は1行に切り詰めて表示する）
+const TITLE_MIN_CHARS = 6;              // 記事名として使う最低文字数（「文部科学省」のような短い語はサイト名なので使わない）
+
+// タイトルの出所（news_links.title_source に入れる）
+const TITLE_SOURCES = { TITLE: 'title', H1: 'h1', OG: 'og', RSS: 'rss', DOMAIN: 'domain' };
+
+// og:title の「記事名｜サイト名」の区切り（全角・半角の縦棒と中点）
+const SITE_NAME_SEPARATORS = /\s*[\u007c\uff5c\u2022\u30fb\uff73]\s*/;
 
 /**
  * 内部アドレス（localhost・私網・.local）を拒否する（server 側のfetchで内部設備を叩かない＝SSRF防御）
@@ -224,13 +231,62 @@ function decodeHtmlEntities(text) {
   });
 }
 
-/** HTML文字列から <title> を抽出する（見つからなければ null） */
-function extractPageTitle(html) {
+/** タイトルとして使う長さへ揃える（短い語は使わない＝null、長い物は文字数上限で切る） */
+function fitTitle(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  if (t.length < TITLE_MIN_CHARS) return null;
+  return t.length > TITLE_MAX_CHARS ? t.slice(0, TITLE_MAX_CHARS) : t;
+}
+
+/** HTMLタグを文字だけ残して空へ替える（<h1> の中にバッチや改行が入ることがある） */
+function stripTags(text) {
+  return String(text || '').replace(/<[^>]*>/g, ' ');
+}
+
+/** `<title>` の中身を取り出す（実体参照を元へ戻す） */
+function pickTitleTag(html) {
   const m = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(String(html || ''));
   if (!m) return null;
-  const t = decodeHtmlEntities(m[1]).replace(/\s+/g, ' ').trim();
-  if (!t) return null;
-  return t.length > TITLE_MAX_CHARS ? t.slice(0, TITLE_MAX_CHARS) : t;
+  return fitTitle(decodeHtmlEntities(m[1]));
+}
+
+/** 最初の `<h1>` の文字を取り出す（子タグ・バッチは文字だけ残す） */
+function pickH1Tag(html) {
+  const m = /<h1[^>]*>([\s\S]*?)<\/h1>/i.exec(String(html || ''));
+  if (!m) return null;
+  return fitTitle(decodeHtmlEntities(stripTags(m[1])));
+}
+
+/** og:title の content を取り出す（property / name の書き方の両方に対応） */
+function pickOgTitleTag(html) {
+  const source = String(html || '');
+  const byProperty = /<meta[^>]*property=["']og:title["'][^>]*>/i.exec(source);
+  const byName = /<meta[^>]*name=["']og:title["'][^>]*>/i.exec(source);
+  const tag = byProperty ? byProperty[0] : (byName ? byName[0] : null);
+  if (!tag) return null;
+  const content = /content\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(tag);
+  if (!content) return null;
+  return fitTitle(decodeHtmlEntities(content[1] || content[2] || ''));
+}
+
+/** og:title の「記事名｜サイト名」から記事名だけ残す（区切りが無ければそのまま） */
+function dropSiteName(text) {
+  const head = String(text || '').split(SITE_NAME_SEPARATORS)[0] || '';
+  return fitTitle(head);
+}
+
+/** ページのタイトルを `<title>` → `<h1>` → og:title の順で探す（取れなければ null） */
+function extractPageTitle(html) {
+  const fromTitle = pickTitleTag(html);
+  if (fromTitle) return { title: fromTitle, titleSource: TITLE_SOURCES.TITLE };
+
+  const fromH1 = pickH1Tag(html);
+  if (fromH1) return { title: fromH1, titleSource: TITLE_SOURCES.H1 };
+
+  const fromOg = dropSiteName(pickOgTitleTag(html));
+  if (fromOg) return { title: fromOg, titleSource: TITLE_SOURCES.OG };
+
+  return null;
 }
 
 /** レスポンス本文を400KBまで読み出す（charset が Shift-JIS のページも TextDecoder で直す） */
@@ -481,7 +537,8 @@ export const newsService = {
 
   /**
    * 記事を共有する ＝ ピノックアップ教育ニュースへリンクを1件追加する（チャット投稿はしない）
-   * ページタイトルは server がURLをfetchって取得し、取れないときはドメイン名をタイトルにする。
+   * ページタイトルは server がURLをfetchって <title> → <h1> → og:title の順で取得し、
+   * 取れないときはドメイン名をタイトルにする（title_source に出所を残す）。
    * @param {object} { url, user }
    */
   async addSharedLink({ url, user }) {
@@ -497,23 +554,22 @@ export const newsService = {
 
     const domain = new URL(norm).hostname.replace(/^www\./, '');
 
-    let title = null;
-    let titleFrom = 'domain';
+    let pageTitle = null;
     try {
       const html = await fetchHtmlGuarded(norm);
-      const pageTitle = html ? extractPageTitle(html) : null;
-      if (pageTitle) {
-        title = pageTitle;
-        titleFrom = 'page';
-      }
+      pageTitle = html ? extractPageTitle(html) : null;
     } catch (e) {
       // ページが開けない・タイトルが無い場合はそのままドメイン名で登録する（共有は成功させる）
     }
 
+    const titleSource = pageTitle ? pageTitle.titleSource : 'domain';
+    const title = (pageTitle ? pageTitle.title : null) || domain;
+
     const item = await newsLinkModel.createNewsLink({
       url: norm,
-      title: title || domain,
+      title,
       domain,
+      titleSource,
       addedBy: user?.id || null,
       addedByName: user?.name || '教員',
     });
@@ -522,10 +578,10 @@ export const newsService = {
       userId: user?.id || null,
       action: 'ADD_NEWS_LINK',
       target: `news_links:${item.id}`,
-      details: { url: norm, titleFrom },
+      details: { url: norm, titleSource },
     });
 
-    return { item, titleFrom };
+    return { item, titleSource };
   },
 
   /**
@@ -571,3 +627,9 @@ export const newsService = {
 };
 
 export default newsService;
+
+// タイトル抽出規則（title → h1 → og:title）とURL正規化はテストが直接叩く
+export {
+  isPrivateHost, normalizeLinkUrl, extractPageTitle,
+  fitTitle, stripTags, pickTitleTag, pickH1Tag, pickOgTitleTag, dropSiteName, TITLE_SOURCES,
+};

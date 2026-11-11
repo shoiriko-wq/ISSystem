@@ -10,6 +10,7 @@
     "cert:gen": "node scripts/create-ca.mjs",
     "pretest": "node scripts/init-db.js && node scripts/seed.js",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand",
+    "test:one": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand",
     "test:db:smoke": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand --coverage --coverageReporters=text",
     "db:init": "node scripts/init-db.js",
     "db:seed": "node scripts/seed.js",

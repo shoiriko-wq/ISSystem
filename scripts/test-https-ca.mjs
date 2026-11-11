@@ -12,9 +12,12 @@
  *  8. ブラウザは wss:// で接続し、アプリ内 API は https 相対で機能する
  *  9. 非HTTPポートでは plain ws 接続が確立しない
  *
- * 実行: npm run test:ui:https   (NODE_EXTRA_CA_CERTS=./certs/issystem-ca.crt 付き)
- *  options: UI_BASE=https://127.0.0.1:3443  INSECURE_BASE=http://127.0.0.1:3000
+ * 実行: npm run test:ui:https   （サーバー起動済み・CA信頼ストアは人間環境で一度だけ登録）
+ *  options: UI_BASE=https://127.0.0.1:3443  INSECURE_BASE=http://127.0.0.1:<.env の PORT>
  *           UI_USER=T2026001  UI_PASS=password123  CHROME_PATH=/usr/bin/google-chrome
+ *
+ * 注意: CA配布ページのポートは .env の PORT 実値から読む（既定3000 と .env のズレで
+ *       落ちるのを防ぐ）。CA信頼ストア未登録の失敗は人間の環境設定の問題として扱う。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,8 +31,17 @@ import puppeteer from 'puppeteer-core';
 import { io } from 'socket.io-client';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
+// .env を読んで CA配布ページのポート（PORT）を実値から決める（既定3000とのズレ防止）
+const readEnvPort = () => {
+  try {
+    const line = fs.readFileSync(path.join(ROOT, '.env'), 'utf8').split(/\r?\n/).find((l) => /^PORT\s*=/.test(l.trim()));
+    return Number(line.split('=')[1].trim());
+  } catch {
+    return 3000;
+  }
+};
 const SECURE = process.env.UI_BASE || 'https://127.0.0.1:3443';
-const INSECURE = process.env.INSECURE_BASE || 'http://127.0.0.1:3000';
+const INSECURE = process.env.INSECURE_BASE || `http://127.0.0.1:${readEnvPort() || 3000}`;
 const USER = process.env.UI_USER || 'T2026001';
 const PASS = process.env.UI_PASS || 'password123';
 const CHROME = process.env.CHROME_PATH || '/usr/bin/google-chrome';

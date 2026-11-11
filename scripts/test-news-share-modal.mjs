@@ -17,6 +17,10 @@
  * 11. フッター「閉じる」と ESC キーで閉じられる（全モーダル共通規約）
  * 12. 背景クリック規則: モーダル内で押し開始→背景で離すと閉じない、背景で押し開始→閉じる
  * 13. ボタン・モーダルの Lucide アイコンが SVG として実描画される
+ * 14. カードは1行表示（タイトルリンク＋右端の小さな日付）。px実測で1行（リンク高16px・カード高34px以下・nowrap+ellipsis）、
+ *     ホバーで全文（title属性＝リンクの全文）、ドメインバッチ・共有者名・下線・二重リングは出ない、リンクは新タブ（target/rel）
+ * 15. サーバー実データ: title_source（title/h1/og/domain）が記録され、ページタイトルが取れた時はタイトルがドメイン名でない
+ * 16. 後片付け: このテストが作った共有リンクは掃除され、掃除後の API に出ない（DB にテストの残りを溜めない）
  *
  * 実行: node scripts/test-news-share-modal.mjs  （ISSystem サーバーが必要）
  *  options: UI_BASE=https://127.0.0.1:3443  UI_USER=T2026001  UI_PASS=password123  CHROME_PATH=...
@@ -208,6 +212,103 @@ const sharedUrls = await waitFor(() => page.evaluate(async (u) => {
 check('サーバー実データ: ピノックアップ教育ニュースに共有URLが登録されている',
   Array.isArray(sharedUrls), sharedUrls?.slice(0, 2));
 
+// ---- 14. カードは1行表示（タイトルリンク＋右端の小さな日付・共有者名とドメインバッチは出ない） ----
+const cardShape = await page.evaluate(() => {
+  const card = document.querySelector('#dash-news-summary > div.news-link-card');
+  const link = card?.querySelector('a.news-link-card__title');
+  const date = card?.querySelector('.news-link-card__date');
+  if (!card || !link || !date) return null;
+  const csCard = getComputedStyle(card);
+  const csLink = getComputedStyle(link);
+  const csDate = getComputedStyle(date);
+  const cardRect = card.getBoundingClientRect();
+  const linkRect = link.getBoundingClientRect();
+  const dateRect = date.getBoundingClientRect();
+  return {
+    cards: document.querySelectorAll('#dash-news-summary > div.news-link-card').length,
+    display: csCard.display,
+    alignItems: csCard.alignItems,
+    cardH: Math.round(cardRect.height),
+    linkH: Math.round(linkRect.height),
+    linkW: Math.round(linkRect.width),
+    linkScrollW: link.scrollWidth,
+    nowrap: csLink.whiteSpace,
+    overflowX: csLink.overflowX,
+    ellipsis: csLink.textOverflow,
+    linkFont: csLink.fontSize,
+    linkWeight: parseFloat(csLink.fontWeight),
+    linkLineCount: Math.round(linkRect.height / parseFloat(csLink.lineHeight)),
+    dateFont: csDate.fontSize,
+    dateRightGap: Math.round(cardRect.right - dateRect.right),
+    href: link.href,
+    target: link.target,
+    rel: link.rel,
+    titleAttr: link.getAttribute('title'),
+    linkText: link.textContent,
+    dateText: date.textContent,
+    badge: !!card.querySelector('.badge'),
+    shareName: card.textContent.includes('共有:'),
+    borderW: parseFloat(csCard.borderTopWidth),
+    borderS: csCard.borderTopStyle,
+    cardUnderline: csLink.textDecorationLine,
+    cardOutline: csLink.outlineStyle,
+    lucideInCard: !!card.querySelector('svg'),
+  };
+});
+check('カードは1行（flex行・タイトルリンク高16px・カード高34px以下・1行分しかない）',
+  cardShape && cardShape.display === 'flex' && cardShape.alignItems === 'center'
+  && cardShape.linkH === 16 && cardShape.cardH <= 34 && cardShape.linkLineCount === 1, cardShape);
+check('長いタイトルは1行で … に切り詰められる（nowrap / overflow:hidden / text-overflow:ellipsis・下に下線は出さない）',
+  cardShape && cardShape.nowrap === 'nowrap' && cardShape.overflowX === 'hidden'
+  && cardShape.ellipsis === 'ellipsis' && cardShape.linkScrollW >= cardShape.linkW
+  && cardShape.cardUnderline === 'none', cardShape);
+check('ホバーで全文が出る（title属性＝リンクの全文・リンクの文字も全文）',
+  cardShape && !!cardShape.titleAttr && cardShape.titleAttr === cardShape.linkText, cardShape);
+check('右端に小さな日付（10px・カード右端の余白12px以下・M/D形）、共有者名とドメインバッチは出ない',
+  cardShape && cardShape.dateFont === '10px' && cardShape.dateRightGap <= 12
+  && /^\d{1,2}\/\d{1,2}$/.test(cardShape.dateText) && !cardShape.shareName && !cardShape.badge, cardShape);
+check('リンクは下線・二重リング・下地を持たず新タブで開く（target=_blank・rel=noopener）、カード枠は2px実線',
+  cardShape && cardShape.cardUnderline === 'none' && cardShape.cardOutline === 'none'
+  && cardShape.href === EXPECT_URL && cardShape.target === '_blank' && cardShape.rel.includes('noopener')
+  && cardShape.borderW === 2 && cardShape.borderS === 'solid', cardShape);
+
+// カード本体だけホバーリングを描く（中のリンクは二重リングを出さない＝UI十条5）
+const newsCardEl = await page.$('#dash-news-summary > div.news-link-card');
+await newsCardEl.hover();
+await sleep(400);
+const hoveredCard = await page.evaluate(() => {
+  const card = document.querySelector('#dash-news-summary > div.news-link-card');
+  const link = card?.querySelector('a.news-link-card__title');
+  const cs = getComputedStyle(card);
+  return {
+    hovered: card.matches(':hover'),
+    outline: cs.outlineStyle,
+    outlineW: cs.outlineWidth,
+    transform: cs.transform,
+    cursor: cs.cursor,
+    linkOutline: getComputedStyle(link).outlineStyle,
+  };
+});
+check('ホバーでカードに1pxリング＋3px浮き、中のリンクは二重リングが出ない',
+  hoveredCard.hovered === true && hoveredCard.outline === 'solid'
+  && parseFloat(hoveredCard.outlineW) === 3
+  && /^matrix\(1, 0, 0, 1, 0, -3\)$/.test(hoveredCard.transform)
+  && hoveredCard.cursor === 'pointer' && hoveredCard.linkOutline === 'none', hoveredCard);
+
+// ---- 15. サーバー実データ: タイトルの出所（title_source）とページタイトル ----
+const sharedMeta = await waitFor(() => page.evaluate(async (u) => {
+  const m = await import('/js/api.js');
+  const res = await m.apiGet('/news/links', { limit: 50 });
+  const item = (res.links || []).find((x) => String(x.url || '').toLowerCase() === u.toLowerCase());
+  return item ? { title: item.title, domain: item.domain, source: item.title_source ?? item.titleSource ?? null } : null;
+}, EXPECT_URL), 12000);
+check('サーバー実データ: title_source（title / h1 / og / domain）が記録されている',
+  ['title', 'h1', 'og', 'domain'].includes(sharedMeta?.source), sharedMeta);
+check('サーバー実データ: ページタイトルが取れた時はタイトルがドメイン名でない（取れない時はドメイン名）',
+  sharedMeta && (sharedMeta.source === 'domain'
+    ? sharedMeta.title === sharedMeta.domain
+    : sharedMeta.title !== sharedMeta.domain && !sharedMeta.title.includes(sharedMeta.domain)), sharedMeta);
+
 // ---- 11. 閉じるボタン・ESC（全モーダル共通ルール） ----
 await openShare();
 await page.click('#news-share-modal .modal-footer .modal-close');
@@ -262,6 +363,15 @@ check('ボタン・モーダルのアイコンがSVGとして描画されてい�
 // このテストが作った共有リンクを掃除して終わる（DB にテストの残りを溜めない）
 const cleaned = await cleanNewsLinks();
 console.log(`掃除(終了): 共有リンク ${cleaned} 件`);
+
+// ---- 16. 後片付け: このテストが作った共有リンクはサーバーから消える（テストの残りを DB に溜めない） ----
+const leftUrls = await page.evaluate(async (prefix) => {
+  const m = await import('/js/api.js');
+  const res = await m.apiGet('/news/links', { limit: 100 });
+  return (res.links || []).filter((x) => String(x.url || '').startsWith(prefix)).map((x) => x.url);
+}, CLEAN_PREFIX);
+check('後片付け: このテストが作った共有リンクはサーバーから消える（掃除後は API に出ない）',
+  cleaned >= 1 && leftUrls.length === 0, { cleaned, leftUrls });
 
 await browser.close();
 console.log('---');

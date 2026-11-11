@@ -23,3 +23,18 @@ certs/
 logs/
 # UI検証スクリーンショット出力 (Gitに含めない)
 scripts/output/
+# 検証用一時成果物と実行時データ (Gitに含めない・コードが必要時に作成する)
+data/
+prompt.txt
+nohup.out
+*.tmp
+tmp-probe.mjs
+scripts/tmp/
+ui*.txt
+t*.txt
+vd*.txt
+api*.txt
+mail-*.txt
+health.json
+audit-resolve.json
+

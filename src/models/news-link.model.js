@@ -49,6 +49,8 @@ function mapLink(row) {
     url: row.url,
     title: row.title,
     domain: row.domain,
+    titleSource: row.titleSource || row.title_source || 'domain',
+    title_source: row.title_source || row.titleSource || 'domain',
     addedBy: row.addedBy || row.added_by,
     added_by: row.added_by || row.addedBy,
     addedByName: row.addedByName || row.added_by_name,
@@ -91,19 +93,19 @@ export const newsLinkModel = {
 
   /**
    * 共有リンクを追加する（時刻は JST 壁時計で書く）
-   * @param {object} link { url, title, domain, addedBy, addedByName }
+   * @param {object} link { url, title, domain, titleSource, addedBy, addedByName }
    * @returns {Promise<object>}
    */
-  async createNewsLink({ url, title, domain, addedBy, addedByName }) {
+  async createNewsLink({ url, title, domain, titleSource = 'domain', addedBy, addedByName }) {
     await getDb();
 
     const id = `nl_${Date.now().toString(36)}${Math.random().toString(36).substring(2, 8)}`;
     const nowStr = nowIso();
 
     await query(
-      `INSERT INTO news_links (id, url, title, domain, added_by, added_by_name, added_at, is_deleted)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 0)`,
-      [id, url, title, domain, addedBy, addedByName, nowStr]
+      `INSERT INTO news_links (id, url, title, domain, title_source, added_by, added_by_name, added_at, is_deleted)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0)`,
+      [id, url, title, domain, titleSource, addedBy, addedByName, nowStr]
     );
 
     return mapLink({
@@ -111,6 +113,7 @@ export const newsLinkModel = {
       url,
       title,
       domain,
+      title_source: titleSource,
       added_by: addedBy,
       added_by_name: addedByName,
       added_at: nowStr,

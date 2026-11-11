@@ -1531,8 +1531,9 @@ export function sharedLinksSnapshot() {
 }
 
 /**
- * 「ピノックアップ教育ニュース」ウィジェットを描画する（共有リンクを新しい順に並べる）
+ * 「ピノックアップ教育ニュース」ウィジェットを描画する（共有リンクを新しい順・1行1件）
  * カードは 2px 実線の1枚の枠（readability.css R3/R4 でホバーリング・浮き上がり）。
+ * 行は「タイトルリンク（1行・長さは末尾 … で切る・ホバーで全文）＋右端の小さな日付」だけ。共有者名は出さない。
  * 元記事は新タブで開く（target="_blank"・rel="noopener noreferrer"）。常設説明文は置かない（UI十条9）。
  */
 function renderDashNewsSummary() {
@@ -1548,23 +1549,18 @@ function renderDashNewsSummary() {
   el.innerHTML = sharedLinks.map((l) => {
     const rawUrl = String(l.url || '');
     const safeUrl = /^https?:\/\//i.test(rawUrl) ? rawUrl : '#';
-    const title = escapeHTML(String(l.title || l.domain || '共有記事'));
-    const domain = escapeHTML(String(l.domain || defaultShareTitle(rawUrl)));
+    const fullTitle = String(l.title || l.domain || '共有記事');
     const day = String(l.addedDay || l.added_day || '').substring(0, 10);
-    const by = escapeHTML(String(l.addedByName || l.added_by_name || '教員'));
+    const dayShort = /^\d{4}-\d{2}-\d{2}$/.test(day)
+      ? `${Number(day.substring(5, 7))}/${Number(day.substring(8, 10))}`
+      : '';
 
     return `
-      <div class="p-3 rounded-lg bg-surface-strong border border-divider flex flex-col gap-1.5">
-        <div class="flex items-center justify-between gap-2">
-          <span class="badge badge-info truncate">${domain}</span>
-          <span class="text-[10px] text-muted font-mono shrink-0">${escapeHTML(day)}</span>
-        </div>
+      <div class="news-link-card rounded-lg bg-surface-strong border border-divider px-2 py-1.5">
         <a href="${escapeHTML(safeUrl)}" target="_blank" rel="noopener noreferrer"
-           class="text-xs font-bold text-accent hover:underline flex items-center gap-1 leading-snug"
-           aria-label="元記事を開く">
-          ${title} <i data-lucide="external-link" class="w-3 h-3 shrink-0"></i>
-        </a>
-        <span class="text-[10px] text-muted">共有: ${by} 教員</span>
+           class="news-link-card__title truncate" title="${escapeHTML(fullTitle)}"
+           aria-label="元記事を開く">${escapeHTML(fullTitle)}</a>
+        <span class="news-link-card__date font-mono">${escapeHTML(dayShort)}</span>
       </div>
     `;
   }).join('');

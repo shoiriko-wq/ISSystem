@@ -131,6 +131,69 @@ check('article cards in the 4 sections share the unified 2px frame (same color a
   items.length >= 6 && items.every((i) => i.top === FRAME_W && i.style === 'solid' && !transparent(i.color) && i.color === sectionColor),
   `${items.length} items, widths=${items.map((i) => i.top).join('/')} colors=${[...new Set(items.map((i) => i.color))].join(',')}`);
 
+// ---- R3b: ピノックアップ教育ニュースの共有リンクカードは1行（タイトルリンク＋右端の小さな日付） ----
+const newsCards = await page.evaluate(() => [...document.querySelectorAll('#dash-news-summary > div.news-link-card')].map((card) => {
+  const link = card.querySelector('a.news-link-card__title');
+  const date = card.querySelector('.news-link-card__date');
+  const csCard = getComputedStyle(card);
+  const csLink = getComputedStyle(link);
+  const cardRect = card.getBoundingClientRect();
+  const linkRect = link.getBoundingClientRect();
+  const dateRect = date.getBoundingClientRect();
+  return {
+    display: csCard.display,
+    cardH: Math.round(cardRect.height),
+    linkH: Math.round(linkRect.height),
+    linkW: Math.round(linkRect.width),
+    linkScrollW: link.scrollWidth,
+    nowrap: csLink.whiteSpace,
+    overflowX: csLink.overflowX,
+    ellipsis: csLink.textOverflow,
+    linkFont: csLink.fontSize,
+    dateFont: getComputedStyle(date).fontSize,
+    dateRightGap: Math.round(cardRect.right - dateRect.right),
+    badge: !!card.querySelector('.badge'),
+    shareName: card.textContent.includes('共有:'),
+    titleAttr: link.getAttribute('title'),
+    linkText: link.textContent,
+  };
+}));
+check('news share cards draw one line (title link + right date); long titles cut with … and full text stays in title',
+  newsCards.length === 3 && newsCards.every((c) => c.display === 'flex' && c.cardH <= 34 && c.linkH === 16
+    && c.nowrap === 'nowrap' && c.overflowX === 'hidden' && c.ellipsis === 'ellipsis'
+    && c.linkFont === '12px' && c.dateFont === '10px' && c.dateRightGap <= 12
+    && !c.badge && !c.shareName && c.titleAttr === c.linkText)
+  && newsCards[0].linkScrollW > newsCards[0].linkW,
+  newsCards.map((c) => `cardH=${c.cardH} linkH=${c.linkH} link=${c.linkW}/${c.linkScrollW} ell=${c.ellipsis} gap=${c.dateRightGap}`).join(' | '));
+
+// ---- R3c: 共有リンクの描画コードはカード1枚にリンク1本と日付1個だけ（1行の約束） ----
+const renderSource = await page.evaluate(async () => {
+  const src = await fetch('/public/js/modules/dashboard.module.js').then((r) => r.text());
+  const start = src.indexOf('function renderDashNewsSummary');
+  const body = src.slice(start, start + 1300);
+  return {
+    start,
+    cardClass: /class="news-link-card rounded-lg/.test(body),
+    titleClass: /class="news-link-card__title/.test(body),
+    dateClass: /class="news-link-card__date/.test(body),
+    truncate: /news-link-card__title truncate/.test(body),
+    linkCount: (body.match(/<a /g) || []).length,
+    dateCount: (body.match(/<span class="news-link-card__date/g) || []).length,
+    target: /target="_blank"/.test(body),
+    rel: /rel="noopener noreferrer"/.test(body),
+    titleAttr: /title="\$\{escapeHTML\(fullTitle\)\}"/.test(body),
+    textFull: /\$\{escapeHTML\(fullTitle\)\}<\/a>/.test(body),
+    addedDay: /l\.addedDay \|\| l\.added_day/.test(body),
+    emptyState: /共有された記事はまだありません/.test(body),
+    shareName: /共有:/.test(body),
+  };
+});
+check('renderDashNewsSummary draws one card with exactly one title link and one date (full title kept, empty state, no share name)',
+  renderSource.start > 0 && renderSource.cardClass && renderSource.titleClass && renderSource.dateClass
+  && renderSource.truncate && renderSource.linkCount === 1 && renderSource.dateCount === 1
+  && renderSource.target && renderSource.rel && renderSource.titleAttr && renderSource.textFull
+  && renderSource.addedDay && renderSource.emptyState && !renderSource.shareName, JSON.stringify(renderSource));
+
 // 入力欄・チップ（border-*-color クラス）は枠線を持つ「合図」として width が復元されること
 const colorClassProbe = await page.evaluate(() => {
   const main = document.querySelector('main');

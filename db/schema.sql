@@ -1324,17 +1324,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_mail_messages_uid ON mail_messages(user_i
 -- 20. ピックアップ教育ニュースの共有リンク (news_links)
 -- ダッシュボード「記事を共有」で追加した記事URLとページタイトルを保持する。
 -- ★ 共有はリンクの追加だけ（チャット投稿はしない）。同一URLは1件だけ（小文字比較で重複拒否）。
+-- ★ title_source: ページタイトルの出所（title / h1 / og / domain）。画面は1行表示（長いタイトルは … で切る）。
 -- -------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS news_links (
   id TEXT PRIMARY KEY,
   url TEXT NOT NULL,
   title TEXT NOT NULL,
   domain TEXT NOT NULL,
+  title_source TEXT NOT NULL DEFAULT 'domain',
   added_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   added_by_name TEXT NOT NULL,
   added_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   is_deleted INTEGER NOT NULL DEFAULT 0
 );
+-- 旧環境（title_source 列なし）からの冪等マイグレーション。ensureSchema は失敗を警告扱いとする
+ALTER TABLE news_links ADD COLUMN IF NOT EXISTS title_source TEXT NOT NULL DEFAULT 'domain';
 CREATE INDEX IF NOT EXISTS idx_news_links_added_at ON news_links(added_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS uniq_news_link_url ON news_links(lower(url)) WHERE is_deleted = 0;
 
