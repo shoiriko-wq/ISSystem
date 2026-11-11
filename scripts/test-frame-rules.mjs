@@ -136,39 +136,59 @@ check('article cards in the 4 sections share the unified 2px frame (same color a
   `${items.length} items, widths=${items.map((i) => i.top).join('/')} colors=${[...new Set(items.map((i) => i.color))].join(',')}`);
 
 // ---- R3b: ピノックアップ教育ニュースの共有リンクカードは1行（タイトルリンク＋右端の小さな日付） ----
-const newsCards = await page.evaluate(() => [...document.querySelectorAll('#dash-news-summary > div.news-link-card')].map((card) => {
-  const link = card.querySelector('a.news-link-card__title');
-  const date = card.querySelector('.news-link-card__date');
-  const csCard = getComputedStyle(card);
-  const csLink = getComputedStyle(link);
-  const cardRect = card.getBoundingClientRect();
-  const linkRect = link.getBoundingClientRect();
-  const dateRect = date.getBoundingClientRect();
-  return {
-    display: csCard.display,
-    cardH: Math.round(cardRect.height),
-    linkH: Math.round(linkRect.height),
-    linkW: Math.round(linkRect.width),
-    linkScrollW: link.scrollWidth,
-    nowrap: csLink.whiteSpace,
-    overflowX: csLink.overflowX,
-    ellipsis: csLink.textOverflow,
-    linkFont: csLink.fontSize,
-    dateFont: getComputedStyle(date).fontSize,
-    dateRightGap: Math.round(cardRect.right - dateRect.right),
-    badge: !!card.querySelector('.badge'),
-    shareName: card.textContent.includes('共有:'),
-    titleAttr: link.getAttribute('title'),
-    linkText: link.textContent,
-  };
-}));
+const newsCards = await page.evaluate(() => {
+  const container = document.getElementById('dash-news-summary');
+  const ccs = getComputedStyle(container);
+  const bl = document.getElementById('dash-pinned-bulletins');
+  const bcs = getComputedStyle(bl);
+  return [...container.querySelectorAll('div.news-link-card')].map((card) => {
+    const link = card.querySelector('a.news-link-card__title');
+    const date = card.querySelector('.news-link-card__date');
+    const csCard = getComputedStyle(card);
+    const csLink = getComputedStyle(link);
+    const cardRect = card.getBoundingClientRect();
+    const linkRect = link.getBoundingClientRect();
+    const dateRect = date.getBoundingClientRect();
+    return {
+      display: csCard.display,
+      listDisplay: ccs.display,
+      listDir: ccs.flexDirection,
+      listGap: ccs.gap,
+      blDisplay: bcs.display,
+      blDir: bcs.flexDirection,
+      blGap: bcs.gap,
+      cardW: Math.round(cardRect.width),
+      cardH: Math.round(cardRect.height),
+      linkH: Math.round(linkRect.height),
+      linkW: Math.round(linkRect.width),
+      linkScrollW: link.scrollWidth,
+      nowrap: csLink.whiteSpace,
+      overflowX: csLink.overflowX,
+      ellipsis: csLink.textOverflow,
+      linkFont: csLink.fontSize,
+      dateFont: getComputedStyle(date).fontSize,
+      dateRightGap: Math.round(cardRect.right - dateRect.right),
+      badge: !!card.querySelector('.badge'),
+      shareName: card.textContent.includes('共有:'),
+      titleAttr: link.getAttribute('title'),
+      linkText: link.textContent,
+    };
+  });
+});
 check('news share cards draw one line (title link + right date); long titles cut with … and full text stays in title',
-  newsCards.length === 3 && newsCards.every((c) => c.display === 'flex' && c.cardH <= 34 && c.linkH === 16
+  newsCards.length === 3 && newsCards.every((c) => c.display === 'flex' && c.cardH <= 38 && c.linkH === 19
     && c.nowrap === 'nowrap' && c.overflowX === 'hidden' && c.ellipsis === 'ellipsis'
-    && c.linkFont === '12px' && c.dateFont === '10px' && c.dateRightGap <= 12
+    && c.linkFont === '14px' && c.dateFont === '10px' && c.dateRightGap <= 12
     && !c.badge && !c.shareName && c.titleAttr === c.linkText)
   && newsCards[0].linkScrollW > newsCards[0].linkW,
   newsCards.map((c) => `cardH=${c.cardH} linkH=${c.linkH} link=${c.linkW}/${c.linkScrollW} ell=${c.ellipsis} gap=${c.dateRightGap}`).join(' | '));
+
+// ---- R3b2: 一覧は1列（本日の連絡と同一の flex 列・カード幅は全カード同一＝2列にならない） ----
+check('news share list stacks as one column exactly like 本日の連絡 (flex column, same gap, every card the same full width)',
+  newsCards.length === 3 && newsCards.every((c) => c.listDisplay === 'flex' && c.listDir === 'column'
+    && c.cardW >= 300 && c.listGap === c.blGap && c.blDisplay === 'flex' && c.blDir === 'column')
+  && new Set(newsCards.map((c) => c.cardW)).size === 1,
+  newsCards.map((c) => `w=${c.cardW} dir=${c.listDir} gap=${c.listGap} bl=${c.blDir}/${c.blGap}`).join(' | '));
 
 // ---- R3c: 共有リンクの描画コードはカード1枚にリンク1本と日付1個だけ（1行の約束） ----
 const renderSource = await page.evaluate(async () => {

@@ -17,8 +17,9 @@
  * 11. フッター「閉じる」と ESC キーで閉じられる（全モーダル共通規約）
  * 12. 背景クリック規則: モーダル内で押し開始→背景で離すと閉じない、背景で押し開始→閉じる
  * 13. ボタン・モーダルの Lucide アイコンが SVG として実描画される
- * 14. カードは1行表示（タイトルリンク＋右端の小さな日付）。px実測で1行（リンク高16px・カード高34px以下・nowrap+ellipsis）、
+ * 14. カードは1行表示（タイトルリンク＋右端の小さな日付）。px実測で1行（リンク高19px・カード高38px以下・nowrap+ellipsis）、
  *     ホバーで全文（title属性＝リンクの全文）、ドメインバッチ・共有者名・下線・二重リングは出ない、リンクは新タブ（target/rel）
+ * 17. 一覧は1列（本日の連絡と同一の flex 列・カード幅は全カード同一＝2列にならない）
  * 15. サーバー実データ: title_source（title/h1/og/domain）が記録され、ページタイトルが取れた時はタイトルがドメイン名でない
  * 16. 後片付け: このテストが作った共有リンクは掃除され、掃除後の API に出ない（DB にテストの残りを溜めない）
  *
@@ -197,8 +198,8 @@ check('URLスキーマ無しは https:// へ補完され、送信は url 1項目
   newsPost?.body?.url === EXPECT_URL && Object.keys(newsPost?.body || {}).length === 1, newsPost?.body);
 check('共有の行き先は /api/news/links（職員チャットへの投稿は発生しない＝v3.1.7・禁则16）',
   !!newsPost && !chatPost, { newsPost: newsPost?.endpoint, chatPost: chatPost?.endpoint });
-check('共有後はモーダルが閉じ、成功トースト「ピノックアップ教育ニュースへ…」',
-  !!afterShare && afterShare.toasts.some((t) => t.includes('ピノックアップ教育ニュースへ')), afterShare);
+check('共有後はモーダルが閉じ、成功トースト「ピックアップ教育ニュースへ…」',
+  !!afterShare && afterShare.toasts.some((t) => t.includes('ピックアップ教育ニュースへ')), afterShare);
 check('タブはダッシュボードのまま（チャットタブへ遷移しない）',
   afterShare?.activeView === 'view-dashboard', afterShare?.activeView);
 
@@ -255,9 +256,9 @@ const cardShape = await page.evaluate(() => {
     lucideInCard: !!card.querySelector('svg'),
   };
 });
-check('カードは1行（flex行・タイトルリンク高16px・カード高34px以下・1行分しかない）',
+check('カードは1行（flex行・タイトルリンク高19px・カード高38px以下・1行分しかない）',
   cardShape && cardShape.display === 'flex' && cardShape.alignItems === 'center'
-  && cardShape.linkH === 16 && cardShape.cardH <= 34 && cardShape.linkLineCount === 1, cardShape);
+  && cardShape.linkH === 19 && cardShape.cardH <= 38 && cardShape.linkLineCount === 1, cardShape);
 check('長いタイトルは1行で … に切り詰められる（nowrap / overflow:hidden / text-overflow:ellipsis・下に下線は出さない）',
   cardShape && cardShape.nowrap === 'nowrap' && cardShape.overflowX === 'hidden'
   && cardShape.ellipsis === 'ellipsis' && cardShape.linkScrollW >= cardShape.linkW
@@ -271,6 +272,27 @@ check('リンクは下線・二重リング・下地を持たず新タブで開�
   cardShape && cardShape.cardUnderline === 'none' && cardShape.cardOutline === 'none'
   && cardShape.href === EXPECT_URL && cardShape.target === '_blank' && cardShape.rel.includes('noopener')
   && cardShape.borderW === 2 && cardShape.borderS === 'solid', cardShape);
+
+// ---- 17. 一覧は1列（本日の連絡と同一の flex 列・2列にならない・タイトルは14px太字） ----
+const listShape = await page.evaluate(() => {
+  const container = document.getElementById('dash-news-summary');
+  if (!container) return null;
+  const ccs = getComputedStyle(container);
+  const bl = document.getElementById('dash-pinned-bulletins');
+  const bcs = bl ? getComputedStyle(bl) : null;
+  const widths = [...container.querySelectorAll('div.news-link-card')]
+    .map((c) => Math.round(c.getBoundingClientRect().width));
+  return {
+    display: ccs.display, dir: ccs.flexDirection, gap: ccs.gap, widths,
+    blDisplay: bcs ? bcs.display : null, blDir: bcs ? bcs.flexDirection : null, blGap: bcs ? bcs.gap : null,
+  };
+});
+check('一覧は1列（flex column・本日の連絡と同一の gap・カード幅は全カード同一＝2列にならない・タイトルは14px太字＝本日の連絡と同じ列設計）',
+  listShape && listShape.display === 'flex' && listShape.dir === 'column'
+  && listShape.blDisplay === 'flex' && listShape.blDir === 'column' && listShape.gap === listShape.blGap
+  && listShape.widths.length >= 1 && new Set(listShape.widths).size === 1 && listShape.widths[0] >= 300
+  && cardShape && cardShape.linkFont === '14px' && cardShape.linkWeight >= 700,
+  { listShape, linkFont: cardShape?.linkFont, weight: cardShape?.linkWeight });
 
 // カード本体だけホバーリングを描く（中のリンクは二重リングを出さない＝UI十条5）
 const newsCardEl = await page.$('#dash-news-summary > div.news-link-card');

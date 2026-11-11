@@ -457,9 +457,10 @@ export function initDashboardModule() {
 
           </div>
 
-          <div id="dash-news-summary" class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <!-- 一覧は1列（本日の連絡と同一の dash-news-list・gap 0.75rem）。2列にはしない -->
+          <div id="dash-news-summary" class="dash-news-list">
 
-            <div class="text-xs text-muted py-4 text-center col-span-2">ニュースを取得中...</div>
+            <div class="text-xs text-muted py-4 text-center">ニュースを取得中...</div>
 
           </div>
 
@@ -1536,9 +1537,10 @@ export function sharedLinksSnapshot() {
 }
 
 /**
- * 「ピノックアップ教育ニュース」ウィジェットを描画する（共有リンクを新しい順・1行1件）
+ * 「ピノックアップ教育ニュース」ウィジェットを描画する（共有リンクを新しい順・1列1行1件）
+ * 一覧は1列（本日の連絡と同一の .dash-news-list。2列にはしない）。
  * カードは 2px 実線の1枚の枠（readability.css R3/R4 でホバーリング・浮き上がり）。
- * 行は「タイトルリンク（1行・長さは末尾 … で切る・ホバーで全文）＋右端の小さな日付」だけ。共有者名は出さない。
+ * 行は「タイトルリンク（14px・1行・長さは末尾 … で切る・ホバーで全文）＋右端の小さな日付」だけ。共有者名は出さない。
  * 元記事は新タブで開く（target="_blank"・rel="noopener noreferrer"）。常設説明文は置かない（UI十条9）。
  */
 function renderDashNewsSummary() {
@@ -1546,7 +1548,7 @@ function renderDashNewsSummary() {
   if (!el) return;
 
   if (sharedLinks.length === 0) {
-    el.innerHTML = '<div class="text-xs text-muted py-4 text-center col-span-2">共有された記事はまだありません。</div>';
+    el.innerHTML = '<div class="text-xs text-muted py-4 text-center">共有された記事はまだありません。</div>';
     refreshLucideIcons();
     return;
   }
