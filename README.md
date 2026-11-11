@@ -74,7 +74,9 @@ PGPASSWORD='otome601' psql -h localhost -p 5432 -U postgres -d issystem
 - 実装は `src/services/mail.transport.js`。`node:net` / `node:tls` のみを使い、IMAP は `STARTTLS → LOGIN`、SMTP は `EHLO → STARTTLS → AUTH LOGIN` を確認する。新規 npm 依存は増やさない。
 - 校内サーバーの証明書は CN 不一致・自己署名が多いため `rejectUnauthorized: false`（SNI の servername は送る）。証明書の厳密検証は行わない。
 - API: `POST /api/mail/test`。body に `password` とフォーム値を送れば未保存設定のプレテスト（DB 書き込みなし）、空なら保存済み設定でテストし `status` を更新して監査ログ `MAIL_CONNECTION_TEST` を残す。
-- 検証: `npm run test:api:mail-test`（Jest 6項目・存在しない `issystem.example` 宛てなので接続は必ず失敗し、`status=FAILED` と成功系はプローブ差し替えで検証）と `npm run test:ui:mail`（ブラウザ 37項目）。
+- **複数アカウント対応**: 1ユーザーは複数メールアカウントを登録できる（`mail_accounts` は `UNIQUE (user_id, lower(email_address))`。`mail_messages.account_id` は `ON DELETE CASCADE` でアカウントに所属し、`UNIQUE (account_id, folder, uid)` で UID 重複を排除する）。受信箱のタブ欄最上段にアカウントタブ（末尾に追加 `+` タブ）を並べ、受信/送信ボックスタブはその下段に置く。表示・取得・送信・既読・削除はすべて `account_id` で対象アカウントを指定する（未指定はそのユーザーの1件目）。ヘッダーの「接続アカウント: … / 最終受信確認: …」行は廃止した（アカウントはタブで示す）。
+- **自動受信**: メールタブ表示中は 60 秒周期 (`setInterval`) でアクティブアカウントの受信ボックスを再取得する（受信中はスキップ、受信失敗はサイレントでトーストを出さない、タブ切替と読み込み時もサイレント取得）。受信ボタンのアイコンは Lucide の `download`（`refresh-cw` は使わない）。
+- 検証: `npm run test:api:mail-test`（Jest 6項目・存在しない `issystem.example` 宛てなので接続は必ず失敗し、`status=FAILED` と成功系はプローブ差し替えで検証）と `npm run test:ui:mail`（ブラウザ 52項目：アカウントタブ・追加 `+`・タブ切替・アカウント削除・60秒定期受信フック・ダウンロードアイコン・再読み込み後継続）。
 
 ## コマンド
 
@@ -91,7 +93,7 @@ PGPASSWORD='otome601' psql -h localhost -p 5432 -U postgres -d issystem
 | `npm run test:logsecurity` | ログ秘匿・保持検証 (404 レスポンスに stack なし、失敗ログイン 401 がアクセスログ `data/logs/access-YYYY-MM-DD.log` に記録、ログディレクトリ mode 700、アクセスログファイル mode 600、アクセスログに bcrypt ハッシュなし、ADMIN 監査 API に `LOGIN_FAILED`、監査 JSON にハッシュなし、レート制限 6回失敗=401×5+429×1 の 9項目。サーバー起動後に実行) |
 | `npm run test:api:mail-test` | メール接続テスト API 検証 (Jest `test/mail.test.js` 6項目) |
 | `npm run test:api:mail-defaults` | メール初期値 (.env プリフィル・Git 秘匿) API 検証 (12項目) |
-| `npm run test:ui:mail` | メール UI 検証 (初回設定・プリフィル・接続テスト・受信箱の 37項目) |
+| `npm run test:ui:mail` | メール UI 検証 (初回設定・プリフィル・接続テスト・受信箱・複数アカウントタブ・60秒定期受信の 52項目) |
 | `npm run test:ui:exambasic` | 定期考査 基本情報「3. 科目 × 実施クラス・コース」の列幅・チップ配置検証 (実施数列なし / 科目名14%・略称8% / チップ内容分63% / はみ出し0 / チップクリック・Shift範囲選択・保存反映の 4ビューポート 38項目) |
 | `npm run test:ui:examaddtop` | 考査 基本情報の「行の追加」が最上部・未入力の行1件だけ・ボタン無効（未入力の行の top が先頭：実測 487px < 保存済み行 552px < 末尾行 2426px / 行追加で画面がスクロールしない `main.scrollTop` 0→0 / ボタン disabled+aria-disabled / 2回押しても31件のまま / 保存 201→ボタン復活 / 未入力の行の削除 200→ベースライン復元 / 部屋 8→9→8 / 科目 9→10→9 / クラス 30→31→30 / 学年順＋名前順不変。クラス名は初期29名固定・学年内重複不可（409）・初期の行は削除不可（使用中の行の「削除」は使用状況照会後 DELETE 非送信、初期名の直接 DELETE は 409）の 22項目） |
 | `npm run test:ui:bulletin-search` | 職員掲示板の全日検索 UI 検証 (タイトル・本文・投稿者名を全日で検索して左列が対象日見出し付きの全日の列表になる / タイトルの `<mark>` ハイライト・件数「N 件」・行の対象日チップ / 中心日表示は「全日」になり ‹ ›・本日・日付クリック（カレンダー開閉）は disabled（data-day は維持・固定幅なので › の位置は動かず） / 結果クリックは中心日を動かさず右ペインに全文 / 検索ピルは存在しない / ←/→・T・C キーは停止 / ミニカレンダーの検索該当枠と日付セル disabled（合成クリックでも中心日は動かない） / 検索語クリアで通常表示とナビが復帰・投稿者名検索・後片付けの 23項目) |
@@ -109,6 +111,7 @@ PGPASSWORD='otome601' psql -h localhost -p 5432 -U postgres -d issystem
 | `npm run rotate:mail-key -- OLD_JWT_SECRET=<旧> (OLD_SECRET=<旧MAIL_ENC_SECRET> も可)` | mail_accounts の AES-256-GCM キーローテ (sha256(旧JWT) / scrypt(旧MAIL_ENC_SECRET) で暗号化された行を新 MAIL_ENC_SECRET 基準の scrypt キーへ再暗号化。再暗号化後にサーバー再起動) |
 | `npm run db:create` / `db:init` / `db:seed` | DB 作成 / スキーマ適用 / ダミーデータ投入 |
 | `npm run db:drop-general-chat` | 職員全体チャット撤廃 (v3.1.2) の既存DB移行: `chat_channels` から `general` / `chat-all` / `all` を DELETE（関連する `chat_messages` / `chat_message_reads` / `chat_channel_members` は ON DELETE CASCADE で連動削除。削除件数と残存チェックを表示） |
+| `npm run db:mail-accounts` | メール複数アカウント移行 (2026/11/11) の既存DB移行: `mail_accounts` の `UNIQUE(user_id)` を撤去して `UNIQUE (user_id, lower(email_address))` へ、`mail_messages.account_id` (FK `ON DELETE CASCADE`) を追加し、UID 一意制約を `UNIQUE (account_id, folder, uid)` へ作り直す。旧DBの孤立メッセージはそのユーザーの最古アカウントへ割り当てる（冪等。アカウント一覧と内訳・未所属件数を表示） |
 | `npm run db:tables` | コード内参照テーブル名の一覧表示 (スキーマ整合チェック) |
 
 ## テストスイート
@@ -134,7 +137,7 @@ PGPASSWORD='otome601' psql -h localhost -p 5432 -U postgres -d issystem
 1. 見出し・カード・枠は 2px の実線を1枚（`border-main`）。影・グラデーション・影文字は使わない
 2. モーダルは画面中央・余白10px・`max-height:90dvh`・内部スクロール・`max-width` 上限・閉じボタン
 3. 入力は `type`・`id`・`name`・`autocomplete`（新規 `new-password`／既存 `username`）・`aria-label`・`label for`・`border-main` の7条件
-4. 操作できる要素はホバーで周りに1pxリング＋3px浮き＋影（影はリング目的のみ、背景は変えない）
+4. 操作できる要素はホバーで周りに1pxリング＋3px浮き＋影（影はリング目的のみ、背景は変えない）。操作できない面（ダッシュボード上段の労い・年休等・出張・要対応タスクカード＝`card--framed card--static`）は指カーソルを出さず（`cursor:default`）、ホバーでもリング・浮き上がり・背景/影の強調を出さない（指カーソルは実際にクリックできる要素にだけ出す。検証 `test:ui:frames` R4b）
 5. 色は60〜70%彩度・35%明度の単色、コントラスト比4.5以上（`npm run test:ui:contrast` / `test:ui:chrome`）
 6. 文字は「Noto Sans JP + Tencent Sans」Webフォント、font-family 直書き禁止
 7. 画面の常時スクロール禁止（`100dvh`・`overflow:hidden`、コンテンツは内部スクロール）
@@ -221,4 +224,6 @@ PGPASSWORD='otome601' psql -h localhost -p 5432 -U postgres -d issystem
 - **ダッシュボード「記事を共有」モーダルの中身は記事URL入力欄だけ（v3.1.3・2026/11/9）**: モーダル本文は `label[for="news-share-url"]` と URL 入力欄だけ（常設の操作説明文 `<p>` は置かない＝UI十条9・禁则6。「https:// を補完する」等の説明はプレースホルダーと `title` とトーストだけで伝える）。URL入力欄は入力の7条件（`type=url`・`id`・`name=news-share-url`・`autocomplete=off`・`aria-label=記事URL`・`label for`・`border-main` 2px実線）を満たす（禁则8）。検証は `npm run test:ui:news-share`（30項目・共有の行き先は `POST /api/news/links`＝職員チャットへの投稿は発生しない・テストが作った共有リンクは後片付けで削除し API に残さない）
 - **共有リンクカードは1行表示（v3.1.8・2026/11/11）**: 「ピノックアップ教育ニュース」のカード1枚は1行だけ＝「タイトルリンク（12px太字・`white-space:nowrap`+`overflow:hidden`+`text-overflow:ellipsis`で1行・長いタイトルは末尾を … で切る・`title`属性に全文（ホバーで全文）・下線と下地と二重リングなし（カード本体だけが1pxリング＋3px浮き＝UI十条5・禁则5））」＋「右端の小さな日付（10px・JST壁時計の M/D・右端余白12px以下）」。共有者名・ドメインバッチ・常設説明文は出ない（UI十条9）。元記事は新タブで開く（`target="_blank"`・`rel="noopener noreferrer"`）。CSS の寸法は `public/css/readability.css` §14（`!important` はレイアウト寸法の確定に使う＝禁则13）。検証は `npm run test:ui:news-share`（px実測）と `npm run test:ui:frames`（fixture の3枚で切り詰め・右端日付・枠2pxを px 実測、描画コードがカード1枚にリンク1本と日付1個だけであることを源码照合）
 - **ページタイトルと出所（title_source）（v3.1.8・2026/11/11）**: 共有時に server がURLをfetchしてタイトルを `<title>` → `<h1>` → `og:title`（「記事名｜サイト名」のサイト名接尾を除く）の順で取り、取れないときだけドメイン名を使う。出所は `news_links.title_source`（`title` / `h1` / `og` / `domain`）へ記録し、API とダッシュボードへ返す（既定 `domain`、旧環境からの冪等マイグレーション `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`）。検証は `npm run test:ui:news-share`（サーバー実データの `title_source` と「ページタイトルが取れた時はタイトルがドメイン名でない」）
+- **ダッシュボード上段3カードはクリック誘導効果なし（v3.1.9・2026-11-11）**: 労いカード・「年休等・出張」・「要対応タスク」の3カードはカード自体にクリックハンドラが存在しない「面」＝`card--framed card--static`。指カーソルは出さず（`cursor:default`）、ホバーでも1pxリング・3px浮き上がり・背景/影の強調を出さない（`public/css/readability.css` 第10節 644〜654行。第9節・第10節のホバールール自体が `!important` なので、この上書きも `!important` で消す）。2pxの実枠と角丸はセクションカードと同一のまま。カード内で実際にクリックできるもの（年休等・出張の `role="button"` 人数タイル、「承認依頼一覧へ」ボタン、4セクションの記事カード、天気ウィジェット）は従来どおり指カーソル＋ホバーリングが出る。検証は `npm run test:ui:frames`（`scripts/test-frame-rules.mjs` 23項目＝R4b 追加5項目で computed style を実測）と `npm run test:ui:fx`（タイルクリック・キーボード Enter で登録・確認モーダルが開く回帰）
+
 

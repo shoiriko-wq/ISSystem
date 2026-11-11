@@ -634,6 +634,26 @@ b,
   transform: translateY(var(--hover-lift)) !important;
 }
 
+/* ダッシュボード上段の3カード（労い・年休等・出張・要対応タスク）は「面」＝カードそのものは
+   クリックできない。指カーソル・ホバーリング・浮き上がり・背景/影強調といったクリック誘導の
+   視覚効果を付けない（ユーザーを誤認させない）。2pxの実枠と角丸はセクションカードと同一のまま。
+   第9節（指カーソル）と第10節（ホバーのリング・浮き上がり・glow影）は !important で宣言されて
+   いるので、この上書きも !important で消す（特異度 0,3,0 だけでは勝たない = test:ui:frames で実測）。
+   カード内の role="button" タイル（年休等・出張）と「承認依頼一覧へ」ボタン、4セクションの
+   記事カードはクリック可能なので pointer + リング + 浮き上がりを出す（第9節がそのまま作用）。 */
+.card--framed.card--static {
+  cursor: default;
+}
+
+.card--framed.card--static:hover {
+  cursor: default;
+  outline: none;
+  transform: none !important;
+  border-color: var(--border-main) !important;
+  background-color: var(--bg-card) !important;
+  box-shadow: none !important;
+}
+
 /* ホバーリング (outline var(--ring-width) + outline-offset) と 3px のスライドが
    サイドバーのスクロールコンテナの端で切れない余白を nav 内に確保する。
    余白 = リング (3+2=5px) + スライド 3px ≥ padding。 */

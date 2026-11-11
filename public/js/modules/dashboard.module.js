@@ -293,7 +293,11 @@ export function initDashboardModule() {
 
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
 
-      <div class="card card--framed p-5 bg-gradient-to-br from-accent-soft via-surface-soft to-surface-strong border-accent-soft md:col-span-2 flex flex-col justify-between dash-fx-card">
+      <!-- 上段3カード（労い・年休等・出張・要対応タスク）は「面」＝カード自体はクリックできない。
+           card--static で指カーソル・ホバーリング・浮き上がり等のクリック誘導効果を付けない
+           （readability.css 第9節/第10節）。カード内の role="button" タイル（年休等・出張）と
+           「承認依頼一覧へ」ボタンはクリック可能なので従来どおり pointer + リングが出る。 -->
+      <div class="card card--framed card--static p-5 bg-gradient-to-br from-accent-soft via-surface-soft to-surface-strong border-accent-soft md:col-span-2 flex flex-col justify-between dash-fx-card">
 
         <div id="dash-fx-layer" class="dash-fx-layer" aria-hidden="true"></div>
 
@@ -314,8 +318,9 @@ export function initDashboardModule() {
 
 
       <!-- 本日の 年休等・出張 (区分別人数タイルをクリックして登録・確認モーダルを開く。記入フォームはモーダル内に常設) -->
+      <!-- 見出しと区分別タイルの間の余白を消す: justify-between を撤去し、タイル群 (flex-1) がカード残高を満たす -->
 
-      <div class="card card--framed p-4 flex flex-col justify-between">
+      <div class="card card--framed card--static p-4 flex flex-col">
 
         <div class="flex items-center justify-between text-sm text-muted mb-2">
 
@@ -329,9 +334,9 @@ export function initDashboardModule() {
              配色は登録・確認モーダル（index.html の区分別人数サマリー）と同一トークン:
              年休等 = 赤系 (bg-danger-soft / border-danger-soft / text-danger)
              出張   = 黄系 (bg-warning-soft / border-warning-soft / text-warning) -->
-        <div class="grid grid-cols-2 gap-2 items-start">
+        <div class="grid grid-cols-2 gap-2 flex-1 items-stretch">
           <div id="dash-absence-leave-tile" role="button" tabindex="0"
-               class="flex flex-col items-center gap-1 py-2.5 px-0 rounded-lg bg-danger-soft border border-danger-soft cursor-pointer transition hover:brightness-110 focus:outline-2 focus:outline-offset-2 focus:outline-danger"
+               class="flex flex-col items-center justify-center gap-1 py-2.5 px-0 rounded-lg bg-danger-soft border border-danger-soft cursor-pointer transition hover:brightness-110 focus:outline-2 focus:outline-offset-2 focus:outline-danger"
                title="クリックして本日の「年休等」の詳細リストと記入フォームを開く">
             <div class="flex items-center gap-1.5 text-danger text-xs font-bold whitespace-nowrap">
               <i data-lucide="bed-double" class="w-3.5 h-3.5 shrink-0"></i>
@@ -340,7 +345,7 @@ export function initDashboardModule() {
             <span id="dash-absence-leave" class="text-xl font-black text-danger leading-none">0名</span>
           </div>
           <div id="dash-absence-trip-tile" role="button" tabindex="0"
-               class="flex flex-col items-center gap-1 py-2.5 px-0 rounded-lg bg-warning-soft border border-warning-soft cursor-pointer transition hover:brightness-110 focus:outline-2 focus:outline-offset-2 focus:outline-warning"
+               class="flex flex-col items-center justify-center gap-1 py-2.5 px-0 rounded-lg bg-warning-soft border border-warning-soft cursor-pointer transition hover:brightness-110 focus:outline-2 focus:outline-offset-2 focus:outline-warning"
                title="クリックして本日の「出張」の詳細リストと記入フォームを開く">
             <div class="flex items-center gap-1.5 text-warning text-xs font-bold whitespace-nowrap">
               <i data-lucide="briefcase" class="w-3.5 h-3.5 shrink-0"></i>
@@ -355,7 +360,7 @@ export function initDashboardModule() {
 
       <!-- 未処理タスク・承認サマリー -->
 
-      <div class="card card--framed p-4 flex flex-col justify-between">
+      <div class="card card--framed card--static p-4 flex flex-col justify-between">
 
         <div class="flex items-center justify-between text-xs text-muted mb-2">
 
@@ -1634,7 +1639,7 @@ function bindNewsShareForm() {
       form.reset();
 
       const title = (item && item.title) ? item.title : defaultShareTitle(url);
-      showToast(`ピノックアップ教育ニュースへ「${title}」を共有しました`, 'success');
+      showToast(`ピックアップ教育ニュースへ「${title}」を共有しました`, 'success');
 
       // ウィジェットへ即反映（server へ再取得を頼まず、追加した1件を先頭に足す）
       if (item) {

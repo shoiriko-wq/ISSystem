@@ -10,9 +10,13 @@
  *  R3. モダル・チャット・座席表・アプリ骨格 (header / sidebar) と 4セクションの記事カード
  *      (各リスト直下の項目) の枠線は 2px で維持する。セクション群を囲むグループ枠
  *      (.dashboard-grid) は描かない。
- *  R4. クリックできるカード (.card--framed) は枠線＋ホバーリングを維持する。
+ *  R4. クリックできるカード (.card--framed:not(.card--static)) は枠線＋ホバーリングを維持する。
  *      ダッシュボード 4セクションの記事カード (各リスト直下の項目) も同一の
  *      ホバーリング＋浮き上がりを持つ（セクションカード自体は面なので反応しない）。
+ *  R4b. ダッシュボード上段の3カード（労い・年休等・出張・要対応タスク）は .card--static の
+ *      「面」＝カード自体はクリックできない。指カーソル・ホバーリング・浮き上がり・影強調を
+ *      付けない（ユーザーを誤認させない）。カード内の role="button" 人数タイルと
+ *      「承認依頼一覧へ」ボタンはクリック可能なので指カーソル＋ホバーリングを維持する。
  *  R5. サイドバーのホバーリング（outline + offset + スライド）がスクロールコンテナの端で
  *      見切れない余白がある。
  *  R6. 狭幅モード（アイコンのみ）でアイコンがサイドバー箱から見切れない。
@@ -263,15 +267,94 @@ check('section card is not a fake clickable frame (cursor not pointer, no ring/l
   `cursor=${sectionRest.cursor} outline=${sectionHover.outline} transform=${sectionHover.transform} frame=${sectionHover.top}`);
 
 await page.mouse.move(5, 5);
-const framedEl = await page.$('.card--framed');
+const framedEl = await page.$('.card--framed:not(.card--static)');
 await framedEl.hover();
 const framedHover = await page.evaluate((el) => {
   const cs = getComputedStyle(el);
   return { outline: cs.outlineStyle, top: cs.borderTopWidth, cursor: cs.cursor };
 }, framedEl);
-check('interactive card keeps frame + hover ring feedback',
-  px(framedHover.top) > 0 && framedHover.outline === 'solid',
+check('interactive card (.card--framed, not face card) keeps frame + pointer + hover ring feedback',
+  px(framedHover.top) > 0 && framedHover.outline === 'solid' && framedHover.cursor === 'pointer',
   `border=${framedHover.top} outline=${framedHover.outline} cursor=${framedHover.cursor}`);
+
+// ---- R4b: ダッシュボード上段3カード（労い・年休等・出張・要対応タスク）は「面」＝クリック誘導なし ----
+const staticCardsRest = await page.evaluate(() => [...document.querySelectorAll('#view-dashboard .card--framed.card--static')]
+  .map((el) => {
+    const cs = getComputedStyle(el);
+    return {
+      title: el.textContent.replace(/\s+/g, ' ').trim().slice(0, 14),
+      cursor: cs.cursor, top: parseFloat(cs.borderTopWidth), shadow: cs.boxShadow,
+      clickableSelf: el.tagName === 'BUTTON' || el.tagName === 'A' || el.getAttribute('role') === 'button'
+    };
+  }));
+check('上段3カード（労い・年休等・出張・要対応タスク）は card--static の面：指カーソルなし・影なし・2px枠は維持',
+  staticCardsRest.length === 3 && staticCardsRest.every((c) => !c.clickableSelf && c.cursor === 'default' &&
+    px(c.top) === FRAME_W && c.shadow === 'none'),
+  staticCardsRest.map((c) => `${c.title} cursor=${c.cursor} border=${c.top} shadow=${c.shadow === 'none' ? 'no-shadow' : c.shadow}`).join(' | '));
+
+// ホバーしてもカード自体はリング・浮き上がり・影強調で反応しない（見出し部分でホバリングする）
+const staticHoverSelectors = ['#dash-greeting', '#view-dashboard .card--framed.card--static:nth-of-type(2) .font-bold', '#dash-unread-bulletins'];
+const staticCardHovers = [];
+for (const sel of staticHoverSelectors) {
+  const el = await page.$(sel);
+  if (!el) { staticCardHovers.push({ sel, missing: true }); continue; }
+  let hovered = false;
+  for (let i = 0; i < 6 && !hovered; i++) {
+    await el.hover();
+    await new Promise((r) => setTimeout(r, 120));
+    hovered = await page.evaluate((node) => {
+      const card = node.closest('#view-dashboard .card--framed.card--static');
+      return card ? card.matches(':hover') : false;
+    }, el);
+  }
+  await new Promise((r) => setTimeout(r, 300));
+  staticCardHovers.push(await page.evaluate((node, selName) => {
+    const card = node.closest('#view-dashboard .card--framed.card--static');
+    const cs = getComputedStyle(card);
+    return {
+      sel: selName, hovered: card.matches(':hover'), cursor: cs.cursor, outline: cs.outlineStyle,
+      transform: cs.transform, top: parseFloat(cs.borderTopWidth), shadow: cs.boxShadow
+    };
+  }, el, sel));
+}
+const flatTransform = (t) => t === 'none' || t === 'matrix(1, 0, 0, 1, 0, 0)';
+check('上段3カードはホバーでも指カーソル・リング・浮き上がり・影強調で反応しない（面なので反応しない）',
+  staticCardHovers.length === 3 && staticCardHovers.every((r) => !r.missing && r.hovered === true &&
+    r.cursor === 'default' && noRing(r.outline) && flatTransform(r.transform) && px(r.top) === FRAME_W &&
+    r.shadow === 'none'),
+  staticCardHovers.map((r) => `${r.sel} hover=${r.hovered} cursor=${r.cursor} outline=${r.outline} transform=${r.transform} border=${r.top} shadow=${r.shadow === 'none' ? 'no-shadow' : r.shadow}`).join(' | '));
+
+// カード内のクリックできる要素（人数タイル・承認依頼一覧へボタン）は指カーソル＋ホバーリングを維持する
+await page.mouse.move(5, 5);
+const tileHovers = [];
+for (const sel of ['#dash-absence-leave-tile', '#dash-absence-trip-tile']) {
+  const el = await page.$(sel);
+  if (!el) { tileHovers.push({ sel, missing: true }); continue; }
+  let hovered = false;
+  for (let i = 0; i < 6 && !hovered; i++) {
+    await el.hover();
+    await new Promise((r) => setTimeout(r, 120));
+    hovered = await page.evaluate((node) => node.matches(':hover'), el);
+  }
+  await new Promise((r) => setTimeout(r, 300));
+  tileHovers.push(await page.evaluate((node, selName) => {
+    const cs = getComputedStyle(node);
+    return {
+      sel: selName, hovered: node.matches(':hover'), cursor: cs.cursor, outline: cs.outlineStyle,
+      top: parseFloat(cs.borderTopWidth), role: node.getAttribute('role')
+    };
+  }, el, sel));
+}
+check('年休等・出張の人数タイル（role=button）はクリック可能なので指カーソル＋ホバーリングを維持する',
+  tileHovers.length === 2 && tileHovers.every((r) => !r.missing && r.hovered === true && r.role === 'button' &&
+    r.cursor === 'pointer' && r.outline === 'solid' && px(r.top) > 0),
+  tileHovers.map((r) => `${r.sel} hover=${r.hovered} cursor=${r.cursor} outline=${r.outline} border=${r.top}`).join(' | '));
+
+const approvalCursor = await page.evaluate(() => {
+  const b = document.getElementById('dash-btn-approval');
+  return b ? getComputedStyle(b).cursor : 'missing';
+});
+check('「承認依頼一覧へ」ボタンは指カーソルを維持する', approvalCursor === 'pointer', `cursor=${approvalCursor}`);
 
 // ---- R4: ダッシュボード 4セクションの記事カードもトップ3記事カードと同じホバーアニメーション ----
 const dashArticleSelectors = ['#dash-pinned-bulletins', '#dash-news-summary', '#dash-today-facilities', '#dash-today-schedules'];
