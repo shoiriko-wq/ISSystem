@@ -20,7 +20,20 @@ export const mailController = {
   },
 
   /**
-   * メール接続設定の登録 / 更新 (初回はメールアドレスとパスワードを入力)
+   * 自分の全メール接続設定取得 (アカウントタブ表示用)
+   * GET /api/mail/accounts
+   */
+  async listAccounts(req, res, next) {
+    try {
+      const { accounts } = await mailService.listAccounts(req.user);
+      return res.status(200).json({ success: true, accounts });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * メール接続設定の登録 / 更新 (初回はメールアドレスとパスワードを入力 / body.id でアカウント更新)
    * POST /api/mail/account
    */
   async saveAccount(req, res, next) {
@@ -37,12 +50,12 @@ export const mailController = {
   },
 
   /**
-   * メール接続設定の削除
+   * メール接続設定の削除 (query.account_id 指定はそのアカウントのみ / 未指定は全アカウント)
    * DELETE /api/mail/account
    */
   async deleteAccount(req, res, next) {
     try {
-      const result = await mailService.deleteAccount(req.user);
+      const result = await mailService.deleteAccount(req.user, req.query.account_id ?? null);
       return res.status(200).json({
         success: true,
         message: 'メール接続設定を削除しました。',
@@ -71,26 +84,30 @@ export const mailController = {
   },
 
   /**
-   * ボックス表示 (folder=inbox 受信ボックス / folder=sent 送信ボックス)
+   * ボックス表示 (folder=inbox 受信ボックス / folder=sent 送信ボックス / account_id 未指定は主アカウント)
    * GET /api/mail/messages
    */
   async getInbox(req, res, next) {
     try {
       const folder = req.query.folder === 'sent' ? 'sent' : 'inbox';
-      const { messages, unread } = await mailService.getInbox(req.user, folder);
-      return res.status(200).json({ success: true, folder, messages, unread });
+      const { folder: normalized, account_id, messages, unread } = await mailService.getInbox(
+        req.user,
+        folder,
+        req.query.account_id ?? null
+      );
+      return res.status(200).json({ success: true, folder: normalized, account_id, messages, unread });
     } catch (error) {
       next(error);
     }
   },
 
   /**
-   * 受信ボックスの取得 (IMAP へ接続して新着をDB保存)
+   * 受信ボックスの取得 (IMAP へ接続して新着をDB保存 / account_id 未指定は主アカウント)
    * POST /api/mail/inbox/refresh
    */
   async refreshInbox(req, res, next) {
     try {
-      const result = await mailService.fetchInbox(req.user);
+      const result = await mailService.fetchInbox(req.user, req.body?.account_id ?? req.query.account_id ?? null);
       return res.status(200).json({
         success: true,
         message: `受信ボックスを更新しました（新規 ${result.added} 件）`,

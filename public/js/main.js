@@ -105,9 +105,11 @@ export function switchTab(tabName) {
 }
 
 /**
- * 掲示タブの操作控件（年月選択・サイドバーの「未読」）を全日表示状態へ追従させる。
- * 全日表示（検索語・未読表示）は中心日が列表表示に影響しないため、中心日を動かす操作を全て止める。
- * ‹ ›・中心日クリック・年月選択・カレンダーの日付セルはモジュール側（setDayNavEnabled）が同じ条件で止める。
+ * 掲示タブの操作控件（年月選択・未読ボタン）を表示モードへ追従させる。
+ * 全日表示（検索語・未読表示）は中心日が列表表示に影響しないため、中心日を動かす操作（年月選択・‹ ›・中心日クリック）を止める。
+ * ★ 未読ボタンは未読表示中も押せる（もう一度押して日付表示へ戻る＝未読行が残っていても復帰できる）。
+ *   検索引力中だけ止める（unreadOnly と検索語の二重状態を作らない）。 disabled の決定は syncUnreadButtonToState（モジュール）が一元管理する。
+ * ‹ ›・中心日クリック・カレンダーの日付セルはモジュール側（setDayNavEnabled）が同じ条件で止める。
  * 寸法は変えない（disabled は見た目の変化をホバーリング用の影だけに効かせる運用）
  */
 export function refreshBulletinControls() {
@@ -117,10 +119,6 @@ export function refreshBulletinControls() {
     monthMenu.disabled = fullMode;
     monthMenu.setAttribute('aria-disabled', String(fullMode));
   }
-  document.querySelectorAll('#bulletin-btn-unread').forEach((el) => {
-    el.disabled = fullMode;
-    el.setAttribute('aria-disabled', String(fullMode));
-  });
   syncUnreadButtonToState();
 }
 

@@ -227,9 +227,10 @@ export const bulletinController = {
   async downloadBulletinAttachment(req, res, next) {
     try {
       const { attachmentId } = req.params;
-      const userId = req.user ? req.user.id : 'kyomu01';
+      // req.user は { id, name, role, is_kyomu }（ルール27の権限判定に role を使う）
+      const user = req.user || { id: 'kyomu01' };
 
-      const { meta, stream } = await bulletinService.getAttachmentForDownload(attachmentId, userId);
+      const { meta, stream } = await bulletinService.getAttachmentForDownload(attachmentId, user);
 
       const encodedName = encodeURIComponent(meta.name);
       res.setHeader('Content-Type', meta.mime || 'application/octet-stream');

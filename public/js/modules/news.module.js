@@ -189,7 +189,7 @@ async function shareToNewsLinks(newsId) {
   try {
     const res = await apiPost('/news/links', { url });
     const added = res?.link || res?.data || null;
-    showToast(`ピノックアップ教育ニュースへ「${added?.title || item.title}」を共有しました`, 'success');
+    showToast(`ピックアップ教育ニュースへ「${added?.title || item.title}」を共有しました`, 'success');
   } catch (e) {
     showToast(`共有に失敗しました: ${e.message}`, 'error');
     return;

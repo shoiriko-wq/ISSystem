@@ -172,6 +172,39 @@ const TITLE_SOURCES = { TITLE: 'title', H1: 'h1', OG: 'og', RSS: 'rss', DOMAIN: 
 // og:title の「記事名｜サイト名」の区切り（全角・半角の縦棒と中点）
 const SITE_NAME_SEPARATORS = /\s*[\u007c\uff5c\u2022\u30fb\uff73]\s*/;
 
+// ★ タイトル取得で使う User-Agent は ASCII のみ（README §23 のルール）。
+//   fetch（undici）の header 値は Latin-1 ByteString（U+000–U+00FF）しか許されない。
+//   日本語を混ぜると **リクエスト送信前に** TypeError になる（サーバーログにも残らない），
+//   ため送信前にここで検査する（README §23「User-Agent は ASCII のみ・127文字以内」）。
+const TITLE_USER_AGENT = 'ISSystem/3.1 (ISSystem title fetch)';
+
+/**
+ * ヘッダー値が Latin-1 ByteString だけを載せられることを検証する（送信前のガード）
+ * 日本語などの非Latin-1文字・127文字超の User-Agent は fetch が TypeError を投げるため、
+ * 原因を名前付きエラーとしてここで出す（ログで読める）。
+ * @param {Record<string,string>} headers
+ * @returns {Record<string,string>} 検証済みのヘッダー（そのまま fetch に渡せる）
+ */
+function assertByteStringHeaders(headers) {
+  const checked = {};
+  for (const [name, raw] of Object.entries(headers || {})) {
+    const value = String(raw);
+    if (value.length > 127) {
+      throw new TypeError(`Header value too long (max 127 chars): ${name} (${value.length} chars)`);
+    }
+    if (!/^[\x00-\xFF]*$/.test(value)) {
+      let pos = 0;
+      while (pos < value.length && value.charCodeAt(pos) <= 0xff) pos += 1;
+      const cp = value.codePointAt(pos);
+      throw new TypeError(
+        `Header value must be Latin-1 (ASCII) only: ${name} contains U+${cp.toString(16).toUpperCase().padStart(4, '0')} at index ${pos}`
+      );
+    }
+    checked[name] = value;
+  }
+  return checked;
+}
+
 /**
  * 内部アドレス（localhost・私網・.local）を拒否する（server 側のfetchで内部設備を叩かない＝SSRF防御）
  * @param {string} hostname
@@ -336,10 +369,12 @@ async function fetchHtmlGuarded(startUrl) {
   let current = startUrl;
 
   for (let hop = 0; hop < 6; hop += 1) {
+    // ★ User-Agent は ASCII のみ（Latin-1 の ByteString しか header に載せられない＝日本語を含めると fetch が送信前に TypeError になる）
+    const headers = assertByteStringHeaders({ 'user-agent': TITLE_USER_AGENT });
     const res = await fetch(current, {
       redirect: 'manual',
       signal: AbortSignal.timeout(TITLE_FETCH_TIMEOUT_MS),
-      headers: { 'user-agent': 'ISSystem/3.1 (校内システムのタイトル取得)' },
+      headers,
     });
 
     if (res.status >= 300 && res.status < 400) {
@@ -549,17 +584,25 @@ export const newsService = {
 
     const existing = await newsLinkModel.findNewsLinkByUrl(norm);
     if (existing) {
-      throw new ApiError(409, '同じURLはピノックアップ教育ニュースに共有済みです');
+      throw new ApiError(409, '同じURLはピックアップ教育ニュースに共有済みです');
     }
 
     const domain = new URL(norm).hostname.replace(/^www\./, '');
 
     let pageTitle = null;
+    let fetchFail = null;
     try {
       const html = await fetchHtmlGuarded(norm);
       pageTitle = html ? extractPageTitle(html) : null;
     } catch (e) {
       // ページが開けない・タイトルが無い場合はそのままドメイン名で登録する（共有は成功させる）
+      fetchFail = e;
+    }
+
+    // タイトルが取れなかったときはサイレントにドメイン名へ化けない（サーバーログに理由を残す）
+    if (!pageTitle) {
+      console.warn(`[News] タイトル取得失敗 url=${norm} → ドメイン名で登録 title_source=domain`,
+        fetchFail ? `${fetchFail.name}: ${fetchFail.message}` : 'ページにタイトルが見つからない');
     }
 
     const titleSource = pageTitle ? pageTitle.titleSource : 'domain';
@@ -632,4 +675,6 @@ export default newsService;
 export {
   isPrivateHost, normalizeLinkUrl, extractPageTitle,
   fitTitle, stripTags, pickTitleTag, pickH1Tag, pickOgTitleTag, dropSiteName, TITLE_SOURCES,
+  TITLE_USER_AGENT, TITLE_MAX_CHARS, TITLE_MIN_CHARS, TITLE_FETCH_TIMEOUT_MS,
+  assertByteStringHeaders, fetchHtmlGuarded,
 };

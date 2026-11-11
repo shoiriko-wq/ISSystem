@@ -5,8 +5,9 @@
  * 現行実装（2026-11 改版）の実測どおりに期待値を作っている：
  *  1. ツールバーの未読ボタンで左列が全日の未読一覧（対象日見出し付き）になる。readout は「未読」、
  *     ‹ ›・中心日クリック・年月選択ボタン・未読ボタンは止まる。ミニカレンダーは自動では開かない。
- *     未読の最新1件（対象日降順→投稿日時降順）が自動選択されて即既読化し、列表から消える。
- *  2. 列表の行クリック＝既読化（列表から行が消える）。列表とサイドバーの未読件数が1件ずつ減る。
+ *     未読の最新1件（対象日降順→投稿日時降順）は自動選択で右ペインに出るだけ＝表示だけでは既読にならない
+ *     （その行は未読バッヂと data-unread=true を残す）。既読はタイトル行をクリック（↑/↓ 選択も）して初めて付く。
+ *  2. 列表の行クリック＝既読化（行は列表に残り、未読バッヂだけ消える）。列表の件数は減らず、ラベルとサイドバーの未読件数だけ1減る。
  *     全件読むと未読表示は閉じて本日列表へ自動復帰する。
  *  3. ←/→ は本日列表で中心日を±1日動かす。全日表示・未読表示では止まる。T キーは未読表示を閉じて本日へ戻る。
  *     C キーはミニカレンダーの開閉（未読表示・検索中は止まる）。N キーは現行実装に無い＝中心日を動かさない。
@@ -199,6 +200,16 @@ const clickRow = (p, idx) => p.evaluate((i) => {
   return { id: r.getAttribute('data-bulletin-toggle'), title: t ? t.textContent.trim() : null };
 }, idx);
 
+/** 未読バッヂの行（列表の上から1件目）をクリックして { id, title } を返す（行はクリック後も列表に残る） */
+const clickUnreadRow = (p) => p.evaluate(() => {
+  const rows = [...document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]')];
+  const r = rows.find((x) => x.getAttribute('data-unread') === 'true');
+  if (!r) return null;
+  const t = r.querySelector('.bulletin-row-title');
+  r.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  return { id: r.getAttribute('data-bulletin-toggle'), title: t ? t.textContent.trim() : null };
+});
+
 /** 検索語を入力（打字と同じ input イベント）→ 空なら消して本日列表へ戻す */
 const setSearch = (p, val) => p.evaluate((v) => {
   const input = document.getElementById('bulletin-search-input');
@@ -302,12 +313,10 @@ const universe = cacheIds.map((id) => items.find((b) => String(b.id) === id)).fi
 const unreadItems = universe.filter((b) => isUnreadFor(b, regDay));
 const N = unreadItems.length;
 const startRowsApi = universe.filter((b) => isActiveOn(b, today) && targetOf(b) === today).sort((a, b) => postedMs(b) - postedMs(a));
-// base-mode（本日・全表示）の最上位（投稿日時 newest）は初期ロード時に自動選択されて既読される
-const baseAuto = startRowsApi[0];
-const baseAutoId = String(baseAuto.id);
-// 未読モードの期待集合：baseAuto は既読済みなので全日未読から除いて target date → posted 順に並べる
-const unreadAfterBaseAuto = unreadItems.filter((b) => String(b.id) !== baseAutoId);
-const sortedUnread = sortFull(unreadAfterBaseAuto);
+// ★ 右ペインに表示されるだけでは既読にならない（本日列表の最上位が自動選択されても未読のまま）
+const baseUnreadRows = startRowsApi.filter((b) => isUnreadFor(b, regDay)).length;
+// 全日未読の期待集合（base-mode と同じ土台）。対象日降順→投稿日時降順に並べる
+const sortedUnread = sortFull(unreadItems);
 const newestUnread = sortedUnread[0];
 const startCount = startRowsApi.length;
 const searchApi = sortFull(universe.filter((b) => matchesQ(b, q)));
@@ -316,10 +325,11 @@ const searchGroups = new Set(searchApi.map(targetOf)).size;
 log('api-expect', {
   apiItems: items.length, cacheItems: cacheIds.length, universe: universe.length,
   N, startCount, startIds: startRowsApi.map((b) => b.id),
-  baseAutoId, newestUnreadId: newestUnread ? newestUnread.id : null, searchCount, searchGroups,
+  baseUnreadRows, newestUnreadId: newestUnread ? newestUnread.id : null, searchCount, searchGroups,
 });
-check('期待値が成立（未読 N >= 2、本日列表 startCount >= 1、宇宙 cache は N 以上）',
-  N >= 2 && startCount >= 1 && universe.length >= N, { N, startCount, universe: universe.length });
+check('期待値が成立（未読 N >= 2、本日列表 startCount >= 1、宇宙 cache は N 以上、本日列表の未読行 baseUnreadRows >= 1）',
+  N >= 2 && startCount >= 1 && universe.length >= N && baseUnreadRows >= 1,
+  { N, startCount, universe: universe.length, baseUnreadRows });
 
 log('start', { readoutText: start.readoutText, centerDate: start.centerDate, countText: start.countText, rows: start.rows, rowIds: start.rowIds, seps: start.seps, label: start.label, labelHidden: start.labelHidden, sidebarText: start.sidebarText, sidebarHidden: start.sidebarHidden, unreadText: start.unreadText, unreadHidden: start.unreadHidden, unreadPressed: start.unreadPressed, unreadDisabled: start.unreadDisabled, calOpen: start.calOpen, paneTitle: start.paneTitle, activeTitle: start.activeTitle, badgeRows: start.badgeRows });
 
@@ -342,22 +352,24 @@ log('start-rows-calc', startRowsApi.map((b) => ({
   unreadCalc: isUnreadFor(b, regDay),
 })));
 
-check('初期状態で未読ボタンとサイドバーのバッヂは全日未読（base-mode の最上位が自動既読で N-1、両方 visible、件数一致）、未読ボタンは pressed false・enabled・非 hidden、ミニカレンダーは閉じている',
-  start.unreadText === '未読 ' + (N - 1) && start.unreadHidden === false
-  && start.sidebarCount === N - 1 && start.sidebarHidden === false
+check('初期状態で未読ボタンとサイドバーのバッヂは全日未読 N（右ペインの自動選択では既読化しないので N のまま、両方 visible、件数一致）、未読ボタンは pressed false・enabled・非 hidden、ミニカレンダーは閉じている',
+  start.unreadText === '未読 ' + N && start.unreadHidden === false
+  && start.sidebarCount === N && start.sidebarHidden === false
   && start.unreadPressed === 'false' && start.unreadDisabled === false
   && start.calOpen === false,
   { unreadText: start.unreadText, unreadHidden: start.unreadHidden, sidebarCount: start.sidebarCount, sidebarHidden: start.sidebarHidden, unreadPressed: start.unreadPressed, unreadDisabled: start.unreadDisabled, calOpen: start.calOpen, N });
 
-check('本日列表の行に data-target-day チップは付かない（day モード）、見出し区切りは出ない、未読バッヂの行数は base-mode 最上位（自動既読）を除いた未読行と一致',
+check('本日列表の行に data-target-day チップは付かない（day モード）、見出し区切りは出ない、未読バッヂの行数は本日列表の未読行と一致（右ペインの自動選択で既読化しないので全未読行に残る）',
   start.rowDays.every((d) => d === '') && start.seps === 0
-  && start.badgeRows === startRowsApi.filter((b) => isUnreadFor(b, regDay)).length - 1,
-  { rowDays: start.rowDays, seps: start.seps, badgeRows: start.badgeRows, expectBadge: startRowsApi.filter((b) => isUnreadFor(b, regDay)).length - 1 });
+  && start.badgeRows === baseUnreadRows,
+  { rowDays: start.rowDays, seps: start.seps, badgeRows: start.badgeRows, expectBadge: baseUnreadRows });
 
-check('自動選択で右ペインのタイトルは本日列表の最新行（投稿日時降順1件目）、列表の active も同じ行',
+check('自動選択で右ペインのタイトルは本日列表の最新行（投稿日時降順1件目）、列表の active も同じ行で、その行は未読のまま（表示だけでは既読にならない＝data-unread=true・バッヂあり）',
   start.paneTitle === startRowsApi[0].title && start.activeTitle === startRowsApi[0].title
-  && start.rowIds[0] === String(startRowsApi[0].id),
-  { paneTitle: start.paneTitle, activeTitle: start.activeTitle, expectTitle: startRowsApi[0].title, rowIds: start.rowIds });
+  && start.rowIds[0] === String(startRowsApi[0].id)
+  && start.rowUnread[0] === 'true' && start.state.selectedId === String(startRowsApi[0].id),
+  { paneTitle: start.paneTitle, activeTitle: start.activeTitle, expectTitle: startRowsApi[0].title,
+    rowIds: start.rowIds, rowUnread: start.rowUnread, selectedId: start.state.selectedId });
 
 // ===== 2. 未読ボタンクリック（全日の未読一覧＋readout「未読」、控件は止まる、ミニカレンダーは自動で開かない） =====
 await page.evaluate(() => { const b = document.querySelector('#view-bulletin #bulletin-btn-unread'); if (b) b.click(); });
@@ -365,60 +377,138 @@ await sleep(600);
 const u = await snapshot(page);
 log('unread-click', { readoutText: u.readoutText, centerDate: u.centerDate, prevDisabled: u.prevDisabled, nextDisabled: u.nextDisabled, dayBtnDisabled: u.dayBtnDisabled, menuBtnDisabled: u.menuBtnDisabled, calOpen: u.calOpen, rows: u.rows, rowIds: u.rowIds, rowUnread: u.rowUnread, rowDays: u.rowDays, seps: u.seps, badgeRows: u.badgeRows, sidebarText: u.sidebarText, label: u.label, labelHidden: u.labelHidden, unreadDisabled: u.unreadDisabled, unreadPressed: u.unreadPressed, unreadText: u.unreadText, unreadHidden: u.unreadHidden, paneTitle: u.paneTitle, countText: u.countText, unreadMode: u.state.unreadMode });
 
-check('未読ボタンクリックで readout は「未読」、中心日は本日、‹ ›・中心日クリック・未読ボタンは disabled（年月選択ボタンは閉じたミニカレンダー側に在らない＝null）、ミニカレンダーは自動で開かない、未読ボタンは pressed true',
+check('未読ボタンクリックで readout は「未読」、中心日は本日、‹ ›・中心日クリックは disabled（年月選択ボタンは閉じたミニカレンダー側に在らない＝null）、ミニカレンダーは自動で開かない、未読ボタンは pressed true で enabled（未読表示中ももう一度押して復帰できる）',
   u.readoutText === '未読' && u.centerDate === today
   && u.prevDisabled === true && u.nextDisabled === true && u.dayBtnDisabled === true
   && u.menuBtnDisabled === null && u.calOpen === false
-  && u.unreadDisabled === true && u.unreadPressed === 'true'
+  && u.unreadDisabled === false && u.unreadPressed === 'true'
   && u.state.unreadMode === true,
   { readoutText: u.readoutText, centerDate: u.centerDate, prevDisabled: u.prevDisabled, nextDisabled: u.nextDisabled, dayBtnDisabled: u.dayBtnDisabled, menuBtnDisabled: u.menuBtnDisabled, calOpen: u.calOpen, unreadDisabled: u.unreadDisabled, unreadPressed: u.unreadPressed, unreadHidden: u.unreadHidden });
 
-// 未読の最新1件（対象日降順→投稿日時降順）が自動選択で既読化して列表から消える（base-mode 最上位は既に既読）
-const expectRows = sortedUnread.slice(1).map((b) => String(b.id));
-check('未読列表は未読 N-2 件（base-mode 最上位と未読の最新1件が自動選択で既読化して消える）、全行に未読バッヂと data-target-day チップ、見出しは対象日グループ、ラベルとサイドバーは N-2',
-  u.rows === N - 2 && u.countText === (N - 2) + ' 件'
-  && u.rowIds.join(',') === expectRows.join(',')
-  && u.rowUnread.every((v) => v === 'true') && u.badgeRows === N - 2
+// ★ 未読列表は未読ボタンを押した時点の未読 N 件をピン留めする（右ペインの自動選択では既読化しないので N 件そのまま）。
+//   列表の並びは対象日降順→投稿日時降順。ピン留め Set は cache 順で持たれるので集合として突き合わせる
+const pinnedIds = sortedUnread.map((b) => String(b.id));
+const sortedJoin = (arr) => arr.map(String).slice().sort().join(',');
+check('未読列表はピン留めした N 件（未読ボタンを押した時点の未読全部）。右ペインの自動選択は既読化しないので全行が data-unread=true・未読バッヂあり、data-target-day チップと対象日見出し、ラベルとサイドバーは N',
+  u.rows === N && u.countText === N + ' 件'
+  && u.rowIds.join(',') === pinnedIds.join(',')
+  && sortedJoin(u.state.pinnedUnread) === sortedJoin(pinnedIds)
+  && u.rowUnread.every((v) => v === 'true')
+  && u.badgeRows === N
   && u.rowDays.every((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
-  && u.seps === new Set(sortedUnread.slice(1).map(targetOf)).size
-  && u.unreadText === '未読 ' + (N - 2) && u.unreadHidden === false
-  && u.sidebarCount === N - 2 && u.sidebarHidden === false,
-  { rows: u.rows, countText: u.countText, rowIds: u.rowIds, expectRows, rowUnread: u.rowUnread, badgeRows: u.badgeRows, rowDays: u.rowDays, seps: u.seps, unreadText: u.unreadText, sidebarCount: u.sidebarCount });
+  && u.seps === new Set(sortedUnread.map(targetOf)).size
+  && u.unreadText === '未読 ' + N && u.unreadHidden === false
+  && u.sidebarCount === N && u.sidebarHidden === false,
+  { rows: u.rows, countText: u.countText, rowIds: u.rowIds, pinnedIds, pinned: u.state.pinnedUnread, rowUnread: u.rowUnread, badgeRows: u.badgeRows, rowDays: u.rowDays, seps: u.seps, unreadText: u.unreadText, sidebarCount: u.sidebarCount });
 
-check('右ペインのタイトルは自動選択された未読の最新1件（その行は列表から消えている）',
-  u.paneTitle === newestUnread.title && !u.rowIds.includes(String(newestUnread.id)),
-  { paneTitle: u.paneTitle, expectTitle: newestUnread.title, newestId: newestUnread.id, rowIds: u.rowIds });
+// ★ 右ペインは未読表示に入る前に出ていた行（本日列表の最上位）の全文のまま。その行はピン留めリストに残り、未読バッヂも残る
+const startSelectedId = String(start.state.selectedId);
+check('未読表示に入ると右ペインは未読列表に残っている選択行（本日列表の最上位）の全文のまま＝表示だけでは既読にならない（その行は data-unread=true・バッヂあり、列表の active も同じ行）',
+  u.paneTitle === start.paneTitle && u.activeTitle === start.paneTitle
+  && String(u.state.selectedId) === startSelectedId
+  && u.rowIds.includes(startSelectedId)
+  && u.rowUnread[u.rowIds.indexOf(startSelectedId)] === 'true',
+  { paneTitle: u.paneTitle, activeTitle: u.activeTitle, startPaneTitle: start.paneTitle,
+    startSelectedId, selectedId: u.state.selectedId, rowIds: u.rowIds, rowUnread: u.rowUnread });
 
-// ===== 3. 列表の行クリック＝既読化（列表とサイドバーが1件ずつ減る）。全件読むと未読表示は閉じて本日列表へ自動復帰 =====
-const consumed = [newestUnread, baseAuto];  // base-mode 最上位と未読の最新1件は自動選択で既読化済み
+// ===== 2b. タイトル行クリックで既読化（左列の行は消えない＝バッヂだけ消える）。既読行の再クリックは状態を変えない =====
+const k0row = await clickRow(page, 0);   // 右ペインに自動選択されている「未読」の行をクリックして既読化する（表示だけでは既読にならない）
+await sleep(400);
+const k1 = await snapshot(page);
+log('row-click-read', { clickedId: k0row.id, rows: k1.rows, badgeRows: k1.badgeRows, sidebarCount: k1.sidebarCount, unreadText: k1.unreadText, paneTitle: k1.paneTitle, rowUnread: k1.rowUnread });
+check('タイトル行をクリックすると行は列表に残り、バッヂ・ラベル・サイドバーだけ 1 減る（右ペインはその行の全文、クリックした行だけ data-unread=false）',
+  k1.rows === N && k1.rowIds.join(',') === pinnedIds.join(',') && k1.badgeRows === N - 1
+  && k1.sidebarCount === N - 1 && k1.unreadText === '未読 ' + (N - 1)
+  && k1.rowUnread[k1.rowIds.indexOf(k0row.id)] === 'false' && k1.paneTitle === k0row.title,
+  { clickedId: k0row.id, rows: k1.rows, badgeRows: k1.badgeRows, sidebarCount: k1.sidebarCount, unreadText: k1.unreadText, paneTitle: k1.paneTitle, rowUnread: k1.rowUnread });
+
+// ★ DB 実測（post_acknowledgements）: 行クリックで初めて既読レコード 1 件（右ペイン表示だけでは 0 件のままだった）
+const acks1 = Number((await query("SELECT COUNT(*) AS c FROM post_acknowledgements WHERE user_id = 'kyomu01'")).rows[0].c);
+log('acks-after-first-click', { acks1, N });
+check('タイトル行クリックで DB の既読レコードが 1 件（右ペイン表示だけの時点では既読レコード 0 件＝サイドバーは未読 N）', acks1 === 1, { acks1, N });
+
+await clickRow(page, 0);   // 既読行を再クリック（既読カードの再クリックは API を叩かない＝冪等）
+await sleep(400);
+const k1b = await snapshot(page);
+log('row-reclick', { rows: k1b.rows, badgeRows: k1b.badgeRows, sidebarCount: k1b.sidebarCount, unreadText: k1b.unreadText, paneTitle: k1b.paneTitle });
+check('既読行を再クリックしても列表のピン留め N 件・バッヂ N-1・サイドバー N-1 はそのまま（未読バッヂの行は消えない）',
+  k1b.rows === N && k1b.rowIds.join(',') === pinnedIds.join(',') && k1b.badgeRows === N - 1 && k1b.sidebarCount === N - 1,
+  { rows: k1b.rows, badgeRows: k1b.badgeRows, sidebarCount: k1b.sidebarCount, unreadText: k1b.unreadText });
+
+const k2row = await clickUnreadRow(page);   // 未読バッヂの行をクリックして全文を右ペインに出す（＝既読化）
+await sleep(500);
+const k2 = await snapshot(page);
+log('row-read-keep', { clickedId: k2row.id, rows: k2.rows, badgeRows: k2.badgeRows, sidebarCount: k2.sidebarCount, unreadText: k2.unreadText, paneTitle: k2.paneTitle });
+check('未読行をクリックすると行は列表に残り、バッヂだけ消えてラベルとサイドバーが1減る（右ペインはその行の全文）',
+  k2.rows === N && k2.rowIds.includes(k2row.id) && k2.badgeRows === N - 2
+  && k2.sidebarCount === N - 2 && k2.unreadText === '未読 ' + (N - 2) && k2.paneTitle === k2row.title,
+  { clickedId: k2row.id, rows: k2.rows, badgeRows: k2.badgeRows, sidebarCount: k2.sidebarCount, unreadText: k2.unreadText, paneTitle: k2.paneTitle, rowIds: k2.rowIds });
+
+// ===== 3. 未読ボタンをもう一度押して日付表示へ復帰する（未読行が残っていても復帰できる） =====
+await page.evaluate(() => { const b = document.querySelector('#view-bulletin #bulletin-btn-unread'); if (b) b.click(); });
+await sleep(500);
+const back = await snapshot(page);
+log('unread-button-exit', { readoutText: back.readoutText, centerDate: back.centerDate, rows: back.rows, countText: back.countText, unreadPressed: back.unreadPressed, unreadDisabled: back.unreadDisabled, unreadText: back.unreadText, sidebarCount: back.sidebarCount, pinned: back.state.pinnedUnread, unreadMode: back.state.unreadMode, prevDisabled: back.prevDisabled, nextDisabled: back.nextDisabled });
+check('未読表示中は未読ボタンが enabled で、もう一度押すと未読行（N-2 件）が残っていても日付表示へ復帰する（readout は本日、列表は本日列表 startCount 件、pressed=false、ピン留めは空、‹ › は enabled、ラベルとサイドバーは未読 N-2 で visible）',
+  back.state.unreadMode === false && back.state.pinnedUnread.length === 0
+  && String(back.readoutText).startsWith(mmdd(today)) && back.centerDate === today
+  && back.rows === startCount && back.countText === startCount + ' 件'
+  && back.unreadPressed === 'false' && back.unreadDisabled === false
+  && back.sidebarCount === N - 2 && back.unreadText === '未読 ' + (N - 2) && back.sidebarHidden === false
+  && back.prevDisabled === false && back.nextDisabled === false && back.calOpen === false,
+  { readoutText: back.readoutText, centerDate: back.centerDate, rows: back.rows, pinned: back.state.pinnedUnread, unreadPressed: back.unreadPressed, unreadDisabled: back.unreadDisabled, sidebarCount: back.sidebarCount, startCount, N });
+
+// ===== 4. 未読表示へ戻して全件を読む（列表の行は消えない。全件読むと未読表示は自動で閉じて本日列表へ復帰する） =====
+await page.evaluate(() => { const b = document.querySelector('#view-bulletin #bulletin-btn-unread'); if (b) b.click(); });
+await sleep(500);
+const u2 = await snapshot(page);
+const pinned2 = u2.state.pinnedUnread.map(String);
+log('unread-reenter', { rows: u2.rows, pinned: pinned2, badgeRows: u2.badgeRows, sidebarCount: u2.sidebarCount, unreadText: u2.unreadText });
+check('未読表示へ戻すと現在の未読 N-2 件をピン留めして列表に出す（右ペインの自動選択は既読化しない＝バッヂとサイドバーは N-2、列表の行は N-2 件で全行 data-unread=true）',
+  u2.rows === N - 2 && u2.rowIds.join(',') === pinned2.join(',') && u2.badgeRows === N - 2
+  && u2.rowUnread.every((v) => v === 'true')
+  && u2.sidebarCount === N - 2 && u2.unreadText === '未読 ' + (N - 2),
+  { rows: u2.rows, pinned: pinned2, badgeRows: u2.badgeRows, sidebarCount: u2.sidebarCount, unreadText: u2.unreadText, rowUnread: u2.rowUnread });
+
+// 再入りでも右ペインは未読列表に残っている選択行の全文のまま（表示だけでは既読にならない）
+const u2Auto = items.find((b) => String(b.id) === String(u2.state.selectedId));
+check('未読表示への再入りの自動選択は既読化しない（右ペインのタイトルは選択行の全文で、その行は data-unread=true・バッヂありのまま）',
+  u2Auto && u2.paneTitle === u2Auto.title && u2.activeTitle === u2Auto.title
+  && u2.rowIds.includes(String(u2.state.selectedId))
+  && u2.rowUnread[u2.rowIds.indexOf(String(u2.state.selectedId))] === 'true',
+  { paneTitle: u2.paneTitle, activeTitle: u2.activeTitle, expectTitle: u2Auto ? u2Auto.title : null, selectedId: u2.state.selectedId, rowUnread: u2.rowUnread });
+
+// ===== 5. 列表の行クリック＝既読化（行は消えない。バッヂとラベル・サイドバーだけが1件ずつ減る）。全件読むと未読表示は閉じて本日列表へ自動復帰 =====
+const consumed = [k0row, k2row];   // クリックで既読化した行（k0row = 未読列表の最新1件＝右ペインに自動選択されていた行）。表示だけの自動選択は既読化しない
 let guard = 0;
-let cur = u;
-while (cur.rows > 0 && cur.state.unreadMode === true && guard < N) {
+let cur = u2;
+while (cur.badgeRows > 0 && cur.state.unreadMode === true && guard < N) {
   guard += 1;
-  const row = await clickRow(page, 0);
+  const row = await clickUnreadRow(page);
   await sleep(500);
   const s = await snapshot(page);
   consumed.push(items.find((b) => String(b.id) === row.id));
-  log('row-click-' + guard, { clickedId: row.id, rowsBefore: cur.rows, rowsAfter: s.rows, sidebarCount: s.sidebarCount, unreadText: s.unreadText, paneTitle: s.paneTitle, unreadMode: s.state.unreadMode });
-  const last = cur.rows === 1;
-  // 右ペインは読んだ行の全文を出す（クリックした行のまま）。最後の1件を読むと未読表示は閉じて本日列表へ自動復帰する。
+  log('row-click-' + guard, { clickedId: row.id, badgesBefore: cur.badgeRows, badgesAfter: s.badgeRows, rows: s.rows, sidebarCount: s.sidebarCount, unreadText: s.unreadText, paneTitle: s.paneTitle, unreadMode: s.state.unreadMode });
+  const last = cur.badgeRows === 1;
+  // 右ペインは読んだ行の全文を出す（クリックした行のまま＝行は列表に残る）。最後の1件を読むと未読表示は閉じて本日列表へ自動復帰する。
   //   復帰した本日列表に読んだ行が残る（＝対象日が本日）なら右ペインはその行のまま。
   //   残らない（対象日が本日でない）なら本日列表の最上位が自動選択される。
   const paneExpect = last
     ? (startRowsApi.some((b) => String(b.id) === row.id) ? row.title : startRowsApi[0].title)
     : row.title;
-  check('行クリック ' + guard + ': クリックした行は列表から消え、列表・ラベル・サイドバーが1件ずつ減る、右ペインは読んだ行の全文（最後の1件を読むと未読表示は閉じて本日列表へ自動復帰し、右ペインは本日列表の最上位）',
+  check('行クリック ' + guard + ': クリックした行は列表に残る（未読バッヂの行は左列から消えない）。バッヂ・ラベル・サイドバーだけ1減り、右ペインは読んだ行の全文（最後の1件を読むと未読表示は閉じて本日列表へ自動復帰し、右ペインは本日列表の最上位）',
     (last ? (s.rows === startCount && s.state.unreadMode === false)
-          : (s.rows === cur.rows - 1 && !s.rowIds.includes(row.id)))
+          : (s.rows === cur.rows && s.rowIds.includes(row.id)))
+    && s.badgeRows === cur.badgeRows - 1
     && s.sidebarCount === cur.sidebarCount - 1
-    && s.unreadText === '未読 ' + (cur.rows - 1)
+    && s.unreadText === '未読 ' + (cur.badgeRows - 1)
     && s.paneTitle === paneExpect,
-    { clickedId: row.id, rowsBefore: cur.rows, rowsAfter: s.rows, sidebarCount: s.sidebarCount,
-      unreadText: s.unreadText, paneTitle: s.paneTitle, expectPane: paneExpect,
+    { clickedId: row.id, badgesBefore: cur.badgeRows, badgesAfter: s.badgeRows, rowsBefore: cur.rows, rowsAfter: s.rows,
+      sidebarCount: s.sidebarCount, unreadText: s.unreadText, paneTitle: s.paneTitle, expectPane: paneExpect,
       unreadMode: s.state.unreadMode, last });
   cur = s;
 }
-check('未読全件（N 件）が行クリックで既読化された（base-mode 最上位の自動既読1件＋未読モードの自動選択1件＋列表クリック N-2 件）', consumed.length === N && Number(start.sidebarCount) === N - 1, { consumedIds: consumed.map((b) => b.id), N, uiCount: Number(start.sidebarCount) });
+check('未読全件（N 件）が行クリックで既読化された（2b のクリック 2 件＋列表クリック ' + guard + ' 件。右ペイン表示の自動選択は既読化しない）。列表の行は最後まで消えない', consumed.length === N && Number(start.sidebarCount) === N && cur.rows === startCount, { consumedIds: consumed.map((b) => b && b.id), N, uiCount: Number(start.sidebarCount), rowsAtEnd: cur.rows, clicks: guard });
 
 const z = await snapshot(page);
 log('unread-zero-exit', { readoutText: z.readoutText, centerDate: z.centerDate, countText: z.countText, rows: z.rows, unreadText: z.unreadText, unreadHidden: z.unreadHidden, sidebarHidden: z.sidebarHidden, sidebarCount: z.sidebarCount, unreadDisabled: z.unreadDisabled, unreadPressed: z.unreadPressed, prevDisabled: z.prevDisabled, nextDisabled: z.nextDisabled, calOpen: z.calOpen, unreadMode: z.state.unreadMode });
@@ -499,11 +589,25 @@ await page.evaluate(() => { const b = document.querySelector('#view-bulletin #bu
 await sleep(500);
 const z1 = await snapshot(page);
 log('unread-zero-mode', { readoutText: z1.readoutText, centerDate: z1.centerDate, rows: z1.rows, prevDisabled: z1.prevDisabled, nextDisabled: z1.nextDisabled, dayBtnDisabled: z1.dayBtnDisabled, unreadDisabled: z1.unreadDisabled, unreadPressed: z1.unreadPressed, calOpen: z1.calOpen, listText: z1.listText.slice(0, 40), unreadMode: z1.state.unreadMode });
-check('未読 0 件で未読表示に入ると readout「未読」、列表 0 件（未読無しメッセージ）、控件 disabled、ミニカレンダーは閉じたまま',
+check('未読 0 件で未読表示に入ると readout「未読」、列表 0 件（未読無しメッセージ）、‹ › と中心日クリックは disabled、未読ボタンは enabled（もう一度押して日付表示へ戻れる）、ミニカレンダーは閉じたまま',
   z1.readoutText === '未読' && z1.rows === 0 && z1.listText.includes('未読')
   && z1.prevDisabled === true && z1.nextDisabled === true && z1.dayBtnDisabled === true
-  && z1.unreadDisabled === true && z1.unreadPressed === 'true' && z1.calOpen === false,
-  { readoutText: z1.readoutText, rows: z1.rows, listText: z1.listText.slice(0, 40), prevDisabled: z1.prevDisabled, dayBtnDisabled: z1.dayBtnDisabled, unreadPressed: z1.unreadPressed, calOpen: z1.calOpen });
+  && z1.unreadDisabled === false && z1.unreadPressed === 'true' && z1.calOpen === false,
+  { readoutText: z1.readoutText, rows: z1.rows, listText: z1.listText.slice(0, 40), prevDisabled: z1.prevDisabled, dayBtnDisabled: z1.dayBtnDisabled, unreadPressed: z1.unreadPressed, unreadDisabled: z1.unreadDisabled, calOpen: z1.calOpen });
+
+// 未読 0 件でも未読ボタンをもう一度押して日付表示へ復帰できる
+await page.evaluate(() => { const b = document.querySelector('#view-bulletin #bulletin-btn-unread'); if (b) b.click(); });
+await sleep(400);
+const z1b = await snapshot(page);
+log('unread-zero-exit-btn', { readoutText: z1b.readoutText, centerDate: z1b.centerDate, rows: z1b.rows, unreadPressed: z1b.unreadPressed, unreadMode: z1b.state.unreadMode });
+check('未読 0 件表示で未読ボタンをもう一度押すと日付表示へ復帰する（readout は本日の日付、列表は本日列表、pressed false）',
+  z1b.state.unreadMode === false && String(z1b.readoutText).startsWith(mmdd(today)) && z1b.centerDate === today
+  && z1b.rows === startCount && z1b.unreadPressed === 'false',
+  { readoutText: z1b.readoutText, centerDate: z1b.centerDate, rows: z1b.rows, unreadPressed: z1b.unreadPressed });
+
+// 未読 0 件を未読表示へ戻して ←/→・C キーが止まることを測る
+await page.evaluate(() => { const b = document.querySelector('#view-bulletin #bulletin-btn-unread'); if (b) b.click(); });
+await sleep(400);
 
 // 未読表示中は ←/→・C キーが止まる
 await press(page, 'ArrowRight');

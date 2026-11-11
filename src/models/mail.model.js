@@ -49,9 +49,30 @@ export const mailModel = {
   encryptPassword,
   decryptPassword,
 
-  /** ユーザーのメール接続設定 (無ければ null) */
+  /** ユーザーのメール接続設定 (1件目 = 主アカウント。無ければ null) */
   async getAccount(userId) {
-    const res = await query('SELECT * FROM mail_accounts WHERE user_id = ?', [String(userId)]);
+    const res = await query(
+      'SELECT * FROM mail_accounts WHERE user_id = ? ORDER BY created_at, id LIMIT 1',
+      [String(userId)]
+    );
+    return res.rows[0] || null;
+  },
+
+  /** 自分の全メール接続設定 (アカウントタブ表示用 / 作成順) */
+  async listAccountsForUser(userId) {
+    const res = await query(
+      'SELECT * FROM mail_accounts WHERE user_id = ? ORDER BY created_at, id',
+      [String(userId)]
+    );
+    return res.rows;
+  },
+
+  /** 指定IDの接続設定 (自分のアカウントだけ返す) */
+  async getAccountById(accountId, userId) {
+    const res = await query(
+      'SELECT * FROM mail_accounts WHERE id = ? AND user_id = ?',
+      [String(accountId), String(userId)]
+    );
     return res.rows[0] || null;
   },
 
@@ -61,17 +82,41 @@ export const mailModel = {
     return res.rows[0]?.email || null;
   },
 
-  /** メール接続設定の登録 / 更新 (user_id は UNIQUE なので UPSERT) */
+  /** メール接続設定の登録 / 更新 (id 指定は自分のアカウントを更新、未指定は同一ユーザー同一アドレスで UPSERT) */
   async upsertAccount({
     id, user_id, email_address, password_enc,
     imap_host, imap_port, imap_tls, imap_folder,
     smtp_host, smtp_port, smtp_tls, sent_folder, display_name, status,
   }) {
-    const rowId = id || `mail_${String(user_id)}`;
+    const cols = [
+      ['email_address', String(email_address)],
+      ['password_enc', String(password_enc)],
+      ['imap_host', imap_host ?? null],
+      ['imap_port', imap_port ?? null],
+      ['imap_tls', imap_tls || 'none'],
+      ['imap_folder', imap_folder || 'INBOX'],
+      ['smtp_host', smtp_host ?? null],
+      ['smtp_port', smtp_port ?? null],
+      ['smtp_tls', smtp_tls || 'none'],
+      ['sent_folder', sent_folder || 'Sent'],
+      ['display_name', display_name ?? null],
+      ['status', status || 'UNVERIFIED'],
+    ];
+
+    // id 指定は自分のアカウントを UPDATE (アドレスを変更しても id と受信メッセージはそのまま残る)
+    if (id) {
+      const setSql = cols.map(([c]) => `${c} = ?`).join(', ');
+      const res = await query(
+        `UPDATE mail_accounts SET ${setSql}, updated_at = CURRENT_TIMESTAMP WHERE id = ? RETURNING *`,
+        [...cols.map(([, v]) => v), String(id)]
+      );
+      return res.rows[0] || null;
+    }
+
     const res = await query(
       `INSERT INTO mail_accounts (id, user_id, email_address, password_enc, imap_host, imap_port, imap_tls, imap_folder, smtp_host, smtp_port, smtp_tls, sent_folder, display_name, status)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (user_id) DO UPDATE SET
+       ON CONFLICT (user_id, lower(email_address)) DO UPDATE SET
          email_address = EXCLUDED.email_address,
          password_enc  = EXCLUDED.password_enc,
          imap_host     = EXCLUDED.imap_host,
@@ -87,7 +132,7 @@ export const mailModel = {
          updated_at    = CURRENT_TIMESTAMP
        RETURNING *`,
       [
-        rowId,
+        `mail_${crypto.randomUUID()}`,
         String(user_id),
         String(email_address),
         String(password_enc),
@@ -106,32 +151,28 @@ export const mailModel = {
     return res.rows[0] || null;
   },
 
-  /** メール接続設定の削除 (存在すれば true) */
-  async deleteAccount(userId) {
-    const res = await query('DELETE FROM mail_accounts WHERE user_id = ?', [String(userId)]);
+  /** メール接続設定の削除 (accountId 指定はそのアカウントのみ / 未指定は全アカウント。messages は CASCADE で消える) */
+  async deleteAccount(userId, accountId = null) {
+    const res = accountId
+      ? await query('DELETE FROM mail_accounts WHERE id = ? AND user_id = ?', [String(accountId), String(userId)])
+      : await query('DELETE FROM mail_accounts WHERE user_id = ?', [String(userId)]);
     return res.rowCount > 0;
   },
 
-  /** 全件取得 (管理者・接続機能のバッチ処理用 / 復号はしない) */
-  async listAccounts() {
-    const res = await query('SELECT * FROM mail_accounts ORDER BY updated_at DESC');
-    return res.rows;
-  },
-
-  /** 接続テスト結果の保存 (status + 最終確認時刻) */
-  async setStatus(userId, status) {
+  /** 接続テスト結果の保存 (status + 最終確認時刻 / アカウント単位) */
+  async setStatus(accountId, status) {
     const res = await query(
-      `UPDATE mail_accounts SET status = ?, last_checked_at = CURRENT_TIMESTAMP WHERE user_id = ? RETURNING *`,
-      [String(status), String(userId)]
+      `UPDATE mail_accounts SET status = ?, last_checked_at = CURRENT_TIMESTAMP WHERE id = ? RETURNING *`,
+      [String(status), String(accountId)]
     );
     return res.rows[0] || null;
   },
 
-  /** メッセージ一覧 (folder = 'inbox' 受信ボックス / 'sent' 送信ボックス / 新しい順) */
-  async listMessages(userId, folder = 'inbox', limit = 50) {
+  /** メッセージ一覧 (folder = 'inbox' 受信ボックス / 'sent' 送信ボックス / 指定アカウント / 新しい順) */
+  async listMessages(accountId, folder = 'inbox', limit = 50) {
     const res = await query(
-      `SELECT * FROM mail_messages WHERE user_id = ? AND folder = ? ORDER BY received_at DESC LIMIT ?`,
-      [String(userId), String(folder), Number(limit)]
+      `SELECT * FROM mail_messages WHERE account_id = ? AND folder = ? ORDER BY received_at DESC LIMIT ?`,
+      [String(accountId), String(folder), Number(limit)]
     );
     return res.rows;
   },
@@ -145,12 +186,12 @@ export const mailModel = {
     return Number(res.rows[0]?.count || 0);
   },
 
-  /** 受信ボックスへメールを保存する (IMAP UID で重複挿入を防ぐ) */
-  async upsertInboxMessage({ user_id, uid, sender_name, sender_email, subject, body, is_read, received_at }) {
+  /** 受信ボックスへメールを保存する (アカウント + IMAP UID で重複挿入を防ぐ) */
+  async upsertInboxMessage({ account_id, user_id, uid, sender_name, sender_email, subject, body, is_read, received_at }) {
     const res = await query(
-      `INSERT INTO mail_messages (id, user_id, folder, uid, sender_name, sender_email, subject, body, is_read, received_at)
-       VALUES (?, ?, 'inbox', ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (user_id, folder, uid) DO UPDATE SET
+      `INSERT INTO mail_messages (id, user_id, account_id, folder, uid, sender_name, sender_email, subject, body, is_read, received_at)
+       VALUES (?, ?, ?, 'inbox', ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (account_id, folder, uid) DO UPDATE SET
          sender_name = EXCLUDED.sender_name,
          sender_email = EXCLUDED.sender_email,
          subject = EXCLUDED.subject,
@@ -159,8 +200,9 @@ export const mailModel = {
          received_at = EXCLUDED.received_at
        RETURNING *`,
       [
-        `mail_${String(user_id)}_inbox_${String(uid)}`,
+        `mail_${crypto.randomUUID()}`,
         String(user_id),
+        String(account_id),
         String(uid),
         String(sender_name),
         String(sender_email),
@@ -174,14 +216,15 @@ export const mailModel = {
   },
 
   /** 送信ボックスへ送信記録を追加する */
-  async addSentMessage({ user_id, recipients, sender_name, sender_email, subject, body }) {
+  async addSentMessage({ account_id, user_id, recipients, sender_name, sender_email, subject, body }) {
     const res = await query(
-      `INSERT INTO mail_messages (id, user_id, folder, uid, sender_name, sender_email, recipients, subject, body, is_read, received_at)
-       VALUES (?, ?, 'sent', NULL, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+      `INSERT INTO mail_messages (id, user_id, account_id, folder, uid, sender_name, sender_email, recipients, subject, body, is_read, received_at)
+       VALUES (?, ?, ?, 'sent', NULL, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
        RETURNING *`,
       [
         `mail_${crypto.randomUUID()}`,
         String(user_id),
+        String(account_id),
         String(sender_name),
         String(sender_email),
         String(recipients),
@@ -201,20 +244,20 @@ export const mailModel = {
     return res.rows[0] || null;
   },
 
-  /** uid から受信ボックスのレコードを探す (既読マークの同期用) */
-  async findInboxByUid(userId, uid) {
+  /** uid から受信ボックスのレコードを探す (既読マークの同期用 / アカウント単位) */
+  async findInboxByUid(accountId, uid) {
     const res = await query(
-      "SELECT * FROM mail_messages WHERE user_id = ? AND folder = 'inbox' AND uid = ?",
-      [String(userId), String(uid)]
+      "SELECT * FROM mail_messages WHERE account_id = ? AND folder = 'inbox' AND uid = ?",
+      [String(accountId), String(uid)]
     );
     return res.rows[0] || null;
   },
 
-  /** 受信ボックス最終確認時刻を更新 */
-  async touchLastChecked(userId) {
+  /** 受信ボックス最終確認時刻を更新 (アカウント単位) */
+  async touchLastChecked(accountId) {
     const res = await query(
-      `UPDATE mail_accounts SET last_checked_at = CURRENT_TIMESTAMP WHERE user_id = ? RETURNING *`,
-      [String(userId)]
+      `UPDATE mail_accounts SET last_checked_at = CURRENT_TIMESTAMP WHERE id = ? RETURNING *`,
+      [String(accountId)]
     );
     return res.rows[0] || null;
   },

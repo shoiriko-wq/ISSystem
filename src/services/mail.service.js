@@ -113,6 +113,7 @@ function toView(row, suggestedEmail = '') {
   const d = mailDefaults();
   return {
     needs_setup: !row,
+    id: row ? row.id : null,
     email_address: row ? row.email_address : null,
     suggested_email: row ? row.email_address : suggestedEmail,
     status: row ? row.status : 'UNVERIFIED',
@@ -230,12 +231,29 @@ function requireSmtp(p) {
   }
 }
 
+/** 送信用アカウント解決 (account_id 未指定は主アカウント = 作成1件目) */
+async function resolveAccount(user, accountId = null) {
+  return accountId
+    ? await mailModel.getAccountById(accountId, user.id)
+    : await mailModel.getAccount(user.id);
+}
+
 export const mailService = {
-  /** 自分のメール接続設定取得 (初回は needs_setup = true) */
+  /** 自分のメール接続設定取得 (初回は needs_setup = true。1件目を主アカウントとして返す) */
   async getAccount(user) {
     const row = await mailModel.getAccount(user.id);
     const profileEmail = row ? '' : await mailModel.getUserEmail(user.id);
     return toView(row, profileEmail || '');
+  },
+
+  /** 自分の全メール接続設定 (アカウントタブ表示用。未設定時は .env 初期値 1 件を needs_setup で返す) */
+  async listAccounts(user) {
+    const rows = await mailModel.listAccountsForUser(user.id);
+    if (rows.length === 0) {
+      const profileEmail = await mailModel.getUserEmail(user.id);
+      return { accounts: [toView(null, profileEmail || '')] };
+    }
+    return { accounts: rows.map((row) => toView(row)) };
   },
 
   /** メール接続設定の登録 / 更新 (パスワードは暗号化して保存。暗号化モードとフォルダも保存) */
@@ -254,7 +272,15 @@ export const mailService = {
     const sentFolder = normalizeFolder(body.sent_folder ?? body.sentFolder, '送信済みフォルダ', d.sent_folder);
     const displayName = normalizeDisplayName(body.display_name ?? body.displayName);
 
+    // id 指定は自分のアカウントを更新、未指定は同一アドレスがあれば更新 / 無ければ新規作成
+    const requestedId = body.id ? String(body.id) : null;
+    const targetRow = requestedId ? await mailModel.getAccountById(requestedId, user.id) : null;
+    if (requestedId && !targetRow) {
+      throw new ApiError(404, '更新対象のメール接続設定が見つかりません。');
+    }
+
     const saved = await mailModel.upsertAccount({
+      id: targetRow?.id ?? null,
       user_id: user.id,
       email_address: email,
       password_enc: mailModel.encryptPassword(password),
@@ -294,51 +320,56 @@ export const mailService = {
     return toView(saved);
   },
 
-  /** メール接続設定の削除 */
-  async deleteAccount(user) {
-    const row = await mailModel.getAccount(user.id);
-    if (!row) throw new ApiError(404, 'メール接続設定が見つかりません。');
+  /** メール接続設定の削除 (accountId 指定はそのアカウントのみ / 未指定は自分の全アカウント) */
+  async deleteAccount(user, accountId = null) {
+    const rows = accountId
+      ? await mailModel.listAccountsForUser(user.id).then((all) => all.filter((r) => r.id === String(accountId)))
+      : await mailModel.listAccountsForUser(user.id);
+    if (!rows.length) throw new ApiError(404, 'メール接続設定が見つかりません。');
 
-    await mailModel.deleteAccount(user.id);
+    const targetIds = rows.map((r) => r.id);
+    await Promise.all(targetIds.map((id) => mailModel.deleteAccount(user.id, id)));
 
-    await auditModel.logAction({
-      userId: user.id,
-      action: 'MAIL_ACCOUNT_DELETE',
-      targetEntity: 'MAIL_ACCOUNT',
-      targetId: row.id,
-      changesJson: JSON.stringify({ email_address: row.email_address }),
-    });
+    for (const row of rows) {
+      await auditModel.logAction({
+        userId: user.id,
+        action: 'MAIL_ACCOUNT_DELETE',
+        targetEntity: 'MAIL_ACCOUNT',
+        targetId: row.id,
+        changesJson: JSON.stringify({ email_address: row.email_address }),
+      });
+    }
 
     return { ok: true };
   },
 
   /**
    * ボックス表示 (folder='inbox' 受信ボックス / 'sent' 送信ボックス。DBに保存済みだけを返す)
-   * GET /api/mail/messages?folder=inbox|sent
+   * GET /api/mail/messages?folder=inbox|sent&account_id= (account_id 未指定は主アカウント)
    */
-  async getInbox(user, folder = 'inbox') {
-    const account = await mailModel.getAccount(user.id);
+  async getInbox(user, folder = 'inbox', accountId = null) {
+    const account = await resolveAccount(user, accountId);
     if (!account) {
       throw new ApiError(409, 'メール接続設定が未登録です。最初にメールアドレスとパスワードを登録してください。');
     }
 
     const normalized = folder === 'sent' ? 'sent' : 'inbox';
-    const rows = await mailModel.listMessages(user.id, normalized);
+    const rows = await mailModel.listMessages(account.id, normalized);
     const messages = rows.map(toMessageView);
     const unread = messages.filter((m) => !m.is_read).length;
 
     // 最終確認時刻を記録 (監査ログ対象外)
-    await mailModel.touchLastChecked(user.id);
+    await mailModel.touchLastChecked(account.id);
 
-    return { folder: normalized, messages, unread };
+    return { folder: normalized, account_id: account.id, messages, unread };
   },
 
   /**
    * 受信ボックスの取得 (IMAP に接続し、まだ保存されていない新着をDBへ書き込んで一覧を返す)
-   * POST /api/mail/inbox/refresh
+   * POST /api/mail/inbox/refresh (account_id 未指定は主アカウント)
    */
-  async fetchInbox(user) {
-    const account = await mailModel.getAccount(user.id);
+  async fetchInbox(user, accountId = null) {
+    const account = await resolveAccount(user, accountId);
     if (!account) {
       throw new ApiError(409, 'メール接続設定が未登録です。最初にメールアドレスとパスワードを登録してください。');
     }
@@ -346,22 +377,29 @@ export const mailService = {
     const p = transportParams(account);
     requireImap(p);
 
-    const fetched = await probes.fetch({
-      host: p.imapHost,
-      port: p.imapPort,
-      tlsMode: p.imapTls,
-      user: p.email,
-      password: p.password,
-      mailbox: p.imapFolder,
-      timeoutMs: p.timeoutMs,
-    });
+    // 受信失敗（DNS/接続/ログイン）は 502 として扱う（500 の SERVER_ERROR 監査ログを出さない）
+    let fetched = [];
+    try {
+      fetched = await probes.fetch({
+        host: p.imapHost,
+        port: p.imapPort,
+        tlsMode: p.imapTls,
+        user: p.email,
+        password: p.password,
+        mailbox: p.imapFolder,
+        timeoutMs: p.timeoutMs,
+      });
+    } catch (err) {
+      throw new ApiError(502, `受信に失敗しました: ${err.message}`);
+    }
 
     let added = 0;
     for (const item of fetched) {
-      const existing = await mailModel.findInboxByUid(user.id, item.uid);
+      const existing = await mailModel.findInboxByUid(account.id, item.uid);
       if (existing) continue;
       const parsed = parseMessage(item.raw, item.internaldate);
       const saved = await mailModel.upsertInboxMessage({
+        account_id: account.id,
         user_id: user.id,
         sender_name: parsed.sender_name,
         sender_email: parsed.sender_email,
@@ -373,12 +411,13 @@ export const mailService = {
       if (saved) added += 1;
     }
 
-    await mailModel.touchLastChecked(user.id);
+    await mailModel.touchLastChecked(account.id);
 
-    const rows = await mailModel.listMessages(user.id, 'inbox');
+    const rows = await mailModel.listMessages(account.id, 'inbox');
     const messages = rows.map(toMessageView);
     return {
       folder: 'inbox',
+      account_id: account.id,
       messages,
       unread: messages.filter((m) => !m.is_read).length,
       fetched: fetched.length,
@@ -388,10 +427,10 @@ export const mailService = {
 
   /**
    * メール送信 (SMTP で送り、送信済みボックスへDB保存。IMAP が設定済みなら送信済みフォルダへも保存)
-   * POST /api/mail/send
+   * POST /api/mail/send (payload.account_id 未指定は主アカウント)
    */
   async sendMessage(user, payload) {
-    const account = await mailModel.getAccount(user.id);
+    const account = await resolveAccount(user, payload?.account_id ?? payload?.accountId ?? null);
     if (!account) {
       throw new ApiError(409, 'メール接続設定が未登録です。最初にメールアドレスとパスワードを登録してください。');
     }
@@ -413,21 +452,28 @@ export const mailService = {
       body: bodyText,
     });
 
-    const sent = await probes.send({
-      host: p.smtpHost,
-      port: p.smtpPort,
-      tlsMode: p.smtpTls,
-      user: p.email,
-      password: p.password,
-      from: p.email,
-      to: recipients,
-      raw,
-      timeoutMs: p.timeoutMs,
-    });
+    // 送信失敗（DNS/接続/ログイン）は 502 として扱う（500 の SERVER_ERROR 監査ログを出さない）
+    let sent;
+    try {
+      sent = await probes.send({
+        host: p.smtpHost,
+        port: p.smtpPort,
+        tlsMode: p.smtpTls,
+        user: p.email,
+        password: p.password,
+        from: p.email,
+        to: recipients,
+        raw,
+        timeoutMs: p.timeoutMs,
+      });
+    } catch (err) {
+      throw new ApiError(502, `送信に失敗しました: ${err.message}`);
+    }
 
     if (!sent.ok) throw new ApiError(502, `送信に失敗しました: ${sent.message}`);
 
     const row = await mailModel.addSentMessage({
+      account_id: account.id,
       user_id: user.id,
       sender_email: p.email,
       sender_name: p.displayName || '',
@@ -474,7 +520,10 @@ export const mailService = {
     // IMAP の既読フラグは best-effort (サーバー側の失敗でDBの既読状態を巻き戻さない)
     if (row.folder === 'inbox' && row.uid) {
       try {
-        const p = transportParams(await mailModel.getAccount(user.id));
+        const accountRow = row.account_id
+          ? await mailModel.getAccountById(row.account_id, user.id)
+          : await mailModel.getAccount(user.id);
+        const p = transportParams(accountRow);
         await probes.markSeen({
           host: p.imapHost,
           port: p.imapPort,
@@ -501,9 +550,9 @@ export const mailService = {
     return toMessageView(row);
   },
 
-  /** 復号した接続設定 (メール送受信機能でのサーバー内部使用) */
-  async getDecryptedAccount(user) {
-    const row = await mailModel.getAccount(user.id);
+  /** 復号した接続設定 (メール送受信機能でのサーバー内部使用 / account_id 未指定は主アカウント) */
+  async getDecryptedAccount(user, accountId = null) {
+    const row = await resolveAccount(user, accountId);
     if (!row) return null;
     return {
       ...row,
@@ -541,7 +590,7 @@ export const mailService = {
       smtpPort = normalizePort(body.smtp_port ?? body.smtpPort, '送信ポート') ?? d.smtp_port;
       smtpTls = normalizeTlsField(body.smtp_tls ?? body.smtpTls, '送信サーバー', d.smtp_tls);
     } else {
-      row = await mailModel.getAccount(user.id);
+      row = await resolveAccount(user, body.account_id ?? body.accountId ?? null);
       if (!row) {
         throw new ApiError(409, '接続テストの前にメールアドレスとパスワードを登録してください。');
       }
@@ -590,9 +639,9 @@ export const mailService = {
       smtp_tls: smtpTls,
     };
 
-    // 保存済み設定のテスト時のみ status を更新し監査ログへ残す
+    // 保存済み設定のテスト時のみ status を更新し監査ログへ残す (テストしたアカウント単位)
     if (row) {
-      const updated = await mailModel.setStatus(user.id, status);
+      const updated = await mailModel.setStatus(row.id, status);
       result.account = toView(updated);
       await auditModel.logAction({
         userId: user.id,

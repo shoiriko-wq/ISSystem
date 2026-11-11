@@ -7,7 +7,7 @@
  *  2. メールタブの初回は設定フォームが表示され、メールアドレスはユーザー情報からプリフィルされる
  *  2a. 上級設定（IMAP / SMTP）は .env の初期値（GitHub 非公開の秘匿情報）でプリフィルされる
  *  3. 不正メールアドレスの送信はエラートーストになり、フォームは残る
- *  4. 正常な設定保存で受信箱パネルへ切り替わり、ヘッダーにアドレスが表示される
+ *  4. 正常な設定保存で受信箱パネルへ切り替わり、アカウントタブにアドレスが表示される（ヘッダーの接続アカウント行は廃止）
  *  4a. ヘッダーデザインは職員掲示板・施設物品予約と同一（ツールバー面＋text-base タイトル＋w-4 アイコン、
  *      コントロール高さは 2.4rem に統一）。「はじめてご利用…暗号化して保存されます」の案内文は存在しない
  *  4a-test. ヘッダーの「接続テスト」で IMAP / SMTP を実接続テストし、結果パネルと status (接続失敗) が出る
@@ -80,9 +80,15 @@ const check = (name, ok, detail = null) => {
  * 実 IMAP は外部サーバーで検証では到達不能なため、一覧は DB 読み出しで表示される。
  * folder = 'inbox'（受信）3件・'sent'（送信済み）2件。受信は全て未読 (is_read=0)。
  * user_id はログイン staff_code T2026001 のユーザーレコード id 'kyomu01'（FK が users(id) を指すため）。
+ * account_id は UI で保存された接続アカウント（mail_accounts の 1件目）の id を実参照する。
  */
 async function seedMailMessages() {
   await query(`DELETE FROM mail_messages WHERE user_id = 'kyomu01'`);
+  const acc = await query(
+    `SELECT id FROM mail_accounts WHERE user_id = 'kyomu01' ORDER BY created_at, id LIMIT 1`
+  );
+  const accountId = acc.rows[0]?.id;
+  if (!accountId) throw new Error('seedMailMessages: 接続アカウント (mail_accounts) が見つかりません');
   const inboxRows = [
     ['mail_kyomu01_inbox_9001', '9001', '山田太郎', 'yamada@issystem.example', 'UI検証メール1',
       '本文一: 左一覧の一番下に現れる受信検証メッセージです。右ペインの本文表示を確認する文章です。', 0, '2026-06-01 09:00:00'],
@@ -93,8 +99,8 @@ async function seedMailMessages() {
   ];
   for (const [id, uid, senderName, senderEmail, subject, body, isRead, receivedAt] of inboxRows) {
     await query(
-      `INSERT INTO mail_messages (id, user_id, folder, uid, sender_name, sender_email, subject, body, is_read, received_at)
-       VALUES ('${id}', 'kyomu01', 'inbox', '${uid}', '${senderName}', '${senderEmail}', '${subject}', '${body}', ${isRead}, '${receivedAt}')`
+      `INSERT INTO mail_messages (id, user_id, account_id, folder, uid, sender_name, sender_email, subject, body, is_read, received_at)
+       VALUES ('${id}', 'kyomu01', '${accountId}', 'inbox', '${uid}', '${senderName}', '${senderEmail}', '${subject}', '${body}', ${isRead}, '${receivedAt}')`
     );
   }
   const sentRows = [
@@ -103,8 +109,8 @@ async function seedMailMessages() {
   ];
   for (const [id, subject, recipients, body, receivedAt] of sentRows) {
     await query(
-      `INSERT INTO mail_messages (id, user_id, folder, sender_name, sender_email, recipients, subject, body, is_read, received_at)
-       VALUES ('${id}', 'kyomu01', 'sent', '田中太郎', 'tanaka.ui@issystem.example', '${recipients}', '${subject}', '${body}', 1, '${receivedAt}')`
+      `INSERT INTO mail_messages (id, user_id, account_id, folder, sender_name, sender_email, recipients, subject, body, is_read, received_at)
+       VALUES ('${id}', 'kyomu01', '${accountId}', 'sent', '田中太郎', 'tanaka.ui@issystem.example', '${recipients}', '${subject}', '${body}', 1, '${receivedAt}')`
     );
   }
 }
@@ -169,6 +175,21 @@ const snapshot = (page) => page.evaluate(() => {
     })(),
     headerText: (document.getElementById('view-mail')?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 160),
     fullViewText: document.getElementById('view-mail')?.textContent || '',
+    accountTabsText: (document.getElementById('mail-account-tabs')?.textContent || '').replace(/\s+/g, ' ').trim(),
+    accountTabCount: document.querySelectorAll('#mail-account-tabs [data-mail-account]').length,
+    accountTabActive: (document.querySelector('#mail-account-tabs [data-mail-account][aria-selected="true"] .font-bold')?.textContent || '').trim(),
+    addAccountBtn: !!document.getElementById('mail-btn-add-account'),
+    accountTabsAboveBox: (() => {
+      const at = document.getElementById('mail-account-tabs');
+      const bt = document.getElementById('mail-box-tabs');
+      if (!at || !bt) return null;
+      return at.getBoundingClientRect().bottom <= bt.getBoundingClientRect().top + 1;
+    })(),
+    refreshIconClass: (document.querySelector('#mail-btn-refresh svg')?.getAttribute('class') || ''),
+    mailSnap: (() => {
+      const s = window.__mailSnap ? window.__mailSnap() : null;
+      return s ? { pollMs: s.pollMs, polling: s.polling, activeAccountId: s.activeAccountId, accounts: s.accounts } : null;
+    })(),
     headerInfo: (() => {
       const h = document.querySelector('#view-mail > div');
       if (!h) return null;
@@ -294,7 +315,11 @@ await page.click('.app-sidebar [data-tab="mail"]');
 await sleep(1800);
 const configured = await snapshot(page);
 check('保存で受信箱へ切り替わる', configured.hasInbox === true && configured.hasForm === false, { hasInbox: configured.hasInbox, hasForm: configured.hasForm });
-check('ヘッダーにアドレス表示', configured.headerText.includes('tanaka.ui@issystem.example'), configured.headerText);
+check('アカウントタブに接続アカウントのアドレスが表示される（ヘッダーの接続アカウント行は廃止）',
+  configured.accountTabCount === 1 && configured.accountTabActive === 'tanaka.ui@issystem.example' &&
+  configured.accountTabsText.includes('tanaka.ui@issystem.example') &&
+  !/接続アカウント|最終受信確認/.test(configured.fullViewText),
+  { count: configured.accountTabCount, active: configured.accountTabActive, text: configured.accountTabsText.slice(0, 120) });
 
 // 4a2. ヘッダーコントロール高さは掲示板・施設物品予約と同じ 2.4rem に統一
 const hc = configured.headerInfo;
@@ -304,6 +329,25 @@ check('メール設定・接続テスト・再読み込みボタンは 2.4rem �
 check('設定済みヘッダーに受信箱案内文は出ない',
   !/はじめてご利用|暗号化して保存/.test(configured.fullViewText),
   { fullViewText: configured.fullViewText.slice(0, 120) });
+
+// 4a3. 受信ボタンはダウンロードアイコン（リロード表示から変更。2.4rem 正方形の寸法は維持）
+check('受信ボタンはダウンロードアイコン（refresh-cw アイコンは使わない）',
+  configured.refreshIconClass.includes('lucide-download') && !configured.refreshIconClass.includes('lucide-refresh-cw'),
+  { refreshIconClass: configured.refreshIconClass });
+
+// 4a4. アカウントタブの配置（受信ボックス・送信ボックスタブの上にアカウントタブ、末尾に追加 (+) タブ）
+check('アカウントタブが受信ボックス・送信ボックスタブより上にある',
+  configured.accountTabsAboveBox === true, { accountTabsAboveBox: configured.accountTabsAboveBox });
+check('アカウントタブの末尾にアカウント追加 (+) タブがある',
+  configured.addAccountBtn === true, { addAccountBtn: configured.addAccountBtn });
+
+// 4a5. 自動受信・定期受信フック（メールタブ表示時に受信問い合わせを開始し、60秒周期で定期受信する）
+check('設定済みで定期受信フックが開始される（60秒周期。受信失敗はサイレントで表示を止めない）',
+  configured.mailSnap && configured.mailSnap.pollMs === 60000 && configured.mailSnap.polling === true &&
+  configured.mailSnap.activeAccountId === configured.mailSnap.accounts[0]?.id &&
+  configured.toasts.every((t) => !t.includes('受信できませんでした')) &&
+  configured.hasInbox === true && configured.listItems.length >= 3,
+  { mailSnap: configured.mailSnap, toasts: configured.toasts.slice(-2), items: configured.listItems.length });
 
 // 4a-test. ヘッダーの「接続テスト」→ IMAP / SMTP を実接続テスト（到達不能サーバーなので NG になる）
 check('ヘッダーに接続テストボタンがある', configured.testBtnText.includes('接続テスト'), configured.testBtnText);
@@ -428,6 +472,52 @@ await sleep(600);
 const back = await snapshot(page);
 check('「変更しない」で受信箱へ戻る', back.hasInbox === true && back.hasForm === false && back.listItems.length >= 3, { hasInbox: back.hasInbox, items: back.listItems.length });
 
+// 4h. 複数アカウントの同時表示: 「+」タブで 2件目を追加し、アカウントタブで切り替える
+await page.click('#mail-btn-add-account');
+await sleep(600);
+await page.evaluate(() => {
+  document.getElementById('mail-setup-email').value = 'second.ui@issystem.example';
+  document.getElementById('mail-setup-password').value = 'ui-secret-456';
+  document.getElementById('mail-setup-imap-host').value = 'imap.issystem.example';
+  document.getElementById('mail-setup-imap-port').value = '993';
+  document.getElementById('mail-setup-form').requestSubmit();
+});
+await sleep(2000);
+const twoAccounts = await snapshot(page);
+check('「+」タブで追加した 2件目のアカウントタブが増える',
+  twoAccounts.accountTabCount === 2 && twoAccounts.accountTabsText.includes('second.ui@issystem.example') &&
+  twoAccounts.accountTabActive === 'second.ui@issystem.example',
+  { count: twoAccounts.accountTabCount, active: twoAccounts.accountTabActive, text: twoAccounts.accountTabsText.slice(0, 200) });
+check('追加後は新アカウントの受信箱（空）を表示し、1件目の未読2は全アカウント合計のバッジに残る',
+  twoAccounts.listItems.length === 0 && twoAccounts.unreadBadgeText === '2' &&
+  twoAccounts.mailSnap.accounts.find((a) => a.email === 'tanaka.ui@issystem.example')?.unread === 2,
+  { items: twoAccounts.listItems.length, badge: twoAccounts.unreadBadgeText, snap: twoAccounts.mailSnap });
+
+// 1件目のアカウントタブへ切り替えると受信3件と右本文が戻る（切替時に受信問い合わせる）
+const firstId = twoAccounts.mailSnap.accounts.find((a) => a.email === 'tanaka.ui@issystem.example').id;
+await page.evaluate((id) => document.querySelector(`#mail-account-tabs [data-mail-account="${id}"]`).click(), firstId);
+await sleep(1800);
+const backFirst = await snapshot(page);
+check('アカウントタブ切替で1件目の受信ボックス（3件）と右本文が戻る',
+  backFirst.accountTabActive === 'tanaka.ui@issystem.example' && backFirst.listItems.length === 3 &&
+  backFirst.detailBody.length > 40,
+  { active: backFirst.accountTabActive, items: backFirst.listItems.length, detail: backFirst.detailSubject });
+
+// アカウント削除は表示中アカウントだけ（2件目を削除すると1件目が残る）
+const secondMailId = twoAccounts.mailSnap.accounts.find((a) => a.email === 'second.ui@issystem.example').id;
+await page.evaluate((id) => document.querySelector(`#mail-account-tabs [data-mail-account="${id}"]`).click(), secondMailId);
+await sleep(1800);
+await page.click('#mail-btn-settings');
+await sleep(600);
+await page.click('#mail-btn-remove');
+await sleep(1600);
+const afterDelete = await snapshot(page);
+check('表示中アカウントの削除は2件目だけが消え、1件目の受信ボックス（3件）と未読バッジ2が残る',
+  afterDelete.accountTabCount === 1 && afterDelete.accountTabActive === 'tanaka.ui@issystem.example' &&
+  afterDelete.listItems.length === 3 && afterDelete.unreadBadgeText === '2' && afterDelete.hasForm === false,
+  { count: afterDelete.accountTabCount, active: afterDelete.accountTabActive, items: afterDelete.listItems.length,
+    badge: afterDelete.unreadBadgeText, hasForm: afterDelete.hasForm });
+
 // 5. ページ再読み込み後も受信箱 (左一覧 + 右本文) が続く
 await page.reload({ waitUntil: 'networkidle2' });
 await sleep(1200);
@@ -438,6 +528,11 @@ check('再読み込み後も設定済み', reloaded.hasInbox === true && reloade
 check('再読み込み後も左一覧と右本文',
   reloaded.listItems.length >= 3 && reloaded.detailSubject.length > 0 && reloaded.detailBody.length > 40,
   { titles: reloaded.listItems.map((i) => i.subject), detail: reloaded.detailSubject });
+check('再読み込み後もアカウントタブ・定期受信フック・ダウンロードアイコン',
+  reloaded.accountTabActive === 'tanaka.ui@issystem.example' && reloaded.accountTabCount === 1 &&
+  reloaded.mailSnap?.polling === true && reloaded.mailSnap?.pollMs === 60000 &&
+  reloaded.refreshIconClass.includes('lucide-download'),
+  { active: reloaded.accountTabActive, mailSnap: reloaded.mailSnap, icon: reloaded.refreshIconClass });
 check('接続テストの失敗状態 (status=FAILED) は再読み込み後もヘッダーに残る',
   reloaded.headerText.includes('接続失敗') && reloaded.testResultText === '',
   { headerText: reloaded.headerText.slice(0, 110), testResultText: reloaded.testResultText.slice(0, 60) });

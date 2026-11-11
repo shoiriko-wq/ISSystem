@@ -7,13 +7,16 @@
  *  R2. 科目名・略称列は実枠 14% / 8%（table-layout:fixed）で、入力欄（実枠）が列幅の 90% 以上ある。
  *  R3. 実施クラス・コース列はチップ内容分の幅（63%）で、チップがコンテナ右端を超えない。
  *      1440px では学年ごとに 1 行（チップ行 = 学年数）で収まる。
- *  R4. カード・テーブル・内容領域に水平スクロールが発生せず、保存/削除ボタンが操作列の右端を超えない。
- *  R5. チップをクリックすると選択（bg-accent-soft）になり、保存でサーバーへ class_course_ids が届いて
- *      再読み込み後も選択が維持される（Shift+クリックで範囲選択、解除して元へ戻す）。
- *  R6. 「行を追加」は未入力の行を表の最上部に1件だけ出す（未入力の行の top は最初の保存済み行より上）。
+ *  R4. カード・テーブル・内容領域に水平スクロールが発生せず、操作列の削除ボタンが列の右端を超えない。
+ *  R5. チップをクリックすると選択（bg-accent-soft）になり、選択を終えた（ポインタを離した）瞬間に自動登録（PUT）されて
+ *      サーバーへ class_course_ids が届く。ページを再読み込みしても選択が維持される（Shift+クリックで範囲選択、解除して元へ戻す）。
+ *  R6. 「行を追加」は未入力の行を表の最上部に1件だけ出す（未入力の行の top は最初の登録済み行より上）。
  *      未入力の行が1件表示されている間は「行を追加」ボタンは無効（disabled・aria-disabled）で、
- *      2回押しても行は増えない。保存・破棄すると未入力の行は消え、ボタンは元通り使える。
- *      保存済み行は通常の順（クラス=学年順・教科=登録順・科目=教科順）で並ぶ。
+ *      2回押しても行は増えない。自動登録・破棄すると未入力の行は消え、ボタンは元通り使える。
+ *      登録済み行は通常の順（クラス=学年順・教科=登録順・科目=教科順）で並ぶ。
+ *  R7. 行に「保存」ボタンは無い（ボタン・title・トースト・説明文に「保存」の語が出ない）。行の編集は
+ *      入力欄を書いて焦点が行の外へ移った瞬間に自動登録される。焦点が行内の次の入力欄へ移るだけでは書き込まない
+ *      （焦点移動ごとにリクエストが走らない）。ページを再読み込みしても入力内容が行に残る（サーバーへ書き込まれている）。
  *
  * 実行: npm run test:ui:exambasic  （ISSystem サーバーが必要）
  * options: UI_BASE=https://127.0.0.1:3443 UI_USER=T2026001 UI_PASS=password123
@@ -70,7 +73,8 @@ const GEOMETRY = () => {
     rowsMap.set(Math.round(r.top), (rowsMap.get(Math.round(r.top)) || 0) + 1);
     if (lr && r.right > lr.right + 1) chipOver += 1;
   }
-  const buttons = [...row.querySelectorAll('button[data-act]')].map((b) => Math.round(b.getBoundingClientRect().right));
+  const buttons = [...row.querySelectorAll('button[data-act="delete"]')].map((b) => Math.round(b.getBoundingClientRect().right));
+  const saveBtnCount = row.querySelectorAll('button[data-act="save"]').length;
   const content = document.querySelector('#app-container main') || document.querySelector('main');
   const picker = cellRect(3);
   return {
@@ -88,6 +92,7 @@ const GEOMETRY = () => {
     chipOver,
     name: inputRect('name'),
     short: inputRect('short_name'),
+    saveBtnCount,
     buttonMaxRight: buttons.length ? Math.max(...buttons) : 0,
     actionRight: cellRect(tds.length - 1)?.right ?? -1,
     contentOverflow: content.scrollWidth - content.clientWidth,
@@ -105,6 +110,13 @@ const page = await browser.newPage();
 page.on('pageerror', (e) => console.log(`  [page js error] ${e.message}`));
 page.on('console', (m) => {
   if (m.type() === 'error') console.log(`  [console error] ${m.text()}`);
+});
+// 自動登録（POST/PUT）のリクエスト数を数える（焦点移動ごとに走らないことを確認する）
+page.on('request', (r) => {
+  const m = r.method();
+  if (m === 'POST' || m === 'PUT') {
+    page.evaluate((u, mm) => { (window.__reqs = window.__reqs || []).push({ url: u, method: mm }); }, r.url(), m);
+  }
 });
 
 const loginToBasic = async () => {
@@ -134,7 +146,8 @@ for (const vw of VIEWPORTS) {
   check(`${vw}px 略称入力欄が列幅の90%以上`, g.short.w >= g.cols[2].w * 0.9, `${g.short.w}/${g.cols[2].w}`);
   check(`${vw}px チップが実施クラス・コース列の右端を超えない`, g.chipOver === 0, `over=${g.chipOver} listRight=${g.listRight} pickerRight=${g.pickerRight}`);
   check(`${vw}px 水平スクロールなし（カード・内容領域）`, g.contentOverflow <= 0 && g.tableOverflow <= 0, `content=${g.contentOverflow} table=${g.tableOverflow}`);
-  check(`${vw}px 保存/削除ボタンが操作列内に収まる`, g.buttonMaxRight <= g.actionRight + 1, `${g.buttonMaxRight}/${g.actionRight}`);
+  check(`${vw}px 削除ボタンが操作列内に収まる`, g.buttonMaxRight <= g.actionRight + 1, `${g.buttonMaxRight}/${g.actionRight}`);
+  check(`${vw}px 行に「保存」ボタンはない（行の編集は自動登録）`, g.saveBtnCount === 0, `save=${g.saveBtnCount}`);
   if (vw >= 1440) {
     check('1440px チップは学年ごとに1行（列幅は内容分）', g.chipRows.length === g.gradeRows && g.listW >= g.pickerW * 0.98, `chipRows=${g.chipRows.join(',')} gradeRows=${g.gradeRows} pickerW=${g.pickerW} listW=${g.listW}`);
   }
@@ -145,8 +158,8 @@ for (const vw of VIEWPORTS) {
   await (cardEl ? cardEl.screenshot({ path: path.join(OUT_DIR, `exam-basic-subject-${vw}-card.png`) }) : page.screenshot({ path: path.join(OUT_DIR, `exam-basic-subject-${vw}.png`) }));
 }
 
-// R5. チップクリック・Shift 範囲選択・保存（サーバー反映）
-console.log('--- チップ選択と保存（1440px） ---');
+// R5. チップクリック・Shift 範囲選択・自動登録（選択を終えた瞬間の PUT でサーバー反映）
+console.log('--- チップ選択と自動登録（1440px） ---');
 await page.setViewport({ width: 1440, height: 1000 });
 await loginToBasic();
 
@@ -178,19 +191,18 @@ const clickChip = async (id, shift = false) => {
   return true;
 };
 
-const saveRow = async () => {
-  const resP = page.waitForResponse((r) => r.url().includes('/basic-info/subject/') && r.request().method() === 'PUT', { timeout: 6000 });
-  await page.evaluate(() => document.querySelector('#basic-body-subject tr [data-act="save"]').scrollIntoView({ block: 'center' }));
-  await page.click('#basic-body-subject tr [data-act="save"]');
-  const res = await resP;
-  await sleep(1200);
-  return res.status();
-};
+/** チップ選択を終えた瞬間（ポインタを離した瞬間）に走る自動登録（PUT）のレスポンスを待つ */
+const putAfterChip = () => page.waitForResponse(
+  (r) => r.url().includes('/basic-info/subject/') && r.request().method() === 'PUT', { timeout: 6000 }
+);
 
+const pA = putAfterChip();
 await clickChip(targets.a);
+const stA = (await pA).status();
 const onA = await page.evaluate((cid) => document.querySelector(`[data-cc="${cid}"]`).classList.contains('bg-accent-soft'), targets.a);
-check('チップクリックで選択される', onA);
+check(`チップクリックで選択され、選択を終えた瞬間に自動登録（PUT ${stA}）される`, stA === 200 && onA, `status=${stA} on=${onA}`);
 
+const pB = putAfterChip();
 await clickChip(targets.b, true);
 const rangeOn = await page.evaluate(
   (a, b) => {
@@ -203,9 +215,9 @@ const rangeOn = await page.evaluate(
   targets.a,
   targets.b
 );
-check('Shift+クリックで範囲選択される', rangeOn);
+const stB = (await pB).status();
+check(`Shift+クリックで範囲選択され、選択を終えた瞬間に自動登録（PUT ${stB}）される`, stB === 200 && rangeOn, `status=${stB}`);
 
-const status = await saveRow();
 const kept = await page.evaluate(
   (a, b) => {
     const row = [...document.querySelectorAll('#basic-body-subject tr')].find((r) => r.dataset.id === window.__sid);
@@ -216,9 +228,9 @@ const kept = await page.evaluate(
   targets.a,
   targets.b
 );
-check(`保存（PUT ${status}）後の再読み込みで選択が維持される`, kept.selA && kept.selB, JSON.stringify(kept));
+check(`チップクリック時の自動登録（PUT ${stA}）が行の選択として残っている`, kept.selA && kept.selB, JSON.stringify(kept));
 
-// 選択を元の集合へ戻す（範囲選択で作った追加分を個別に解除 → 保存）
+// 選択を元の集合へ戻す（範囲選択で作った追加分を個別に解除 → 解除のたびに自動登録される）
 const extras = await page.evaluate(
   (base) => {
     const row = document.querySelector('#basic-body-subject tr');
@@ -226,8 +238,12 @@ const extras = await page.evaluate(
   },
   targets.base
 );
-for (const id of extras) await clickChip(id);
-const status2 = await saveRow();
+for (const id of extras) {
+  const pExtra = putAfterChip();
+  await clickChip(id);
+  await pExtra;
+  await sleep(400);
+}
 const restored = await page.evaluate(
   (a, b, base) => {
     const row = [...document.querySelectorAll('#basic-body-subject tr')].find((r) => r.dataset.id === window.__sid);
@@ -238,7 +254,20 @@ const restored = await page.evaluate(
   targets.b,
   targets.base
 );
-check(`解除して保存（PUT ${status2}）すると選択が元の集合へ戻る`, restored.ok, `sel=${restored.sel} base=${restored.base}`);
+check('解除して自動登録すると選択が元の集合へ戻る', restored.ok, `sel=${restored.sel} base=${restored.base}`);
+
+// ページを再読み込みしても自動登録した選択が元の集合のまま（サーバーへ書き込まれており、未保存の選択は消えない）
+await loginToBasic();
+const selAfterReload = await page.evaluate(
+  (sid, base) => {
+    const row = [...document.querySelectorAll('#basic-body-subject tr')].find((r) => r.dataset.id === sid);
+    const sel = [...(row?.querySelectorAll('[data-cc].bg-accent-soft') || [])].map((c) => c.dataset.cc).sort();
+    return { ok: sel.join(',') === [...base].sort().join(','), sel: sel.join(','), base: [...base].sort().join(',') };
+  },
+  targets.id,
+  targets.base
+);
+check('ページを再読み込みしてもチップ選択は元の集合のまま（自動登録がサーバーへ書き込まれている＝未保存テキスト消失がない）', selAfterReload.ok, `sel=${selAfterReload.sel} base=${selAfterReload.base}`);
 
 // ==========================================================
 // 行の追加・保存・削除（クラス・教科・科目・教室の全テーブル）
@@ -275,7 +304,7 @@ const addRow = async (kind) => {
       blankIsFirst: tbody.firstElementChild === blank,
       blankTop: topOf(blank),
       firstSavedTop: topOf(firstSaved),
-      hasSave: !!blank?.querySelector('[data-act="save"]'),
+      hasSaveBtn: !!blank?.querySelector('[data-act="save"]'),
       hasDelete: !!blank?.querySelector('[data-act="delete"]'),
       addDisabled: addBtn.disabled === true,
       addAriaDisabled: addBtn.getAttribute('aria-disabled') === 'true',
@@ -314,29 +343,6 @@ const basicState = (kind) =>
     };
   }, kind);
 
-const fillRow = (kind, values) =>
-  page.evaluate((k, vals) => {
-    const row = document.querySelector(`#basic-body-${k} tr[data-kind="${k}"][data-id=""]`);
-    for (const [key, val] of Object.entries(vals)) {
-      const el = row.querySelector(`[data-f="${key}"]`);
-      if (!el) continue;
-      if (el.tagName === 'SELECT' && [...el.options].some((o) => o.value === String(val))) el.value = String(val);
-      else el.value = String(val);
-    }
-  }, kind, values);
-
-const clickButtonInBlankRow = async (kind, act, method) => {
-  const resP = page.waitForResponse((r) => r.url().includes(API_PATH[kind]) && r.request().method() === method, { timeout: 6000 });
-  await page.evaluate((k, a) => {
-    const btn = document.querySelector(`#basic-body-${k} tr[data-kind="${k}"][data-id=""] [data-act="${a}"]`);
-    btn.scrollIntoView({ block: 'center' });
-    btn.click();
-  }, kind, act);
-  const res = await resP;
-  await sleep(1200);
-  return res.status();
-};
-
 const clickDeleteById = async (kind, rowId) => {
   const resP = page.waitForResponse((r) => r.url().includes(API_PATH[kind]) && r.request().method() === 'DELETE', { timeout: 6000 });
   await page.evaluate((k, id) => {
@@ -348,6 +354,46 @@ const clickDeleteById = async (kind, rowId) => {
   await sleep(1200);
   return res.status();
 };
+
+/** 未入力の行（data-id 空）へ実タイピングで値を入れる（入力欄をクリックして焦点を当てる＝書き始め、選択欄は page.select） */
+const typeRow = async (kind, values) => {
+  for (const [key, val] of Object.entries(values)) {
+    const sel = `#basic-body-${kind} tr[data-kind="${kind}"][data-id=""] [data-f="${key}"]`;
+    const isSelect = await page.evaluate((s) => document.querySelector(s)?.tagName === 'SELECT', sel);
+    await page.click(sel);
+    await sleep(150);
+    if (isSelect) await page.select(sel, String(val));
+    else await page.type(sel, String(val));
+    await sleep(150);
+  }
+};
+
+/** 焦点を行の外（別テーブルの登録済み行の入力欄）へ移す selector（書き終えた瞬間を再現する） */
+const BLUR_TARGET = (kind) => (kind === 'room'
+  ? '#basic-body-class tr[data-kind="class"][data-id]:not([data-id=""]) [data-f="name"]'
+  : '#basic-body-room tr[data-kind="room"][data-id]:not([data-id=""]) [data-f="name"]');
+
+/** 焦点を行の外へ移す = 書き終えた瞬間。自動登録のリクエストを待つ */
+const autoSaveBlank = async (kind, method = 'POST') => {
+  const resP = page.waitForResponse((r) => r.url().includes(API_PATH[kind]) && r.request().method() === method, { timeout: 6000 });
+  await page.focus(BLUR_TARGET(kind));
+  const res = await resP;
+  await sleep(1200);
+  return res.status();
+};
+
+const countReq = (kind, method) => page.evaluate((k, m) =>
+  window.__reqs.filter((r) => r.url.includes(API_PATH[k]) && r.method === m).length, kind, method);
+
+/** 行内の入力欄から別の入力欄へ焦点を移す（行内の移動は自動登録の条件ではない） */
+const focusWithin = (kind, rowId, fields) => page.evaluate((k, id, fs) => {
+  const row = document.querySelector(`#basic-body-${k} tr[data-id="${id}"]`);
+  row.querySelector(`[data-f="${fs[0]}"]`).focus();
+  row.querySelector(`[data-f="${fs[1]}"]`).focus();
+}, kind, rowId, fields);
+
+/** 焦点を行の外（別テーブルの登録済み行の入力欄）へ移す（= 書き終えた瞬間） */
+const focusOutside = (kind) => page.focus(BLUR_TARGET(kind));
 
 const findRowId = (kind, name) =>
   page.evaluate((k, nm) => {
@@ -398,24 +444,24 @@ for (const c of addCases) {
   }
   const before = await rowInfo(c.kind);
   const added = await addRow(c.kind);
-  check(`${c.kind}: 「行を追加」で未入力の行が1件だけ最上部に出る（保存・削除ボタン付き・ボタンは無効）`,
+  check(`${c.kind}: 「行を追加」で未入力の行が1件だけ最上部に出る（「保存」ボタンは無く削除ボタンだけ・ボタンは無効）`,
     added.count === before.count + 1 && added.blankCount === 1 && added.blankIsFirst &&
-    added.blankTop < added.firstSavedTop && added.hasSave && added.hasDelete &&
+    added.blankTop < added.firstSavedTop && !added.hasSaveBtn && added.hasDelete &&
     added.addDisabled && added.addAriaDisabled,
-    `count=${added.count} blank=${added.blankCount} first=${added.blankIsFirst} top=${added.blankTop}/${added.firstSavedTop} del=${added.hasDelete} disabled=${added.addDisabled}`);
+    `count=${added.count} blank=${added.blankCount} first=${added.blankIsFirst} top=${added.blankTop}/${added.firstSavedTop} save=${added.hasSaveBtn} del=${added.hasDelete} disabled=${added.addDisabled}`);
   const again = await clickAddAgain(c.kind);
   check(`${c.kind}: 未入力の行が1件ある間「行を追加」は機能しない（行数・未入力の行数は変わらず・ボタンは無効のまま）`,
     again.count === added.count && again.blankCount === 1 && again.addDisabled,
     `count=${again.count} blank=${again.blankCount} disabled=${again.addDisabled}`);
-  await fillRow(c.kind, c.fill);
-  const status = await clickButtonInBlankRow(c.kind, 'save', 'POST');
+  await typeRow(c.kind, c.fill);
+  const status = await autoSaveBlank(c.kind, 'POST');
   const after = await rowInfo(c.kind);
   const savedId = await findRowId(c.kind, c.name);
   const afterSave = await basicState(c.kind);
-  check(`${c.kind}: 行を追加して保存（POST ${status}）すると入力内容が行として一覧に残る`,
+  check(`${c.kind}: 行を追加して入力し、焦点が行の外へ移ると自動登録（POST ${status}）されて行として一覧に残る`,
     status === 201 && after.count === before.count + 1 && savedId && savedId !== '',
     `count=${after.count} id=${savedId}`);
-  check(`${c.kind}: 保存後は未入力の行が消え「行を追加」が使えるようになる`,
+  check(`${c.kind}: 自動登録後は未入力の行が消え「行を追加」が使えるようになる`,
     afterSave.blankCount === 0 && afterSave.addDisabled === false,
     `blank=${afterSave.blankCount} disabled=${afterSave.addDisabled}`);
   const delStatus = await clickDeleteById(c.kind, savedId);

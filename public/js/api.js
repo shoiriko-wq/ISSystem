@@ -154,3 +154,83 @@ export async function apiPostForm(endpoint, formData = new FormData()) {
     body: formData
   });
 }
+
+/**
+ * Content-Disposition からファイル名を取り出す（UTF-8 の filename* を優先）
+ * @param {string|null} disposition レスポンスヘッダー
+ * @returns {string} ファイル名（取れれば）
+ */
+function filenameFromDisposition(disposition) {
+  if (!disposition) return '';
+  const utf8 = disposition.match(/filename\*=(?:UTF-8|utf-8)''([^;]+)/i);
+  if (utf8) {
+    try {
+      return decodeURIComponent(utf8[1].trim().replace(/^"|"$/g, ''));
+    } catch (e) {
+      // 壊れた UTF-8 指定は無視して filename へ進む
+    }
+  }
+  const plain = disposition.match(/filename="?([^";]+)"?/i);
+  return plain ? plain[1].trim() : '';
+}
+
+/**
+ * 認証付きファイルダウンロード（Bearer トークンをヘッダーで送る）
+ * ブラウザの直接リンク（<a href>）は Authorization ヘッダーを送れないため、
+ * 保護された添付 API はこの関数でのみ取得する（直リンクは 401 になる）
+ * @param {string} endpoint APIエンドポイント (例: '/bulletins/attachments/att_xxx')
+ * @returns {Promise<{blob: Blob, filename: string}>}
+ */
+export async function apiDownload(endpoint) {
+  const url = endpoint.startsWith('http') ? endpoint : `${API_BASE_URL}${endpoint}`;
+
+  const headers = {};
+  if (state.authToken) {
+    headers['Authorization'] = `Bearer ${state.authToken}`;
+  }
+
+  const response = await fetch(url, { method: 'GET', headers });
+
+  // 401/403 は JSON エラー body（ファイル本体は返らない）。apiFetch と同じ扱いでメッセージを出す
+  if (response.status === 401 || response.status === 403) {
+    const errorData = await response.json().catch(() => ({}));
+
+    if (response.status === 403) {
+      console.warn('[API] 権限不足でファイル取得が拒否されました。');
+      throw new Error(errorData.message || errorData.error || 'このファイルを読む権限がありません。');
+    }
+
+    // トークンがあったのに 401 の時だけセッションを破棄する（未ログインの 401 はセッション切れではない）
+    if (state.authToken) {
+      console.warn('[API] 認証セッションが無効です。再ログインが必要です。');
+      setUserSession(null, null);
+    }
+    throw new Error(errorData.message || errorData.error || 'ファイルを取得できませんでした。ログインし直してください。');
+  }
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.message || errorData.error || `ファイルを取得できませんでした (Status: ${response.status})`);
+  }
+
+  const blob = await response.blob();
+  const filename = filenameFromDisposition(response.headers.get('Content-Disposition'));
+  return { blob, filename };
+}
+
+/**
+ * メモリ上のファイルをこの端末に保存する（ダウンロード）
+ * @param {Blob} blob 取得したファイル本体
+ * @param {string} filename 保存時のファイル名
+ */
+export function saveBlobAsFile(blob, filename = 'download') {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // 保存が始まってから URL を捨てる（長く置くと同じ URL を再利用できない）
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}

@@ -156,15 +156,22 @@ router.delete('/facilities/:facilityId', authenticateToken, requireKyomuRole, sa
 
 // メール接続設定 API (/api/mail)
 // 自分の設定のみ閲覧・変更・削除可 (初回は未設定 → UI でメールアドレスとパスワードを入力)
+// ※ GET /mail/accounts は複数アカウントの一覧（アカウントタブ描画用。/mail/account は1件目の設定）
 router.get('/mail/account', authenticateToken, safe(mailController?.getAccount));
+router.get('/mail/accounts', authenticateToken, safe(mailController?.listAccounts));
 router.post('/mail/account', authenticateToken, safe(mailController?.saveAccount));
 router.delete('/mail/account', authenticateToken, safe(mailController?.deleteAccount));
+// ?account_id= 指定はそのアカウントだけ、未指定は1件目のアカウントを削除する
 
 // 接続テスト API (フォーム値でのプレテスト / 保存済み設定の IMAP・SMTP 接続確認)
 router.post('/mail/test', authenticateToken, safe(mailController?.testConnection));
 
 // 受信箱 API (左：件名と日時、右：本文 / 既読記録)
+// ?account_id= 未指定はそのユーザーの1件目のアカウント。refresh は受信ボックスの IMAP 取得 (自動受信を含む)、
+// send は SMTP 送信 + 送信済みボックス保存 (POST body.account_id で送信元アカウントを選ぶ)
 router.get('/mail/messages', authenticateToken, safe(mailController?.getInbox));
+router.post('/mail/inbox/refresh', authenticateToken, safe(mailController?.refreshInbox));
+router.post('/mail/send', authenticateToken, safe(mailController?.sendMessage));
 router.post('/mail/messages/:id/read', authenticateToken, safe(mailController?.markMessageRead));
 
 // ==========================================

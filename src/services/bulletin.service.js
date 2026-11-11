@@ -561,20 +561,34 @@ export const bulletinService = {
 
   /**
    * 添付ファイル 1 件の取得（メタ + 実体ストリーム）
+   * ★ ルール27: ダウンロードできるのは投稿者本人・教務 (KYOMU)・管理者 (ADMIN) のみ。
+   *   他の職員が他者の添付を呼ぼうとしたら 403 で拒否する（UI はボタンを出さないが、直叩きも防ぐ）。
    * @param {string} attachmentId
-   * @param {string} userId
+   * @param {Object|string} user - req.user { id, name, role, is_kyomu }（旧呼び出しの文字 ID も許す）
    */
-  async getAttachmentForDownload(attachmentId, userId = 'kyomu01') {
+  async getAttachmentForDownload(attachmentId, user = {}) {
     const row = await bulletinModel.findAttachment(attachmentId);
     if (!row) {
       throw new ApiError(404, '添付ファイルが見つかりません。');
     }
 
+    const actor = typeof user === 'string' ? { id: user } : (user || {});
+    const myId = String(actor.id || actor.staff_code || '');
+    const role = String(actor.role || '').toUpperCase();
+    const isPrivileged = role === 'KYOMU' || role === 'KYOUMU' || role === 'ADMIN' || actor.is_kyomu === true;
+    const isUploader = row.uploaded_by && String(row.uploaded_by) === myId;
+
+    let isPostAuthor = false;
     if (row.post_id) {
       const post = await bulletinModel.findById(row.post_id);
       if (!post) {
         throw new ApiError(404, '添付元の掲示が存在しないため、ダウンロードできません。');
       }
+      isPostAuthor = String(post.authorId || post.author_id) === myId;
+    }
+
+    if (!isPrivileged && !isUploader && !isPostAuthor) {
+      throw new ApiError(403, '添付ファイルをダウンロードできるのは投稿者本人・教務・管理者のみです。');
     }
 
     return { meta: mapAttachment(row), row, stream: getAttachmentStream(row) };

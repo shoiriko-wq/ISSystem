@@ -15,6 +15,9 @@
  *  6. 「詳細」ボタン → 詳細モーダル（投稿日時・掲示期間などの読者向け情報はモーダルに集約。aria-hidden 同期）
  *  7. モバイル（<768px）は縦 stacking、横スクロールなし
  *  8. prefers-reduced-motion ではタイトル移動アニメーションが無効（コンテンツ移動なし）
+ *  9. 既読の付き方: 右ペインに全文が表示されるだけ（初期ロード・‹ › の日移動の自動選択）では既読にならない
+ *     （未読バッヂと DB の `post_acknowledgements` はそのまま）。タイトル行クリック（↑/↓ 選択も）で既読になる
+ *     ＝DB の既読レコード 1 件を実測する
  * 実行: node scripts/test-bulletin-split.mjs   （ISSystem サーバーが必要）
  *  options: UI_BASE=http://host:port  UI_USER=T2026001  UI_PASS=password123  CHROME_PATH=...
  * 出力: スクリプト実行ログ + /tmp/bulletin-split-desktop.png / /tmp/bulletin-split-390.png
@@ -275,6 +278,43 @@ const snapshot = (page) => page.evaluate(() => {
   };
 });
 
+/** 押下後 240ms を 20ms で刻み、右ペインに走った animation を一意に数える。
+ *  fade = opacity だけで動くキーフレーム（左右のフェード）、other = それ以外（移動・影など）。
+ *  listMoves = 左列コンテナに animation が立っているサンプル数（左列全体が動いてはいけない）。 */
+const paneFadeProbe = (pg) => pg.evaluate(async () => {
+  const pane = document.getElementById('bulletin-detail-pane');
+  const listEl = document.getElementById('bulletin-list-container');
+  const propsOf = (k) => Object.keys(k).filter((x) => !['composite', 'easing', 'offset', 'computedOffset'].includes(x));
+  const isFade = (a) => {
+    const keys = a.effect ? a.effect.getKeyframes() : [];
+    return keys.length >= 2 && keys.every((k) => propsOf(k).length === 1 && propsOf(k)[0] === 'opacity');
+  };
+  const calls = window.__fadeCalls || [];
+  const seen = new Map();   // animation オブジェクトそのものを key に（id はインスタンス間で重複しうる）
+  let listMoves = 0;
+  const samples = [];
+  for (let i = 0; i < 12; i++) {
+    for (const a of pane.getAnimations()) {
+      if (!seen.has(a)) seen.set(a, isFade(a) ? 'fade' : 'other');
+    }
+    if (listEl.getAnimations().length > 0) listMoves++;
+    samples.push({
+      t: i,
+      ids: pane.getAnimations().map((a) => `${a.id || 'noid'}:${Math.round(a.duration)}`),
+      rowIds: listEl.getAnimations().map((a) => `${a.id || 'noid'}:${Math.round(a.duration)}`),
+    });
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  const kinds = [...seen.values()];
+  return {
+    fades: kinds.filter((v) => v === 'fade').length,
+    others: kinds.filter((v) => v === 'other').length,
+    listMoves,
+    samples,
+    calls,
+  };
+});
+
 /* ============ 通常ビュー（1280x900） ============ */
 const { browser, page } = await setup();
 await page.setViewport({ width: 1280, height: 900 });
@@ -310,6 +350,20 @@ check('ミニカレンダーに「今日」ボタンと「任意日へ」入力�
     && pickedDay.monthBtns === 2 && pickedDay.dayCells > 28,
   { hasTodayButton: pickedDay.hasTodayButton, hasAnyDayLabel: pickedDay.hasAnyDayLabel,
     hasDateInput: pickedDay.hasDateInput, monthBtns: pickedDay.monthBtns, dayCells: pickedDay.dayCells });
+
+// ★ シグニファイア › の色比較（未読行と既読行）を決定的にするための前処理。
+//   右ペインに全文が出るだけでは既読にならない（2026-11-11 仕様）ので、末尾行と最上位行を実クリックして既読行を作る。
+//   ↑/↓ は選択移動時に既読化するのでキー操作は使わない（最上位行のクリックで active を最上位へ戻す）。
+await page.evaluate(() => {
+  const rows = [...document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]')];
+  if (rows.length > 1) rows[rows.length - 1].click();
+});
+await sleep(380);
+await page.evaluate(() => {
+  const row = document.querySelector('#bulletin-list-container [data-bulletin-toggle]');
+  if (row) row.click();
+});
+await sleep(380);
 
 const snap1 = await snapshot(page);
 log('after-day-select', snap1);
@@ -633,15 +687,29 @@ await page.screenshot({ path: '/tmp/bulletin-split-desktop.png' });
 const rowIds = await page.evaluate(() =>
   [...document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]')].map((r) => r.getAttribute('data-bulletin-toggle')));
 await page.evaluate(() => document.querySelector('#bulletin-list-container [data-bulletin-toggle]').focus());
+// pane.animate の呼び出しスタックを記録（フェードが何回走ったか、どこから走ったかを特定する）
+await page.evaluate(() => {
+  const pane = document.getElementById('bulletin-detail-pane');
+  window.__fadeCalls = [];
+  const orig = pane.animate.bind(pane);
+  pane.animate = function (kfs, opts) {
+    window.__fadeCalls.push(new Error().stack.split('\n').slice(1, 4).join(' | '));
+    return orig(kfs, opts);
+  };
+});
+// ★ アニメーション計測は自動選択のフェードが終わった後に押す（press 直後の計測は
+//   ロード時のフェードと重なって pane の animation が2本立つ（実測）。350ms 待って確定させる）
+await sleep(350);
 await page.keyboard.press('ArrowDown');
-await sleep(5);   // press 直後：右ペインのフェード(150ms)が生きていないと計測できない
+const fadeProbe = await paneFadeProbe(page);   // 押下後の 240ms を 20ms で刻んで pane の animation を数える
 const snapDown = await snapshot(page);
 log('after-ArrowDown', snapDown);
+log('fadeProbe', fadeProbe);
 log('rowIds', rowIds);
 check('↑/↓ で選択行が移動し右ペイン全文が連動', snapDown.activeIdx === 1 && snapDown.paneTitle === snapDown.activeTitle, { activeIdx: snapDown.activeIdx, paneTitle: snapDown.paneTitle });
 check('選択切替は左列全体を動かさず右ペインはフェード1回',
-  snapDown.listAnimations === 0 && snapDown.paneAnimations === 1,
-  { listAnimations: snapDown.listAnimations, paneAnimations: snapDown.paneAnimations });
+  fadeProbe.fades === 1 && fadeProbe.others === 0 && fadeProbe.listMoves === 0,
+  { fades: fadeProbe.fades, others: fadeProbe.others, listMoves: fadeProbe.listMoves });
 
 // 選択枠の移動は translateY のスライドだけ（上移動なら下から滑り込み、最終位置で0・左列全体は動かない）
 await page.keyboard.press('ArrowUp');
@@ -682,14 +750,16 @@ const posterLogin = await caFetch(`${BASE}/api/auth/login`, {
 }).then((r) => r.json());
 const posterToken = posterLogin.token;
 const unreadTitle = 'UI検証バッジ用掲示';  // タイトルに「未読」の文字を入れるとバッジ数と混ざるので使わない
+// ★ 検証用掲示は「本日」に作る（center が過去日だった快照の日付で作ると本日列表に出ず、行クリックの実測ができない）
+const todayIso = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
 const madePost = await caFetch(`${BASE}/api/bulletins`, {
   method: 'POST',
   headers: { 'content-type': 'application/json', Authorization: `Bearer ${posterToken}` },
   body: JSON.stringify({
     title: unreadTitle,
     content: '未読バッジ検証用（行の選択で既読化されることを実測し、検証後に削除される）。',
-    target_date: snapUp.centerDate,
-    display_start_date: snapUp.centerDate,
+    target_date: todayIso,
+    display_start_date: todayIso,
   }),
 }).then((r) => r.json());
 const madeId = (madePost.data && madePost.data.id) || (madePost.bulletin && madePost.bulletin.id) || null;
@@ -702,6 +772,43 @@ const unreadRow = await page.evaluate((t) => {
   const rows = [...document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]')];
   return { found: rows.some((r) => r.getAttribute('data-bulletin-toggle') === t), rows: rows.length };
 }, madeId);
+// ★ 既読の付き方（2026-11-11 仕様変更）: 右ペインに全文が出るだけでは既読にならない。
+//   作った掲示は本日列表に未読行として出る（列表は posted_at 順で、本日時刻の posted_at は
+//   .seed の時刻より古いことがあるので最上位になるとは限らない＝実測）。右ペインの自動選択は
+//   最上位行であり、作った掲示の行とは限らない。いずれの場合も未読バッヂと DB の既読レコードは 0 件のまま。
+//   › ‹ で日移動して本日列表へ戻っても未読バッヂは消えない。
+const acksOfMade = async () => Number((await query(
+  'SELECT COUNT(*) AS c FROM post_acknowledgements WHERE post_id = $1', [madeId]
+)).rows[0].c);
+const madeRowState = (id) => page.evaluate((t) => {
+  const row = [...document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]')]
+    .find((r) => r.getAttribute('data-bulletin-toggle') === t);
+  return row ? {
+    unread: row.getAttribute('data-unread'),
+    badge: Boolean(row.querySelector('.bulletin-unread-badge')),
+    rowTitle: row.querySelector('.bulletin-row-title')?.textContent.trim() || null,
+    paneTitle: document.querySelector('#bulletin-detail-pane h3')?.textContent.trim() || null,
+  } : null;
+}, id);
+const paneAtLoad = await madeRowState(madeId);
+const acksBeforeNav = await acksOfMade();
+await page.click('#bulletin-day-next'); await sleep(420);
+await page.click('#bulletin-day-prev'); await sleep(420);
+const navRow = await madeRowState(madeId);
+const afterNav = await snapshot(page);
+const acksAfterNav = await acksOfMade();
+log('display-not-read', {
+  madeId, paneAtLoad, acksBeforeNav, navRow,
+  unreadBefore: beforeUnread.unread, unreadAfterNav: afterNav.unread, acksAfterNav,
+});
+check('右ペイン表示だけでは既読にならない（本日列表に出た新掲示の行は未読バッヂ・data-unread のまま、› ‹ の日移動後も未読バッヂ行数は減らず DB の既読レコードは 0 件）',
+  Boolean(madeId) && paneAtLoad && paneAtLoad.rowTitle === unreadTitle
+    && paneAtLoad.unread === 'true' && paneAtLoad.badge === true
+    && acksBeforeNav === 0 && acksAfterNav === 0
+    && navRow && navRow.rowTitle === unreadTitle && navRow.unread === 'true' && navRow.badge === true
+    && afterNav.unread === beforeUnread.unread,
+  { paneAtLoad, acksBeforeNav, navRow, unreadBefore: beforeUnread.unread, unreadAfterNav: afterNav.unread, acksAfterNav });
+
 // 行を選択（クリック）して未読バッジが1減ることを数える
 await page.evaluate((t) => {
   const rows = [...document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]')];
@@ -719,6 +826,15 @@ check('選択行の未読バッジが消える（未読の掲示を選択する�
     && beforeUnread.unread - afterUnread.unread === 1
     && afterUnread.activeTitle === unreadTitle,
   { before: beforeUnread.unread, after: afterUnread.unread, activeTitle: afterUnread.activeTitle, rowFound: unreadRow.found });
+
+// ★ クリックで初めて既読が付くことを DB 実測で確認する（表示だけでは 0 件だった post_acknowledgements が 1 件へ）
+const acksAfterClick = await acksOfMade();
+const clickedRow = await madeRowState(madeId);
+log('read-on-click', { acksAfterClick, clickedRow });
+check('タイトル行クリックで既読になる（DB の既読レコード 1 件・行の未読バッヂと data-unread が消え、右ペインはその行の全文）',
+  acksAfterClick === 1 && clickedRow && clickedRow.unread === 'false' && clickedRow.badge === false
+    && clickedRow.paneTitle === unreadTitle,
+  { acksAfterClick, clickedRow });
 
 // 後片付け: 田中先生が作った掲示を削除する。
 // 一覧はキャッシュ描画なので、削除後はページを再読込してサーバーの実データへ追従させる。

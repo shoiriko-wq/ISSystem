@@ -12,16 +12,23 @@ import { state } from '../state.js';
 const VIEW_ID = 'view-mail';
 
 let account = null;
+let accounts = [];           // 自分の全メール接続設定 (アカウントタブ表示用)
+let activeAccountId = null;  // 表示中のアカウントID
 let folder = 'inbox';      // 'inbox' = 受信ボックス / 'sent' = 送信ボックス
-let inboxMessages = [];    // 受信ボックス（IMAP から取得してDBに保存済み）
-let sentMessages = [];     // 送信ボックス（このシステムから送信したメール）
+let inboxMessages = [];    // 受信ボックス（IMAP から取得してDBに保存済み / 表示中アカウント）
+let sentMessages = [];     // 送信ボックス（このシステムから送信したメール / 表示中アカウント）
+let messagesByAccount = {}; // accountId -> { inbox: [], sent: [] }
 let selectedInboxId = null;
 let selectedSentId = null;
 let showSetupForm = true; // 初回は必ず入力フォームを表示
+let setupTargetId = null; // 設定フォームの編集対象 (null = 新規追加 / activeAccountId = 編集中)
 let lastTest = null;      // 直近の接続テスト結果
 let testing = false;      // 接続テスト実行中（二重クリック防止）
 let fetching = false;     // 受信ボックスの取得中（二重クリック防止）
 let sending = false;      // 送信中（二重クリック防止）
+
+const POLL_MS = 60000;    // 定期受信の間隔（60秒ごとに受信問い合わせ）
+let pollTimer = null;     // 定期受信タイマー
 
 /** 表示中のボックス一覧 (受信 / 送信) */
 function currentList() {
@@ -89,11 +96,17 @@ function unreadCount() {
   return inboxMessages.filter((m) => !m.is_read).length;
 }
 
-/** サイドメニューのメール未読バッジ */
+/** 全アカウントの未読合計（サイドバーバッジ用） */
+function totalUnread() {
+  return Object.values(messagesByAccount)
+    .reduce((sum, store) => sum + (store.inbox || []).filter((m) => !m.is_read).length, 0);
+}
+
+/** サイドメニューのメール未読バッジ（全アカウント合計） */
 function updateMailUnreadBadge() {
   const badge = document.getElementById('mail-unread-count');
   if (!badge) return;
-  const n = unreadCount();
+  const n = totalUnread();
   badge.textContent = n > 99 ? '99+' : String(n);
   badge.classList.toggle('hidden', n === 0);
 }
@@ -114,10 +127,6 @@ function errorCardHtml(message) {
 /** モジュール共通ヘッダー（掲示板・施設物品予約と同一デザインのツールバー：左にアイコン＋タイトル、右にコントロール。高さを 2.4rem に統一） */
 function headerHtml() {
   const meta = statusMeta(account?.status || 'UNVERIFIED');
-  const configured = !!account && !account.needs_setup;
-  const summary = configured
-    ? `接続アカウント: <span class="font-bold text-main">${escapeHTML(account.email_address)}</span> / 最終受信確認: ${formatDateTime(account.last_checked_at || account.updated_at)}`
-    : '';
 
   return `
     <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-surface-strong p-3 rounded-xl border border-divider">
@@ -125,7 +134,6 @@ function headerHtml() {
         <h2 class="text-base font-bold text-main flex items-center gap-2 shrink-0">
           <i data-lucide="mail" class="w-4 h-4 text-info"></i> メール
         </h2>
-        ${summary ? `<p id="mail-account-summary" class="text-[11px] text-muted mt-1 leading-relaxed">${summary}</p>` : ''}
       </div>
       <div class="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
         <span class="text-[10px] px-2 py-0.5 rounded border border-divider ${meta.bg} ${meta.cls} font-bold shrink-0">${meta.label}</span>
@@ -138,8 +146,8 @@ function headerHtml() {
         <button type="button" id="mail-btn-settings" class="btn-secondary shrink-0 flex items-center gap-1.5" title="メール接続設定（メールアドレス・パスワード）">
           <i data-lucide="settings" class="w-4 h-4"></i> メール設定
         </button>
-        <button type="button" id="mail-btn-refresh" class="icon-btn icon-btn-fixed border border-divider bg-surface shrink-0" aria-label="受信ボックスを取得" title="受信（IMAP）">
-          <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+        <button type="button" id="mail-btn-refresh" class="icon-btn icon-btn-fixed border border-divider bg-surface shrink-0" aria-label="受信ボックスを取得（ダウンロード）" title="受信ボックスを取得（IMAP）">
+          <i data-lucide="download" class="w-4 h-4"></i>
         </button>
       </div>
     </div>`;
@@ -338,6 +346,32 @@ function detailHtml() {
     </div>`;
 }
 
+/** アカウントタブ（受信ボックス・送信ボックスの上に並べる。タブにアカウント名を表示し、末尾の + でアカウントを追加） */
+function accountTabsHtml() {
+  const configured = accounts.filter((a) => !a.needs_setup);
+  const tabs = configured.map((a) => {
+    const active = a.id === activeAccountId;
+    const unread = (messagesByAccount[a.id]?.inbox || []).filter((m) => !m.is_read).length;
+    return `
+      <button type="button" class="mail-tab-btn px-4 py-2.5 flex items-center gap-2 shrink-0" data-mail-account="${a.id}" role="tab" aria-selected="${active}">
+        <i data-lucide="mail" class="w-4 h-4"></i>
+        <span class="font-bold">${escapeHTML(a.email_address)}</span>
+        ${unread > 0 ? `<span class="text-[11px] font-bold text-danger-strong">${unread > 99 ? '99+' : unread}</span>` : ''}
+      </button>`;
+  }).join('');
+
+  const addTab = `
+    <button type="button" class="mail-tab-btn px-4 py-2.5 flex items-center gap-1.5 shrink-0" id="mail-btn-add-account" role="tab" aria-label="アカウントを追加" title="アカウントを追加">
+      <i data-lucide="plus" class="w-4 h-4"></i>
+    </button>`;
+
+  return `
+    <div id="mail-account-tabs" class="flex rounded-lg border border-main overflow-hidden bg-surface mb-3 flex-wrap" role="tablist" aria-label="メールアカウント選択">
+      ${tabs}
+      ${addTab}
+    </div>`;
+}
+
 /** ボックスタブ（受信ボックス / 送信ボックス）。1枚の実線枠、選択は青の下線 */
 function tabsHtml() {
   return `
@@ -357,10 +391,11 @@ function tabsHtml() {
     </div>`;
 }
 
-/** ボックス表示域（タブ + 左一覧 + 右本文） */
+/** ボックス表示域（アカウントタブ + ボックスタブ + 左一覧 + 右本文） */
 function boxHtml() {
   return `
     <div id="mail-box-area" role="tabpanel" aria-labelledby="mail-tab-${folder}">
+      ${accountTabsHtml()}
       ${tabsHtml()}
       <div class="grid grid-cols-1 lg:grid-cols-[minmax(280px,32%)_1fr] gap-4">
         ${listHtml()}
@@ -510,30 +545,66 @@ async function runConnectionTest(body = {}) {
   }
 }
 
-/** 受信ボックス取得（IMAP へ接続 → 新着をDB保存 → 一覧を再読み込み） */
-async function fetchInboxFromServer() {
+/**
+ * 受信ボックス取得（IMAP へ接続 → 新着をDB保存 → 一覧を再読み込み）
+ * @param {{silent?: boolean}} opts silent=true は自動受信・定期受信（トーストを出さず表示を止めない）
+ */
+async function fetchInboxFromServer({ silent = false } = {}) {
   if (fetching) return;
   if (!account || account.needs_setup) {
-    showToast('受信の前にメール接続設定を保存してください。', 'warning');
+    if (!silent) showToast('受信の前にメール接続設定を保存してください。', 'warning');
     return;
   }
   fetching = true;
-  showToast('受信ボックスを取得しています…', 'info');
+  const accountId = account.id;
   try {
-    const res = await apiPost('/mail/inbox/refresh');
+    const res = await apiPost('/mail/inbox/refresh', { account_id: accountId });
+    const store = messagesByAccount[accountId] || (messagesByAccount[accountId] = { inbox: [], sent: [] });
+    store.inbox = res.messages || [];
     folder = 'inbox';
-    inboxMessages = res.messages || [];
-    if (!inboxMessages.some((m) => m.id === selectedInboxId)) selectedInboxId = inboxMessages[0]?.id || null;
-    renderMailView();
-    showToast(res.message, 'success');
+    if (accountId === account.id) {
+      inboxMessages = store.inbox;
+      if (!inboxMessages.some((m) => m.id === selectedInboxId)) selectedInboxId = inboxMessages[0]?.id || null;
+      renderMailView();
+    }
+    updateMailUnreadBadge();
+    if (!silent) showToast(res.message, res.added > 0 ? 'success' : 'info');
   } catch (err) {
-    showToast(`受信できませんでした: ${err.message}`, 'error');
+    // 自動受信・定期受信の失敗は表示を止めない（ダウンロードボタンからの手動受信だけトーストを出す）
+    if (!silent) showToast(`受信できませんでした: ${err.message}`, 'error');
   } finally {
     fetching = false;
   }
 }
 
-/** 新規作成フォームの送信（SMTP へ送信 → 送信ボックスに記録） */
+/** 定期受信（表示中アカウントへ POLL_MS ごとに受信問い合わせ。他アカウントはタブ切替時に受信） */
+function startPolling() {
+  if (pollTimer) return;
+  pollTimer = setInterval(() => {
+    fetchInboxFromServer({ silent: true });
+  }, POLL_MS);
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+/** UI 検証用の内部状態（テストが定期受信フック・アカウントタブ・自動受信を実測するため公開する） */
+window.__mailSnap = () => ({
+  pollMs: POLL_MS,
+  polling: pollTimer !== null,
+  activeAccountId,
+  accounts: accounts.filter((a) => !a.needs_setup).map((a) => ({
+    id: a.id,
+    email: a.email_address,
+    unread: (messagesByAccount[a.id]?.inbox || []).filter((m) => !m.is_read).length,
+  })),
+});
+
+/** 新規作成フォームの送信（SMTP へ送信 → 送信ボックスに記録 / 送信元は表示中アカウント） */
 async function sendComposeMessage(form) {
   if (sending) return;
   if (!account || account.needs_setup) {
@@ -547,7 +618,7 @@ async function sendComposeMessage(form) {
   sending = true;
   showToast('送信しています…', 'info');
   try {
-    const res = await apiPost('/mail/send', { to, subject, body: bodyText });
+    const res = await apiPost('/mail/send', { account_id: account.id, to, subject, body: bodyText });
     closeModal('mail-compose-modal');
     showToast(res.message, 'success');
     // 送信後は送信ボックスへ切り替えて記録を表示する
@@ -562,35 +633,56 @@ async function sendComposeMessage(form) {
   }
 }
 
-/** メールタブの実データ取得 (設定済みなら受信・送信ボックスを読む) */
+/** メールタブの実データ取得 (設定済みアカウント全部のボックスを読み、自動受信して定期受信を開始する) */
 export async function loadMailData() {
   if (!state.currentUser || !state.authToken) return;
   const root = document.getElementById(VIEW_ID);
   if (!root) return;
 
   try {
-    const res = await apiGet('/mail/account');
-    account = res.account || null;
-    const configured = !!account && !account.needs_setup;
+    const res = await apiGet('/mail/accounts');
+    accounts = res.accounts || [];
+    const configured = accounts.filter((a) => !a.needs_setup);
 
-    if (configured) {
-      const inbox = await apiGet('/mail/messages?folder=inbox');
-      const sent = await apiGet('/mail/messages?folder=sent');
-      inboxMessages = inbox.messages || [];
-      sentMessages = sent.messages || [];
+    if (configured.length > 0) {
+      if (!configured.some((a) => a.id === activeAccountId)) activeAccountId = configured[0].id;
+      account = configured.find((a) => a.id === activeAccountId);
+
+      // 全アカウントのボックスを読み込む（アカウントタブの未読表示と切替時の即表示のため）
+      for (const a of configured) {
+        const store = messagesByAccount[a.id] || (messagesByAccount[a.id] = { inbox: [], sent: [] });
+        const inbox = await apiGet(`/mail/messages?folder=inbox&account_id=${encodeURIComponent(a.id)}`);
+        const sent = await apiGet(`/mail/messages?folder=sent&account_id=${encodeURIComponent(a.id)}`);
+        store.inbox = inbox.messages || [];
+        store.sent = sent.messages || [];
+      }
+
+      const store = messagesByAccount[activeAccountId];
+      inboxMessages = store.inbox;
+      sentMessages = store.sent;
       if (!inboxMessages.some((m) => m.id === selectedInboxId)) selectedInboxId = inboxMessages[0]?.id || null;
       if (!sentMessages.some((m) => m.id === selectedSentId)) selectedSentId = sentMessages[0]?.id || null;
       // 設定済みならボックスを表示（ページ再読み込み後は showSetupForm が初期値 true のため必ず落とす）
       showSetupForm = false;
     } else {
+      account = accounts[0] || null;
+      activeAccountId = null;
+      messagesByAccount = {};
       inboxMessages = [];
       sentMessages = [];
       selectedInboxId = null;
       selectedSentId = null;
       showSetupForm = true;
+      stopPolling();
     }
 
     renderMailView();
+
+    // 自動受信: メールタブ表示時に受信問い合わせを行う（失敗はサイレント）。60秒周期で定期受信する
+    if (configured.length > 0) {
+      startPolling();
+      fetchInboxFromServer({ silent: true });
+    }
   } catch (err) {
     root.innerHTML = errorCardHtml(err.message);
     refreshLucideIcons();
@@ -603,7 +695,7 @@ function renderMailView() {
   const root = document.getElementById(VIEW_ID);
   if (!root) return;
 
-  const configured = !!account && !account.needs_setup;
+  const configured = accounts.some((a) => !a.needs_setup);
   const parts = [headerHtml()];
 
   if (lastTest) parts.push(testResultHtml(lastTest));
@@ -663,6 +755,24 @@ export function initMailModule() {
       return;
     }
 
+    const accTab = e.target.closest('[data-mail-account]');
+    if (accTab) {
+      const id = accTab.getAttribute('data-mail-account');
+      const a = accounts.find((x) => x.id === id && !x.needs_setup);
+      if (!a) return;
+      activeAccountId = id;
+      account = a;
+      const store = messagesByAccount[id] || (messagesByAccount[id] = { inbox: [], sent: [] });
+      inboxMessages = store.inbox;
+      sentMessages = store.sent;
+      if (!inboxMessages.some((m) => m.id === selectedInboxId)) selectedInboxId = inboxMessages[0]?.id || null;
+      if (!sentMessages.some((m) => m.id === selectedSentId)) selectedSentId = sentMessages[0]?.id || null;
+      renderMailView();
+      // アカウント切替時も受信問い合わせる（自動受信・サイレント）
+      fetchInboxFromServer({ silent: true });
+      return;
+    }
+
     const tab = e.target.closest('[data-mail-folder]');
     if (tab) {
       folder = tab.getAttribute('data-mail-folder') === 'sent' ? 'sent' : 'inbox';
@@ -673,8 +783,10 @@ export function initMailModule() {
     const btn = e.target.closest('button');
     if (!btn) return;
 
+    const configured = accounts.some((a) => !a.needs_setup);
+
     if (btn.id === 'mail-btn-compose') {
-      if (!account || account.needs_setup) {
+      if (!configured) {
         showToast('送信の前にメール接続設定を保存してください。', 'warning');
         return;
       }
@@ -683,11 +795,11 @@ export function initMailModule() {
     }
 
     if (btn.id === 'mail-btn-test') {
-      if (!account || account.needs_setup) {
+      if (!configured) {
         showToast('接続テストの前にメールアドレスとパスワードを登録してください。', 'warning');
         return;
       }
-      await runConnectionTest();
+      await runConnectionTest({ account_id: activeAccountId });
       return;
     }
 
@@ -702,11 +814,17 @@ export function initMailModule() {
     }
 
     if (btn.id === 'mail-btn-refresh') {
-      await fetchInboxFromServer();
+      await fetchInboxFromServer({ silent: false });
     } else if (btn.id === 'mail-btn-settings') {
+      setupTargetId = account && !account.needs_setup ? account.id : null;
+      showSetupForm = true;
+      renderMailView();
+    } else if (btn.id === 'mail-btn-add-account') {
+      setupTargetId = null; // 「+」タブは新規アカウント追加
       showSetupForm = true;
       renderMailView();
     } else if (btn.id === 'mail-btn-cancel-edit') {
+      setupTargetId = null;
       showSetupForm = false;
       renderMailView();
     } else if (btn.id === 'mail-btn-remove') {
@@ -715,7 +833,7 @@ export function initMailModule() {
   });
 }
 
-/** 接続設定の保存 (メールアドレス + パスワード + 暗号化モード・フォルダ) */
+/** 接続設定の保存 (メールアドレス + パスワード + 暗号化モード・フォルダ。setupTargetId があればそのアカウントを更新) */
 async function submitSetup() {
   const read = (id) => (document.getElementById(id)?.value || '').trim();
   const payload = {
@@ -731,10 +849,13 @@ async function submitSetup() {
     sent_folder: read('mail-setup-sent-folder'),
     display_name: read('mail-setup-display'),
   };
+  if (setupTargetId) payload.id = setupTargetId;
 
   try {
     const res = await apiPost('/mail/account', payload);
     account = res.account;
+    activeAccountId = res.account.id;
+    setupTargetId = null;
     showSetupForm = false;
     selectedInboxId = null;
     selectedSentId = null;
@@ -745,17 +866,20 @@ async function submitSetup() {
   }
 }
 
-/** 接続設定の削除 (未設定状態へ戻す) */
+/** 接続設定の削除 (表示中アカウントを削除。残れば次のアカウントを表示し、全削除で未設定フォームへ戻す) */
 async function removeAccount() {
   try {
-    const res = await apiDelete('/mail/account');
+    const res = await apiDelete(activeAccountId
+      ? `/mail/account?account_id=${encodeURIComponent(activeAccountId)}`
+      : '/mail/account');
     account = null;
+    activeAccountId = null;
+    messagesByAccount = {};
     inboxMessages = [];
     sentMessages = [];
     selectedInboxId = null;
     selectedSentId = null;
-    showSetupForm = true;
-    renderMailView();
+    await loadMailData();
     showToast(res.message || 'メール接続設定を削除しました', 'info');
   } catch (err) {
     showToast(err.message || 'メール接続設定の削除に失敗しました', 'error');

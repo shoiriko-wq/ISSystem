@@ -17,6 +17,7 @@ import { requireAuth } from '../middlewares/auth.middleware.js';
 const router = Router();
 
 router.get('/mail/account', requireAuth, mailController.getAccount);
+router.get('/mail/accounts', requireAuth, mailController.listAccounts);
 router.post('/mail/account', requireAuth, mailController.saveAccount);
 router.delete('/mail/account', requireAuth, mailController.deleteAccount);
 router.post('/mail/test', requireAuth, mailController.testConnection);

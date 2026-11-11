@@ -3,28 +3,35 @@
  * 掲示板＝マスタ・ディテール（左=タイトル列＋未読バッジ／右=選択記事の全文・コメント）
  * 投稿日はヘッダーのタイトル行に ‹ [日付] › を埋め込む（中心日は ‹ › の間の固定幅ボタンで、
  * クリックするとミニカレンダーが開く。カレンダー単独ボタンは置かない）。
- * 選択＝即既読化で右ペインに全文が即表示。コメントは右ペインに並べ、その場で送信できる。
+ * 選択（タイトル行クリック・↑/↓ キー移動）＝既読化で右ペインに全文が即表示。コメントは右ペインに並べ、その場で送信できる。
+ * ★ 右ペインに表示されるだけ（初期ロード・‹ ›・←/→・カレンダーでの日移動、削除後の自動選択）は既読にならない。
+ *   未読バッヂはタイトル行をクリック（または ↑/↓ で選択、詳細モーダルを開く、ダッシュボードカードを押す）して初めて消える。
  * 検索は小型インライン（タイトル・本文・投稿者名で検索。検索語入力中は中心日表示が「全日」になり、
  * 左列が対象日グループ見出し付きの全日の検索結果一覧になる。行クリックは中心日を動かさず右ペインに全文表示。
  * 検索語を消すと元の日付表示へ戻る。検索中は ‹ ›・カレンダー（C）は止まる）、
  * ★ 全日未読ボタン（検索ボックスの右。ラベル「未読 N」＝サイドバーと同一の全日未読数。
  *   クリックで左列が全日の未読一覧（対象日見出し付き）になり、中心日表示は「未読」になる。
- *   未読表示中は ‹ ›・カレンダー開閉・←/→ は止まる。もう一度押すか T キーで日付表示へ戻る）
+ *   列表は押した時点の未読をピン留めする＝タイトルをクリックして既読になっても行は左列に残る（バッヂだけ消える）。
+ *   未読表示中は ‹ ›・カレンダー開閉・←/→ は止まるが未読ボタンは押せる。もう一度押すか T キーで日付表示へ戻る
+ *   （未読行が残っていても復帰できる））
  * ★ ツールバーの「本日」ボタンは撤廃。本日へはカレンダー内（年月選択メニュー）の「本日へ」と T キーで戻る。
  *   カレンダーの年月部分はスケジュールのカレンダーと同じ形（‹ [年月] ›、年月ラベルクリックで年月選択メニュー）
  * キー操作の手引きは収納（キー操作ボタンで開閉）、詳細モーダル・API連携
  */
 
-import { apiGet, apiPost, apiPut, apiPostForm, apiDelete } from '../api.js';
+import { apiGet, apiPost, apiPut, apiPostForm, apiDelete, apiDownload, saveBlobAsFile } from '../api.js';
 import { formatDate, escapeHTML, refreshLucideIcons, openModal, closeModal, showToast, userAvatarHtml } from '../ui-helpers.js';
 import { state, setUnreadCount } from '../state.js';
-import { API_BASE_URL } from '../config.js';
 
 let bulletinsCache = [];
 // ★ 検索語（小文字化済み。空なら通常の日付表示）。検索語がある間は中心日が列表表示に影響しない全日表示
 let currentSearch = '';
 // ★ 全日未読表示モード（検索ボックス右の未読ボタンで入る。中心日は列表表示に影響しない）
 let unreadMode = false;
+// ★ 未読列表のピン留め（未読ボタンを押した時点の未読ID＋押した後に届いた新着未読）。
+//   ピン留め行はタイトルをクリックして既読化しても左列から消さない（未読バッヂだけ消える）。
+//   未読ボタンをもう一度押して未読表示を閉じた時点でピンは捨てる
+let pinnedUnreadIds = new Set();
 // ★ カレンダー内の年月選択メニュー（年月ラベルで開く。年 ‹ › と12ヶ月ボタン + 「本日へ」）
 let calMonthMenuOpen = false;
 let calMenuYear = 0;
@@ -33,7 +40,7 @@ let calMenuDocBound = false;
 // ★ 投稿日状態（表示日 = YYYY-MM-DD JST。‹ › と日付クリック（カレンダー）・←/→ キーで 1 日ずつ移動）
 let currentDayDate = '';            // 中心日
 let calendarAnchor = '';            // ミニカレンダー表示月アンカー (YYYY-MM-DD)
-let selectedId = '';               // 右ペインで全文表示中の掲示ID（選択＝即既読化）
+let selectedId = '';               // 右ペインで全文表示中の掲示ID（行クリック・↑/↓ 選択で既読化。表示だけでは既読にならない）
 let eventsBound = false;           // イベント多重登録防止
 
 /** 掲示ID → コメント一覧（API の ack コメント＋ローカルで送信した分） */
@@ -77,6 +84,9 @@ export function ingestBulletin(bulletin) {
   const idx = bulletinsCache.findIndex((b) => String(b.id) === key);
   if (idx >= 0) bulletinsCache[idx] = { ...bulletinsCache[idx], ...bulletin };
   else bulletinsCache = [bulletin, ...bulletinsCache];
+  // ★ 未読表示中に新着が届いたらピンへ加える（未読列表に新着行が現れる。ピン行は既読化しても左列に残る）
+  const merged = bulletinsCache.find((b) => String(b.id) === key);
+  if (unreadMode && merged && isUnreadForMe(merged)) pinnedUnreadIds.add(key);
   recomputeUnreadBadges();
 }
 
@@ -190,7 +200,8 @@ export function initBulletinModule() {
       <span><kbd class="kbd-key">T</kbd> 今日（未読表示中は閉じて本日へ）</span>
       <span><kbd class="kbd-key">C</kbd> カレンダー（‹ › の間の日付をクリックでも開く）</span>
       <span>検索＝タイトル・本文・投稿者名。検索語入力中は中心日表示が「全日」になり、結果の行クリックは中心日を動かさない。検索語を消すと日付表示へ戻る</span>
-      <span>未読＝検索ボックス右の未読ボタン。クリックで全日の未読一覧（対象日見出し付き）が出る。もう一度押すと日付表示へ戻る</span>
+      <span>既読はタイトル行をクリック（↑/↓ で選択、詳細モーダルを開く、ダッシュボード「本日の連絡」カードを押す）して付く。右ペインに表示されるだけ（初期表示・日移動）では既読にならない</span>
+      <span>未読＝検索ボックス右の未読ボタン。クリックで全日の未読一覧（対象日見出し付き）が出る。行をクリックして既読になっても行は残る（バッヂだけ消える）。もう一度押すと日付表示へ戻る</span>
       <span>本日へはカレンダー内の「本日へ」ボタンと <kbd class="kbd-key">T</kbd> キーで戻る（ツールバーの本日ボタンは撤廃）</span>
       <span><kbd class="kbd-key">?</kbd> 手引き開閉</span>
     </div>
@@ -264,6 +275,7 @@ function bindEvents() {
   document.getElementById('bulletin-search-input')?.addEventListener('input', (e) => {
     currentSearch = e.target.value.toLowerCase().trim();
     unreadMode = false;        // 検索語が勝つ（未読表示と全日検索の二重状態を作らない）
+    pinnedUnreadIds = new Set();   // 未読列表のピン留めも捨てる（未読ボタンをもう一度押すか検索語を消して使い直す）
     updateDayReadout();        // 中心日表示を「全日」化し ‹ ›・日付クリックを止める（検索語クリアで元の日へ復帰）
     renderBulletinList();
     // ミニカレンダーが開いているなら、検索該当日（.mini-cal-hit）の枠も追従させる
@@ -272,10 +284,11 @@ function bindEvents() {
   });
 
   // ★ 全日未読ボタン（ツールバーの検索ボックス右＋サイドバー項目。同じ id が 2 つあるので両方に張る）。
-  //   全日表示中は押せない（disabled になる。クリックが届いてもここで返す）
+  //   ★ 未読表示中は押せる（もう一度押すと日付表示へ戻る＝未読行が残っていても復帰できる）。
+  //     検索語入力中（全日表示）は押せない（disabled。クリックが届いてもここで返す）
   document.querySelectorAll('#bulletin-btn-unread').forEach((el) => {
     el.addEventListener('click', () => {
-      if (el.disabled) return;   // 全日表示中は中心日を動かす操作を止める（サイドバー項目は読まない）
+      if (el.disabled) return;   // 検索語入力中（全日表示）は未読表示との二重状態を作らない
       if (unreadMode) {
         setUnreadMode(false);
         showToast('未読表示を閉じて日付表示へ戻りました', 'info');
@@ -320,7 +333,7 @@ function bindEvents() {
     });
   }
 
-  // ★ 右ペイン（「詳細」・コメント送信）はペイン側で委譲
+  // ★ 右ペイン（「詳細」・コメント送信・添付ダウンロード）はペイン側で委譲
   const paneEl = document.getElementById('bulletin-detail-pane');
   if (paneEl) {
     paneEl.addEventListener('click', (e) => {
@@ -329,8 +342,22 @@ function bindEvents() {
         openBulletinDetail(detail.getAttribute('data-bulletin-detail'));
         return;
       }
+      const dl = e.target.closest('[data-attachment-download]');
+      if (dl) {
+        downloadBulletinAttachment(dl);
+        return;
+      }
       const send = e.target.closest('[data-bulletin-comment]');
       if (send) sendBulletinComment(send.getAttribute('data-bulletin-comment'));
+    });
+  }
+
+  // ★ 詳細モーダルの添付ダウンロード（モーダルの添付欄は innerHTML を作り替えるので、作り替わらない欄側で委譲）
+  const modalAttachEl = document.getElementById('detail-bulletin-attachments');
+  if (modalAttachEl) {
+    modalAttachEl.addEventListener('click', (e) => {
+      const dl = e.target.closest('[data-attachment-download]');
+      if (dl) downloadBulletinAttachment(dl);
     });
   }
 
@@ -419,7 +446,7 @@ function bindEvents() {
 
 /**
  * キーボードによるザッピング操作
- * ↑/↓ タイトル行間移動（選択＝即既読化・右ペイン全文が連動）、Enter 右ペイン（全文）へフォーカス、
+ * ↑/↓ タイトル行間移動（選択＝既読化・右ペイン全文が連動）、Enter 右ペイン（全文）へフォーカス、
  * ←/→ 前日・翌日（±1日）、T 今日、C カレンダー、? 手引き開閉。
  * 検索語入力中は中心日が列表表示に影響しないため ←/→・T・C は受け付けない（↑/↓・Enter・? はそのまま）
  */
@@ -705,13 +732,15 @@ function setDayNavEnabled(enabled) {
 /** サイドバーの「未読 N」項目の有効／無効を全日表示状態へ追従させる（全日表示中は読まない＝押せない）。
  *   ツールバー側の同じ id のボタンはモジュール側で active 表示する（2 つあるため querySelectorAll で揃える） */
 export function syncUnreadButtonToState() {
-  const fullMode = isFullMode();
-  // 未読ボタンはツールバーのボタンとサイドバー項目の 2 つ（同じ id）。両方を全日表示状態へ揃える：
-  //   全日表示（検索語・未読表示）中は中心日を動かす操作を止めるので、未読ボタンも押せない（disabled）。
-  //   閉じて本日へ戻るには T キー（main.js の refreshBulletinControls と同じ条件）。
+  // 未読ボタンはツールバーのボタンとサイドバー項目の 2 つ（同じ id）。両方を表示モードへ揃える：
+  //   ★ 未読表示中は押せる（もう一度押すと日付表示へ戻る＝未読行が残っていても復帰できる）。
+  //     中心日を動かす ‹ ›・中心日クリック・年月選択・←/→・C は止まる（setDayNavEnabled が同じ条件で止める）。
+  //   検索語入力中（全日表示）は押せない（検索語が列表を決めるので未読表示との二重状態を作らない）。
+  //   未読 0 件は main.js が hidden にする＝押せない。
+  const searchMode = Boolean(currentSearch);
   document.querySelectorAll('#bulletin-btn-unread').forEach((btn) => {
-    btn.disabled = fullMode;
-    btn.setAttribute('aria-disabled', String(fullMode));
+    btn.disabled = searchMode;
+    btn.setAttribute('aria-disabled', String(searchMode));
   });
 }
 
@@ -1018,9 +1047,10 @@ function postedDesc(a, b) {
   return dateB - dateA;
 }
 
-/** 全日の未読該当（未読ボタンで表示する列表。対象日降順 → 投稿日時降順） */
+/** 全日の未読列表（未読ボタンで表示する列表。ピン留めしたIDだけを対象日降順 → 投稿日時降順で並べる）。
+ *   ピン留め行はタイトルをクリックして既読化しても残る（未読バッヂだけ消える）＝列表から行が落ちない */
 function allUnreadMatches() {
-  const hits = bulletinsCache.filter(isUnreadForMe);
+  const hits = bulletinsCache.filter((b) => pinnedUnreadIds.has(String(b.id)));
   hits.sort((a, b) => {
     const dayA = targetDayOf(a);
     const dayB = targetDayOf(b);
@@ -1036,8 +1066,13 @@ function allUnreadMatches() {
  */
 export function setUnreadMode(on) {
   unreadMode = Boolean(on);
+  // ★ 未読表示は押した時点の未読をピン留めする（閉じた時点でピンは捨てる）。ピン行は既読化しても左列に残る
+  pinnedUnreadIds = unreadMode
+    ? new Set(bulletinsCache.filter(isUnreadForMe).map((b) => String(b.id)))
+    : new Set();
   // 同じ id が 2 つ（ツールバーのボタンとサイドバー項目）あるので両方に pressed を載せる
   document.querySelectorAll('#bulletin-btn-unread').forEach((btn) => btn.setAttribute('aria-pressed', unreadMode ? 'true' : 'false'));
+  syncUnreadButtonToState();   // 未読表示中は未読ボタンを押せる（もう一度押して日付表示へ戻れる）。検索語入力中だけ止まる
   updateDayReadout();   // 中心日表示を「未読」へ（setDayNavEnabled が ‹ ›・年月選択・サイドバーの「未読」を止める）
   renderBulletinList();
   const cal = document.getElementById('bulletin-mini-cal');
@@ -1122,6 +1157,23 @@ function isBulletinAuthor(b) {
   return Boolean(myId) && Boolean(authorId) && myId === authorId;
 }
 
+/**
+ * ★ ルール27: 添付をダウンロードできる人（server も同じ条件で 403 を返す）
+ *   掲示の投稿者本人・添付をアップロードした本人・教務 (KYOMU)・システム管理者 (ADMIN) だけ。
+ *   それ以外（一般の閲覧者）にはダウンロードボタンを出さない（押しても 403 になるボタンを置かない＝UI十条）。
+ * @param {Object} b 掲示（authorId を持つ）
+ * @param {Object} a 添付メタ（uploadedBy を持つ）
+ */
+function canDownloadAttachment(b, a) {
+  const me = state.currentUser || {};
+  const myId = String(me.id || me.staff_code || me.userId || '');
+  const role = String(me.role || '').toUpperCase();
+  const privileged = role === 'KYOMU' || role === 'ADMIN' || me.is_kyomu === true;
+  const authorId = String((b && (b.authorId || b.author_id)) || '');
+  const uploader = String((a && (a.uploadedBy || a.uploaded_by)) || '');
+  return Boolean(privileged) || (Boolean(myId) && (myId === authorId || myId === uploader));
+}
+
 /** 掲示ID でキャッシュの掲示を探す */
 function findBulletin(id) {
   return bulletinsCache.find((b) => String(b.id) === String(id)) || null;
@@ -1157,7 +1209,7 @@ function paneAuthorHtml(b) {
  * 左列タイトル行（1行・右端に未読バッジ、行頭シグニファイア › でクリック誘導。全文は右ペインに出す。削除は詳細モーダル内のみ）
  * 全日の検索結果一覧（showDay）では行頭に対象日チップを出し、タイトル内の検索該当を <mark> で強調する
  * @param {Object} b
- * @param {boolean} selected 選択中（既読化済み・強調表示）か
+ * @param {boolean} selected 選択中（右ペインに全文が出ている・強調表示）か。未読バッヂはクリックで既読化するまで残る
  * @param {boolean} [showDay] 対象日チップを出すか（全日の検索結果一覧でのみ true）
  */
 function titleRowHtml(b, selected, showDay = false) {
@@ -1182,7 +1234,7 @@ function titleRowHtml(b, selected, showDay = false) {
 function renderBulletinList() {
   const filtered = filteredBulletins();
 
-  // 右ペイン表示中の選択が現在の絞り込みから外れた場合、その日の最初の項目を自動選択
+  // 右ペイン表示中の選択が現在の絞り込みから外れた場合、その日の最初の項目を自動選択する（表示のみ＝既読化しない）
   const ids = filtered.map((b) => String(b.id));
   const autoSelect = ids.length > 0 && !ids.includes(String(selectedId));
   if (autoSelect) {
@@ -1192,7 +1244,8 @@ function renderBulletinList() {
   }
 
   renderRows();
-  if (autoSelect && selectedId) markBulletinRead(selectedId);  // 表示＝全文が見えるので選択時点で既読化
+  // ★ 右ペインに全文を出すだけでは既読にならない（日移動・初期ロード・削除後の自動選択は既読化しない）。
+  //   既読が付くのはタイトル行クリック／↑↓キー選択／詳細モーダルを開く／ダッシュボード「本日の連絡」カードクリック
   renderDetailPane(findBulletin(selectedId));
   refreshLucideIcons();
   if (selectedId) loadComments(selectedId);
@@ -1290,7 +1343,7 @@ function renderDetailPane(b) {
         </button>
       </div>
       <pre class="pane-body-text">${escapeHTML(String(b.content || ''))}</pre>
-      ${attachmentsHtml(atts)}
+      ${attachmentsHtml(atts, b)}
       <div class="bulletin-comments">
         <p class="comment-heading"><i data-lucide="message-square" class="w-3.5 h-3.5 text-accent"></i> 投稿者への補足・コメント (${comments.length})</p>
         ${comments.length > 0 ? `<ul class="comment-list">${comments.map(commentHtml).join('')}</ul>` : '<p class="comment-empty">まだコメントはありません。</p>'}
@@ -1408,7 +1461,8 @@ async function sendBulletinComment(id) {
 }
 
 /**
- * タイトル行の選択（左列の行クリック・↑/↓ キー。選択時点で既読化し、右ペインに全文を表示）
+ * タイトル行の選択（左列の行クリック・↑/↓ キー。選択時点で既読化し、右ペインに全文を表示。
+ *   右ペイン表示だけの自動選択（日移動・初期ロード）はここを通らない＝既読化しない）
  * @param {string} id 掲示ID
  * @param {number} [dir] 移動方向（1=次/下、-1=前/上）。省略時は表示順の位置差から算出
  */
@@ -1482,7 +1536,11 @@ async function deleteBulletinPost(id) {
   }
 }
 
-/** 既読化（PUT /api/bulletins/:id/read）。左列の未読バッジ・全バッヂを更新（既読カードの再クリックは API を叩かない＝冪等） */
+/**
+ * 既読化（PUT /api/bulletins/:id/read）。左列の未読バッジ・全バッヂを更新（既読カードの再クリックは API を叩かない＝冪等）。
+ * 呼ぶのはタイトル行クリック／↑/↓ キー選択（`selectBulletin`）・詳細モーダルを開く（`openBulletinDetail`）・
+ * ダッシュボード「本日の連絡」カードクリックだけ。右ペインに全文を表示するだけでは呼ばない。
+ */
 export async function markBulletinRead(id) {
   const item = bulletinsCache.find((b) => String(b.id) === String(id));
   if (!item) return;
@@ -1545,7 +1603,7 @@ async function openBulletinDetail(id) {
   if (attachEl) {
     const atts = item.attachments || [];
     attachEl.innerHTML = atts.length > 0
-      ? attachmentsHtml(atts)
+      ? attachmentsHtml(atts, item)
       : `<p class="text-sm text-muted">添付ファイルはありません。</p>`;
   }
 
@@ -1576,8 +1634,13 @@ async function openBulletinDetail(id) {
   refreshLucideIcons();
 }
 
-/** 添付ファイル一覧（右ペイン・モーダル共用） */
-function attachmentsHtml(atts = []) {
+/**
+ * 添付ファイル一覧（右ペイン・モーダル共用）
+ * ダウンロードボタンはルール27の権限者（投稿者・アップローダ・教務・管理者）だけにを出す
+ * @param {Array} atts 添付メタ配列
+ * @param {Object} b 掲示（authorId から投稿者判定する）
+ */
+function attachmentsHtml(atts = [], b = {}) {
   if (atts.length === 0) return '';
   return `
     <div class="attachment-block">
@@ -1588,14 +1651,51 @@ function attachmentsHtml(atts = []) {
             <span class="truncate text-main">${escapeHTML(String(a.name || ''))}</span>
             <span class="text-muted shrink-0">${formatBytes(a.size)}</span>
             ${a.kgs ? '<span class="badge bg-warning-soft text-warning-strong border border-warning-soft shrink-0">KAGOSHIMA EDU</span>' : ''}
-            <a href="${API_BASE_URL}/bulletins/attachments/${a.id}" target="_blank" rel="noopener"
-               class="ml-auto text-accent-strong hover-text-accent-strong shrink-0 flex items-center gap-1">
+            ${canDownloadAttachment(b, a) ? `<button type="button"
+                    data-attachment-download="${escapeHTML(String(a.id ?? ''))}"
+                    data-attachment-name="${escapeHTML(String(a.name || '添付ファイル'))}"
+                    class="ml-auto btn-secondary shrink-0 flex items-center gap-1 px-2 py-1 text-xs rounded"
+                    title="「${escapeHTML(String(a.name || '添付ファイル'))}」をこの端末に保存する">
               <i data-lucide="download" class="w-3.5 h-3.5"></i> ダウンロード
-            </a>
+            </button>` : '<span class="ml-auto text-muted shrink-0 text-xs">ダウンロードは投稿者のみ</span>'}
           </li>`).join('')}
       </ul>
     </div>`;
 }
+
+/**
+ * 添付のダウンロード（トークン付きで取得してこの端末に保存する）
+ * 直接リンク（<a href>）は Authorization ヘッダーを送れず API が 401 を返すため、
+ * ダウンロードは必ずこの処理で行う。取得中はボタンを disabled にして連打を防ぐ
+ * @param {HTMLButtonElement} btn data-attachment-download を持つボタン
+ */
+async function downloadBulletinAttachment(btn) {
+  const id = btn.getAttribute('data-attachment-download');
+  const name = btn.getAttribute('data-attachment-name') || '添付ファイル';
+
+  if (!id) {
+    showToast('この添付にはファイル番号が記録されていないため、ダウンロードできません', 'warning');
+    return;
+  }
+  if (btn.disabled) return;
+
+  btn.disabled = true;
+  try {
+    const { blob, filename } = await apiDownload(`/bulletins/attachments/${id}`);
+    if (!blob || blob.size === 0) {
+      showToast(`「${name}」は空のファイルでした`, 'warning');
+      return;
+    }
+    saveBlobAsFile(blob, filename || name);
+    showToast(`「${filename || name}」をこの端末に保存しました`, 'success');
+  } catch (err) {
+    console.warn('[Bulletin] 添付ダウンロード失敗:', err.message);
+    showToast(err.message || '添付ファイルをダウンロードできませんでした', 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 
 /**
  * 新規投稿処理
@@ -1754,6 +1854,18 @@ window.__bulletinSnap = () => ({
   selectedId: String(selectedId),
   currentSearch,
   unreadMode,
+  pinnedUnread: [...pinnedUnreadIds],
   filtered: filteredBulletins().map((b) => String(b.id)),
   cache: bulletinsCache.map((b) => String(b.id)),
+});
+
+/**
+ * テスト用：ルール27 のダウンロード権限判定を読む（UI テストが権限者/非権限者でボタン出方を確認する）
+ * 判定本体 (canDownloadAttachment) と、その入力になっている current ユーザーを一緒に返す
+ */
+window.__canDownloadDebug = (b, a) => ({
+  can: canDownloadAttachment(b, a),
+  me: state.currentUser ? { id: state.currentUser.id, staff_code: state.currentUser.staff_code, role: state.currentUser.role, is_kyomu: state.currentUser.is_kyomu } : null,
+  author: b ? (b.authorId ?? b.author_id ?? null) : null,
+  uploader: a ? (a.uploadedBy ?? a.uploaded_by ?? null) : null,
 });

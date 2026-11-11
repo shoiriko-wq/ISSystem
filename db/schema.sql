@@ -1261,7 +1261,7 @@ ALTER TABLE exam_slots ADD COLUMN IF NOT EXISTS block_shape_id TEXT;
 -- ==========================================
 CREATE TABLE IF NOT EXISTS mail_accounts (
   id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL UNIQUE,
+  user_id TEXT NOT NULL,
   email_address TEXT NOT NULL,
   password_enc TEXT NOT NULL,
   imap_host TEXT,
@@ -1280,6 +1280,11 @@ CREATE TABLE IF NOT EXISTS mail_accounts (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- 旧DB（1ユーザー1アカウント时代）の user_id UNIQUE を撤去し、メール機能の複数アカウントに対応する
+-- 同一ユーザーの同一アドレスは1件だけ（小文字比較）。旧DBの UNIQUE(user_id) は DROP して置き換える
+ALTER TABLE mail_accounts DROP CONSTRAINT IF EXISTS mail_accounts_user_id_key;
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_mail_accounts_user_email ON mail_accounts(user_id, lower(email_address));
+
 -- 旧DB（2026/11/7 以前）の mail_accounts に無い列を冪等に足す（暗号化モード・フォルダ・表示名）
 -- CREATE TABLE IF NOT EXISTS は既存テーブルを拡張しないため、既存環境ではこの ALTER で列を補う
 ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS imap_tls TEXT NOT NULL DEFAULT 'none';
@@ -1294,10 +1299,12 @@ CREATE INDEX IF NOT EXISTS idx_mail_accounts_user ON mail_accounts(user_id);
 -- 23. メールメッセージ (mail_messages) — mail.model.js / mail.service.js 用
 -- folder = 'inbox'（受信ボックス）/ 'sent'（送信ボックス）
 -- uid = IMAP の UID（受信メッセージのみ。送信ボックスのレコードは uid = NULL）
+-- account_id = メッセージを保有する接続アカウント（アカウント削除は ON DELETE CASCADE でメッセージも消える）
 -- ==========================================
 CREATE TABLE IF NOT EXISTS mail_messages (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
+  account_id TEXT REFERENCES mail_accounts(id) ON DELETE CASCADE,
   folder TEXT NOT NULL DEFAULT 'inbox',
   uid TEXT,
   sender_name TEXT NOT NULL,
@@ -1311,14 +1318,24 @@ CREATE TABLE IF NOT EXISTS mail_messages (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
--- 旧DB（2026/11/7 以前）の mail_messages に無い列を冪等に足す（フォルダ・IMAP UID・宛先）
+-- 旧DB（2026/11/7 以前）の mail_messages に無い列を冪等に足す（フォルダ・IMAP UID・宛先・アカウント所属）
 ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS folder TEXT NOT NULL DEFAULT 'inbox';
 ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS uid TEXT;
 ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS recipients TEXT;
+ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS account_id TEXT REFERENCES mail_accounts(id) ON DELETE CASCADE;
+
+-- 旧DBの孤立メッセージ（アカウント未所属）をそのユーザーの最初のアカウントへ割り当てる（冪等）
+UPDATE mail_messages m SET account_id = a.id
+  FROM mail_accounts a
+  WHERE m.user_id = a.user_id AND m.account_id IS NULL
+    AND a.created_at = (SELECT MIN(b.created_at) FROM mail_accounts b WHERE b.user_id = m.user_id);
 
 CREATE INDEX IF NOT EXISTS idx_mail_messages_user_time ON mail_messages(user_id, received_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mail_messages_unread ON mail_messages(user_id, is_read);
-CREATE UNIQUE INDEX IF NOT EXISTS uniq_mail_messages_uid ON mail_messages(user_id, folder, uid);
+CREATE INDEX IF NOT EXISTS idx_mail_messages_account_time ON mail_messages(account_id, received_at DESC);
+-- アカウント単位の UID 重複排除（旧DBのユーザー単位 UNIQUE は撤去して置き換える）
+DROP INDEX IF EXISTS uniq_mail_messages_uid;
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_mail_messages_uid ON mail_messages(account_id, folder, uid);
 
 -- -------------------------------------------------------------
 -- 20. ピックアップ教育ニュースの共有リンク (news_links)

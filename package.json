@@ -16,6 +16,7 @@
     "db:seed": "node scripts/seed.js",
     "db:drop-general-chat": "node scripts/migrate-chat-drop-general.mjs",
     "db:mail-folders": "node scripts/migrate-mail-folders.mjs",
+    "db:mail-accounts": "node scripts/migrate-mail-accounts.mjs",
     "db:create": "node scripts/create-db.js",
     "db:tables": "node scripts/list-tables.js",
     "db:backup": "node scripts/backup-db.mjs",

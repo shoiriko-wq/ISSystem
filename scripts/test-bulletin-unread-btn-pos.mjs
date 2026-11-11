@@ -489,18 +489,36 @@ check('未読表示中は C キーでも中心日が動かない（カレンダ�
   (u2.calOpen === true && u2.calDayCells > 0 && u2.calDisabledDays === u2.calDayCells && u2.labelDisabled === true),
   { calOpen: u2.calOpen, calDayCells: u2.calDayCells, calDisabledDays: u2.calDisabledDays, labelDisabled: u2.labelDisabled, centerDate: u2.centerDate });
 
-// ===== 11. 全日表示中は未読ボタンが disabled（押せない）。T キーで未読表示を閉じて本日へ戻る =====
-const d0 = await snapshot(page);   // 押す直前の全日の未読列表（この後の比較の基準）
+// ===== 11. 未読表示中は未読ボタンが enabled（もう一度押して日付表示へ戻る）。T キーでも未読表示を閉じて本日へ戻る =====
+const d0 = await snapshot(page);   // 押す直前の全日の未読列表（中心日表示「未読」）
+check('未読表示中は未読ボタンが enabled で押せる（中心日読み上げは「未読」、列表は全日の未読列表のまま、中心日は本日、aria-pressed=true、‹ ›・中心日クリック・年月選択ラベルは disabled）',
+  d0.readoutText === '未読' && d0.rows >= baseCount + 2 && d0.centerDate === today &&
+  d0.btnDisabled === false && d0.btnPressed === 'true' &&
+  d0.navDisabled.every((d) => d === true) && d0.labelDisabled === true &&
+  d0.state && d0.state.unreadMode === true,
+  { readoutText: d0.readoutText, rows: d0.rows, centerDate: d0.centerDate,
+    btnDisabled: d0.btnDisabled, btnPressed: d0.btnPressed,
+    navDisabled: d0.navDisabled, labelDisabled: d0.labelDisabled, state: d0.state });
+
+// ★ 未読行が残っていても未読ボタンをもう一度押して日付表示へ復帰できる（ピン留めは閉じた時点で捨てる）
 await clickUnread(page);
 const d1 = await snapshot(page);
-check('全日表示中は未読ボタンが disabled で押せない（中心日読み上げは「未読」、列表・中心日・控件はそのまま、aria-pressed=true）',
-  d1.readoutText === '未読' && d1.rows === d0.rows && d1.centerDate === d0.centerDate &&
-  d1.btnDisabled === true && d1.btnPressed === 'true' &&
-  d1.navDisabled.every((d) => d === true) && d1.labelDisabled === true &&
-  d1.state && d1.state.unreadMode === true,
-  { readoutText: d1.readoutText, rows: d1.rows, rowsBefore: d0.rows, centerDate: d1.centerDate,
-    btnDisabled: d1.btnDisabled, btnPressed: d1.btnPressed,
-    navDisabled: d1.navDisabled, labelDisabled: d1.labelDisabled, state: d1.state });
+log('unread-btn-exit', { readoutText: d1.readoutText, centerDate: d1.centerDate, rows: d1.rows, btnDisabled: d1.btnDisabled, btnPressed: d1.btnPressed, pinned: d1.state && d1.state.pinnedUnread, navDisabled: d1.navDisabled });
+check('未読表示中で未読ボタンをもう一度押すと日付表示へ復帰する（readout は本日の日付、中心日は本日、列表は本日列表、pressed=false、ピン留めは空、控件は enabled）',
+  String(d1.readoutText).startsWith(mmdd(today)) && d1.centerDate === today && d1.rows === s0.rows &&
+  d1.btnDisabled === false && d1.btnPressed === 'false' &&
+  d1.state && d1.state.unreadMode === false && d1.state.pinnedUnread.length === 0 &&
+  d1.navDisabled.every((d) => d === false),
+  { readoutText: d1.readoutText, centerDate: d1.centerDate, rows: d1.rows, baseRows: s0.rows,
+    btnDisabled: d1.btnDisabled, btnPressed: d1.btnPressed, pinned: d1.state && d1.state.pinnedUnread, navDisabled: d1.navDisabled });
+
+// 未読表示へ戻して T キーで閉じる（未読行が残っていても T キーで本日列表へ復帰する）
+await clickUnread(page);
+const d2 = await snapshot(page);
+check('未読表示へ戻すと未読ボタンは pressed=true・enabled で、列表は全日の未読列表へ戻る',
+  d2.readoutText === '未読' && d2.btnPressed === 'true' && d2.btnDisabled === false &&
+  d2.state && d2.state.unreadMode === true && d2.rows >= baseCount + 2,
+  { readoutText: d2.readoutText, rows: d2.rows, btnPressed: d2.btnPressed, btnDisabled: d2.btnDisabled });
 await pressKey(page, 't');
 const d3 = await snapshot(page);
 check('T キーは未読表示を閉じて本日へ戻る（readout は本日の日付、中心日は本日、控件 enabled、aria-pressed=false）',
