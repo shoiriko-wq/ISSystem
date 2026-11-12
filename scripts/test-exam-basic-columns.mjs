@@ -10,9 +10,9 @@
  *  R4. カード・テーブル・内容領域に水平スクロールが発生せず、操作列の削除ボタンが列の右端を超えない。
  *  R5. チップをクリックすると選択（bg-accent-soft）になり、選択を終えた（ポインタを離した）瞬間に自動登録（PUT）されて
  *      サーバーへ class_course_ids が届く。ページを再読み込みしても選択が維持される（Shift+クリックで範囲選択、解除して元へ戻す）。
- *  R6. 「行を追加」は未入力の行を表の最上部に1件だけ出す（未入力の行の top は最初の登録済み行より上）。
- *      未入力の行が1件表示されている間は「行を追加」ボタンは無効（disabled・aria-disabled）で、
- *      2回押しても行は増えない。自動登録・破棄すると未入力の行は消え、ボタンは元通り使える。
+ *  R6. 「行を追加」は未入力の行を表の最上部に足す（未入力の行の top は最初の登録済み行より上）。
+ *      「行を追加」ボタンは常に使える（未入力の行の件数で無効にならない）ので、
+ *      2回押すと未入力の行が2件並ぶ。自動登録・破棄すると未入力の行は消える。
  *      登録済み行は通常の順（クラス=学年順・教科=登録順・科目=教科順）で並ぶ。
  *  R7. 行に「保存」ボタンは無い（ボタン・title・トースト・説明文に「保存」の語が出ない）。行の編集は
  *      入力欄を書いて焦点が行の外へ移った瞬間に自動登録される。焦点が行内の次の入力欄へ移るだけでは書き込まない
@@ -129,6 +129,39 @@ const loginToBasic = async () => {
   await page.click('[data-tab="exam"]');
   await sleep(1600);
 };
+// ==========================================================
+// セクション編集ロック（既定は読み取り専用、トグルで編集可能 ⇔ 編集ロック）
+// ラベルは「押せる動作」を示す: 編集ロック中（読み取り専用）なら「編集可能」、編集可能なら「編集ロック」
+// ==========================================================
+
+/** ロックトグルと実枠の操作可能状態をまとめて測る */
+const lockUiState = (kind) =>
+  page.evaluate((k) => {
+    const btn = document.getElementById(`basic-lock-${k}`);
+    const rows = [...document.querySelectorAll(`#basic-body-${k} tr[data-kind="${k}"]`)];
+    const inputs = rows.flatMap((r) => [...r.querySelectorAll('input, select')]);
+    const addBtn = document.getElementById(`basic-add-${k}`);
+    return {
+      hasLockBtn: !!btn,
+      label: btn?.querySelector('span')?.textContent?.trim() ?? '',
+      otherLabel: btn?.textContent?.includes('他:') === true,
+      primary: btn?.classList.contains('btn-primary') === true,
+      addDisabled: addBtn?.disabled === true,
+      inputsDisabled: inputs.length > 0 && inputs.every((i) => i.disabled),
+    };
+  }, kind);
+
+/** トグルを押して編集可能（unlocked=true）⇔ 編集ロック（unlocked=false）へ整える（操作後の実枠状態を返す） */
+const setLockMode = async (kind, unlocked) => {
+  const st = await lockUiState(kind);
+  const isUnlocked = st.label === '編集ロック';   // ラベルが「編集ロック」= 現在は編集可能（押すと読み取り専用へ戻る）
+  if (st.hasLockBtn && isUnlocked === unlocked) return st;
+  await page.evaluate((k) => document.getElementById(`basic-lock-${k}`)?.scrollIntoView({ block: 'center' }), kind);
+  await page.click(`#basic-lock-${kind}`);
+  await sleep(900);
+  return lockUiState(kind);
+};
+
 
 for (const vw of VIEWPORTS) {
   console.log(`--- ${vw}px ---`);
@@ -148,6 +181,12 @@ for (const vw of VIEWPORTS) {
   check(`${vw}px 水平スクロールなし（カード・内容領域）`, g.contentOverflow <= 0 && g.tableOverflow <= 0, `content=${g.contentOverflow} table=${g.tableOverflow}`);
   check(`${vw}px 削除ボタンが操作列内に収まる`, g.buttonMaxRight <= g.actionRight + 1, `${g.buttonMaxRight}/${g.actionRight}`);
   check(`${vw}px 行に「保存」ボタンはない（行の編集は自動登録）`, g.saveBtnCount === 0, `save=${g.saveBtnCount}`);
+  const lockSt = await lockUiState('subject');
+  check(
+    `${vw}px 既定は読み取り専用（トグルは「編集可能」で入力欄・チップ・行追加が操作不能）`,
+    lockSt.hasLockBtn && lockSt.label === '編集可能' && !lockSt.primary && lockSt.addDisabled && lockSt.inputsDisabled,
+    JSON.stringify(lockSt),
+  );
   if (vw >= 1440) {
     check('1440px チップは学年ごとに1行（列幅は内容分）', g.chipRows.length === g.gradeRows && g.listW >= g.pickerW * 0.98, `chipRows=${g.chipRows.join(',')} gradeRows=${g.gradeRows} pickerW=${g.pickerW} listW=${g.listW}`);
   }
@@ -162,6 +201,14 @@ for (const vw of VIEWPORTS) {
 console.log('--- チップ選択と自動登録（1440px） ---');
 await page.setViewport({ width: 1440, height: 1000 });
 await loginToBasic();
+
+// チップ選択・自動登録は編集可能モードでしか効かない（既定は読み取り専用）→ トグルで編集可能へ
+const subjLock = await setLockMode('subject', true);
+check(
+  '科目セクションのトグルで編集可能モードへ（トグルは「編集ロック」表示・入力欄・チップ・行追加が操作可能）',
+  subjLock.label === '編集ロック' && subjLock.primary && !subjLock.addDisabled && !subjLock.inputsDisabled,
+  JSON.stringify(subjLock),
+);
 
 const targets = await page.evaluate(() => {
   const row = document.querySelector('#basic-body-subject tr');
@@ -268,6 +315,14 @@ const selAfterReload = await page.evaluate(
   targets.base
 );
 check('ページを再読み込みしてもチップ選択は元の集合のまま（自動登録がサーバーへ書き込まれている＝未保存テキスト消失がない）', selAfterReload.ok, `sel=${selAfterReload.sel} base=${selAfterReload.base}`);
+
+// 編集可能モードをトグルで閉じる（読み取り専用へ戻る・入力欄と行追加が操作不能へ）
+const subjRelock = await setLockMode('subject', false);
+check(
+  'トグルをもう一度押すと読み取り専用へ戻る（トグルは「編集可能」表示・入力欄と行追加が操作不能）',
+  subjRelock.label === '編集可能' && !subjRelock.primary && subjRelock.addDisabled && subjRelock.inputsDisabled,
+  JSON.stringify(subjRelock),
+);
 
 // ==========================================================
 // 行の追加・保存・削除（クラス・教科・科目・教室の全テーブル）
@@ -415,23 +470,31 @@ const allRowsHaveButtons = await page.evaluate((kinds) => {
 const missingBtns = Object.keys(API_PATH).filter((k) => allRowsHaveButtons[`${k}Count`] > 0 && !allRowsHaveButtons[k]);
 check('すべての行に保存・削除ボタンがある（4テーブル）', missingBtns.length === 0, missingBtns.join(',') || '');
 
-// 追加→保存→削除に使う未登録名（サーバー側の登録制約に合わせて選ぶ）
-const DEFAULT_CLASS_NAMES = [
-  '1-1', '1-2', '1-3', '1-4', '1-5', '1-6', '1-7',
-  '2-1', '2-2', '2-3', '2-4文', '2-4理', '2-5', '2-6看', '2-6文', '2-7',
-  '3-1総', '3-1人', '3-2', '3-3', '3-4人', '3-4数', '3-5', '3-6数', '3-6環',
-  '3-7看', '3-7総', '3-7人', '3-8総', '3-8人',
-];
-// 教科名は登録・改名が固定リスト内のみ（src/services/subject.service.js の DEFAULT_SUBJECT_NAMES）
-const ALLOWED_GROUP_NAMES = ['国語', '地歴公民', '数学', '理科', '保健体育', '芸術', '外国語', '家庭', '情報'];
-
+// 追加→自動登録→削除に使う名前（サーバー側は初期名を固定せず、クラス名・教科名も自由に付けられる）
+// このテストが作り、最後に削除する一意な名前を使う
 const classNames = (await rowInfo('class')).rows.map((r) => r.name);
 const groupNames = (await rowInfo('group')).rows.map((r) => r.name);
-const newClass = DEFAULT_CLASS_NAMES.find((n) => !classNames.includes(n));
-const newGroup = ALLOWED_GROUP_NAMES.find((n) => !groupNames.includes(n));
+const makeUnique = (base, taken) => {
+  let n = base;
+  let i = 2;
+  while (taken.includes(n)) n = base + i++;
+  return n;
+};
+const STAMP = 'Z' + String(Date.now()).slice(-4);
+const newClass = makeUnique(`1-9${STAMP}`, classNames);
+const newGroup = makeUnique(`追加テスト教科${STAMP}`, groupNames);
+
+// 行の追加・自動登録・削除は編集可能モードでしか効かない → 4セクションを編集可能へ（焦点を外す実枠も他セクションの編集可能が要る）
+const unlockedAll = {};
+for (const k of Object.keys(API_PATH)) unlockedAll[k] = await setLockMode(k, true);
+check(
+  '4セクションを編集可能モードへ（トグルは「編集ロック」表示・行追加と入力欄が使える）',
+  Object.keys(API_PATH).every((k) => unlockedAll[k].label === '編集ロック' && unlockedAll[k].primary && !unlockedAll[k].addDisabled && !unlockedAll[k].inputsDisabled),
+  JSON.stringify(unlockedAll),
+);
 
 const addCases = [
-  { kind: 'class', name: newClass, fill: newClass ? { grade: Number(newClass[0]), name: newClass, short_name: newClass } : null },
+  { kind: 'class', name: newClass, fill: newClass ? { grade: Number(newClass[0]), name: newClass } : null },
   { kind: 'group', name: newGroup, fill: newGroup ? { name: newGroup } : null },
   { kind: 'subject', name: 'テスト科目Z', fill: { name: 'テスト科目Z', short_name: 'テストZ' } },
   { kind: 'room', name: '試験教室Z9', fill: { name: '試験教室Z9', seats: '30', notes: '回帰テスト' } },
@@ -444,15 +507,27 @@ for (const c of addCases) {
   }
   const before = await rowInfo(c.kind);
   const added = await addRow(c.kind);
-  check(`${c.kind}: 「行を追加」で未入力の行が1件だけ最上部に出る（「保存」ボタンは無く削除ボタンだけ・ボタンは無効）`,
+  check(`${c.kind}: 「行を追加」で未入力の行が最上部に出る（「保存」ボタンは無く削除ボタンだけ・ボタンは常に使える）`,
     added.count === before.count + 1 && added.blankCount === 1 && added.blankIsFirst &&
     added.blankTop < added.firstSavedTop && !added.hasSaveBtn && added.hasDelete &&
-    added.addDisabled && added.addAriaDisabled,
+    !added.addDisabled && !added.addAriaDisabled,
     `count=${added.count} blank=${added.blankCount} first=${added.blankIsFirst} top=${added.blankTop}/${added.firstSavedTop} save=${added.hasSaveBtn} del=${added.hasDelete} disabled=${added.addDisabled}`);
   const again = await clickAddAgain(c.kind);
-  check(`${c.kind}: 未入力の行が1件ある間「行を追加」は機能しない（行数・未入力の行数は変わらず・ボタンは無効のまま）`,
-    again.count === added.count && again.blankCount === 1 && again.addDisabled,
+  check(`${c.kind}: 「行の追加」を連続で押すと未入力の行が2件並ぶ（ボタンは常に使える）`,
+    again.count === added.count + 1 && again.blankCount === 2 && !again.addDisabled,
     `count=${again.count} blank=${again.blankCount} disabled=${again.addDisabled}`);
+  // 余分な未入力の行を1件破棄して未入力の行を1件に戻す（未登録行の削除は UI から行を破棄するだけ）
+  await page.evaluate((k) => {
+    const rows = [...document.querySelectorAll(`#basic-body-${k} tr[data-kind="${k}"][data-id=""]`)];
+    const btn = rows[rows.length - 1].querySelector('[data-act="delete"]');
+    btn.scrollIntoView({ block: 'center' });
+    btn.click();
+  }, c.kind);
+  await sleep(400);
+  const afterExtraDiscard = await basicState(c.kind);
+  check(`${c.kind}: 余分な未入力の行の「削除」はその行をUIから破棄する（未入力の行は1件残る）`,
+    afterExtraDiscard.count === added.count && afterExtraDiscard.blankCount === 1 && !afterExtraDiscard.addDisabled,
+    `count=${afterExtraDiscard.count} blank=${afterExtraDiscard.blankCount} disabled=${afterExtraDiscard.addDisabled}`);
   await typeRow(c.kind, c.fill);
   const status = await autoSaveBlank(c.kind, 'POST');
   const after = await rowInfo(c.kind);
@@ -485,6 +560,15 @@ const afterDiscard = await basicState('room');
 check('未保存行の削除はその行をUIから破棄する（サーバー変更なし・行を追加は元通り使える）',
   afterDiscard.count === beforeDiscard.count && afterDiscard.blankCount === 0 && afterDiscard.addDisabled === false,
   `count=${afterDiscard.count} blank=${afterDiscard.blankCount} disabled=${afterDiscard.addDisabled}`);
+
+// テスト終了後に編集可能モードを閉じる（読み取り専用へ戻してロックを他教員へ渡す）
+const relockedAll = {};
+for (const k of Object.keys(API_PATH)) relockedAll[k] = await setLockMode(k, false);
+check(
+  '4セクションを読み取り専用へ戻す（トグルは「編集可能」表示・行追加と入力欄が操作不能）',
+  Object.keys(API_PATH).every((k) => relockedAll[k].label === '編集可能' && !relockedAll[k].primary && relockedAll[k].addDisabled && relockedAll[k].inputsDisabled),
+  JSON.stringify(relockedAll),
+);
 
 await browser.close();
 console.log(failures.length ? `\n=== ${failures.length} FAILURES ===\n${failures.join('\n')}` : '\n=== ALL PASSED ===');

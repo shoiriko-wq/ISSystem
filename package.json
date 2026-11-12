@@ -59,6 +59,8 @@
     "test:ui:mail": "node scripts/test-mail-setup.mjs",
     "test:ui:https": "node scripts/test-https-ca.mjs",
     "test:ui:timeline": "node scripts/test-facility-timeline.mjs",
+    "test:exam:lock": "node --env-file=.env scripts/test-exam-basic-lock.mjs",
+    "test:exam:lock:api": "node scripts/test-exam-basic-lock-api.mjs",
     "test:ui:exambasic": "node scripts/test-exam-basic-columns.mjs",
     "test:ui:examaddtop": "node scripts/test-exam-basic-add-top.mjs",
     "test:ui:seating": "node scripts/test-ui-seating.mjs",

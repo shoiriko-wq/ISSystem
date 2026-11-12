@@ -15,18 +15,6 @@ const KINDS = {
   room: { label: '教室', resource: 'basic_room' },
 };
 
-/** 初期設定（デフォルト）のクラス・コース名。これ以外の名称は登録・改名不可 */
-export const DEFAULT_CLASS_NAMES = [
-  '1-1', '1-2', '1-3', '1-4', '1-5', '1-6', '1-7',
-  '2-1', '2-2', '2-3', '2-4文', '2-4理', '2-5', '2-6看', '2-6文', '2-7',
-  '3-1総', '3-1人', '3-2', '3-3', '3-4人', '3-4数', '3-5', '3-6数', '3-6環',
-  '3-7看', '3-7総', '3-7人', '3-8総', '3-8人',
-];
-
-function isDefaultClassName(name) {
-  return DEFAULT_CLASS_NAMES.includes(String(name || '').trim());
-}
-
 function isKyomu(user) {
   const role = String(user?.role || '').toUpperCase();
   return user?.is_kyomu === true || role === 'KYOMU' || role === 'ADMIN';
@@ -158,6 +146,62 @@ function usageMessage(kind, counts) {
   return parts.length ? `（${parts.join(' / ')}で使用）` : '';
 }
 
+// ==========================================================
+// セクション編集ロック（座席表の編集排他ロックと同一の editing_locks を使う）
+// resource_type='exam_basic' / resource_id='exam_basic_class' ほか 4 セクション。
+// 取得 = 編集開始（編集可能モード）、解除 = 編集終了（読み取り専用モード）。
+// 書き込みは保持者のみ（未取得の書き込みは教務部権限で通す＝既存の自動登録との互換）。
+// ==========================================================
+const SECTION_LOCK_TYPE = 'exam_basic';
+const SECTION_LABELS = { class: 'クラス・コース', group: '教科', subject: '科目', room: '教室' };
+
+function sectionResourceId(kind) {
+  return `${SECTION_LOCK_TYPE}_${kind}`;
+}
+
+/** 4セクションのアクティブロック（保持者のみ { kind: { user_id, user_name } } で返す） */
+async function sectionLocks() {
+  const out = {};
+  for (const kind of Object.keys(SECTION_LABELS)) {
+    const lock = await auditModel.getActiveEditingLock(SECTION_LOCK_TYPE, sectionResourceId(kind), 180);
+    if (lock) out[kind] = { user_id: lock.user_id, user_name: lock.user_name || null };
+  }
+  return out;
+}
+
+/** 編集開始（自分のロックがあれば TTL 延長、他の教員が保持していれば 423） */
+async function lockSection(kind, user) {
+  requireKyomu(user);
+  const resourceId = sectionResourceId(kind);
+  const active = await auditModel.getActiveEditingLock(SECTION_LOCK_TYPE, resourceId, 180);
+  if (active && String(active.user_id) !== String(user.id)) {
+    throw new ApiError(423, `${SECTION_LABELS[kind]}は他の教員（${active.user_name || '別のユーザー'}）が編集中です。`);
+  }
+  return await auditModel.acquireEditingLock(SECTION_LOCK_TYPE, resourceId, user.id, user.name);
+}
+
+/** 編集終了（保持者自身のみ解除。他者のロックは 423 で拒否） */
+async function unlockSection(kind, user) {
+  requireKyomu(user);
+  const resourceId = sectionResourceId(kind);
+  const active = await auditModel.getActiveEditingLock(SECTION_LOCK_TYPE, resourceId, 180);
+  if (active && String(active.user_id) !== String(user.id)) {
+    throw new ApiError(423, `${SECTION_LABELS[kind]}は他の教員（${active.user_name || '別のユーザー'}）が編集中です。`);
+  }
+  await auditModel.releaseEditingLock(SECTION_LOCK_TYPE, resourceId);
+  return { kind, released: true };
+}
+
+/** 書き込み前の検証（他教員がロックしていれば 423、自分のロックは TTL 延長、未取得は教務部権限で通す） */
+async function assertSectionWritable(kind, user) {
+  const resourceId = sectionResourceId(kind);
+  const active = await auditModel.getActiveEditingLock(SECTION_LOCK_TYPE, resourceId, 180);
+  if (active && String(active.user_id) !== String(user.id)) {
+    throw new ApiError(423, `${SECTION_LABELS[kind]}は他の教員（${active.user_name || '別のユーザー'}）が編集中です。`);
+  }
+  if (active) await auditModel.refreshEditingLock(SECTION_LOCK_TYPE, resourceId, user.id);
+}
+
 export const basicinfoService = {
   /**
    * 基本情報一括取得（全教職員）
@@ -201,6 +245,7 @@ export const basicinfoService = {
   // ==========================================================
   async createItem(kind, payload, user) {
     requireKyomu(user);
+    await assertSectionWritable(kind, user);
     if (!KINDS[kind]) throw new ApiError(400, '不明なマスタ種別です。');
     const p = validatePayload(kind, payload);
     if (kind === 'subject' && p.class_course_ids !== undefined) {
@@ -208,9 +253,6 @@ export const basicinfoService = {
       delete p.class_course_ids;
     }
     if (kind === 'class') await checkClassNameDup(p.grade, p.name);
-    if (kind === 'class' && !DEFAULT_CLASS_NAMES.includes(String(p.name).trim())) {
-      throw new ApiError(400, `クラス・コース名は「${DEFAULT_CLASS_NAMES.join('・')}」の範囲内で指定してください。`);
-    }
     if (kind === 'room') await checkRoomNameDup(p.name);
 
     let created = null;
@@ -236,6 +278,7 @@ export const basicinfoService = {
   // ==========================================================
   async updateItem(kind, id, payload, user) {
     requireKyomu(user);
+    await assertSectionWritable(kind, user);
     if (!KINDS[kind]) throw new ApiError(400, '不明なマスタ種別です。');
 
     const partial = {};
@@ -260,9 +303,6 @@ export const basicinfoService = {
     if (kind === 'class' && partial.name) {
       const row = (await basicinfoModel.listClasses()).find((c) => String(c.id) === String(id));
       if (!row) throw new ApiError(404, `対象の${KINDS[kind].label}が見つかりません。`);
-      if (!DEFAULT_CLASS_NAMES.includes(partial.name)) {
-        throw new ApiError(400, `クラス・コース名は「${DEFAULT_CLASS_NAMES.join('・')}」の範囲内で指定してください。`);
-      }
       await checkClassNameDup(partial.grade !== undefined ? Number(partial.grade) : row.grade, partial.name, id);
     }
     if (kind === 'room' && partial.name) await checkRoomNameDup(partial.name, id);
@@ -291,15 +331,12 @@ export const basicinfoService = {
   // ==========================================================
   async deleteItem(kind, id, user) {
     requireKyomu(user);
+    await assertSectionWritable(kind, user);
     if (!KINDS[kind]) throw new ApiError(400, '不明なマスタ種別です。');
 
     const label = KINDS[kind].label;
 
     if (kind === 'class') {
-      const row = (await basicinfoModel.listClasses()).find((c) => String(c.id) === String(id));
-      if (row && isDefaultClassName(row.name)) {
-        throw new ApiError(409, `初期設定のクラス・コース「${row.name}」は削除できません。`);
-      }
       const counts = await basicinfoModel.classUsage(id);
       if (counts.total > 0) {
         throw new ApiError(409, `このクラスは考査データ${usageMessage('class', counts)}で使用されているため削除できません。`);
@@ -352,6 +389,12 @@ export const basicinfoService = {
     });
     return { id: String(id), name: row.name };
   },
+
+  // ===== セクション編集ロック（座席表の編集排他ロックと同一の editing_locks） =====
+  sectionLocks,
+  lockSection,
+  unlockSection,
+  assertSectionWritable,
 };
 
 export default basicinfoService;

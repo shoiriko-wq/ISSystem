@@ -16,6 +16,7 @@ import {
   refreshLucideIcons,
   showToast,
   isKyomuUser,
+  sectionLockState,
 } from './exam.shared.js';
 import { state } from '../../state.js';
 
@@ -210,7 +211,8 @@ export function applySubjectDefaults(p) {
 }
 
 export function subjectRowHtml(p, kyomu) {
-  const can = rowEditable(p, kyomu);
+  // クラス・コース編集ロックが他教員なら chips を操作不能にする（server も書き込みを 423 で守る）
+  const can = rowEditable(p, kyomu) && sectionLockState('class') !== 'other';
   const dis = can ? '' : 'disabled';
   const flags = FLAG_ITEMS.map(
     (f) => `<label class="flex items-center gap-1 text-[10px] text-soft">

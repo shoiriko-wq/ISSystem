@@ -8,6 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcrypt';
 import config from '../config/default.js';
+import { seedInitialData } from './seed-data.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -131,51 +132,8 @@ const dummyScheduleCategoryMap = [
   { schedule_id: 'sch_103', category_id: 2 }
 ];
 
-// 10. クラス・科目マスタ
-const dummyClasses = [
-  { id: '1-1', grade: 1, class_num: 1, name: '1-1' },
-  { id: '1-2', grade: 1, class_num: 2, name: '1-2' },
-  { id: '1-3', grade: 1, class_num: 3, name: '1-3' },
-  { id: '1-4', grade: 1, class_num: 4, name: '1-4' },
-  { id: '1-5', grade: 1, class_num: 5, name: '1-5' },
-  { id: '1-6', grade: 1, class_num: 6, name: '1-6' },
-  { id: '1-7', grade: 1, class_num: 7, name: '1-7' },
-  { id: '2-1', grade: 2, class_num: 1, name: '2-1' },
-  { id: '2-2', grade: 2, class_num: 2, name: '2-2' },
-  { id: '2-3', grade: 2, class_num: 3, name: '2-3' },
-  { id: '2-4a', grade: 2, class_num: 4, name: '2-4文' },
-  { id: '2-4r', grade: 2, class_num: 4, name: '2-4理' },
-  { id: '2-5', grade: 2, class_num: 5, name: '2-5' },
-  { id: '2-6k', grade: 2, class_num: 6, name: '2-6看' },
-  { id: '2-6a', grade: 2, class_num: 6, name: '2-6文' },
-  { id: '2-7', grade: 2, class_num: 7, name: '2-7' },
-  { id: '3-1s', grade: 3, class_num: 1, name: '3-1総' },
-  { id: '3-1h', grade: 3, class_num: 1, name: '3-1人' },
-  { id: '3-2', grade: 3, class_num: 2, name: '3-2' },
-  { id: '3-3', grade: 3, class_num: 3, name: '3-3' },
-  { id: '3-4h', grade: 3, class_num: 4, name: '3-4人' },
-  { id: '3-4s', grade: 3, class_num: 4, name: '3-4数' },
-  { id: '3-5', grade: 3, class_num: 5, name: '3-5' },
-  { id: '3-6s', grade: 3, class_num: 6, name: '3-6数' },
-  { id: '3-6w', grade: 3, class_num: 6, name: '3-6環' },
-  { id: '3-7k', grade: 3, class_num: 7, name: '3-7看' },
-  { id: '3-7s', grade: 3, class_num: 7, name: '3-7総' },
-  { id: '3-7h', grade: 3, class_num: 7, name: '3-7人' },
-  { id: '3-8s', grade: 3, class_num: 8, name: '3-8総' },
-  { id: '3-8h', grade: 3, class_num: 8, name: '3-8人' }
-];
-
-const dummySubjects = [
-  { id: 'ko01', name: '国語' },
-  { id: 'ko02', name: '地歴公民' },
-  { id: 'ko03', name: '数学' },
-  { id: 'ko04', name: '理科' },
-  { id: 'ko05', name: '保健体育' },
-  { id: 'ko06', name: '芸術' },
-  { id: 'ko07', name: '外国語' },
-  { id: 'ko08', name: '家庭' },
-  { id: 'ko09', name: '情報' }
-];
+// 10. クラス・教科・科目・教室マスタの初期データは data/seed/*.csv から投入する (scripts/seed-data.js)
+//     サーバー側（コード）に初期名を固定しない。運用で作り替えたマスタをコードへ書き戻さない。
 
 // 11. 考査マスター
 const dummyExamMasters = [
@@ -209,42 +167,49 @@ const dummyAbsenceRecords = [
   { id: 'abs_3', user_id: 't-sato', record_date: todayStr, record_type: 'TRIP', reason: '進路指導部 校外打ち合わせ', recorded_by: 'kyomu01', recorded_by_name: '教務 主任' }
 ];
 
-// 14. 考査コマ（科目時間割）と監督割当を決定論的に生成 (3日 × 3コマ × 6クラス = 54コマ)
+// 14. 考査コマ（科目時間割）と監督割当を決定論的に生成
+//     クラス・教科は CSV 投入後の DB 実データから作る（初期データの名前に依存しない）
 const teacherPool = ['kyomu01', 't-tanaka', 't-sato', 't-suzuki', 't-takahashi'];
 const exemptedTeachers = new Set(dummyExamExemptions.map((e) => e.teacher_id));
-const dummyExamSlots = [];
-const dummyProctorAssignments = [];
 
-for (const master of dummyExamMasters) {
-  for (let day = 1; day <= master.days_count; day++) {
-    for (let slot = 1; slot <= master.daily_slots; slot++) {
-      dummyClasses.forEach((cls, classIndex) => {
-        const subject = dummySubjects[(day + slot + classIndex) % dummySubjects.length];
-        const subjectTeacher = subjectTeachers[subject.id];
+/** CSV 投入後のクラス・教科を受けて考査コマと監督割当を生成する */
+function buildExamSlots(classes, subjectIds) {
+  const slots = [];
+  const proctors = [];
+  if (!classes.length || !subjectIds.length) return { slots, proctors };
 
-        dummyExamSlots.push({
-          exam_master_id: master.id,
-          day_number: day,
-          slot_number: slot,
-          class_id: cls.id,
-          subject_id: subject.id,
-          subject_teacher_id: subjectTeacher
+  for (const master of dummyExamMasters) {
+    for (let day = 1; day <= master.days_count; day++) {
+      for (let slot = 1; slot <= master.daily_slots; slot++) {
+        classes.forEach((cls, classIndex) => {
+          const subjectId = subjectIds[(day + slot + classIndex) % subjectIds.length];
+          const subjectTeacher = subjectTeachers[subjectId] || teacherPool[(day + slot + classIndex) % teacherPool.length];
+
+          slots.push({
+            exam_master_id: master.id,
+            day_number: day,
+            slot_number: slot,
+            class_id: cls.id,
+            subject_id: subjectId,
+            subject_teacher_id: subjectTeacher
+          });
+
+          // 自科目担当・除外教員を避けて監督教員を輪番割当
+          const eligible = teacherPool.filter((t) => t !== subjectTeacher && !exemptedTeachers.has(t));
+          const proctor = eligible[(day * 3 + slot + classIndex) % eligible.length] || teacherPool[0];
+
+          proctors.push({
+            exam_master_id: master.id,
+            day_number: day,
+            slot_number: slot,
+            class_id: cls.id,
+            proctor_teacher_id: proctor
+          });
         });
-
-        // 自科目担当・除外教員を避けて監督教員を輪番割当
-        const eligible = teacherPool.filter((t) => t !== subjectTeacher && !exemptedTeachers.has(t));
-        const proctor = eligible[(day * 3 + slot + classIndex) % eligible.length];
-
-        dummyProctorAssignments.push({
-          exam_master_id: master.id,
-          day_number: day,
-          slot_number: slot,
-          class_id: cls.id,
-          proctor_teacher_id: proctor
-        });
-      });
+      }
     }
   }
+  return { slots, proctors };
 }
 
 async function seedDatabase() {
@@ -287,6 +252,8 @@ async function seedDatabase() {
       exam_proctor_assignments,
       exam_slots,
       exam_masters,
+      curriculum_subjects,
+      basic_rooms,
       classes,
       subjects,
       users
@@ -450,24 +417,14 @@ async function seedDatabase() {
       );
     }
 
-    for (const c of dummyClasses) {
-      await client.query(
-        `INSERT INTO classes (id, grade, class_num, name) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (id) DO UPDATE SET
-           grade = EXCLUDED.grade,
-           class_num = EXCLUDED.class_num,
-           name = EXCLUDED.name`,
-        [c.id, c.grade, c.class_num, c.name]
-      );
-    }
+    // クラス・教科・教室・科目の初期データは CSV から投入する（コード側に初期名を固定しない）
+    // TRUNCATE 済みなので空のテーブルへ data/seed/*.csv を投入する
+    const seedResults = await seedInitialData({ runQuery: client.query.bind(client), force: true });
+    console.log(`[Seed CSV] ${seedResults.map((r) => `${r.table}=${r.inserted}件`).join(' / ')}`);
 
-    for (const subj of dummySubjects) {
-      await client.query(
-        `INSERT INTO subjects (id, name) VALUES ($1, $2)
-         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name`,
-        [subj.id, subj.name]
-      );
-    }
+    // 考査コマは CSV 投入後の実データ（クラス・教科）から生成する
+    const seededClasses = (await client.query('SELECT id, grade FROM classes ORDER BY grade ASC, id ASC')).rows;
+    const seededSubjectIds = (await client.query('SELECT id FROM subjects ORDER BY sort_order ASC, id ASC')).rows.map((r) => r.id);
 
     for (const m of dummyExamMasters) {
       await client.query(
@@ -493,6 +450,8 @@ async function seedDatabase() {
         [ex.exam_master_id, ex.teacher_id, ex.reason]
       );
     }
+
+    const { slots: dummyExamSlots, proctors: dummyProctorAssignments } = buildExamSlots(seededClasses, seededSubjectIds);
 
     for (const sl of dummyExamSlots) {
       await client.query(

@@ -1,161 +1,160 @@
 /**
- * 定期考査「基本情報の登録」の「行の追加」の配置ルールを実ブラウザで測る回帰テスト
- *
- * ルール（public/js/modules/exam/exam.basic.ui.js）:
- *  R1. 「行の追加」で出る未入力の行は表の最上部に1件だけ（未入力の行の top は最初の保存済み行より上）。
- *  R2. 未入力の行が1件表示されている間は「行の追加」ボタンが無効（disabled・aria-disabled）。2回押しても行は増えない。
- *  R3. 追加の操作で画面はスクロールしない（main の scrollTop は追加前と同じ＝下に移動する手間がない）。
- *  R4. 未入力の行は末尾の保存済み行より上に出る（スクロール距離が最も短くなる）。
- *  R5. 保存（POST 201）で未入力の行は消え、ボタンは元通り使える（部屋・科目・教科）。
- *      部屋=名前順、科目=教科順+名前順、教科=表示順（固定）。
- *  R6. 未入力の行の「削除」は行をUIから破棄し、ボタンは元通り使える（サーバー変更なし）。
- *  R7. クラス名はサーバーの登録制約（初期の29名・学年内の重複不可・初期の行は削除不可）。
- *      重複名での保存は 400 で未入力の行は残り、ボタンは無効のまま。
- *
- * 実行: npm run test:ui:examaddtop  （ISSystem サーバーが必要）
- *  options: UI_BASE=https://127.0.0.1:3443 UI_USER=T2026001 UI_PASS=password123 CHROME_PATH=...
- * 出力: scripts/output/exam-add-top-*.png。NG が1件でもあれば exit code 1
+ * EXAM-COMPLETE-REGRESSION-TEST 追加画面の行の追加位置
+ * 目的: 未入力の行の「追加位置」が UI テスト仕様（basic-ui-test-design L136-138）どおりか測る。
+ * 測定対象: 行の DOM の top をピクセルで実測し、表の先頭（最初の登録済み行より上）であることを検証する。
+ * 期待: 「行の追加」で未入力の行は表の最上部に出る（下にスクロールして書かない）。ボタンは常時使える（未入力の行の件数で無効にならない）ので連続で複数行を追加できる。
+ *       各行の「削除」は未入力の行をUIから破棄する（サーバーには何も送らない）。
+ * 前提: サーバー（PORT 3333）が起動し、実DBへ初期データ（クラス30・教科9・科目98・教室14）のシーディングが終わっていること。
+ * 削除の検証: クラス表で自由な名前の行を作り（クラスコードは自動採番）、DELETE で消す（サーバー側は初期名を固定しない）。
+ * 副作用: 自動登録→DELETE でテスト専用の行を作り最後に消す（残さない）。使用中の行には触らない。
  */
+import { chromium } from 'playwright';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import puppeteer from 'puppeteer-core';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const OUT_DIR = path.join(ROOT, 'scripts', 'output');
-const BASE = process.env.UI_BASE || 'https://127.0.0.1:3443';
-const USER = process.env.UI_USER || 'T2026001';
-const PASS = process.env.UI_PASS || 'password123';
-// ブラウザはローカルの Chrome/Chromium を探す（Windows の Edge パスはこの環境に存在しないので落とさない）
-const CHROME = (() => {
-  const candidates = [process.env.CHROME_PATH, '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable',
-    '/usr/bin/chromium', '/usr/bin/chromium-browser'].filter(Boolean);
-  for (const p of candidates) if (fs.existsSync(p)) return p;
-  throw new Error('Chrome/Chromium が見つかりません。CHROME_PATH 環境変数でパスを指定してください。');
-})();
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const BASE_URL = 'http://localhost:3333';
+const OUT_DIR = 'screenshots/basic-ui';
+const STAMP = 'Z' + String(Date.now()).slice(-4);
 
 const failures = [];
-const check = (name, ok, detail = null) => {
-  if (!ok) failures.push(name);
-  console.log(`  ${ok ? 'PASS' : 'FAIL'} - ${name}${detail !== null ? ` -> ${JSON.stringify(detail)}` : ''}`);
+const logLines = [];
+const check = (name, cond, detail) => {
+  const line = `${cond ? 'ok' : 'FAIL'} - ${name} | ${detail}`;
+  logLines.push(line);
+  console.log(line);
+  if (!cond) failures.push(name);
+};
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** 一般ユーザー（exam_operator）でログインして一般権限の権限マップを持たせる */
+const login = async () => {
+  const browser = await chromium.launch({
+    headless: false,
+    args: ['--disable-search-engine-choice-screen', '--lang=ja-JP'],
+  });
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 950 } });
+  await ctx.addInitScript((u) => { localStorage.setItem('is_system_url_v251', u); }, BASE_URL);
+  const page = await ctx.newPage();
+  await page.goto(`${BASE_URL}/?next=exam`);
+  const status = await page.evaluate(async () => {
+    const r = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'user1', password: 'user1234' }),
+    });
+    const j = await r.json().catch(() => null);
+    return { status: r.status, token: j?.token, permission_map: j?.permission_map ?? null };
+  });
+  if (status.status !== 200 || !status.token) {
+    console.log(`login status=${status.status}`);
+    await browser.close();
+    process.exit(1);
+  }
+  const map = status.permission_map
+    ? (status.permission_map.super_admin ? 'super_admin' : 'exam_operator')
+    : 'admin';
+  await page.evaluate((vals) => {
+    localStorage.setItem('is_system_jwt_token_v251', vals.token);
+    localStorage.setItem('is_system_user_info_v251', JSON.stringify({ username: 'user1', role: 'user', token: vals.token }));
+    localStorage.setItem('is_system_permission_map_v251', JSON.stringify(vals.map));
+  }, { token: status.token, map });
+  return { browser, page };
 };
 
-const browser = await puppeteer.launch({
-  executablePath: CHROME,
-  headless: 'new',
-  ignoreHTTPSErrors: true,
-  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--ignore-certificate-errors'],
-});
-const page = await browser.newPage();
-page.on('pageerror', (e) => console.log(`  [page js error] ${e.message}`));
-page.on('console', (m) => { if (m.type() === 'error') console.log(`  [console error] ${m.text()}`); });
-page.on('dialog', (d) => d.accept());   // 削除確認の window.confirm を自動承認
-page.on('request', (r) => { if (r.url().includes('/api/basic-info') || r.url().includes('/api/subjects')) console.log(`  [REQ] ${r.method()} ${r.url()} ${r.postData() || ''}`); });
-page.on('response', (r) => { if (r.url().includes('/api/basic-info') || r.url().includes('/api/subjects')) console.log(`  [RES] ${r.status()} ${r.url()}`); });
+/** 指定表の「行の追加」ボタン（行の追加は追加ボタンだけ＝未入力の行をUIに出すだけ＝サーバーには何も送らない） */
+const addButton = (kind) => `#basic-table-${kind} [data-act="add-row"]`;
 
-await page.setViewport({ width: 1440, height: 1000 });
-await page.goto(`${BASE}/`, { waitUntil: 'networkidle2' });
-await page.type('#login-userid', USER);
-await page.type('#login-password', PASS);
-await page.evaluate(() => window.handleLoginClick());
-await page.waitForSelector('#app-container:not(.hidden)', { timeout: 10000 });
-await sleep(900);
-await page.click('[data-tab="exam"]');
-await sleep(1800);
+const clickAdd = (kind) => page.click(addButton(kind));
+const domClickAdd = (kind) => page.evaluate((sel) => document.querySelector(sel)?.click(), addButton(kind));
 
-/** テーブルの状態を px で実測（未入力の行の位置・ボタン状態・スクロール位置） */
+/** 状態実測: 行数・未入力の行数・未入力の行の top・先頭/末尾の登録済み行の top・ボタン有効状態・main の scrollTop */
 const snap = (kind) => page.evaluate((k) => {
-  const tbody = document.getElementById(`basic-body-${k}`);
-  if (!tbody) return { err: 'no table' };
-  const rows = [...tbody.querySelectorAll('tr[data-kind]')];
-  const blank = rows.find((r) => !r.dataset.id);
-  const firstSaved = rows.find((r) => r.dataset.id);
-  const lastSaved = [...rows].reverse().find((r) => r.dataset.id);
-  const addBtn = document.getElementById(`basic-add-${k}`);
-  const main = document.querySelector('#app-container main') || document.querySelector('main');
-  const rOf = (el) => (el ? el.getBoundingClientRect() : null);
-  const br = rOf(blank), fsr = rOf(firstSaved), lsr = rOf(lastSaved), mr = main.getBoundingClientRect();
+  const trs = [...document.querySelectorAll(`#basic-body-${k} tr[data-kind="${k}"]`)];
+  const blank = trs.filter((r) => r.dataset.id === '');
+  const saved = trs.filter((r) => r.dataset.id !== '');
+  const main = document.getElementById('main-scroll');
+  const mainRect = main.getBoundingClientRect();
+  const card = document.querySelector(`#basic-table-${k}`)?.closest('.rounded-md.border-main');
+  const cardRect = card.getBoundingClientRect();
+  const firstBlank = blank[0];
+  const bt = firstBlank ? firstBlank.getBoundingClientRect().top : -1;
   return {
-    rows: rows.length,
-    blankCount: rows.filter((r) => !r.dataset.id).length,
-    blankIsFirst: tbody.firstElementChild === blank,
-    blankTop: br ? Math.round(br.top) : -1,
-    firstSavedTop: fsr ? Math.round(fsr.top) : -1,
-    lastSavedTop: lsr ? Math.round(lsr.top) : -1,
-    mainTop: Math.round(mr.top),
-    mainBottom: Math.round(mr.bottom),
+    rows: trs.length,
+    blankCount: blank.length,
+    blanksLeading: blank.length && trs[0].dataset.id === '' && blank.every((r) => trs.indexOf(r) < saved.length),
+    blankIsFirst: trs[0] === firstBlank,
+    blankTop: Math.round(bt),
+    firstSavedTop: saved.length ? Math.round(saved[0].getBoundingClientRect().top) : -1,
+    lastSavedTop: saved.length ? Math.round(saved[saved.length - 1].getBoundingClientRect().top) : -1,
+    blankVisible: bt >= mainRect.top && bt <= mainRect.bottom &&
+      bt >= cardRect.top && bt <= cardRect.bottom,
+    mainTop: Math.round(mainRect.top),
+    mainBottom: Math.round(mainRect.bottom),
     mainScrollTop: Math.round(main.scrollTop),
-    blankVisible: br ? (br.top >= mr.top - 1 && br.top <= mr.bottom + 1) : false,
-    addDisabled: addBtn.disabled === true,
-    addAriaDisabled: addBtn.getAttribute('aria-disabled') === 'true',
+    addDisabled: document.querySelector(`#basic-table-${k} [data-act="add-row"]`)?.disabled,
+    addAriaDisabled: document.querySelector(`#basic-table-${k} [data-act="add-row"]`)?.getAttribute('aria-disabled') === 'true',
   };
 }, kind);
 
-/** 「行の追加」ボタンを実マウスで押す（有効なときだけ効く） */
-const clickAdd = async (kind) => {
-  await page.evaluate((k) => document.getElementById(`basic-add-${k}`).scrollIntoView({ block: 'center' }), kind);
-  await page.click(`#basic-add-${kind}`);
-  await sleep(350);
-};
-
-/** disabled のボタンにも DOM クリックを届けてハンドラの防御確認を見る（実ユーザーは押せない） */
-const domClickAdd = async (kind) => {
-  await page.evaluate((k) => document.getElementById(`basic-add-${k}`).click(), kind);
-  await sleep(350);
-};
-
-/** 未入力の行（data-id 空）へ値を入れる */
-const fillBlank = (kind, values) => page.evaluate((k, vals) => {
-  const row = document.querySelector(`#basic-body-${k} tr[data-kind="${k}"][data-id=""]`);
-  for (const [key, val] of Object.entries(vals)) {
-    const el = row.querySelector(`[data-f="${key}"]`);
+/** 未入力の行（1件目）へ入力して焦点を行の外へ移すと自動登録（POST）される */
+const fillBlank = (kind, fields, index = 0) => page.evaluate((k, fs2, i) => {
+  const rows = [...document.querySelectorAll(`#basic-body-${k} tr[data-kind="${k}"][data-id=""]`)];
+  const row = rows[i];
+  for (const [f, v] of Object.entries(fs2)) {
+    const el = row.querySelector(`[data-f="${f}"]`);
     if (!el) continue;
-    if (el.tagName === 'SELECT' && [...el.options].some((o) => o.value === String(val))) el.value = String(val);
-    else el.value = String(val);
+    el.value = v;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
   }
-}, kind, values);
+  const first = row.querySelector('[data-f="name"]');
+  first.focus();
+  first.dispatchEvent(new Event('blur', { bubbles: true }));
+}, kind, fields, index);
 
-/** 未入力の行の「保存」を押して POST を待つ */
-const saveBlank = async (kind) => {
-  const resP = page.waitForResponse((r) => r.url().includes(API_PATH[kind]) && r.request().method() === 'POST', { timeout: 6000 });
-  await page.evaluate((k) => {
-    const btn = document.querySelector(`#basic-body-${k} tr[data-kind="${k}"][data-id=""] [data-act="save"]`);
-    btn.scrollIntoView({ block: 'center' });
-    btn.click();
-  }, kind);
-  const res = await resP;
-  await sleep(1200);
-  return res.status();
-};
+/** 自動登録（POST）の応答を捕まえる。未入力の行が消える＝自動登録成功を待つ */
+const autoSaveBlank = (kind, method = 'POST') => page.waitForResponse(
+  (r) => r.url().includes(`/api${API_PATH[kind]}`) && r.request().method() === method &&
+    r.request().url().replace(/[?].*$/, '') === `/api${API_PATH[kind]}`,
+  { timeout: 10000 }
+);
 
-/** 登録済み行を「削除」して DELETE を待つ（confirm は自動承認） */
-const deleteById = async (kind, rowId) => {
-  const resP = page.waitForResponse((r) => r.url().includes(API_PATH[kind]) && r.request().method() === 'DELETE', { timeout: 6000 });
-  await page.evaluate((k, id) => {
-    const btn = document.querySelector(`#basic-body-${k} tr[data-id="${id}"] [data-act="delete"]`);
-    btn.scrollIntoView({ block: 'center' });
-    btn.click();
-  }, kind, rowId);
-  const res = await resP;
-  await sleep(1200);
-  return res.status();
-};
+/** 行の「削除」ボタン（未入力の行＝未登録の行をUIから破棄する／登録済み行＝サーバーから削除する） */
+const deleteRow = (kind, id = '') => page.evaluate((k, rid) => {
+  const row = document.querySelector(`#basic-body-${k} tr[data-kind="${k}"][data-id="${rid}"]`);
+  const btn = row.querySelector('[data-act="delete"]');
+  btn.scrollIntoView({ block: 'center' });
+  btn.click();
+}, kind, id);
 
-/** 名前から行の data-id と表示位置（何番目の行か）を読む */
-const rowByName = (kind, name) => page.evaluate((k, nm) => {
+const discardBlank = (kind, index = 0) => page.evaluate((k, i) => {
+  const rows = [...document.querySelectorAll(`#basic-body-${k} tr[data-kind="${k}"][data-id=""]`)];
+  const btn = rows[i].querySelector('[data-act="delete"]');
+  btn.scrollIntoView({ block: 'center' });
+  btn.click();
+}, kind, index);
+
+/** 登録済み行の「削除」で DELETE の応答を捕まえる（使用中なら DELETE は送られない） */
+const deleteById = (kind, id) => page.waitForResponse(
+  (r) => r.url().replace(/[?].*$/, '') === `/api${API_PATH[kind]}/${id}` && r.request().method() === 'DELETE',
+  { timeout: 10000 }
+).then((r) => r.status());
+
+/** クラス表で名前に一致する行の index と id を読む */
+const rowByName = (kind, name) => page.evaluate((k, n) => {
   const rows = [...document.querySelectorAll(`#basic-body-${k} tr[data-kind="${k}"]`)];
-  const i = rows.findIndex((r) => r.querySelector('[data-f="name"]')?.value === nm);
-  return { index: i, id: i >= 0 ? (rows[i].dataset.id || '') : null, count: rows.length };
+  const i = rows.findIndex((r) => r.querySelector('[data-f="name"]')?.value === n);
+  return { index: i, id: i >= 0 ? rows[i].dataset.id : null };
 }, kind, name);
 
-/** クラス列が学年順+名前順で並んでいるか（保存済み行だけで測る） */
+/** クラス表が学年順+名前順（登録済み行）で並んでいるか */
 const classOrderOk = () => page.evaluate(() => {
-  const rows = [...document.querySelectorAll('#basic-body-class tr[data-kind="class"]')].filter((r) => r.dataset.id);
-  const items = rows.map((r) => ({
-    grade: Number(r.querySelector('[data-f="grade"]')?.value || 0),
-    name: r.querySelector('[data-f="name"]')?.value || '',
-  }));
+  const items = [...document.querySelectorAll('#basic-body-class tr[data-kind="class"]')]
+    .filter((r) => r.dataset.id)
+    .map((r) => ({
+      grade: Number(r.querySelector('[data-f="grade"]')?.value || 1),
+      name: r.querySelector('[data-f="name"]')?.value || '',
+    }));
   for (let i = 1; i < items.length; i++) {
     const cmp = items[i - 1].grade - items[i].grade || String(items[i - 1].name).localeCompare(String(items[i].name), 'ja');
     if (cmp > 0) return { ok: false, items };
@@ -170,22 +169,45 @@ const groupNames = () => page.evaluate(() =>
   [...document.querySelectorAll('#basic-body-group tr[data-kind="group"]')]
     .filter((r) => r.dataset.id).map((r) => r.querySelector('[data-f="name"]')?.value || ''));
 
-// サーバーの登録制約（クラス名は初期の29名・学年内の重複不可・初期の行は削除不可）
-// 教科名は9教科の固定、部屋・科目は自由に名前を付けられる（test-exam-basic-columns.mjs と同じ）
-const ALLOWED_GROUP_NAMES = ['国語', '地歴公民', '数学', '理科', '保健体育', '芸術', '外国語', '家庭', '情報'];
 const API_PATH = { class: '/basic-info/class', group: '/subjects', subject: '/basic-info/subject', room: '/basic-info/room' };
 
-// ── クラス表：未入力の行は最上部・ボタンは無効・スクロールしない ──────────
-const classNamesBefore = await classNames();
-const groupNamesList = await groupNames();
-const groupUnused = ALLOWED_GROUP_NAMES.find((n) => !groupNamesList.includes(n));
+// サーバー側は初期名を固定しない（クラス名・教科名も自由に登録でき、初期データ行も使用状況の照会を通れば削除できる）。
+// 学年内のクラス名の重複だけが制約（409）として残る。
 
+/** 科目行の教科セレクトの現在値（教科id） */
+const firstGroupId = () => page.evaluate(() =>
+  document.querySelector('#basic-body-subject tr[data-kind="subject"][data-id=""] [data-f="subject_id"]')?.value || '');
+
+/** セッショントークン（localStorage）でサーバーの使用状況を照会し、使用中/非使用中の行を選ぶ */
+const pickByUsage = (kind, wantUsed) => page.evaluate(async (k, used) => {
+  const tok = localStorage.getItem('is_system_jwt_token_v251')
+    || (JSON.parse(localStorage.getItem('is_system_user_info_v251') || '{}').token);
+  const rows = [...document.querySelectorAll(`#basic-body-${k} tr[data-kind="${k}"]`)].filter((r) => r.dataset.id);
+  for (const r of rows) {
+    const id = r.dataset.id;
+    const res = await fetch(`/api/basic-info/usage/${k}/${id}`, { headers: { Authorization: `Bearer ${tok}` } });
+    const j = await res.json().catch(() => null);
+    const total = j?.usage?.total ?? j?.total ?? 0;
+    if ((used && total > 0) || (!used && total === 0)) {
+      return {
+        id,
+        name: r.querySelector('[data-f="name"]')?.value || '',
+        grade: Number(r.querySelector('[data-f="grade"]')?.value || 1),
+        total,
+      };
+    }
+  }
+  return null;
+}, kind, wantUsed);
+
+// ── クラス表：未入力の行は最上部・ボタンは常時有効・連続で複数追加できる ──────
+const classNamesBefore = await classNames();
 const before = await snap('class');
 const baseOrder = await classOrderOk();
 check('クラス：ベースラインの行は学年順+名前順で並んでいる', baseOrder.ok, { ok: baseOrder.ok, n: baseOrder.n });
+
 await page.evaluate(() => {
-  const card = document.querySelector('#basic-table-class')?.closest('.rounded-md.border-main') ||
-    document.getElementById('basic-table-class');
+  const card = document.querySelector('#basic-table-class')?.closest('.rounded-md.border-main');
   card?.scrollIntoView({ block: 'start' });
 });
 await sleep(350);
@@ -193,7 +215,7 @@ const scrolled = await snap('class');
 await clickAdd('class');
 const after = await snap('class');
 
-check('クラス：「行の追加」で未入力の行は1件だけ表の最上部に出る',
+check('クラス：「行の追加」で未入力の行は表の最上部に足す',
   after.rows === before.rows + 1 && after.blankCount === 1 && after.blankIsFirst,
   { rows: after.rows, blankCount: after.blankCount, blankIsFirst: after.blankIsFirst });
 check('クラス：未入力の行の top は最初の保存済み行より上（px 実測）',
@@ -207,17 +229,17 @@ check('クラス：未入力の行は表示中の画面内に見える（px 実�
 check('クラス：追加で画面はスクロールしない（main.scrollTop は追加前と同じ）',
   scrolled.mainScrollTop === after.mainScrollTop,
   { before: scrolled.mainScrollTop, after: after.mainScrollTop });
-check('クラス：未入力の行を表示中は「行の追加」ボタンが無効（disabled・aria-disabled）',
-  after.addDisabled && after.addAriaDisabled,
+check('クラス：「行の追加」ボタンは常時使える（未入力の行があっても disabled・aria-disabled にならない）',
+  !after.addDisabled && !after.addAriaDisabled,
   { addDisabled: after.addDisabled, ariaDisabled: after.addAriaDisabled });
 
 await domClickAdd('class');
 const twice = await snap('class');
-check('クラス：未入力の行がある間は「行の追加」を2回押しても行は増えない',
-  twice.rows === after.rows && twice.blankCount === 1 && twice.addDisabled,
-  { rows: twice.rows, blankCount: twice.blankCount, addDisabled: twice.addDisabled });
+check('クラス：「行の追加」を連続で押すと未入力の行が2件並ぶ（ボタンは使えたまま）',
+  twice.rows === after.rows + 1 && twice.blankCount === 2 && twice.blanksLeading === 2 && !twice.addDisabled,
+  { rows: twice.rows, blankCount: twice.blankCount, blanksLeading: twice.blanksLeading, addDisabled: twice.addDisabled });
 
-// 未入力の行が最上部に出ている様子をカードごとスクリーンショットで残す
+// 未入力の行が最上部に2件並んでいる様子をカードごとスクリーンショットで残す
 const classCard = await page.evaluate(() => {
   const card = document.querySelector('#basic-table-class')?.closest('.rounded-md.border-main');
   if (!card) return null;
@@ -236,117 +258,144 @@ if (classCard) {
   });
 }
 
-// クラス名はサーバーの登録制約（初期の29名・学年内の重複不可）で固定されている。
-// 重複名で保存すると 409 が返り、未入力の行は残る（ボタンは無効のまま）。
-await fillBlank('class', { name: '1-3', grade: '1' });
-const dupStatus = await saveBlank('class');
-const afterDup = await snap('class');
-check('クラス：初期データの名前を重複保存すると 409 で未入力の行は残りボタンは無効のまま',
-  dupStatus === 409 && afterDup.rows === after.rows && afterDup.blankCount === 1 && afterDup.addDisabled,
-  { status: dupStatus, rows: afterDup.rows, blank: afterDup.blankCount, addDisabled: afterDup.addDisabled });
+// 未入力の行の「削除」は行をUIから破棄する（サーバー変更なし）
+await discardBlank('class', 0);
+const midDiscard = await snap('class');
+check('クラス：未入力の行の「削除」はその行をUIから破棄する（1件消える）',
+  midDiscard.rows === after.rows && midDiscard.blankCount === 1,
+  { rows: midDiscard.rows, blank: midDiscard.blankCount });
+await discardBlank('class', 0);
+const afterDiscard = await snap('class');
+check('クラス：未入力の行を連続で破棄するとベースラインの行数へ戻る（サーバー変更なし）',
+  afterDiscard.rows === before.rows && afterDiscard.blankCount === 0,
+  { rows: afterDiscard.rows, blank: afterDiscard.blankCount });
 
-// 未入力の行の「削除」は行をUIから破棄し「行の追加」は元通り使える（サーバー変更なし）
-await page.evaluate(() => {
-  const btn = document.querySelector('#basic-body-class tr[data-kind=\"class\"][data-id=\"\"] [data-act=\"delete\"]');
-  btn.scrollIntoView({ block: 'center' });
-  btn.click();
-});
-await sleep(400);
-const afterDiscardClass = await snap('class');
-check('クラス：未入力の行の「削除」は行をUIから破棄し「行の追加」は元通り使える',
-  afterDiscardClass.rows === before.rows && afterDiscardClass.blankCount === 0 && !afterDiscardClass.addDisabled,
-  { rows: afterDiscardClass.rows, blank: afterDiscardClass.blankCount, addDisabled: afterDiscardClass.addDisabled });
+
+// 自由なクラス名で最上部の未入力の行を登録し、その行を DELETE で消す（コード側に初期名を固定しない）
+const takenClasses = await classNames();
+const takenGroups = await groupNames();
+const makeUnique = (base, taken) => {
+  let n = base;
+  let i = 2;
+  while (taken.includes(n)) n = base + i++;
+  return n;
+};
+const newClass = makeUnique(`1-9${STAMP}`, takenClasses);   // 1年のテスト専用クラス名（最後に削除する）
+const newGroup = makeUnique(`追加テスト教科${STAMP}`, takenGroups);
+
+await clickAdd('class');
+await fillBlank('class', { grade: '1', name: newClass });
+const createStatus = await autoSaveBlank('class');
+const created = await rowByName('class', newClass);
+const afterCreate = await snap('class');
+check(`クラス：自由な名前「${newClass}」を最上部の未入力の行へ入力して焦点を外すと自動登録（POST ${createStatus}）される`,
+  createStatus === 201 && created.index >= 0 && afterCreate.rows === before.rows + 1 && afterCreate.blankCount === 0,
+  { status: createStatus, index: created.index, rows: afterCreate.rows, blank: afterCreate.blankCount });
+const createDelStatus = await deleteById('class', created.id);
+const afterCreateDel = await snap('class');
+check(`クラス：テストで作った行「${newClass}」の「削除」は DELETE ${createDelStatus} で行が消えベースラインへ復元する`,
+  createDelStatus === 200 && afterCreateDel.rows === before.rows && afterCreateDel.blankCount === 0,
+  { status: createDelStatus, rows: afterCreateDel.rows, blank: afterCreateDel.blankCount });
+
+// 学年内の重複名はサーバーの重複チェックで 409（未入力の行は残る＝ボタンは使える）
+await clickAdd('class');
+await fillBlank('class', { grade: '1', name: classNamesBefore[0] });
+const dupStatus = await autoSaveBlank('class');
+const afterDup = await snap('class');
+check(`クラス：1年に既存の名前「${classNamesBefore[0]}」を重複登録しようとすると 409 で未入力の行は残りボタンは使える`,
+  dupStatus === 409 && afterDup.rows === before.rows + 1 && afterDup.blankCount === 1 && !afterDup.addDisabled,
+  { status: dupStatus, rows: afterDup.rows, blank: afterDup.blankCount, addDisabled: afterDup.addDisabled });
+await discardBlank('class', 0);
+const afterDupDiscard = await snap('class');
+check('クラス：重複で残った未入力の行の「削除」は行をUIから破棄する',
+  afterDupDiscard.rows === before.rows && afterDupDiscard.blankCount === 0,
+  { rows: afterDupDiscard.rows, blank: afterDupDiscard.blankCount });
 
 // 使用中のクラス行の「削除」ボタンは使用状況を照会して弾く（DELETE を送らない・行は残る）
-const classTarget = await page.evaluate(() => {
-  const rows = [...document.querySelectorAll('#basic-body-class tr[data-kind=\"class\"]')].filter((r) => r.dataset.id);
-  const row = rows[0];
-  return row ? { id: row.dataset.id, name: row.querySelector('[data-f=\"name\"]').value } : null;
-});
+const usedClass = await pickByUsage('class', true);
+check(`使用中のクラス行が1件以上ある（${usedClass ? usedClass.name : 'なし'}）`, Boolean(usedClass), usedClass);
 const deleteReqs = [];
 const onRequest = (r) => { if (r.method() === 'DELETE' && r.url().includes('/api/basic-info/class')) deleteReqs.push(r.url()); };
 page.on('request', onRequest);
-await page.evaluate((id) => {
-  const btn = document.querySelector(`#basic-body-class tr[data-id=\"${id}\"] [data-act=\"delete\"]`);
-  btn.scrollIntoView({ block: 'center' });
-  btn.click();
-}, classTarget.id);
-await sleep(1600);
+if (usedClass) {
+  await page.evaluate((id) => {
+    const btn = document.querySelector(`#basic-body-class tr[data-id="${id}"] [data-act="delete"]`);
+    btn.scrollIntoView({ block: 'center' });
+    btn.click();
+  }, usedClass.id);
+  await sleep(1600);
+}
 const afterUiDel = await snap('class');
-check(`クラス：使用中の行（${classTarget.name}）の「削除」は DELETE を送らず行は残る`,
+check(`クラス：使用中の行（${usedClass ? usedClass.name : '-'}）の「削除」は DELETE を送らず行は残る`,
   deleteReqs.length === 0 && afterUiDel.rows === before.rows,
   { deleteReqs: deleteReqs.length, rows: afterUiDel.rows });
 page.off('request', onRequest);
 
-// サーバー側でも初期データのクラス名は削除できない（直接 DELETE で 409、行は残る）
-const delStatus = await page.evaluate(async (id) => {
-  const tok = localStorage.getItem('is_system_jwt_token_v251')
-    || (JSON.parse(localStorage.getItem('is_system_user_info_v251') || '{}').token);
-  const r = await fetch(`/api/basic-info/class/${id}`, {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${tok}` },
-  });
-  return r.status;
-}, classTarget.id);
-const afterDel = await snap('class');
-check('クラス：初期データのクラス名の行は DELETE 409 で削除できない（行は残る）',
-  delStatus === 409 && afterDel.rows === before.rows, { status: delStatus, rows: afterDel.rows });
+// 使用中でない初期データの行は「削除」できる（サーバー側は初期名を固定しない＝初期データ行も DELETE 200）
+const freeClass = await pickByUsage('class', false);
+check(`使用中でない初期データのクラス行が1件以上ある（${freeClass ? freeClass.name : 'なし'}）`, Boolean(freeClass), freeClass);
+if (freeClass) {
+  const freeDelStatus = await deleteById('class', freeClass.id);
+  const afterFreeDel = await snap('class');
+  check(`クラス：使用中でない初期データの行「${freeClass.name}」の「削除」は DELETE ${freeDelStatus} で行が消える`,
+    freeDelStatus === 200 && afterFreeDel.rows === before.rows - 1,
+    { status: freeDelStatus, rows: afterFreeDel.rows });
+  // 同じ学年・名前で作り直してベースラインへ復元する（自由な名前が登録できることも同時に測る）
+  await clickAdd('class');
+  await fillBlank('class', { grade: String(freeClass.grade), name: freeClass.name });
+  const restoreStatus = await autoSaveBlank('class');
+  const restored = await rowByName('class', freeClass.name);
+  const afterRestore = await snap('class');
+  const restoreOrder = await classOrderOk();
+  check(`クラス：削除した行「${freeClass.name}」を同じ学年・名前で作り直してベースラインへ復元する（POST ${restoreStatus}）`,
+    restoreStatus === 201 && restored.index >= 0 && afterRestore.rows === before.rows &&
+    restoreOrder.ok && restoreOrder.n === baseOrder.n,
+    { status: restoreStatus, index: restored.index, rows: afterRestore.rows, n: restoreOrder.n });
+}
 
-const orderAfter = await classOrderOk();
-check('クラス：追加・破棄・削除試行後も順序と行数は崩れない',
-  orderAfter.ok && orderAfter.n === baseOrder.n, { ok: orderAfter.ok, n: orderAfter.n, base: baseOrder.n });
 
-
-/** 科目行の教科セレクトの現在値（教科id） */
-const firstGroupId = () => page.evaluate(() =>
-  document.querySelector('#basic-body-subject tr[data-kind="subject"][data-id=""] [data-f="group_id"]')?.value || '');
-
-// ── 教科・科目・教室：同じルール（最上部・無効・保存で復活） ───────────────
-const cases = [];
-if (groupUnused) cases.push({ kind: 'group', name: groupUnused, fill: { name: groupUnused, subject: 'A' } });
-cases.push({ kind: 'room', name: '追加位置Z9教室', fill: { name: '追加位置Z9教室', room_type: 'CLASS', seats: '30', grades: '1' } });
-cases.push({ kind: 'subject', name: '追加位置テスト科目', fill: { name: '追加位置テスト科目', short_name: '追Z' } });
+// ── 教科・教室・科目：同じルール（最上部・常時有効・連続追加・自動登録・削除） ──
+const cases = [
+  { kind: 'group', name: newGroup, fill: { name: newGroup } },
+  { kind: 'room', name: `追加位置${STAMP}教室`, fill: { name: `追加位置${STAMP}教室`, seats: '30', notes: '回帰テスト' } },
+  { kind: 'subject', name: `追加位置${STAMP}科目`, fill: { name: `追加位置${STAMP}科目`, short_name: '追Z' } },
+];
 
 for (const c of cases) {
   const b = await snap(c.kind);
   await clickAdd(c.kind);
   const a = await snap(c.kind);
-  check(`${c.kind}: 未入力の行は1件だけ表の最上部に出る（「行の追加」は無効）`,
+  check(`${c.kind}: 未入力の行は最上部に足す（「保存」ボタンは無く削除ボタンだけ・ボタンは常時有効）`,
     a.rows === b.rows + 1 && a.blankCount === 1 && a.blankIsFirst &&
-    a.blankTop < a.firstSavedTop && a.addDisabled && a.addAriaDisabled,
+    a.blankTop < a.firstSavedTop && !a.addDisabled,
     { rows: a.rows, blankCount: a.blankCount, blankTop: a.blankTop, firstSavedTop: a.firstSavedTop, addDisabled: a.addDisabled });
   await domClickAdd(c.kind);
   const t = await snap(c.kind);
-  check(`${c.kind}: 未入力の行がある間は「行の追加」を2回押しても行は増えない`,
-    t.rows === a.rows && t.blankCount === 1, { rows: t.rows, blankCount: t.blankCount });
+  check(`${c.kind}: 「行の追加」を連続で押すと未入力の行が2件並ぶ`,
+    t.rows === a.rows + 1 && t.blankCount === 2 && t.blanksLeading === 2,
+    { rows: t.rows, blankCount: t.blankCount, blanksLeading: t.blanksLeading });
 
   const fill = { ...c.fill };
-  if (c.kind === 'subject') fill.group_id = await firstGroupId();
-  await fillBlank(c.kind, fill);
-  const st = await saveBlank(c.kind);
+  if (c.kind === 'subject') fill.subject_id = await firstGroupId();
+  await fillBlank(c.kind, fill, 0);
+  const st = await autoSaveBlank(c.kind);
   const row = await rowByName(c.kind, c.name);
   const as = await snap(c.kind);
-  check(`${c.kind}: 保存（POST ${st}）で未入力の行は消え「行の追加」は元通り使える`,
-    st === 201 && as.blankCount === 0 && !as.addDisabled && row.index >= 0,
-    { status: st, blankCount: as.blankCount, addDisabled: as.addDisabled, index: row.index });
+  check(`${c.kind}: 未入力の行へ入力して焦点を行の外へ移すと自動登録（POST ${st}）され、未入力の行は消える`,
+    st === 201 && as.blankCount === 0 && row.index >= 0,
+    { status: st, blankCount: as.blankCount, index: row.index });
   const ds = await deleteById(c.kind, row.id);
   const gone = await rowByName(c.kind, c.name);
-  check(`${c.kind}: 削除（DELETE ${ds}）でベースラインへ復元`, ds === 200 && gone.index === -1, { index: gone.index });
+  const back = await snap(c.kind);
+  check(`${c.kind}: 削除（DELETE ${ds}）でベースラインへ復元`,
+    ds === 200 && gone.index === -1 && back.rows === b.rows,
+    { status: ds, index: gone.index, rows: back.rows });
 }
 
-// ── 未入力の行の「削除」は行を破棄してボタンは元通り使える ──────────────────
-const beforeDiscard = await snap('room');
-await clickAdd('room');
-await page.evaluate(() => {
-  const btn = document.querySelector('#basic-body-room tr[data-kind="room"][data-id=""] [data-act="delete"]');
-  btn.scrollIntoView({ block: 'center' });
-  btn.click();
-});
-await sleep(500);
-const afterDiscard = await snap('room');
-check('未入力の行の「削除」はその行をUIから破棄し「行の追加」は元通り使える',
-  afterDiscard.rows === beforeDiscard.rows && afterDiscard.blankCount === 0 && !afterDiscard.addDisabled,
-  { rows: afterDiscard.rows, blankCount: afterDiscard.blankCount, addDisabled: afterDiscard.addDisabled });
+// クラス表の並び順は追加・登録・削除の操作後も崩れない
+const finalOrder = await classOrderOk();
+check('クラス：追加・登録・削除の操作後も学年順+名前順と行数は崩れない',
+  finalOrder.ok && finalOrder.n === baseOrder.n, { ok: finalOrder.ok, n: finalOrder.n, base: baseOrder.n });
 
 await page.screenshot({ path: path.join(OUT_DIR, 'exam-add-top-final.png') });
 

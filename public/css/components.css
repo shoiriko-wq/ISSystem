@@ -1551,6 +1551,37 @@ span.dash-news-body { display: block; }
   cursor: not-allowed;
 }
 
+/* 考査「基本情報の登録」の項目別編集ロック（タイトル部のトグルで編集可能 ⇔ 編集ロック）。
+   編集ロック中は選択欄も座席表と同じ操作不可の見た目（減光・not-allowed）にし、
+   クラス・コースチップの選択面も指カーソルとリングが出ない（UI十条4）。 */
+#exam-panel-basic #basic-table-class select:disabled,
+#exam-panel-basic #basic-table-group select:disabled,
+#exam-panel-basic #basic-table-subject select:disabled,
+#exam-panel-basic #basic-table-room select:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+#exam-panel-basic .cc-list.is-locked [data-cc] {
+  cursor: default;
+}
+
+/* 編集ロック中（読み取り専用）の入力欄・選択欄・削除ボタン（既定は編集ロック＝誰も編集していない状態） */
+#exam-panel-basic .input-field:disabled,
+#exam-panel-basic select.input-field:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+#exam-panel-basic button[data-act="delete"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+#exam-panel-basic .cc-list.is-locked [data-cc]:hover {
+  border-color: var(--border-color);
+}
+
+
 /* ============================================
    ダッシュボード労いメッセージ用の軽量粒子アニメーション (CSSのみ・Canvas不使用)
    カード内 #dash-fx-layer に絵文字 particle を 10 個並べ、

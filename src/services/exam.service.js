@@ -773,7 +773,7 @@ export const examService = {
     const phases = await examModel.getPhases(examMasterId);
     const kyomu = isKyomu(user);
 
-    const [plan, decisions, decisionSummary, examSurveyStatus, slots, rooms, roomConfig, roomAssignments, trips, staff, availability, proctors, constraints, exemptions, subjectGroups, subjects, roomCatalog, classes, surveySummary] =
+    const [plan, decisions, decisionSummary, examSurveyStatus, slots, rooms, roomConfig, roomAssignments, trips, staff, availability, proctors, constraints, exemptions, subjectGroups, subjects, roomCatalog, classes, surveySummary, locks] =
       await Promise.all([
         examModel.listSubjectPlan(examMasterId),
         examModel.listSubjectDecisions(examMasterId),
@@ -794,6 +794,7 @@ export const examService = {
         basicinfoModel.listRooms(),
         basicinfoModel.listClasses(),
         examModel.subjectSurveySummary(examMasterId),
+        basicinfoService.sectionLocks(),
       ]);
 
     const rulesTable = await examModel.getRulesTable('exam_timetable_rules', examMasterId, DEFAULT_TIMETABLE_RULES);
@@ -835,6 +836,7 @@ export const examService = {
         classes,
         subjects,
         rooms: roomCatalog,
+        locks,
       },
       slots,
       day_slots: ctx.daySlots,

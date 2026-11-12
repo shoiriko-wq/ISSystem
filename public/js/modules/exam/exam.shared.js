@@ -113,14 +113,26 @@ export function isKyomuUser() {
   return examStore.roleKyomu;
 }
 
+/** 基本情報のセクション編集ロック状態（server の editing_locks が真。座席表と同一の仕組み）
+ *  'none' = 誰も編集中でない（既定は読み取り専用）、'mine' = 自分の編集モード、'other' = 他教員が編集中 */
+export function sectionLockState(kind) {
+  const lock = examStore.board?.basic_info?.locks?.[kind];
+  if (!lock) return 'none';
+  const uid = state.currentUser?.id;
+  return String(lock.user_id) === String(uid) ? 'mine' : 'other';
+}
+
 /** フェーズバッジ */
 export function phaseBadge(phase) {
   const meta = PHASE_META[phase] || PHASE_META.DRAFT;
   return `<span class="badge text-[10px] px-1.5 py-0.5 rounded font-bold ${meta.cls}">${meta.label}</span>`;
 }
 
-/** セクションカード */
-export function sectionCard(icon, title, desc, bodyHtml, extra = '') {
+/** セクションカード
+ * extra = タイトル部右側の既存ボタン（「行を追加」等）
+ * headerExtra = タイトル部右側に extra の前へ足す要素（編集ロックトグルなど）
+ */
+export function sectionCard(icon, title, desc, bodyHtml, extra = '', headerExtra = '') {
   return `<div class="card p-4 space-y-3">
     <div class="flex items-start justify-between gap-3">
       <div>
@@ -129,7 +141,7 @@ export function sectionCard(icon, title, desc, bodyHtml, extra = '') {
         </h3>
         ${desc ? `<p class="text-[11px] text-muted mt-0.5">${desc}</p>` : ''}
       </div>
-      ${extra}
+      <div class="flex items-center gap-2 shrink-0">${headerExtra}${extra}</div>
     </div>
     ${bodyHtml}
   </div>`;

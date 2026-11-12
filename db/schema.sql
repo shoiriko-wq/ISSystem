@@ -925,19 +925,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_subject_name ON subjects (lower(name));
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS subjects TEXT NOT NULL DEFAULT '[]';
 
--- 教科マスタの初期データ (教務部が追加・改名・削除できる)
-INSERT INTO subjects (id, name, sort_order, color_key)
-VALUES
-  ('ko01', '国語', 1, 'ACCENT'),
-  ('ko02', '地歴公民', 2, 'WARNING'),
-  ('ko03', '数学', 3, 'SUCCESS'),
-  ('ko04', '理科', 4, 'PURPLE'),
-  ('ko05', '保健体育', 5, 'SLATE'),
-  ('ko06', '芸術', 6, 'DANGER'),
-  ('ko07', '外国語', 7, 'INFO'),
-  ('ko08', '家庭', 8, 'SLATE'),
-  ('ko09', '情報', 9, 'SLATE')
-ON CONFLICT DO NOTHING;
+-- 教科マスタの初期データは data/seed/subject_groups.csv から投入する (scripts/seed-data.js)
+-- サーバー側（コード）に初期名を固定しないため、この DDL に初期 INSERT 句は置かない。
 
 -- デモ教員の担当教科 (教務部が職員一覧から設定する想定の初期値)
 UPDATE users SET subjects = '["国語"]' WHERE id = 't-tanaka' AND (subjects IS NULL OR subjects = '[]');
@@ -1045,66 +1034,16 @@ ALTER TABLE exam_room_assignments ADD COLUMN IF NOT EXISTS class_id TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS uniq_room_assign_class ON exam_room_assignments (exam_master_id, class_id, day_number, slot_number);
 CREATE INDEX IF NOT EXISTS idx_room_assign_class ON exam_room_assignments(exam_master_id, class_id);
 
--- 19h. 基本情報の初期データ (教務部が登録・改名・削除する)
+-- 19h. 基本情報の初期データは CSV から投入する (data/seed/*.csv, scripts/seed-data.js)
 -- クラス・コースは分離せず学校固有の自由文字列名で登録する（「1-3理」「1-6看」「1-6保育」など）
-INSERT INTO classes (id, grade, class_num, name, short_name, course_ids, is_active)
-VALUES
-  ('1-1', 1, 1, '1-1', '1-1', '[]', true),
-  ('1-2', 1, 2, '1-2', '1-2', '[]', true),
-  ('1-3', 1, 3, '1-3', '1-3', '[]', true),
-  ('1-4', 1, 4, '1-4', '1-4', '[]', true),
-  ('1-5', 1, 5, '1-5', '1-5', '[]', true),
-  ('1-6', 1, 6, '1-6', '1-6', '[]', true),
-  ('1-7', 1, 7, '1-7', '1-7', '[]', true),
-  ('2-1', 2, 1, '2-1', '2-1', '[]', true),
-  ('2-2', 2, 2, '2-2', '2-2', '[]', true),
-  ('2-3', 2, 3, '2-3', '2-3', '[]', true),
-  ('2-4a', 2, 4, '2-4文', '2-4文', '[]', true),
-  ('2-4r', 2, 4, '2-4理', '2-4理', '[]', true),
-  ('2-5', 2, 5, '2-5', '2-5', '[]', true),
-  ('2-6k', 2, 6, '2-6看', '2-6看', '[]', true),
-  ('2-6a', 2, 6, '2-6文', '2-6文', '[]', true),
-  ('2-7', 2, 7, '2-7', '2-7', '[]', true),
-  ('3-1s', 3, 1, '3-1総', '3-1総', '[]', true),
-  ('3-1h', 3, 1, '3-1人', '3-1人', '[]', true),
-  ('3-2', 3, 2, '3-2', '3-2', '[]', true),
-  ('3-3', 3, 3, '3-3', '3-3', '[]', true),
-  ('3-4h', 3, 4, '3-4人', '3-4人', '[]', true),
-  ('3-4s', 3, 4, '3-4数', '3-4数', '[]', true),
-  ('3-5', 3, 5, '3-5', '3-5', '[]', true),
-  ('3-6s', 3, 6, '3-6数', '3-6数', '[]', true),
-  ('3-6w', 3, 6, '3-6環', '3-6環', '[]', true),
-  ('3-7k', 3, 7, '3-7看', '3-7看', '[]', true),
-  ('3-7s', 3, 7, '3-7総', '3-7総', '[]', true),
-  ('3-7h', 3, 7, '3-7人', '3-7人', '[]', true),
-  ('3-8s', 3, 8, '3-8総', '3-8総', '[]', true),
-  ('3-8h', 3, 8, '3-8人', '3-8人', '[]', true)
-ON CONFLICT (id) DO NOTHING;
+-- サーバー側（コード）に初期名を固定しないため、この DDL に初期 INSERT 句は置かない。
+-- 対象テーブルが空のときだけ CSV を投入する（運用で作り替えたマスタへは触らない）。
 
 UPDATE classes SET short_name = COALESCE(short_name, name) WHERE short_name IS NULL;
 
-INSERT INTO basic_rooms (id, name, room_type, seats, grades, notes)
-VALUES
-  ('room101', '普通教室1年棟', 'CLASS', 40, '[]', '1年生全クラス'),
-  ('room102', '普通教室2年棟', 'CLASS', 40, '[]', '2年生全クラス'),
-  ('room103', '普通教室3年棟', 'CLASS', 40, '[]', '3年生全クラス'),
-  ('room201', '別室1', 'CLASS', 20, '[]', '少人数・別室考査'),
-  ('room202', '別室2', 'CLASS', 20, '[]', '少人数・別室考査'),
-  ('room203', '予備教室', 'CLASS', 30, '[]', '空コマ・予備試験用'),
-  ('room301', '音楽室', 'CLASS', 60, '[]', '特別教室')
-ON CONFLICT (id) DO NOTHING;
+-- 教室マスタの初期データも CSV (data/seed/basic_rooms.csv) から投入する
 
-INSERT INTO curriculum_subjects (id, name, short_name, subject_id, grade, offerings, default_room_id, default_duration, sort_order)
-VALUES
-  ('csub101', '国語1年', '国語1年', 'ko01', 0, '[{"grade":1,"class_course_id":"1-1","room_id":"room101"},{"grade":1,"class_course_id":"1-2","room_id":"room101"},{"grade":1,"class_course_id":"1-3r","room_id":"room101"},{"grade":1,"class_course_id":"1-4a","room_id":"room101"},{"grade":1,"class_course_id":"1-5","room_id":"room101"},{"grade":1,"class_course_id":"1-6k","room_id":"room101"},{"grade":1,"class_course_id":"1-6h","room_id":"room101"}]', 'room101', 50, 0),
-  ('csub102', '数学1年', '数学1年', 'ko02', 0, '[{"grade":1,"class_course_id":"1-1","room_id":"room101"},{"grade":1,"class_course_id":"1-2","room_id":"room101"},{"grade":1,"class_course_id":"1-3r","room_id":"room101"},{"grade":1,"class_course_id":"1-4a","room_id":"room101"},{"grade":1,"class_course_id":"1-5","room_id":"room101"},{"grade":1,"class_course_id":"1-6k","room_id":"room101"},{"grade":1,"class_course_id":"1-6h","room_id":"room101"}]', 'room101', 50, 0),
-  ('csub103', '英語1年', '英語1年', 'ko03', 0, '[{"grade":1,"class_course_id":"1-1","room_id":"room101"},{"grade":1,"class_course_id":"1-2","room_id":"room101"},{"grade":1,"class_course_id":"1-3r","room_id":"room101"},{"grade":1,"class_course_id":"1-4a","room_id":"room101"},{"grade":1,"class_course_id":"1-5","room_id":"room101"},{"grade":1,"class_course_id":"1-6k","room_id":"room101"},{"grade":1,"class_course_id":"1-6h","room_id":"room101"}]', 'room101', 50, 0),
-  ('csub201', '生物2年3単位', '生物2年3単位', 'ko05', 0, '[{"grade":2,"class_course_id":"2-1","room_id":"room102"},{"grade":2,"class_course_id":"2-2","room_id":"room102"}]', 'room102', 50, 0),
-  ('csub202', '生物2年2単位', '生物2年2単位', 'ko05', 0, '[{"grade":2,"class_course_id":"2-1","room_id":"room102"},{"grade":2,"class_course_id":"2-2","room_id":"room102"}]', 'room102', 100, 0),
-  ('csub301', '数学3年理系', '数学3年理系', 'ko02', 0, '[{"grade":3,"class_course_id":"3-1r","room_id":"room103"}]', 'room103', 50, 0),
-  ('csub302', '世界史探究3年文系', '世界史探究3年文系', 'ko04', 0, '[{"grade":3,"class_course_id":"3-2a","room_id":"room103"}]', 'room103', 50, 0),
-  ('csub303', '公共全学年', '公共全学年', NULL, 0, '[]', 'room201', 50, 0)
-ON CONFLICT (id) DO NOTHING;
+-- 科目マスタの初期データも CSV (data/seed/curriculum_subjects.csv) から投入する
 
 UPDATE curriculum_subjects SET short_name = COALESCE(short_name, name);
 

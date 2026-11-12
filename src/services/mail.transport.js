@@ -626,8 +626,8 @@ export async function probeSmtp({ host, port, tlsMode = 'starttls', secure, user
   }
 }
 
-/** IMAP: フォルダのメッセージを取得する (新しい順・最大 limit 件) */
-export async function imapFetchMessages({ host, port, tlsMode, user, password, folder, limit = 50, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+/** IMAP: フォルダのメッセージを取得する (新しい順・最大 limit 件。フォルダ未指定は受信ボックス INBOX) */
+export async function imapFetchMessages({ host, port, tlsMode, user, password, folder = 'INBOX', limit = 50, timeoutMs = DEFAULT_TIMEOUT_MS }) {
   const session = new ImapSession({ host, port, tlsMode, user, password, timeoutMs });
   await session.connect();
   try {
@@ -649,8 +649,8 @@ export async function imapFetchMessages({ host, port, tlsMode, user, password, f
   }
 }
 
-/** IMAP: メッセージを既読 (\Seen) にする */
-export async function imapMarkSeen({ host, port, tlsMode, user, password, folder, uid, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+/** IMAP: メッセージを既読 (\Seen) にする (フォルダ未指定は受信ボックス INBOX) */
+export async function imapMarkSeen({ host, port, tlsMode, user, password, folder = 'INBOX', uid, timeoutMs = DEFAULT_TIMEOUT_MS }) {
   const session = new ImapSession({ host, port, tlsMode, user, password, timeoutMs });
   await session.connect();
   try {
@@ -664,8 +664,8 @@ export async function imapMarkSeen({ host, port, tlsMode, user, password, folder
   }
 }
 
-/** IMAP: 送信済みフォルダへ APPEND する (raw は RFC822 文字列) */
-export async function imapAppend({ host, port, tlsMode, user, password, folder, raw, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+/** IMAP: 送信済みフォルダへ APPEND する (raw は RFC822 文字列。フォルダ未指定は 'Sent') */
+export async function imapAppend({ host, port, tlsMode, user, password, folder = 'Sent', raw, timeoutMs = DEFAULT_TIMEOUT_MS }) {
   const session = new ImapSession({ host, port, tlsMode, user, password, timeoutMs });
   await session.connect();
   try {

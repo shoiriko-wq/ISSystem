@@ -5,8 +5,34 @@
  */
 
 import basicinfoService from '../services/basicinfo.service.js';
+import { ApiError } from '../middlewares/error.middleware.js';
 
 const KINDS = ['class', 'subject', 'room'];
+
+const SECTION_LABELS = { class: 'クラス・コース', group: '教科', subject: '科目', room: '教室' };
+
+/** /api/exam/basic-lock/:kind の kind を検証（4セクションのみ） */
+function resolveSectionKind(req) {
+  const kind = String(req.params?.kind || '').trim();
+  if (!SECTION_LABELS[kind]) {
+    throw new ApiError(400, '不明なセクション種別です（class / group / subject / room のいずれか）。');
+  }
+  return kind;
+}
+
+/** ロック状態変化を socket で通知（座席表の lock:status_changed と同一イベント） */
+function emitSectionLock(req, payload) {
+  const io = req.app ? req.app.get('io') : null;
+  if (!io) return;
+  io.emit('lock:status_changed', {
+    resourceType: 'exam_basic',
+    resourceId: `exam_basic_${payload.kind}`,
+    kind: payload.kind,
+    isLocked: payload.isLocked,
+    user_id: payload.user_id,
+    user_name: payload.user_name,
+  });
+}
 
 function emitChange(req, payload) {
   const io = req.app ? req.app.get('io') : null;
@@ -115,6 +141,38 @@ export const basicinfoController = {
         success: false,
         message: error.message || '削除に失敗しました。',
       });
+    }
+  },
+  // ===== セクション編集ロック（座席表の編集排他ロックと同一の editing_locks） =====
+  /** POST /api/exam/basic-lock/:kind — セクションの編集を開始（ロック取得＝編集可能モード） */
+  async acquireSectionLock(req, res, next) {
+    try {
+      const kind = resolveSectionKind(req);
+      const lock = await basicinfoService.lockSection(kind, req.user);
+      emitSectionLock(req, { kind, isLocked: true, user_id: req.user.id, user_name: req.user.name });
+      return res.status(200).json({
+        success: true,
+        message: `${SECTION_LABELS[kind]}を編集可能モードにしました。`,
+        data: lock,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /** DELETE /api/exam/basic-lock/:kind — セクションの編集を終了（ロック解除＝読み取り専用モード） */
+  async releaseSectionLock(req, res, next) {
+    try {
+      const kind = resolveSectionKind(req);
+      const data = await basicinfoService.unlockSection(kind, req.user);
+      emitSectionLock(req, { kind, isLocked: false, user_id: req.user.id, user_name: req.user.name });
+      return res.status(200).json({
+        success: true,
+        message: `${SECTION_LABELS[kind]}を編集ロック（読み取り専用）へ戻しました。`,
+        data,
+      });
+    } catch (error) {
+      next(error);
     }
   },
 };

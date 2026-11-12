@@ -10,6 +10,7 @@ import config from '../config/default.js';
 import app from './app.js';
 import insecureApp from './app.insecure.js';
 import { initializeDatabase, closeDatabase } from '../config/database.js';
+import { seedInitialData } from '../scripts/seed-data.js';
 import { initializeSockets } from './sockets/socket.index.js';
 import { initializeCronJobs } from './utils/cron.jobs.js';
 import { loadTlsOptions, getCaInfo } from './services/ca.service.js';
@@ -43,6 +44,18 @@ async function startServer() {
     // 1. データベース接続の初期化およびテーブル/インデックス構築
     await initializeDatabase();
     console.log('[Database] データベースの初期化と接続が完了しました。');
+
+    // 1b. 基本情報マスタ（クラス・教科・教室・科目）の初期データは data/seed/*.csv から投入する
+    //     サーバー側のコードに初期名を固定しない。対象テーブルが空のときだけ投入し、運用で作り替えたマスタには触らない。
+    try {
+      const seedResults = await seedInitialData();
+      const total = seedResults.reduce((sum, r) => sum + r.inserted, 0);
+      if (total > 0) {
+        console.log(`[Seed CSV] 初期マスタデータを投入: ${seedResults.map((r) => `${r.table}=${r.inserted}件`).join(' / ')} 合計 ${total}件`);
+      }
+    } catch (seedErr) {
+      console.warn('[Seed CSV] 初期マスタデータの投入をスキップしました:', seedErr.message);
+    }
 
     const servers = [];
 

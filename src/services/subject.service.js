@@ -7,25 +7,9 @@
 import { subjectModel, parseSubjectList } from '../models/subject.model.js';
 import { logAction } from '../models/audit.model.js';
 import { ApiError } from '../middlewares/error.middleware.js';
+import { basicinfoService } from './basicinfo.service.js';
 
 const NAME_MAX = 20;
-
-/** 初期設定（デフォルト）の教科名。これ以外の教科名は登録・改名不可 */
-export const DEFAULT_SUBJECT_NAMES = [
-  '国語',
-  '地歴公民',
-  '数学',
-  '理科',
-  '保健体育',
-  '芸術',
-  '外国語',
-  '家庭',
-  '情報',
-];
-
-function isDefaultSubject(name) {
-  return DEFAULT_SUBJECT_NAMES.some((n) => String(n).toLowerCase() === String(name).toLowerCase());
-}
 
 function isKyomu(user) {
   if (!user) return false;
@@ -46,9 +30,6 @@ function normalizeName(raw) {
   }
   if (name.length > NAME_MAX) {
     throw new ApiError(400, `教科名は${NAME_MAX}文字以内で入力してください。`);
-  }
-  if (!isDefaultSubject(name)) {
-    throw new ApiError(400, `教科名は「${DEFAULT_SUBJECT_NAMES.join('・')}」の範囲内で指定してください。`);
   }
   return name;
 }
@@ -82,6 +63,7 @@ export const subjectService = {
   /** 教科の追加 (教務部のみ) */
   async createSubject(rawName, user, { color_key = 'SLATE', sort_order = 0 } = {}) {
     ensureKyomu(user);
+    await basicinfoService.assertSectionWritable('group', user);
     const name = normalizeName(rawName);
     const names = await subjectModel.subjectNames();
     const duplicated = Array.from(names).some((n) => String(n).toLowerCase() === name.toLowerCase());
@@ -102,6 +84,7 @@ export const subjectService = {
   /** 教科の改名・色・表示順変更 (教務部のみ・改名は担当教科等へCASCADE) */
   async updateSubject(id, payload, user) {
     ensureKyomu(user);
+    await basicinfoService.assertSectionWritable('group', user);
     const names = await subjectModel.subjectNames();
 
     let name = payload.name !== undefined ? normalizeName(payload.name) : undefined;
@@ -137,13 +120,11 @@ export const subjectService = {
   /** 教科の削除 (教務部のみ・考査計画で使用中は削除不可) */
   async deleteSubject(id, user) {
     ensureKyomu(user);
+    await basicinfoService.assertSectionWritable('group', user);
     const list = await subjectModel.listSubjects();
     const target = list.find((s) => String(s.id) === String(id));
     if (!target) {
       throw new ApiError(404, '教科が見つかりません。');
-    }
-    if (isDefaultSubject(target.name)) {
-      throw new ApiError(409, `初期設定の教科「${target.name}」は削除できません。`);
     }
     if (Number(target.plan_count) > 0) {
       throw new ApiError(409, `教科「${target.name}」は考査計画で ${target.plan_count}件使用されているため削除できません。`);

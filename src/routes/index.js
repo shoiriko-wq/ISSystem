@@ -92,6 +92,12 @@ router.post('/basic-info/:kind', authenticateToken, requireKyomuRole, safe(basic
 router.put('/basic-info/:kind/:id', authenticateToken, requireKyomuRole, safe(basicinfoController?.updateItem));
 router.delete('/basic-info/:kind/:id', authenticateToken, requireKyomuRole, safe(basicinfoController?.deleteItem));
 
+// 基本情報のセクション編集ロック（座席表の編集排他ロックと同一の editing_locks）
+// 取得=編集開始（編集可能モード）、解除=編集終了（読み取り専用モード）。
+// 他教員がロック中の書き込みと再取得は 423。lock:status_changed で全員へ通知する。
+router.post('/exam/basic-lock/:kind', authenticateToken, requireKyomuRole, safe(basicinfoController?.acquireSectionLock));
+router.delete('/exam/basic-lock/:kind', authenticateToken, requireKyomuRole, safe(basicinfoController?.releaseSectionLock));
+
 // エイリアス（同じレート制限を適用）
 router.post('/auth/register', authIpLimiter, registerInvitationLimiter, safe(authController?.registerWithInvitation));
 router.post('/auth/reset-password', authIpLimiter, resetInvitationLimiter, safe(authController?.resetPasswordWithInvitation));

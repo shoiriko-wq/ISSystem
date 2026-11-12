@@ -12,7 +12,7 @@ import { refreshLucideIcons, showToast } from '../../ui-helpers.js';
 import { socketClient } from '../../socket.js';
 import { examStore, examApi, loadBoard, resolveActiveExamId, isKyomuUser, syncRoleKyomu } from './exam.shared.js';
 import { renderPlanTab, bindPlanTab } from './exam.plan.ui.js';
-import { renderBasicTab, bindBasicTab } from './exam.basic.ui.js';
+import { renderBasicTab, bindBasicTab, releaseBasicLocks } from './exam.basic.ui.js';
 import { renderDecisionTab, bindDecisionTab } from './exam.decision.ui.js';
 import { renderTimetableTab, bindTimetableTab, resetTimetableState } from './exam.timetable.ui.js';
 import { renderRoomTab, bindRoomTab } from './exam.room.ui.js';
@@ -140,6 +140,7 @@ export function initExamModule() {
     const btn = e.target.closest('[data-subtab]');
     if (!btn) return;
     examStore.sub = btn.dataset.subtab;
+    if (examStore.sub !== 'basic') releaseBasicLocks();   // 画面を離れるときは自分の編集ロックを返す
     if (examStore.sub === 'timetable') resetTimetableState();
     renderSubTabs();
     renderActivePanel();
@@ -161,6 +162,19 @@ export function initExamModule() {
     if (state.currentUser && view && !view.classList.contains('hidden')) {
       reload();
     }
+  });
+
+  // 基本情報のセクション編集ロック変化（座席表の lock:status_changed と同一イベント）を板へ反映する
+  socketClient.on('lock:status_changed', (payload) => {
+    if (payload?.resourceType !== 'exam_basic') return;
+    const view = document.getElementById('view-exam');
+    if (!state.currentUser || !view || view.classList.contains('hidden')) return;
+    const locks = examStore.board?.basic_info?.locks;
+    if (!locks) return;
+    const kind = payload.kind;
+    if (payload.isLocked) locks[kind] = { user_id: payload.user_id, user_name: payload.user_name };
+    else delete locks[kind];
+    if (examStore.sub === 'basic') renderActivePanel();
   });
 
   renderHeader();

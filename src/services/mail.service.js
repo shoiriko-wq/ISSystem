@@ -386,7 +386,7 @@ export const mailService = {
         tlsMode: p.imapTls,
         user: p.email,
         password: p.password,
-        mailbox: p.imapFolder,
+        folder: p.imapFolder,
         timeoutMs: p.timeoutMs,
       });
     } catch (err) {
@@ -492,7 +492,7 @@ export const mailService = {
           tlsMode: p.imapTls,
           user: p.email,
           password: p.password,
-          mailbox: p.sentFolder,
+          folder: p.sentFolder,
           raw,
           timeoutMs: p.timeoutMs,
         });
@@ -530,7 +530,7 @@ export const mailService = {
           tlsMode: p.imapTls,
           user: p.email,
           password: p.password,
-          mailbox: p.imapFolder,
+          folder: p.imapFolder,
           uid: row.uid,
           timeoutMs: p.timeoutMs,
         });

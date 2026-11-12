@@ -25,7 +25,6 @@ logs/
 scripts/output/
 # 検証用一時成果物と実行時データ (Gitに含めない・コードが必要時に作成する)
 data/
-prompt.txt
 nohup.out
 *.tmp
 tmp-probe.mjs

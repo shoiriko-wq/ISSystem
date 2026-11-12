@@ -2,8 +2,11 @@
  * ISSystem 定期考査 基本情報マスタ UI (教務部 KYOMU)
  * 登録順：1. クラス・コース 2. 教科 3. 科目（教科・科目名・略称 × 実施クラス・コース） 4. 教室
  * クラスとコースは分離せず「1-1」「1-3理」「1-6看」「1-6保育」のような学校固有の名称を直接入力する。
- * 「行を追加」は未入力の行を表の最上部に1件だけ出す（長い表で下までスクロールする必要がない）。
- * 未入力の行が1件表示されている間は「行を追加」は押せない（ボタンは無効になる）。登録済み行は通常の順（学年順・教科順）で並ぶ。
+ * 「行を追加」は未入力の行を表の最上部に足す（長い表で下までスクロールする必要がない）。何件でも連続して追加できる。
+ * 「行を追加」ボタンは常に使える（未入力の行の件数で無効にならない）。登録済み行は通常の順（学年順・教科順）で並ぶ。
+ * 各項目（クラス・コース／教科／科目／教室）の編集はセクションタイトル部の編集ロックトグルで開く。
+ * 既定は読み取り専用で、ロック中は入力欄・行追加・削除・実施クラス・コースチップが操作不能。
+ * ロックは server の editing_locks（座席表と同一の仕組み）。他教員が編集中はトグルに「他: 名前」が出、書き込みは 423 で守られる。
  * 行の「保存」ボタンは無い。入力欄を書き終えて焦点が行の外へ移った瞬間・実施クラス/コースの選択を終えた瞬間に自動登録する
  * （焦点が行内の次の入力欄へ移った間は書き込まない。内容が変わっていない行も書き込まない）。
  * 科目は登録済み教科を選択し、教科順にソートして表示する（学年・表示順・標準試験時間・標準教室の項目は持たない）。
@@ -12,7 +15,7 @@
  */
 
 import { escapeHTML, refreshLucideIcons, showToast } from '../../ui-helpers.js';
-import { examStore, examApi, sectionCard, isKyomuUser } from './exam.shared.js';
+import { examStore, examApi, sectionCard, isKyomuUser, sectionLockState } from './exam.shared.js';
 
 const GRADE_OPTS = [[1, '1年'], [2, '2年'], [3, '3年']];
 const KIND_LABELS = { class: 'クラス・コース', group: '教科', subject: '科目', room: '教室' };
@@ -22,6 +25,32 @@ const API_BASE = {
   subject: '/basic-info/subject',
   room: '/basic-info/room',
 };
+/** セクション単位の編集ロック（座席表の編集排他ロックと同一のサーバー仕組み editing_locks を使う）。
+ *  状態は server が返す board.basic_info.locks が真。トグルは POST / DELETE /api/exam/basic-lock/:kind を叩く。
+ *  既定は誰もロックしていない＝読み取り専用。トグルで編集可能（ロック取得）⇔ 編集ロック（解放）。 */
+
+/** 指定セクションが編集ロック中か（教務権限の有無にかかわらず、既定は編集ロック） */
+function isLocked(kind) {
+  return sectionLockState(kind) !== 'mine';
+}
+
+/** セクションタイトル部の編集ロックトグル（教務権限者にだけ出す） */
+function lockButtonHtml(kind, kyomu) {
+  if (!kyomu) return '';
+  const locked = isLocked(kind);
+  const st = sectionLockState(kind);
+  const holder = examStore.board?.basic_info?.locks?.[kind]?.user_name || '';
+  const label = KIND_LABELS[kind];
+  return `<button id="basic-lock-${kind}" data-act="lock" data-lock-kind="${kind}" type="button"
+    class="${locked ? 'btn-secondary' : 'btn-primary'} py-1 px-3 text-[11px] font-bold flex items-center gap-1 shrink-0"
+    title="${st === 'mine' ? 'クリックで編集ロック（読み取り専用）へ戻します' : st === 'other' ? '他の教員（' + holder + '）が編集中' : 'クリックで編集可能モードへ'}"
+    aria-label="${label}の編集ロック切り替え">
+    <i data-lucide="${locked ? 'lock' : 'lock-open'}" class="w-3.5 h-3.5"></i>
+    <span>${locked ? '編集ロック' : '編集可能'}</span>
+    ${st === 'other' ? `<span class="text-[10px] text-warning-strong">他: ${escapeHTML(holder)}</span>` : ''}
+  </button>`;
+}
+
 const USAGE_LABELS = {
   plans: '実施科目',
   offerings: '開講科目',
@@ -107,6 +136,8 @@ function bindClassCourseSelection(panel, sig, onSelectionEnd) {
   panel.addEventListener('pointerdown', (e) => {
     const chip = e.target.closest('[data-cc]');
     if (!chip) return;
+    const chipRow = chip.closest('tr[data-kind]');
+    if (chipRow && isLocked(chipRow.dataset.kind)) return;   // 編集ロック中はクラス・コース選択を変えない
     e.preventDefault();
     const list = chip.closest('.cc-list');
     if (e.shiftKey && anchor && list === anchor.closest('.cc-list')) {
@@ -253,27 +284,49 @@ function usageNote(counts) {
   return parts.join(' / ');
 }
 
-/** 未入力の行か（「行を追加」で作った行は data-id が空 = サーバーにまだ登録されていない） */
-function isBlankRow(tr) {
-  return Boolean(tr.dataset.kind) && !tr.dataset.id;
-}
-
-/** テーブルに未入力の行が1件表示されているか */
-function hasBlankRow(tbody) {
-  return [...tbody.querySelectorAll('tr[data-kind]')].some(isBlankRow);
-}
-
-/** 「行を追加」ボタンの状態を整える（未入力の行が1件出ている間は押しても機能しない＝無効化） */
+/** 「行を追加」ボタンの状態を整える（編集ロック中は無効、編集可能モードなら未入力の行の件数にかかわらず使える） */
 function syncAddButton(panel, kind) {
   const btn = panel.querySelector(`#basic-add-${kind}`);
-  const tbody = panel.querySelector(`#basic-body-${kind}`);
   if (!btn) return;
-  const blocked = tbody ? hasBlankRow(tbody) : false;
-  btn.disabled = blocked;
-  btn.setAttribute('aria-disabled', String(blocked));
-  btn.title = blocked
-    ? '未入力の行が1件表示中です。名前を書き終えて焦点が別へ移ると自動登録され、行を追加できます'
-    : '未入力の行を1件、表の最上部に追加します';
+  const locked = isLocked(kind);
+  btn.disabled = locked;
+  btn.setAttribute('aria-disabled', String(locked));
+  btn.title = locked
+    ? '編集ロック中（タイトル部の「編集可能」で編集できます）'
+    : '未入力の行を表の最上部に追加します（何件でも連続して追加できます）';
+}
+
+/** ロック状態をセクション実枠へ反映する（入力欄・選択欄・削除ボタン・クラス・コースチップ・行追加ボタン） */
+function applyLockState(panel, kind) {
+  const locked = isLocked(kind);
+
+  const lockBtn = panel.querySelector(`#basic-lock-${kind}`);
+  if (lockBtn) {
+    lockBtn.classList.toggle('btn-primary', !locked);
+    lockBtn.classList.toggle('btn-secondary', locked);
+    const icon = lockBtn.querySelector('i[data-lucide]');
+    if (icon) icon.setAttribute('data-lucide', locked ? 'lock' : 'lock-open');
+    const label = lockBtn.querySelector('span');
+    if (label) label.textContent = locked ? '編集可能' : '編集ロック';   // ラベルは押せる動作（読み取り専用なら「編集可能」）
+    lockBtn.title = locked ? 'クリックで編集可能モードへ' : 'クリックで編集ロック（読み取り専用）へ';
+  }
+
+  for (const tr of panel.querySelectorAll(`#basic-body-${kind} tr[data-kind="${kind}"]`)) {
+    tr.querySelectorAll('input, select').forEach((el) => {
+      el.disabled = locked;
+    });
+    tr.querySelectorAll('button[data-act="delete"]').forEach((b) => {
+      b.disabled = locked;
+    });
+    const list = tr.querySelector('.cc-list');
+    if (list) {
+      list.classList.toggle('is-locked', locked);
+      list.setAttribute('aria-disabled', String(locked));
+    }
+  }
+
+  syncAddButton(panel, kind);
+  refreshLucideIcons();
 }
 
 const ROW_BUILDERS = {
@@ -306,6 +359,7 @@ function tableHtml(kind, title, headCells, items, renderRow, kyomu, d, hint = ''
       <tbody id="basic-body-${kind}">${rows}</tbody>
     </table></div>`,
     `<button id="basic-add-${kind}" class="btn-warning border border-warning-soft py-1 px-3 text-[11px] text-warning-strong flex items-center gap-1"><i data-lucide="plus" class="w-3.5 h-3.5"></i> 行を追加</button>`,
+    lockButtonHtml(kind, kyomu),
   );
 }
 
@@ -341,6 +395,13 @@ export function renderBasicTab(container) {
 // イベント登録 (行の追加 / 自動登録 / 削除)
 // ==========================================================
 
+/** 画面を離れるときに自分の編集ロックをすべて返す（他教員の編集を直ちに解放する） */
+export function releaseBasicLocks() {
+  Object.keys(ROW_BUILDERS).forEach((kind) => {
+    if (sectionLockState(kind) === 'mine') examApi.del(`/exam/basic-lock/${kind}`).catch(() => {});
+  });
+}
+
 export function bindBasicTab(container, reload) {
   const panel = container.querySelector('#exam-basic-panel');
   if (!panel) return;
@@ -351,6 +412,15 @@ export function bindBasicTab(container, reload) {
   const autoCtl = new AbortController();
   container.__basicAutoCtl = autoCtl;
   const sig = { signal: autoCtl.signal };
+
+  // ロックの寿命（TTL 180秒）を生かす心跳：編集可能モードのセクションを 90 秒ごとに再取得し、
+  // 自分の編集を他教員へ渡さない（パネル unbind で心跳は止まる）
+  const heartbeat = setInterval(() => {
+    Object.keys(ROW_BUILDERS).forEach((kind) => {
+      if (sectionLockState(kind) === 'mine') examApi.post(`/exam/basic-lock/${kind}`, {}).catch(() => {});
+    });
+  }, 90000);
+  autoCtl.signal.addEventListener('abort', () => clearInterval(heartbeat));
 
   const queue = [];
   let writing = false;
@@ -383,6 +453,7 @@ export function bindBasicTab(container, reload) {
     if (!tr || tr.dataset.autosaveOff === '1') return;   // 削除操作の行は書き込まない
     const kind = tr.dataset.kind;
     if (!kind || !API_BASE[kind]) return;
+    if (isLocked(kind)) return;                          // 編集ロック中は自動登録しない（読み取り専用）
     const p = collectPayload(kind, tr);
     if (!p.name) return;         // 名前が空の行（「行を追加」直後の未入力行）はまだ書き込まない
     const key = payloadKey(p);
@@ -414,18 +485,14 @@ export function bindBasicTab(container, reload) {
     markInitialKeys(panel, kind);
     syncAddButton(panel, kind);
     addBtn.addEventListener('click', () => {
-      // 未入力の行が1件表示されている間は機能しない（二重に枠を作らない）
-      if (hasBlankRow(tbody)) {
-        syncAddButton(panel, kind);
-        return;
-      }
+      if (isLocked(kind)) return;   // 編集ロック中は行を追加しない（ボタンは disabled、DOM クリックにも防御）
       const d = masterData();
       // tr の innerHTML に <tr> 文字列を入れると属性が落ちる（tr[data-kind] が無くなり自動登録・削除が効かない）
       // → tbody でパースして <tr> をそのまま受け取る
       const frag = document.createElement('tbody');
       frag.innerHTML = ROW_BUILDERS[kind](d);
       const tr = frag.firstElementChild;
-      // 未入力の行は最上部に1件だけ（長い表で下までスクロールする手間をなくす）
+      // 未入力の行は最上部に足す（何件でも連続して追加でき、長い表で下までスクロールする手間をなくす）
       const mainEl = document.querySelector('main');
       const scrollYBefore = mainEl ? mainEl.scrollTop : 0;
       tbody.prepend(tr);
@@ -444,6 +511,7 @@ export function bindBasicTab(container, reload) {
     if (!tr) return;
 
     const kind = tr.dataset.kind;
+    if (isLocked(kind)) return;   // 編集ロック中は削除しない（読み取り専用）
     const id = tr.dataset.id;
     const p = collectPayload(kind, tr);
     const label = KIND_LABELS[kind] || kind;
@@ -454,7 +522,7 @@ export function bindBasicTab(container, reload) {
         if (!id) {
           tr.remove();
           showToast(`${label}の未登録行を破棄しました。`, 'info');
-          syncAddButton(panel, kind);   // 未入力の行が消えたので「行を追加」を元に戻す
+          syncAddButton(panel, kind);   // 行の追加は常時使える（ボタン状態を念のため整える）
           return;
         }
         if (kind !== 'group') {
@@ -476,6 +544,32 @@ export function bindBasicTab(container, reload) {
       showToast(err.message, 'error');
     }
   }, sig);
+
+  // セクションタイトル部の編集ロックトグル（既定は編集ロック＝読み取り専用。トグルで編集可能 ⇔ 編集ロック）
+  Object.keys(ROW_BUILDERS).forEach((kind) => {
+    const lockBtn = panel.querySelector(`#basic-lock-${kind}`);
+    if (lockBtn) {
+      lockBtn.addEventListener('click', async () => {
+        const st = sectionLockState(kind);
+        lockBtn.disabled = true;
+        try {
+          if (st === 'mine') {
+            await examApi.del(`/exam/basic-lock/${kind}`);
+            showToast(`${KIND_LABELS[kind]}を編集ロック（読み取り専用）へ戻しました。`, 'info');
+          } else {
+            await examApi.post(`/exam/basic-lock/${kind}`, {});
+            showToast(`${KIND_LABELS[kind]}を編集可能モードへ切り替えました（今この自分だけが入力できます）。`, 'success');
+          }
+        } catch (err) {
+          showToast(err.message, 'error');
+        }
+        lockBtn.disabled = false;
+        await reload();
+        applyLockState(panel, kind);
+      }, sig);
+    }
+    applyLockState(panel, kind);   // 描画直後のロック状態（既定は編集ロック）を実枠へ反映する
+  });
 
   refreshLucideIcons();
   bindClassCourseSelection(panel, sig, queueRow);
