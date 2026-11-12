@@ -666,16 +666,35 @@ export async function probeSmtp({ host, port, tlsMode = 'starttls', secure, user
   }
 }
 
-/** IMAP: フォルダのメッセージを取得する (新しい順・最大 limit 件。フォルダ未指定は受信ボックス INBOX) */
-export async function imapFetchMessages({ host, port, tlsMode, user, password, folder = 'INBOX', limit = 50, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+/**
+ * IMAP: フォルダの全 UID を昇順 (古い順) で取得する (UID SEARCH ALL)
+ * 無限スクロールの「まだ DB に無い UID」差分判定と、過去分を取得する範囲の決定に使う。
+ */
+export async function imapSearchUids({ host, port, tlsMode, user, password, folder = 'INBOX', timeoutMs = DEFAULT_TIMEOUT_MS }) {
   const session = new ImapSession({ host, port, tlsMode, user, password, timeoutMs });
   await session.connect();
   try {
     const sel = await session.command(`SELECT ${imapQuote(folder)}`);
     if (sel.status !== 'OK') throw new Error(`フォルダ「${folder}」を開けません: ${sel.text}`);
     const search = await session.command('UID SEARCH ALL');
-    const uids = extractUids(search.all);
-    const picks = uids.slice(-limit).reverse(); // 新しい順
+    if (search.status !== 'OK') throw new Error(`UID SEARCH が失敗しました: ${search.text}`);
+    return [...new Set(extractUids(search.all))].sort((a, b) => a - b);
+  } finally {
+    await session.logout();
+  }
+}
+
+/** IMAP: メッセージを取得する (新しい順。uids 指定はその UID 群のみ、未指定はフォルダの最新 limit 件。フォルダ未指定は受信ボックス INBOX) */
+export async function imapFetchMessages({ host, port, tlsMode, user, password, folder = 'INBOX', limit = 50, uids = null, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+  const session = new ImapSession({ host, port, tlsMode, user, password, timeoutMs });
+  await session.connect();
+  try {
+    const sel = await session.command(`SELECT ${imapQuote(folder)}`);
+    if (sel.status !== 'OK') throw new Error(`フォルダ「${folder}」を開けません: ${sel.text}`);
+    // uids 指定は呼び出し側が UID 群を確定済みなので UID SEARCH 不要。未指定は検索して最新 limit 件を選ぶ
+    const picks = uids
+      ? [...uids].map((u) => Number(u)).sort((a, b) => b - a)
+      : extractUids((await session.command('UID SEARCH ALL')).all).slice(-limit).reverse(); // 新しい順
     const messages = [];
     for (const uid of picks) {
       // INTERNALDATE も併せて要求する (Date ヘッダーが欠けたメールの受信日時フォールバック用)
@@ -794,7 +813,8 @@ export async function smtpSend({ host, port, tlsMode, user, password, from, to, 
 
     reader.write('QUIT');
     try { await readSmtpReply(reader, remaining()); } catch { /* QUIT 応答が来なくても送信済み */ }
-    return `SMTP 送信完了 (${host}:${port} / ${tlsModeLabel(mode)}): 宛先 ${to.length} 件`;
+    // 成功は probeImap / probeSmtp と同じ { ok, message } 形で返す (呼び出し側は sent.ok を見るため、文字列成功は失敗扱いに化ける)
+    return { ok: true, message: `SMTP 送信完了 (${host}:${port} / ${tlsModeLabel(mode)}): 宛先 ${to.length} 件` };
   } catch (e) {
     throw new Error(`SMTP: ${e.message}`);
   } finally {

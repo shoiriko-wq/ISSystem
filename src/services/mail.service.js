@@ -9,7 +9,7 @@ import mailModel from '../models/mail.model.js';
 import auditModel from '../models/audit.model.js';
 import { ApiError } from '../middlewares/error.middleware.js';
 import {
-  probeImap, probeSmtp, imapFetchMessages, imapAppend, imapMarkSeen, smtpSend,
+  probeImap, probeSmtp, imapFetchMessages, imapAppend, imapMarkSeen, imapSearchUids, smtpSend,
   parseMessage, buildRawMessage,
   normalizeTlsMode, DEFAULT_TIMEOUT_MS,
 } from './mail.transport.js';
@@ -19,6 +19,11 @@ const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 const HOST_RE = /^[A-Za-z0-9.-]+$/;
 const MIN_PASSWORD = 5;
 const MAX_RECIPIENTS = 20;
+
+// --- 無限スクロール用ページング定数 ---
+const PAGE_SIZE = 50;         // 受信・送信ボックスの1ページ表示件数 (初期読み込みと同じ)
+const IMAP_PAGE_SIZE = 50;    // IMAP から1回に取得する件数 (過去分を遡る1ページ分)
+const IMAP_HISTORY_CAP = 400; // IMAP から取り込む受信履歴の上限 (学校メールサーバーへの負荷と初回同期時間対策)
 
 /** .env に保存されたメールサーバー初期値（GitHub にはコミットしない秘匿情報。暗号化の既定は TLS を使用しない） */
 function mailDefaults() {
@@ -154,12 +159,13 @@ const probes = {
   fetch: imapFetchMessages,
   append: imapAppend,
   markSeen: imapMarkSeen,
+  search: imapSearchUids,
   send: smtpSend,
 };
 
 /**
  * 接続プローブと送受信関数の差し替え (検証専用。引数が空なら実装へ戻す)
- * @param {{imap?: Function, smtp?: Function, fetch?: Function, append?: Function, markSeen?: Function, send?: Function}} overrides
+ * @param {{imap?: Function, smtp?: Function, fetch?: Function, append?: Function, markSeen?: Function, search?: Function, send?: Function}} overrides
  */
 export function setProbeOverrides(overrides = {}) {
   probes.imap = overrides.imap ?? probeImap;
@@ -167,6 +173,7 @@ export function setProbeOverrides(overrides = {}) {
   probes.fetch = overrides.fetch ?? imapFetchMessages;
   probes.append = overrides.append ?? imapAppend;
   probes.markSeen = overrides.markSeen ?? imapMarkSeen;
+  probes.search = overrides.search ?? imapSearchUids;
   probes.send = overrides.send ?? smtpSend;
 }
 
@@ -229,6 +236,20 @@ function requireSmtp(p) {
   if (!p.smtpHost || !p.smtpPort) {
     throw new ApiError(409, '送信サーバー (SMTP) が設定されていません。メール設定で入力してください。');
   }
+}
+
+/**
+ * SMTP 送信結果の正規化 (プローブは文字列成功でも { ok, message } でも受け取れる)
+ * 成功・失敗のどちらでも日本語メッセージが必ず付く形へ揃える (undefined が表示されない)
+ * @param {string | { ok?: boolean, message?: string }} result
+ */
+function normalizeSendResult(result) {
+  if (typeof result === 'string') return { ok: true, message: result };
+  if (!result || typeof result !== 'object') {
+    return { ok: false, message: 'SMTP サーバーから応答が取れませんでした。送信設定とサーバーの状態を確認してください。' };
+  }
+  const ok = Boolean(result.ok);
+  return { ok, message: result.message || (ok ? 'SMTP 送信完了' : '送信サーバーが拒否しました (応答メッセージなし)') };
 }
 
 /** 送信用アカウント解決 (account_id 未指定は主アカウント = 作成1件目) */
@@ -345,23 +366,30 @@ export const mailService = {
 
   /**
    * ボックス表示 (folder='inbox' 受信ボックス / 'sent' 送信ボックス。DBに保存済みだけを返す)
-   * GET /api/mail/messages?folder=inbox|sent&account_id= (account_id 未指定は主アカウント)
+   * GET /api/mail/messages?folder=inbox|sent&account_id=&limit=&before=&before_id=
+   *   limit      : 1ページ件数 (既定 PAGE_SIZE / 最大 100)
+   *   before+id   : 直前ページ最古の行のカーソル (keyset ページングで古いページを返す)
+   * 応答に total(総件数) / unread(受信ボックス全履歴の未読) / has_more(古い行が残る) / oldest(次ページカーソル) を添える
    */
-  async getInbox(user, folder = 'inbox', accountId = null) {
+  async getInbox(user, folder = 'inbox', accountId = null, options = {}) {
     const account = await resolveAccount(user, accountId);
     if (!account) {
       throw new ApiError(409, 'メール接続設定が未登録です。最初にメールアドレスとパスワードを登録してください。');
     }
 
     const normalized = folder === 'sent' ? 'sent' : 'inbox';
-    const rows = await mailModel.listMessages(account.id, normalized);
+    const limit = Math.min(100, Math.max(1, Number(options.limit) || PAGE_SIZE));
+    const cursor = options.before && options.before_id ? { received_at: options.before, id: options.before_id } : null;
+    const { rows, hasMore } = await mailModel.listMessagesPage(account.id, normalized, limit, cursor);
     const messages = rows.map(toMessageView);
-    const unread = messages.filter((m) => !m.is_read).length;
+    const total = await mailModel.countMessages(account.id, normalized);
+    const unread = normalized === 'inbox' ? await mailModel.countUnreadAccount(account.id, 'inbox') : 0;
 
-    // 最終確認時刻を記録 (監査ログ対象外)
-    await mailModel.touchLastChecked(account.id);
+    // 最終確認時刻を記録 (最初のページ読み込み時だけ。監査ログ対象外)
+    if (!cursor) await mailModel.touchLastChecked(account.id);
 
-    return { folder: normalized, account_id: account.id, messages, unread };
+    const oldest = rows.length ? { received_at: rows[rows.length - 1].received_at, id: rows[rows.length - 1].id } : null;
+    return { folder: normalized, account_id: account.id, messages, total, unread, has_more: hasMore, oldest };
   },
 
   /**
@@ -377,10 +405,12 @@ export const mailService = {
     const p = transportParams(account);
     requireImap(p);
 
+    // UID検索で「まだ DB に無い UID」を確定し、その新着 IMAP_PAGE_SIZE 件だけを取得する (読み込み済みの過去分を再取得しない)
     // 受信失敗（DNS/接続/ログイン）は 502 で返す（500 の SERVER_ERROR 相当の 502 として監査ログに記録される）
-    let fetched = [];
+    let targets = null;  // 取得する UID 群 (null = UID検索が使えない = 従来の最新件数取得)
+    let imapMore = null; // IMAP 側に未取得 UID が残るか (検索失敗時は null = 不明)
     try {
-      fetched = await probes.fetch({
+      const uids = await probes.search({
         host: p.imapHost,
         port: p.imapPort,
         tlsMode: p.imapTls,
@@ -389,6 +419,33 @@ export const mailService = {
         folder: p.imapFolder,
         timeoutMs: p.timeoutMs,
       });
+      const known = new Set(await mailModel.listStoredUids(account.id, 'inbox'));
+      const missing = uids.filter((u) => !known.has(String(u)));
+      // UID は昇順 (IMAP の UID は古い順に採番) = 末尾が新着。既定ページ分だけ残す
+      targets = missing.slice(-IMAP_PAGE_SIZE);
+      imapMore = missing.length > targets.length;
+    } catch {
+      targets = null;
+      imapMore = null;
+    }
+
+    let fetched = [];
+    try {
+      if (targets && targets.length === 0) {
+        fetched = []; // 新着なし (DB に無い UID がゼロの時は IMAP から取得しない)
+      } else {
+        fetched = await probes.fetch({
+          host: p.imapHost,
+          port: p.imapPort,
+          tlsMode: p.imapTls,
+          user: p.email,
+          password: p.password,
+          folder: p.imapFolder,
+          limit: IMAP_PAGE_SIZE,
+          uids: targets,
+          timeoutMs: p.timeoutMs,
+        });
+      }
     } catch (err) {
       throw new ApiError(502, `受信に失敗しました: ${err.message}`);
     }
@@ -416,15 +473,111 @@ export const mailService = {
 
     await mailModel.touchLastChecked(account.id);
 
-    const rows = await mailModel.listMessages(account.id, 'inbox');
+    const { rows, hasMore } = await mailModel.listMessagesPage(account.id, 'inbox', PAGE_SIZE, null);
     const messages = rows.map(toMessageView);
+    const total = await mailModel.countMessages(account.id, 'inbox');
+    const unread = await mailModel.countUnreadAccount(account.id, 'inbox');
+    const oldest = rows.length ? { received_at: rows[rows.length - 1].received_at, id: rows[rows.length - 1].id } : null;
     return {
       folder: 'inbox',
       account_id: account.id,
       messages,
-      unread: messages.filter((m) => !m.is_read).length,
+      total,
+      unread,
+      has_more: hasMore,
+      oldest,
       fetched: fetched.length,
       added,
+      imap_more: imapMore,
+    };
+  },
+
+  /**
+   * 受信ボックスの過去分取得 (スクロールで最古まで到達した時に IMAP から1ページ分を遡り DB へ書き込む)
+   * POST /api/mail/inbox/older (account_id 未指定は主アカウント)
+   * more: IMAP 側にまだ未取得 UID が残る (IMAP_HISTORY_CAP で打ち切り)
+   */
+  async fetchOlder(user, accountId = null, limit = IMAP_PAGE_SIZE) {
+    const account = await resolveAccount(user, accountId);
+    if (!account) {
+      throw new ApiError(409, 'メール接続設定が未登録です。最初にメールアドレスとパスワードを登録してください。');
+    }
+
+    const p = transportParams(account);
+    requireImap(p);
+
+    // IMAP から取り込む履歴の上限 (学校メールサーバーへの負荷と初回同期時間対策)。上限に達したら打ち切り
+    const total = await mailModel.countMessages(account.id, 'inbox');
+    const room = IMAP_HISTORY_CAP - total;
+    if (room <= 0) return { account_id: account.id, added: 0, fetched: 0, more: false, capped: true };
+
+    let uids = [];
+    try {
+      uids = await probes.search({
+        host: p.imapHost,
+        port: p.imapPort,
+        tlsMode: p.imapTls,
+        user: p.email,
+        password: p.password,
+        folder: p.imapFolder,
+        timeoutMs: p.timeoutMs,
+      });
+    } catch (err) {
+      throw new ApiError(502, `受信に失敗しました: ${err.message}`);
+    }
+
+    const known = new Set(await mailModel.listStoredUids(account.id, 'inbox'));
+    const missing = uids.filter((u) => !known.has(String(u)));
+    // UID は昇順 (IMAP の UID は古い順に採番) = 先頭が最も古い。過去分の1ページ分を選ぶ
+    const targets = missing.slice(0, Math.min(limit, room));
+    if (!targets.length) {
+      return { account_id: account.id, added: 0, fetched: 0, more: false, capped: false };
+    }
+
+    let fetched = [];
+    try {
+      fetched = await probes.fetch({
+        host: p.imapHost,
+        port: p.imapPort,
+        tlsMode: p.imapTls,
+        user: p.email,
+        password: p.password,
+        folder: p.imapFolder,
+        limit: targets.length,
+        uids: targets,
+        timeoutMs: p.timeoutMs,
+      });
+    } catch (err) {
+      throw new ApiError(502, `受信に失敗しました: ${err.message}`);
+    }
+
+    let added = 0;
+    for (const item of fetched) {
+      const existing = await mailModel.findInboxByUid(account.id, item.uid);
+      if (existing) continue;
+      // raw から解析し、項目が欠けていれば取得値・アカウントアドレス・サーバー時刻で埋める (NOT NULL 維持)
+      const parsed = parseMessage(item.raw ?? '', item.internaldate ?? item.received_at ?? null);
+      const senderEmail = (parsed.sender_email || item.sender_email || account.email_address).toLowerCase();
+      const saved = await mailModel.upsertInboxMessage({
+        account_id: account.id,
+        user_id: user.id,
+        uid: item.uid,
+        sender_name: parsed.sender_name || item.sender_name || senderEmail,
+        sender_email: senderEmail,
+        subject: parsed.subject || item.subject || '',
+        body: parsed.body ?? item.body ?? '',
+        is_read: item.seen === true,
+        received_at: parsed.received_at ?? item.received_at ?? item.internaldate ?? new Date().toISOString(),
+      });
+      if (saved) added += 1;
+    }
+
+    return {
+      account_id: account.id,
+      added,
+      fetched: fetched.length,
+      more: missing.length > targets.length,
+      capped: total + targets.length >= IMAP_HISTORY_CAP,
     };
   },
 
@@ -458,17 +611,19 @@ export const mailService = {
     // 送信失敗（DNS/接続/ログイン）は 502 で返す（500 の SERVER_ERROR 相当の 502 として監査ログに記録される）
     let sent;
     try {
-      sent = await probes.send({
-        host: p.smtpHost,
-        port: p.smtpPort,
-        tlsMode: p.smtpTls,
-        user: p.email,
-        password: p.password,
-        from: p.email,
-        to: recipients,
-        raw,
-        timeoutMs: p.timeoutMs,
-      });
+      sent = normalizeSendResult(
+        await probes.send({
+          host: p.smtpHost,
+          port: p.smtpPort,
+          tlsMode: p.smtpTls,
+          user: p.email,
+          password: p.password,
+          from: p.email,
+          to: recipients,
+          raw,
+          timeoutMs: p.timeoutMs,
+        })
+      );
     } catch (err) {
       throw new ApiError(502, `送信に失敗しました: ${err.message}`);
     }

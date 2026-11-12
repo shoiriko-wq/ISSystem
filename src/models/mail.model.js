@@ -192,6 +192,56 @@ export const mailModel = {
     return res.rows;
   },
 
+  /**
+   * メッセージのページ読み出し (無限スクロール用 keyset ページング)
+   * received_at は JST 壁時計の TIMESTAMP なので、id と組で「カーソルより古い行」を厳密に判定する。
+   * limit+1 件を读出し、余った1件で「まだ古い行がある」を判定する (余った1件は返さない)。
+   * @param {{received_at: string|Date, id: string}} [cursor] 直前ページ最古の行。未指定は最新ページ
+   * @returns {Promise<{rows: object[], hasMore: boolean}>}
+   */
+  async listMessagesPage(accountId, folder = 'inbox', limit = 50, cursor = null) {
+    const params = [String(accountId), String(folder)];
+    let where = 'account_id = ? AND folder = ?';
+    const wall = cursor ? toJstWall(cursor.received_at) : null;
+    if (cursor && wall) {
+      where += ' AND (received_at, id) < (CAST(? AS timestamp), CAST(? AS text))';
+      params.push(wall, String(cursor.id));
+    }
+    const res = await query(
+      `SELECT * FROM mail_messages WHERE ${where} ORDER BY received_at DESC, id DESC LIMIT ?`,
+      [...params, Number(limit) + 1]
+    );
+    const hasMore = res.rows.length > Number(limit);
+    return { rows: hasMore ? res.rows.slice(0, Number(limit)) : res.rows, hasMore };
+  },
+
+  /** フォルダの総件数 (無限スクロールの「全 N 件」表示用) */
+  async countMessages(accountId, folder = 'inbox') {
+    const res = await query(
+      'SELECT COUNT(*) AS count FROM mail_messages WHERE account_id = ? AND folder = ?',
+      [String(accountId), String(folder)]
+    );
+    return Number(res.rows[0]?.count) || 0;
+  },
+
+  /** 特定アカウントの受信ボックス未読数 (未読バッジは読み込み済みページだけでなく全履歴の未読を使う。is_read は INTEGER 0/1) */
+  async countUnreadAccount(accountId, folder = 'inbox') {
+    const res = await query(
+      'SELECT COUNT(*) AS count FROM mail_messages WHERE account_id = ? AND folder = ? AND is_read = 0',
+      [String(accountId), String(folder)]
+    );
+    return Number(res.rows[0]?.count) || 0;
+  },
+
+  /** 保存済み UID 一覧 (IMAP 取得の差分判定用。受信ボックス) */
+  async listStoredUids(accountId, folder = 'inbox') {
+    const res = await query(
+      'SELECT uid FROM mail_messages WHERE account_id = ? AND folder = ? AND uid IS NOT NULL',
+      [String(accountId), String(folder)]
+    );
+    return res.rows.map((r) => String(r.uid));
+  },
+
   /** 未読件数 (受信ボックス) */
   async countUnread(userId) {
     const res = await query(

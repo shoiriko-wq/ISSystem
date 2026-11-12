@@ -177,6 +177,8 @@ router.post('/mail/test', authenticateToken, safe(mailController?.testConnection
 // send は SMTP 送信 + 送信済みボックス保存 (POST body.account_id で送信元アカウントを選ぶ)
 router.get('/mail/messages', authenticateToken, safe(mailController?.getInbox));
 router.post('/mail/inbox/refresh', authenticateToken, safe(mailController?.refreshInbox));
+// 受信ボックスの過去分（無限スクロール。IMAP のまだ DB に無い UID を1ページ分取り込む）
+router.post('/mail/inbox/older', authenticateToken, safe(mailController?.loadOlderInbox));
 router.post('/mail/send', authenticateToken, safe(mailController?.sendMessage));
 router.post('/mail/messages/:id/read', authenticateToken, safe(mailController?.markMessageRead));
 

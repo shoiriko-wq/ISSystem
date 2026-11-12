@@ -85,17 +85,35 @@ export const mailController = {
 
   /**
    * ボックス表示 (folder=inbox 受信ボックス / folder=sent 送信ボックス / account_id 未指定は主アカウント)
-   * GET /api/mail/messages
+   * GET /api/mail/messages?limit=&before=&before_id=  (before+before_id は直前ページ最古の行 = 無限スクロール用カーソル)
    */
   async getInbox(req, res, next) {
     try {
       const folder = req.query.folder === 'sent' ? 'sent' : 'inbox';
-      const { folder: normalized, account_id, messages, unread } = await mailService.getInbox(
+      const { folder: normalized, account_id, messages, total, unread, has_more, oldest } = await mailService.getInbox(
         req.user,
         folder,
-        req.query.account_id ?? null
+        req.query.account_id ?? null,
+        {
+          limit: req.query.limit ?? null,
+          before: req.query.before ?? null,
+          before_id: req.query.before_id ?? null,
+        }
       );
-      return res.status(200).json({ success: true, folder: normalized, account_id, messages, unread });
+      return res.status(200).json({ success: true, folder: normalized, account_id, messages, total, unread, has_more, oldest });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * 受信ボックスの過去分取得 (IMAP に接続し、まだ DB に無い UID のうち古い1ページ分をDB保存する)
+   * POST /api/mail/inbox/older (account_id 未指定は主アカウント)
+   */
+  async loadOlderInbox(req, res, next) {
+    try {
+      const result = await mailService.fetchOlder(req.user, req.body?.account_id ?? req.query.account_id ?? null);
+      return res.status(200).json({ success: true, ...result });
     } catch (error) {
       next(error);
     }

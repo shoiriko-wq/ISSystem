@@ -27,6 +27,7 @@
  *  options: UI_BASE=https://127.0.0.1:3443  UI_USER=T2026001  UI_PASS=password123  CHROME_PATH=...
  */
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 import { query } from '../config/database.js';
@@ -37,7 +38,22 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASE = process.env.UI_BASE || 'https://127.0.0.1:3443';
 const USER = process.env.UI_USER || 'T2026001';
 const PASS = process.env.UI_PASS || 'password123';
-const CHROME = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
+
+/** ブラウザ解決（CHROME_PATH が最優先。Windows の Chrome/Edge と Linux の chrome/chromium を探す） */
+function findChrome() {
+  const candidates = [
+    process.env.CHROME_PATH,
+    'C:/Program Files/Google/Chrome/Application/chrome.exe',
+    'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+    'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+  ].filter(Boolean);
+  for (const p of candidates) if (fs.existsSync(p)) return p;
+  throw new Error('Chrome/Chromium が見つかりません。CHROME_PATH を指定してください。');
+}
+const CHROME = findChrome();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // 実行ごとに一意なURL（同一URLの共有は server が 409 で拒否するためクエリで一意化し、最後に掃除する）

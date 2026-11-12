@@ -9,12 +9,16 @@
  *  5. ユーザー指定値は初期値より優先される / レスポンスにパスワードは含まれない
  *  6. 検証後、未設定状態へ戻して .env 初期値がプリフィルされる
  * 実行: node scripts/test-mail-defaults.mjs  （ISSystem サーバーが必要）
- *  options: UI_BASE  UI_USER  UI_PASS  NODE_EXTRA_CA_CERTS（プライベートCA信頼）
+ *  options: UI_BASE  UI_USER  UI_PASS
+ *  ※ Node 側の API 呼び出しは CA を明示する（AGENTS.md 第12条）。素の fetch は自己署名チェーンで
+ *    SELF_SIGNED_CERT_IN_CHAIN になり落ちる（NODE_EXTRA_CA_CERTS は npm script に埋め込まない）。
  * NG が 1 件でもあれば exit code 1
  */
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import http from 'node:http';
+import https from 'node:https';
 import { fileURLToPath } from 'node:url';
 import config from '../config/default.js';
 
@@ -24,6 +28,38 @@ const USER = process.env.UI_USER || 'T2026001';
 const PASS = process.env.UI_PASS || 'password123';
 const MAIL_PASSWORD = 'default-check-123';
 const OVERRIDES = { imap_host: 'imap.issystem.example', imap_port: 993, smtp_host: 'smtp.issystem.example', smtp_port: 465 };
+
+const SECURE = BASE.startsWith('https:');
+const CA = SECURE ? [fs.readFileSync(path.join(ROOT, 'certs', 'issystem-ca.crt'))] : null;
+
+/** CA を渡す API 呼び出し（fetch と同じ形の res.status / res.json() を返す） */
+function caFetch(url, opts = {}) {
+  const u = new URL(url);
+  const useHttps = u.protocol === 'https:';
+  const mod = useHttps ? https : http;
+  return new Promise((resolve, reject) => {
+    const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+    const body = opts.body ? String(opts.body) : null;
+    if (body) headers['Content-Length'] = String(Buffer.byteLength(body));
+    const reqOpts = {
+      hostname: u.hostname,
+      port: u.port || (useHttps ? 443 : 80),
+      path: u.pathname + u.search,
+      method: opts.method || 'GET',
+      headers,
+    };
+    if (useHttps) reqOpts.ca = CA;
+    const r = mod.request(reqOpts, (res) => {
+      let d = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => (d += c));
+      res.on('end', () => resolve({ status: res.statusCode, text: d, json: async () => JSON.parse(d || '{}') }));
+    });
+    r.on('error', reject);
+    if (body) r.write(body);
+    r.end();
+  });
+}
 
 const failures = [];
 const check = (name, ok, detail = null) => {
@@ -40,7 +76,7 @@ const git = (args) => {
 };
 
 const login = async () => {
-  const res = await fetch(`${BASE}/api/auth/login`, {
+  const res = await caFetch(`${BASE}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ staff_code: USER, password: PASS }),
@@ -52,7 +88,7 @@ const login = async () => {
 const api = async (method, path, token, body = null) => {
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
   if (body) headers['Content-Type'] = 'application/json';
-  const res = await fetch(`${BASE}/api${path}`, {
+  const res = await caFetch(`${BASE}/api${path}`, {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
