@@ -354,6 +354,28 @@ function extractUids(text) {
   return out;
 }
 
+const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+
+/** IMAP の INTERNALDATE ("12 Nov 2026 06:29:54 +0900" / "01-Jan-2026 06:29:54 +0900") を ISO 文字列へ (解析不能は null)
+ *  引数は「INTERNALDATE "..."」を含む応答テキストでも、日付文字列だけでも使える (ISO 文字列はそのまま正規化)
+ */
+function parseInternalDate(responseText) {
+  const quoted = (/INTERNALDATE\s+"([^"]+)"/i.exec(String(responseText || '')) || [])[1];
+  const value = (quoted || String(responseText || '')).trim();
+  if (!value) return null;
+  const m = /(\d{1,2})[-\s]([A-Za-z]{3})[-\s](\d{4})\s+(\d{2}):(\d{2}):(\d{2})\s+([+-]\d{4})/.exec(value);
+  if (m) {
+    const month = MONTHS[m[2].toLowerCase()];
+    if (month) {
+      const iso = `${m[3]}-${String(month).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}T${m[4]}:${m[5]}:${m[6]}${m[7][0]}${m[7].slice(1, 3)}:${m[7].slice(3, 5)}`;
+      const ms = Date.parse(iso);
+      if (!Number.isNaN(ms)) return new Date(ms).toISOString();
+    }
+  }
+  const direct = Date.parse(value);
+  return Number.isNaN(direct) ? null : new Date(direct).toISOString();
+}
+
 /** IMAP の文字列引数エスケープ */
 function imapQuote(value) {
   return `"${String(value).replace(/[\\"]/g, (m) => `\\${m}`)}"`;
@@ -412,12 +434,28 @@ export function encodeHeaderWord(text) {
   return words.join(' ');
 }
 
-/** RFC822 メッセージを解析して受信ボックス用の形へ戻す */
-export function parseMessage(raw) {
+const TZ_ABBREVS = { ut: 0, utc: 0, gmt: 0, est: -5, edt: -4, cst: -6, cdt: -5, mst: -7, mdt: -6, pst: -8, pdt: -7 };
+
+/** RFC2822 の Date ヘッダー ("Mon, 12 Nov 2026 10:00:00 +0900") を絶対時刻へ変換する
+ *  ※ V8 は Date.parse で "+0900" 形式の数値オフセットを無視して UTC 扱いにすることがあるため自前解析 */
+function parseRfc2822Date(text) {
+  const m = /(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?\s*([+-]\d{4}|[A-Za-z]{3,4})/.exec(String(text || ''));
+  if (!m) return null;
+  const month = MONTHS[m[2].toLowerCase()];
+  if (!month) return null;
+  const offset = /^[+-]\d{4}$/.test(m[7])
+    ? (m[7][0] === '-' ? -1 : 1) * (parseInt(m[7].slice(1, 3), 10) * 60 + parseInt(m[7].slice(3, 5), 10))
+    : (TZ_ABBREVS[m[7].toLowerCase()] ?? 0);
+  const ms = Date.UTC(Number(m[3]), month - 1, Number(m[1]), Number(m[4]), Number(m[5]), Number(m[6] || 0));
+  return Number.isNaN(ms) ? null : new Date(ms - offset * 60000).toISOString();
+}
+
+/** RFC822 メッセージを解析して受信ボックス用の形へ戻す (internaldate は Date ヘッダー欠損時のフォールバック) */
+export function parseMessage(raw, internaldate = null) {
   const text = String(raw || '');
-  const sep = text.search(/\r?\n\r?\n/);
-  const headerPart = sep >= 0 ? text.slice(0, sep) : text;
-  const bodyPart = sep >= 0 ? text.slice(sep + (text[sep + 1] === '\n' ? 2 : 3)) : '';
+  const sepMatch = /\r?\n\r?\n/.exec(text);
+  const headerPart = sepMatch ? text.slice(0, sepMatch.index) : text;
+  const bodyPart = sepMatch ? text.slice(sepMatch.index + sepMatch[0].length) : '';
 
   const headers = {};
   for (const line of headerPart.replace(/\r\n[ \t]/g, ' ').split(/\r\n|\n/)) {
@@ -468,14 +506,16 @@ export function parseMessage(raw) {
   const addr = (/<([^>]+)>/g.exec(fromRaw) || [])[1] || fromRaw.trim();
   const name = fromRaw.replace(/<[^>]*>/, '').trim() || addr;
 
-  const dateMs = Date.parse(headers['date'] || '');
+  // 受信日時は Date ヘッダー優先。Date が解析不能なら IMAP INTERNALDATE をフォールバックへ使う
+  const dateIso = parseRfc2822Date(headers['date'] || '');
+  const receivedAt = dateIso ?? parseInternalDate(internaldate);
 
   return {
-    from_name: name,
-    from_email: addr.toLowerCase(),
+    sender_name: name,
+    sender_email: addr.toLowerCase(),
     subject: decodeHeaderWord(headers['subject'] || ''),
     body: bodyText.replace(/\r\n/g, '\n').replace(/\s+$/, ''),
-    date: Number.isNaN(dateMs) ? null : new Date(dateMs).toISOString(),
+    received_at: receivedAt,
   };
 }
 
@@ -638,10 +678,14 @@ export async function imapFetchMessages({ host, port, tlsMode, user, password, f
     const picks = uids.slice(-limit).reverse(); // 新しい順
     const messages = [];
     for (const uid of picks) {
-      const fetched = await session.command(`UID FETCH ${uid} (FLAGS BODY.PEEK[])`);
+      // INTERNALDATE も併せて要求する (Date ヘッダーが欠けたメールの受信日時フォールバック用)
+      const fetched = await session.command(`UID FETCH ${uid} (FLAGS INTERNALDATE BODY.PEEK[])`);
       if (fetched.status !== 'OK') continue;
       const flags = (/FLAGS \(([^)]*)\)/i.exec(fetched.all) || [])[1] || '';
-      messages.push({ uid, seen: /\\Seen/i.test(flags), ...parseMessage(fetched.literal || '') });
+      const raw = fetched.literal || '';
+      const internaldate = parseInternalDate(fetched.all);
+      // raw と解析済み項目の両方を返す (受信日時も項目名で返す)
+      messages.push({ uid, seen: /\\Seen/i.test(flags), raw, internaldate, ...parseMessage(raw, internaldate) });
     }
     return messages;
   } finally {

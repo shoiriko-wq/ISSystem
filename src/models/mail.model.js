@@ -6,6 +6,21 @@
 import crypto from 'node:crypto';
 import { query } from '../../config/database.js';
 import config from '../../config/default.js';
+import { nowIso } from '../utils/db.js';
+
+/** TIMESTAMP(タイムゾーン無し)列は JST 壁時計で保存する (UTC 壁時計を入れると JST 0時以降で日付が1日ずれる)
+ *  'YYYY-MM-DD HH:MM:SS' を返す。解析不能なら null。
+ */
+function toJstWall(value) {
+  if (value == null) return null;
+  const wall = (d) => (Number.isNaN(d.getTime()) ? null : d.toLocaleString('sv-SE', { timeZone: 'Asia/Tokyo' }).replace('T', ' ').substring(0, 19));
+  if (value instanceof Date) return wall(value);
+  const text = String(value).trim();
+  if (!text) return null;
+  // JST 壁時計の文字列 ('2026-11-12 10:00:00' など) はそのまま使う
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/.test(text)) return text.replace('T', ' ');
+  return wall(new Date(text));
+}
 
 const ALGO = 'aes-256-gcm';
 
@@ -188,6 +203,8 @@ export const mailModel = {
 
   /** 受信ボックスへメールを保存する (アカウント + IMAP UID で重複挿入を防ぐ) */
   async upsertInboxMessage({ account_id, user_id, uid, sender_name, sender_email, subject, body, is_read, received_at }) {
+    // received_at / sender_* は NOT NULL。日時が解析不能ならサーバー時刻、差出人が空なら空文字で埋める
+    const receivedAt = toJstWall(received_at) ?? nowIso();
     const res = await query(
       `INSERT INTO mail_messages (id, user_id, account_id, folder, uid, sender_name, sender_email, subject, body, is_read, received_at)
        VALUES (?, ?, ?, 'inbox', ?, ?, ?, ?, ?, ?, ?)
@@ -204,12 +221,12 @@ export const mailModel = {
         String(user_id),
         String(account_id),
         String(uid),
-        String(sender_name),
-        String(sender_email),
-        String(subject),
-        String(body),
+        String(sender_name ?? sender_email ?? ''),
+        String(sender_email ?? ''),
+        String(subject ?? ''),
+        String(body ?? ''),
         is_read ? 1 : 0,
-        received_at,
+        receivedAt,
       ]
     );
     return res.rows[0] || null;

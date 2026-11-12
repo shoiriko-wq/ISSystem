@@ -377,7 +377,7 @@ export const mailService = {
     const p = transportParams(account);
     requireImap(p);
 
-    // 受信失敗（DNS/接続/ログイン）は 502 として扱う（500 の SERVER_ERROR 監査ログを出さない）
+    // 受信失敗（DNS/接続/ログイン）は 502 で返す（500 の SERVER_ERROR 相当の 502 として監査ログに記録される）
     let fetched = [];
     try {
       fetched = await probes.fetch({
@@ -397,16 +397,19 @@ export const mailService = {
     for (const item of fetched) {
       const existing = await mailModel.findInboxByUid(account.id, item.uid);
       if (existing) continue;
-      const parsed = parseMessage(item.raw, item.internaldate);
+      // raw から解析し、項目が欠けていれば取得値・アカウントアドレス・サーバー時刻で埋める (NOT NULL 維持)
+      const parsed = parseMessage(item.raw ?? '', item.internaldate ?? item.received_at ?? null);
+      const senderEmail = (parsed.sender_email || item.sender_email || account.email_address).toLowerCase();
       const saved = await mailModel.upsertInboxMessage({
         account_id: account.id,
         user_id: user.id,
-        sender_name: parsed.sender_name,
-        sender_email: parsed.sender_email,
-        subject: parsed.subject,
-        body: parsed.body,
-        received_at: parsed.received_at,
         uid: item.uid,
+        sender_name: parsed.sender_name || item.sender_name || senderEmail,
+        sender_email: senderEmail,
+        subject: parsed.subject || item.subject || '',
+        body: parsed.body ?? item.body ?? '',
+        is_read: item.seen === true,
+        received_at: parsed.received_at ?? item.received_at ?? item.internaldate ?? new Date().toISOString(),
       });
       if (saved) added += 1;
     }
@@ -452,7 +455,7 @@ export const mailService = {
       body: bodyText,
     });
 
-    // 送信失敗（DNS/接続/ログイン）は 502 として扱う（500 の SERVER_ERROR 監査ログを出さない）
+    // 送信失敗（DNS/接続/ログイン）は 502 で返す（500 の SERVER_ERROR 相当の 502 として監査ログに記録される）
     let sent;
     try {
       sent = await probes.send({
