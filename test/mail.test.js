@@ -128,6 +128,157 @@ describe('Mail API (/api/mail)', () => {
 });
 
 /**
+ * メール送信 (POST /api/mail/send)
+ * SMTP 成功形 (文字列 / { ok, message }) を両方受け取り、成功時は送信ボックスへ記録し、
+ * 失敗時は 502 と日本語メッセージ (undefined を出さない) で送信ボックスへ記録を残さない
+ */
+describe('Mail 送信 (POST /api/mail/send)', () => {
+  let token;
+  const sendSettings = {
+    email_address: 'send.test@issystem.example',
+    password: 'send-secret-123',
+    imap_host: 'imap.issystem.example',
+    imap_port: 993,
+    smtp_host: 'smtp.issystem.example',
+    smtp_port: 465,
+  };
+
+  const sendBody = (over = {}) => ({
+    to: 'teacher1@issystem.example',
+    subject: '出欠確認',
+    body: '5時間目の教室へ',
+    ...over,
+  });
+
+  const sentSubjects = async () => {
+    const res = await request(app).get('/api/mail/messages?folder=sent').set('Authorization', bearer(token));
+    expect(res.statusCode).toBe(200);
+    return res.body.messages.map((m) => m.subject);
+  };
+
+  beforeAll(async () => {
+    token = await loginToken(app);
+    const created = await request(app).post('/api/mail/account').set('Authorization', bearer(token)).send(sendSettings);
+    expect(created.statusCode).toBe(201);
+  });
+
+  afterAll(async () => {
+    setProbeOverrides({});
+    await request(app).delete('/api/mail/account').set('Authorization', bearer(token));
+  });
+
+  it('プローブが文字列を返す実装 (smtpSend の成功形) でも 201 になり、送信ボックスへ記録される', async () => {
+    setProbeOverrides({
+      send: async () => 'SMTP 送信完了 (mock): 宛先 1 件',
+      append: async () => true,
+    });
+
+    const res = await request(app).post('/api/mail/send').set('Authorization', bearer(token)).send(sendBody());
+    expect(res.statusCode).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(res.body.message).toBe('送信しました。');
+    expect(res.body.message_row.folder).toBe('sent');
+    expect(res.body.message_row.subject).toBe('出欠確認');
+    expect(res.body.message_row.recipients).toEqual(['teacher1@issystem.example']);
+
+    expect(await sentSubjects()).toContain('出欠確認');
+  });
+
+  it('プローブが { ok: true, message } を返す形でも 201 になる (成功形の両対応)', async () => {
+    setProbeOverrides({
+      send: async () => ({ ok: true, message: 'mock 送信完了' }),
+      append: async () => true,
+    });
+
+    const res = await request(app)
+      .post('/api/mail/send')
+      .set('Authorization', bearer(token))
+      .send(sendBody({ subject: '両対応検証' }));
+    expect(res.statusCode).toBe(201);
+    expect(res.body.message_row.subject).toBe('両対応検証');
+    expect(await sentSubjects()).toContain('両対応検証');
+  });
+
+  it('プローブが ok:false を返すと 502 で応答メッセージが付き、送信ボックスへ記録が残らない', async () => {
+    setProbeOverrides({
+      send: async () => ({ ok: false, message: 'SMTP 認証失敗 (code=535)' }),
+      append: async () => true,
+    });
+
+    const res = await request(app)
+      .post('/api/mail/send')
+      .set('Authorization', bearer(token))
+      .send(sendBody({ subject: '未送信' }));
+    expect(res.statusCode).toBe(502);
+    expect(res.body.error || res.body.message).toContain('SMTP 認証失敗');
+    expect(res.body.error || res.body.message).not.toContain('undefined');
+
+    expect(await sentSubjects()).not.toContain('未送信');
+  });
+
+  it('プローブが空虚値を返しても 502 の応答に undefined が出ない', async () => {
+    setProbeOverrides({ send: async () => undefined, append: async () => true });
+
+    const res = await request(app)
+      .post('/api/mail/send')
+      .set('Authorization', bearer(token))
+      .send(sendBody({ subject: '空虚値' }));
+    expect(res.statusCode).toBe(502);
+    const text = res.body.error || res.body.message;
+    expect(text).toContain('送信に失敗しました');
+    expect(text).not.toContain('undefined');
+
+    expect(await sentSubjects()).not.toContain('空虚値');
+  });
+
+  it('SMTP 送信の例外 (DNS・接続) は 502 で日本語メッセージがそのまま出る', async () => {
+    setProbeOverrides({
+      send: async () => { throw new Error('SMTP: サーバーへ到達できません。'); },
+      append: async () => true,
+    });
+
+    const res = await request(app)
+      .post('/api/mail/send')
+      .set('Authorization', bearer(token))
+      .send(sendBody({ subject: 'DNS失敗' }));
+    expect(res.statusCode).toBe(502);
+    expect(res.body.error || res.body.message).toContain('サーバーへ到達できません');
+
+    expect(await sentSubjects()).not.toContain('DNS失敗');
+  });
+
+  it('送信済みフォルダへの APPEND 失敗は送信成功を消さない (201 + 警告文)', async () => {
+    setProbeOverrides({
+      send: async () => ({ ok: true, message: 'mock 送信完了' }),
+      append: async () => { throw new Error('フォルダ「Sent」を開けません'); },
+    });
+
+    const res = await request(app)
+      .post('/api/mail/send')
+      .set('Authorization', bearer(token))
+      .send(sendBody({ subject: '警告付き' }));
+    expect(res.statusCode).toBe(201);
+    expect(res.body.message).toContain('送信しました');
+    expect(res.body.message).toContain('送信済みフォルダに保存できませんでした');
+    expect(await sentSubjects()).toContain('警告付き');
+  });
+
+  it('件名・本文未入力は 400 で送信しない', async () => {
+    setProbeOverrides({ send: async () => ({ ok: true, message: 'mock' }), append: async () => true });
+
+    const noSubject = await request(app).post('/api/mail/send').set('Authorization', bearer(token)).send(sendBody({ subject: '' }));
+    expect(noSubject.statusCode).toBe(400);
+    const noBody = await request(app).post('/api/mail/send').set('Authorization', bearer(token)).send(sendBody({ body: '' }));
+    expect(noBody.statusCode).toBe(400);
+  });
+
+  it('未認証では 401', async () => {
+    const noAuth = await request(app).post('/api/mail/send').send(sendBody());
+    expect(noAuth.statusCode).toBe(401);
+  });
+});
+
+/**
  * 受信ボックス (POST /api/mail/inbox/refresh)
  * IMAP 取得結果を DB へ書き込む経路。Date ヘッダー欠損・+0900 オフセット・UID 重複を扱う
  */

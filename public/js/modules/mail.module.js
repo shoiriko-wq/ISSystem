@@ -19,7 +19,10 @@ let activeAccountId = null;  // 表示中のアカウントID
 let folder = 'inbox';      // 'inbox' = 受信ボックス / 'sent' = 送信ボックス
 let inboxMessages = [];    // 受信ボックス（IMAP から取得してDBに保存済み / 表示中アカウント）
 let sentMessages = [];     // 送信ボックス（このシステムから送信したメール / 表示中アカウント）
-let messagesByAccount = {}; // accountId -> { inbox: [], sent: [] }
+// accountId -> { inbox: [], sent: [], inboxTotal, sentTotal, inboxHasMore, sentHasMore, inboxImapMore, inboxUnread, loadingOlder }
+let messagesByAccount = {};
+let listScrollTop = 0;   // 左一覧のスクロール位置（ページをAppendしても表示位置をそのまま維持する）
+let olderFetching = false; // 過去分の読み込み中（スクロールの二重発火防止）
 let selectedInboxId = null;
 let selectedSentId = null;
 let showSetupForm = true; // 初回は必ず入力フォームを表示
@@ -46,6 +49,129 @@ function currentSelectedId() {
 function setCurrentSelectedId(id) {
   if (folder === 'sent') selectedSentId = id;
   else selectedInboxId = id;
+}
+
+/** 表示中アカウントのページングストア (未初期化なら既定値で作る) */
+function ensureStore(accountId) {
+  const store = messagesByAccount[accountId] || (messagesByAccount[accountId] = { inbox: [], sent: [] });
+  if (typeof store.inboxTotal !== 'number') store.inboxTotal = store.inbox.length;
+  if (typeof store.sentTotal !== 'number') store.sentTotal = store.sent.length;
+  if (store.inboxHasMore !== true && store.inboxHasMore !== false) store.inboxHasMore = false;
+  if (store.sentHasMore !== true && store.sentHasMore !== false) store.sentHasMore = false;
+  // inboxImapMore: IMAP 側にまだ未取得の受信過去分が残る (null = 未判定 / false = 尽きた・到達不能・上限到達)
+  if (store.inboxImapMore !== true && store.inboxImapMore !== false) store.inboxImapMore = null;
+  if (typeof store.inboxUnread !== 'number') store.inboxUnread = store.inbox.filter((m) => !m.is_read).length;
+  if (store.loadingOlder !== true) store.loadingOlder = false;
+  return store;
+}
+
+/** 1ページ目（最新ページ）の結果をストアへ反映する。読み込み済みの過去ページは重複を除いて保持する */
+function applyPageOne(store, res, key) {
+  const fresh = res.messages || [];
+  const ids = new Set(fresh.map((m) => m.id));
+  store[key] = [...fresh, ...store[key].filter((m) => !ids.has(m.id))];
+  const total = typeof res.total === 'number' ? res.total : store[key].length;
+  const hasMore = res.has_more === true;
+  if (key === 'inbox') {
+    store.inboxTotal = total;
+    store.inboxHasMore = hasMore;
+    store.inboxUnread = typeof res.unread === 'number' ? res.unread : store.inbox.filter((m) => !m.is_read).length;
+    if (res.imap_more === true || res.imap_more === false) store.inboxImapMore = res.imap_more;
+  } else {
+    store.sentTotal = total;
+    store.sentHasMore = hasMore;
+  }
+}
+
+/** keyset ページングのカーソル（表示中ボックス最古の行。受信・送信ボックス共通） */
+function pageCursor(store) {
+  const list = folder === 'sent' ? store.sent : store.inbox;
+  const last = list[list.length - 1];
+  return last ? { before: last.received_at, before_id: last.id } : null;
+}
+
+/** スクロールでまだ古いメールを読み込めるか（DB に古い行が残る / 受信箱は IMAP 側に過去分が残る） */
+function canLoadOlder(store) {
+  if (!store) return false;
+  const list = folder === 'sent' ? store.sent : store.inbox;
+  if (!list.length) return false;
+  if (folder === 'sent') return store.sentHasMore === true;
+  return store.inboxHasMore === true || store.inboxImapMore === null;
+}
+
+/**
+ * 無限スクロール: 一覧を最下部までスクロールしたら古いページをAppendする（表示はそのまま、下に追加だけ）
+ * DB の受信履歴が尽きた受信箱は IMAP へ過去分を依頼し、取得できた分だけ下に足す（スクロールがシームレスに続く）
+ */
+async function loadOlderMessages() {
+  if (!account || account.needs_setup) return;
+  const accountId = activeAccountId || account.id;
+  const store = ensureStore(accountId);
+  if (olderFetching) return;
+  if (!canLoadOlder(store)) return;
+
+  olderFetching = true;
+  store.loadingOlder = true;
+  renderMailView();
+
+  try {
+    const cursor = pageCursor(store);
+    // 受信箱は DB の履歴が尽きても IMAP 側に過去分が残っていれば、その古い1ページ分を取り込む
+    if (folder === 'inbox' && store.inboxHasMore !== true && store.inboxImapMore !== false) {
+      const older = await apiPost('/mail/inbox/older', { account_id: accountId });
+      store.inboxImapMore = older.more === true;
+      if (older.capped === true) store.inboxImapMore = false; // IMAP 履歴の上限（サーバー側 IMAP_HISTORY_CAP）に達して打ち切り
+    }
+    const query = `/mail/messages?folder=${folder}&account_id=${encodeURIComponent(accountId)}&limit=${PAGE_SIZE}`
+      + (cursor ? `&before=${encodeURIComponent(cursor.before)}&before_id=${encodeURIComponent(cursor.before_id)}` : '');
+    const res = await apiGet(query);
+    const key = folder === 'sent' ? 'sent' : 'inbox';
+    const ids = new Set(store[key].map((m) => m.id));
+    for (const m of (res.messages || [])) {
+      if (!ids.has(m.id)) store[key].push(m); // 重複は足さない（新着受信でページがずれても一覧は正常）
+    }
+    if (key === 'inbox') {
+      store.inboxTotal = typeof res.total === 'number' ? res.total : store.inbox.length;
+      store.inboxHasMore = res.has_more === true;
+    } else {
+      store.sentTotal = typeof res.total === 'number' ? res.total : store.sent.length;
+      store.sentHasMore = res.has_more === true;
+    }
+  } catch (err) {
+    showToast(`過去のメールを取得できませんでした: ${err.message}`, 'error');
+    // IMAP に到達できない（DNS / 接続 / ログイン）受信箱は過去分読み込みを打ち切り、表示は止めない
+    if (folder === 'inbox') store.inboxImapMore = false;
+  } finally {
+    store.loadingOlder = false;
+    olderFetching = false;
+    renderMailView();
+  }
+}
+
+/** 一覧のスクロールを監視して最下部接近で過去分を読み込む（1ページずつAppend表示するため表示位置はそのまま） */
+function bindInfiniteScroll() {
+  const listEl = document.getElementById('mail-inbox-list');
+  if (!listEl) return;
+  // 再描画後もスクロール位置をそのまま復元する（ページAppendで表示は止めない）
+  listEl.scrollTop = listScrollTop;
+  if (listEl.dataset.scrollBound === '1') return;
+  listEl.dataset.scrollBound = '1';
+  listEl.addEventListener('scroll', () => {
+    const store = ensureStore(activeAccountId || account.id);
+    if (!canLoadOlder(store)) {
+      // 過去分が残っていない受信箱は末尾越えのスクロールを受け付けない（表示位置はそのまま）
+      listEl.scrollTop = listScrollTop;
+      return;
+    }
+    listScrollTop = listEl.scrollTop;
+    if (listEl.scrollTop + listEl.clientHeight >= listEl.scrollHeight - 40) loadOlderMessages();
+  });
+  // 画面が短くスクロールが発生しない時は、空きがあれば自動で次のページを読み込む（1ページずつAppend表示）
+  // 高さ指定(max-h)が適用された表示域に収まる時だけ発火する（スタイル適用直後は max-height が none = 発火しない）
+  const maxH = parseFloat(getComputedStyle(listEl).maxHeight);
+  if (Number.isFinite(maxH) && listEl.scrollHeight <= maxH + 1 && canLoadOlder(ensureStore(activeAccountId || account.id))) {
+    loadOlderMessages();
+  }
 }
 
 const STATUS_META = {
@@ -93,15 +219,20 @@ function formatShort(value) {
   });
 }
 
-/** 未読件数（受信ボックスだけ。送信ボックスは未読を数えない） */
+/** 未読件数（受信ボックスだけ。送信ボックスは未読を数えない。読み込み済みページだけでなく全履歴の未読を使う） */
 function unreadCount() {
+  const store = messagesByAccount[activeAccountId];
+  if (store && typeof store.inboxUnread === 'number') return store.inboxUnread;
   return inboxMessages.filter((m) => !m.is_read).length;
 }
 
-/** 全アカウントの未読合計（サイドバーバッジ用） */
+/** 全アカウントの未読合計（サイドバーバッジ用。サーバーの全履歴未読を使う。読み込み済みページだけで減らさない） */
 function totalUnread() {
-  return Object.values(messagesByAccount)
-    .reduce((sum, store) => sum + (store.inbox || []).filter((m) => !m.is_read).length, 0);
+  const stores = Object.values(messagesByAccount);
+  if (stores.length > 0 && stores.every((store) => typeof store.inboxUnread === 'number')) {
+    return stores.reduce((sum, store) => sum + store.inboxUnread, 0);
+  }
+  return stores.reduce((sum, store) => sum + (store.inbox || []).filter((m) => !m.is_read).length, 0);
 }
 
 /** サイドメニューのメール未読バッジ（全アカウント合計） */
@@ -259,6 +390,8 @@ function listHtml() {
   const isSent = folder === 'sent';
   const boxTitle = isSent ? '送信ボックス' : '受信ボックス';
   const boxIcon = isSent ? 'send' : 'inbox';
+  const store = messagesByAccount[activeAccountId] || null;
+  const total = isSent ? (store?.sentTotal ?? list.length) : (store?.inboxTotal ?? list.length);
   const headerBar = `
     <div class="flex items-center justify-between gap-2">
       <h3 class="text-xs font-bold text-main flex items-center gap-2">
@@ -303,10 +436,15 @@ function listHtml() {
     })
     .join('');
 
+  // 最下部フッター: 読み込み中はローダ行、読み込むものが尽きた受信箱・送信ボックスは1行の終了表示
+  const foot = store?.loadingOlder
+    ? '<div id="mail-list-loader" class="py-2 flex items-center justify-center gap-1.5 text-[11px] text-muted"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>過去のメールを読み込み中</div>'
+    : (canLoadOlder(store) ? '' : '<div id="mail-list-foot" class="py-2 text-center text-[10px] text-muted">これより過去のメールはありません</div>');
+
   return `
     <div class="card p-3">
       ${headerBar}
-      <div id="mail-inbox-list" class="mt-2 space-y-1.5 max-h-[70vh] overflow-y-auto">${items}</div>
+      <div id="mail-inbox-list" class="mt-2 space-y-1.5 max-h-[70vh] overflow-y-auto">${items}${foot}</div>
     </div>`;
 }
 
@@ -378,7 +516,9 @@ function accountTabsHtml() {
   const configured = accounts.filter((a) => !a.needs_setup);
   const tabs = configured.map((a) => {
     const active = a.id === activeAccountId;
-    const unread = (messagesByAccount[a.id]?.inbox || []).filter((m) => !m.is_read).length;
+    const unread = typeof messagesByAccount[a.id]?.inboxUnread === 'number'
+      ? messagesByAccount[a.id].inboxUnread
+      : (messagesByAccount[a.id]?.inbox || []).filter((m) => !m.is_read).length;
     return `
       <button type="button" class="mail-tab-btn px-4 py-2.5 flex items-center gap-2 shrink-0" data-mail-account="${a.id}" role="tab" aria-selected="${active}">
         <i data-lucide="mail" class="w-4 h-4"></i>
@@ -401,6 +541,9 @@ function accountTabsHtml() {
 
 /** ボックスタブ（受信ボックス / 送信ボックス）。1枚の実線枠、選択は青の下線 */
 function tabsHtml() {
+  const store = messagesByAccount[activeAccountId] || {};
+  const inboxCount = typeof store.inboxTotal === 'number' ? store.inboxTotal : inboxMessages.length;
+  const sentCount = typeof store.sentTotal === 'number' ? store.sentTotal : sentMessages.length;
   return `
     <div id="mail-box-tabs" class="flex rounded-lg border border-main overflow-hidden bg-surface mb-3" role="tablist" aria-label="メールボックス選択">
       <button type="button" id="mail-tab-inbox" data-mail-folder="inbox" role="tab"
@@ -472,6 +615,35 @@ function composeModalHtml() {
         </form>
       </div>
     </div>`;
+}
+
+/** 新規作成モーダルを #modal-container（body 直下）へ常設マウントし、フォーム送信をバインドする。
+ *  #view-mail は .tab-view.active の fadeIn（transform: translateY）が position:fixed 子要素の包含ボックスに
+ *  なるため、モーダルを #view-mail 内に置くとスクリーンがタブ面だけの box（実測 1180×441）に制限され、
+ *  カード上部（タイトルバー「メール新規作成」と閉じる X）が切り詰められて正しく表示されない。
+ *  施設・スケジュール・教科モジュールと同じ #modal-container へ置く（fixed が viewport 基準になる）。 */
+function mountComposeModal() {
+  const host = document.getElementById('modal-container') || document.body;
+  const existing = document.getElementById('mail-compose-modal');
+  if (existing) {
+    if (existing.parentElement !== host) host.appendChild(existing); // 旧 #view-mail 版は移設する
+    return existing;
+  }
+  host.insertAdjacentHTML('beforeend', composeModalHtml());
+  const modal = document.getElementById('mail-compose-modal');
+  const form = modal.querySelector('#mail-compose-form');
+  // モーダルは #view-mail の委譲対象外なので、フォーム送信はフォームへ直接バインドする
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    await sendComposeMessage(form);
+  });
+  refreshLucideIcons();
+  return modal;
+}
+
+/** 未設定（設定フォーム表示）時は新規作成モーダルを撤去する（アカウント全削除で残さない） */
+function unmountComposeModal() {
+  document.getElementById('mail-compose-modal')?.remove();
 }
 
 /** 暗号化モードの日本語表示 */
@@ -586,8 +758,9 @@ async function fetchInboxFromServer({ silent = false } = {}) {
   const accountId = account.id;
   try {
     const res = await apiPost('/mail/inbox/refresh', { account_id: accountId });
-    const store = messagesByAccount[accountId] || (messagesByAccount[accountId] = { inbox: [], sent: [] });
-    store.inbox = res.messages || [];
+    const store = ensureStore(accountId);
+    // 1ページ目（最新ページ）だけ更新し、読み込み済みの過去ページは重複を除いて保持する
+    applyPageOne(store, res, 'inbox');
     folder = 'inbox';
     if (accountId === account.id) {
       inboxMessages = store.inbox;
@@ -690,10 +863,13 @@ window.__mailSnap = () => ({
   serverPollMs: SERVER_POLL_MS, // サーバー側 cron の受信間隔 (src/utils/cron.jobs.js)
   socketBound,
   activeAccountId,
+  pageSize: PAGE_SIZE,
   accounts: accounts.filter((a) => !a.needs_setup).map((a) => ({
     id: a.id,
     email: a.email_address,
-    unread: (messagesByAccount[a.id]?.inbox || []).filter((m) => !m.is_read).length,
+    unread: typeof messagesByAccount[a.id]?.inboxUnread === 'number'
+      ? messagesByAccount[a.id].inboxUnread
+      : (messagesByAccount[a.id]?.inbox || []).filter((m) => !m.is_read).length,
   })),
 });
 
@@ -716,6 +892,7 @@ async function sendComposeMessage(form) {
   try {
     const res = await apiPost('/mail/send', { account_id: account.id, to, subject, body: bodyText });
     closeModal('mail-compose-modal');
+    form.reset(); // モーダルは常設なので送信後は入力欄を空へ戻す
     showToast(res.message, 'success');
     // 送信後は送信ボックスへ切り替えて記録を表示する
     await loadMailData();
@@ -746,11 +923,17 @@ export async function loadMailData() {
 
       // 全アカウントのボックスを読み込む（アカウントタブの未読表示と切替時の即表示のため）
       for (const a of configured) {
-        const store = messagesByAccount[a.id] || (messagesByAccount[a.id] = { inbox: [], sent: [] });
-        const inbox = await apiGet(`/mail/messages?folder=inbox&account_id=${encodeURIComponent(a.id)}`);
-        const sent = await apiGet(`/mail/messages?folder=sent&account_id=${encodeURIComponent(a.id)}`);
-        store.inbox = inbox.messages || [];
-        store.sent = sent.messages || [];
+        const store = ensureStore(a.id);
+        // 1ページ目は受信・送信ボックスそれぞれ50件、総件数・未読・IMAP 過去分の残存を記録する（スクロールで50件ずつAppend）
+        if (store.inbox.length === 0 && store.sent.length === 0) {
+          const inbox = await apiGet(`/mail/messages?folder=inbox&account_id=${encodeURIComponent(a.id)}&limit=${PAGE_SIZE}`);
+          const sent = await apiGet(`/mail/messages?folder=sent&account_id=${encodeURIComponent(a.id)}&limit=${PAGE_SIZE}`);
+          store.inbox = inbox.messages || [];
+          store.sent = sent.messages || [];
+          applyPageOne(store, inbox, 'inbox');
+          applyPageOne(store, sent, 'sent');
+          store.inboxImapMore = null; // IMAP 側の過去分残存は受信・過去分取得の成否で判定する
+        }
       }
 
       const store = messagesByAccount[activeAccountId];
@@ -794,7 +977,6 @@ function renderMailView() {
 
   if (configured && !showSetupForm) {
     parts.push(boxHtml());
-    parts.push(composeModalHtml());
   } else {
     const prefill = account?.email_address || account?.suggested_email || state.currentUser?.email || '';
     parts.push(setupFormHtml(prefill));
@@ -803,6 +985,11 @@ function renderMailView() {
   root.innerHTML = parts.join('');
   refreshLucideIcons();
   updateMailUnreadBadge();
+  // 新規作成モーダルは #modal-container 側で保持する（タブビュー内に置くと fixed が包含ボックスに制限される）
+  if (configured && !showSetupForm) mountComposeModal();
+  else unmountComposeModal();
+  // 一覧のスクロールで過去分をAppendする（表示位置はそのまま復元する）
+  if (configured && !showSetupForm) bindInfiniteScroll();
 }
 
 /** メールを選ぶ (左一覧 -> 右本文、受信ボックスの未読は既読記録する) */
@@ -815,6 +1002,8 @@ async function selectMessage(id) {
     try {
       await apiPost(`/mail/messages/${id}/read`);
       msg.is_read = true;
+      const store = messagesByAccount[activeAccountId];
+      if (store && typeof store.inboxUnread === 'number' && store.inboxUnread > 0) store.inboxUnread -= 1;
     } catch (err) {
       // 既読記録の失敗は表示を止めない
     }
@@ -892,11 +1081,6 @@ export function initMailModule() {
     if (e.target.id === 'mail-setup-form') {
       e.preventDefault();
       await submitSetup();
-      return;
-    }
-    if (e.target.id === 'mail-compose-form') {
-      e.preventDefault();
-      await sendComposeMessage(e.target);
     }
   });
 
@@ -914,9 +1098,10 @@ export function initMailModule() {
       if (!a) return;
       activeAccountId = id;
       account = a;
-      const store = messagesByAccount[id] || (messagesByAccount[id] = { inbox: [], sent: [] });
+      const store = ensureStore(id);
       inboxMessages = store.inbox;
       sentMessages = store.sent;
+      listScrollTop = 0; // アカウント切替は先頭へ（スクロール位置を引き継がない）
       if (!inboxMessages.some((m) => m.id === selectedInboxId)) selectedInboxId = inboxMessages[0]?.id || null;
       if (!sentMessages.some((m) => m.id === selectedSentId)) selectedSentId = sentMessages[0]?.id || null;
       renderMailView();
@@ -926,6 +1111,7 @@ export function initMailModule() {
     const tab = e.target.closest('[data-mail-folder]');
     if (tab) {
       folder = tab.getAttribute('data-mail-folder') === 'sent' ? 'sent' : 'inbox';
+      listScrollTop = 0; // ボックス切替は先頭へ（スクロール位置を引き継がない）
       renderMailView();
       return;
     }
@@ -1035,6 +1221,9 @@ async function removeAccount() {
     sentMessages = [];
     selectedInboxId = null;
     selectedSentId = null;
+    // 削除完了でフォームを閉じる（消したアカウントの編集画面に留まらず、残ったアカウントの受信箱を即表示する）
+    showSetupForm = false;
+    setupTargetId = null;
     await loadMailData();
     showToast(res.message || 'メール接続設定を削除しました', 'info');
   } catch (err) {
