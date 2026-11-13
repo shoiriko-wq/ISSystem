@@ -6,6 +6,8 @@
 import registerChatSocketHandlers from './chat.socket.js';
 import registerSeatingSocketHandlers from './seating.socket.js';
 import registerLockSocketHandlers from './lock.socket.js';
+import registerMailSocketHandlers from './mail.socket.js';
+import mailService from '../services/mail.service.js';
 import { onlineUserIds } from '../utils/presence.js';
 import {
   isSocketOriginAllowed,
@@ -56,6 +58,12 @@ export function initializeSockets(io) {
     registerChatSocketHandlers(io, socket);
     registerSeatingSocketHandlers(io, socket);
     registerLockSocketHandlers(io, socket);
+    registerMailSocketHandlers(io, socket);
+
+    // このユーザのメールアカウントの常時接続 (IMAP IDLE) 監視を開始する
+    if (userId) {
+      mailService.ensureActiveWatchForUser(userId, io);
+    }
 
     // 切断時のログ出力
     socket.on('disconnect', (reason) => {
@@ -64,6 +72,8 @@ export function initializeSockets(io) {
         // ここではシンプルに削除してブロードキャスト
         onlineUserIds.delete(userId);
         io.emit('user:presence', { userId, isOnline: false });
+        // このユーザの常時接続セッションを全て閉じる (2〜3秒で不要)
+        mailService.dropWatchForUser(userId);
       }
       console.log(`[Socket.io] クライアント切断: User ID ${userId} - Reason: ${reason}`);
     });

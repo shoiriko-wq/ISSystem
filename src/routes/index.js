@@ -179,6 +179,8 @@ router.get('/mail/messages', authenticateToken, safe(mailController?.getInbox));
 router.post('/mail/inbox/refresh', authenticateToken, safe(mailController?.refreshInbox));
 router.post('/mail/send', authenticateToken, safe(mailController?.sendMessage));
 router.post('/mail/messages/:id/read', authenticateToken, safe(mailController?.markMessageRead));
+router.post('/mail/messages/:id/body', authenticateToken, safe(mailController?.fetchMessageBody));
+router.get('/mail/messages/:id/attachment', authenticateToken, safe(mailController?.fetchMessageAttachment));
 
 // ==========================================
 // 5. 校内行事 & スケジュール API (/api/schedules)

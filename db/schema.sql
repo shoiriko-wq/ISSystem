@@ -1250,7 +1250,13 @@ CREATE TABLE IF NOT EXISTS mail_messages (
   sender_email TEXT NOT NULL,
   recipients TEXT,
   subject TEXT NOT NULL,
-  body TEXT NOT NULL,
+  -- body は本文キャッシュ。新着検知時はヘッダのみ保存し body は NULL。ユーザが詳細を開いた時に text/plain を取得して UPDATE する (TOAST が TEXT を自動圧縮)
+  body TEXT,
+  -- 添付ファイル一覧 (JSON: [{"name":"a.pdf","size":1234,"type":"application/pdf"}])。BODYSTRUCTURE から抽出、ファイル実体は DB に持たない
+  attachments TEXT NOT NULL DEFAULT '[]',
+  has_attachments INTEGER NOT NULL DEFAULT 0,
+  -- HTML 専用メールをタグ除去して保存したフラグ (プレーンテキスト化し危険要素を除去した印)
+  html_stripped INTEGER NOT NULL DEFAULT 0,
   is_read INTEGER DEFAULT 0,
   received_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1275,6 +1281,14 @@ CREATE INDEX IF NOT EXISTS idx_mail_messages_account_time ON mail_messages(accou
 -- アカウント単位の UID 重複排除（旧DBのユーザー単位 UNIQUE は撤去して置き換える）
 DROP INDEX IF EXISTS uniq_mail_messages_uid;
 CREATE UNIQUE INDEX IF NOT EXISTS uniq_mail_messages_uid ON mail_messages(account_id, folder, uid);
+
+-- 本文キャッシュ化マイグレーション (2026/11/13: 新着時はヘッダのみ保存。本文は新規作成時は NULL, 詳細閲覧時に text/plain を取得して UPDATE)
+ALTER TABLE mail_messages ALTER COLUMN body DROP NOT NULL;
+ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS attachments TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS has_attachments INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS html_stripped INTEGER NOT NULL DEFAULT 0;
+-- 本文キャッシュの夜間清理 (受信から body_cache_days 日超の受信ボックス本文だけを NULL に戻す) は cron 側で行う
+CREATE INDEX IF NOT EXISTS idx_mail_messages_received ON mail_messages(received_at);
 
 -- -------------------------------------------------------------
 -- 20. ピックアップ教育ニュースの共有リンク (news_links)

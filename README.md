@@ -53,6 +53,8 @@ npm start           # HTTPS/WSS は SSL_PORT (既定 3443)、PORT (既定 3000) 
 | `MAIL_IMAP_HOST` / `MAIL_IMAP_PORT` | 受信 (IMAP) サーバー初期値 | 未設定ユーザーのフォームプリフィルと未入力保存時のフォールバック。**Git に入れない実値は `.env` だけ** |
 | `MAIL_SMTP_HOST` / `MAIL_SMTP_PORT` | 送信 (SMTP) サーバー初期値 | 同上。143 / 25 は STARTTLS、993 / 465 は TLS 直結として扱う |
 | `MAIL_TIMEOUT_MS` | 接続テストのタイムアウト | 既定 12000 ミリ秒 |
+| `MAIL_POLL_INTERVAL_MS` | サーバー側 cron の定期受信間隔 | 既定 60000 ミリ秒（最小 15000）。クライアント側の自律受信は廃止 (2026-11-13) |
+| `MAIL_POLL_MAX_FAILURES` | 定期受信の連続失敗上限 | 既定 5。到達不能サーバーへ毎分再接続しない（受信成功でリセット） |
 
 ### アカウントのパスワード2系統
 
@@ -75,8 +77,8 @@ PGPASSWORD='otome601' psql -h localhost -p 5432 -U postgres -d issystem
 - 校内サーバーの証明書は CN 不一致・自己署名が多いため `rejectUnauthorized: false`（SNI の servername は送る）。証明書の厳密検証は行わない。
 - API: `POST /api/mail/test`。body に `password` とフォーム値を送れば未保存設定のプレテスト（DB 書き込みなし）、空なら保存済み設定でテストし `status` を更新して監査ログ `MAIL_CONNECTION_TEST` を残す。
 - **複数アカウント対応**: 1ユーザーは複数メールアカウントを登録できる（`mail_accounts` は `UNIQUE (user_id, lower(email_address))`。`mail_messages.account_id` は `ON DELETE CASCADE` でアカウントに所属し、`UNIQUE (account_id, folder, uid)` で UID 重複を排除する）。受信箱のタブ欄最上段にアカウントタブ（末尾に追加 `+` タブ）を並べ、受信/送信ボックスタブはその下段に置く。表示・取得・送信・既読・削除はすべて `account_id` で対象アカウントを指定する（未指定はそのユーザーの1件目）。ヘッダーの「接続アカウント: … / 最終受信確認: …」行は廃止した（アカウントはタブで示す）。
-- **自動受信**: メールタブ表示中は 60 秒周期 (`setInterval`) でアクティブアカウントの受信ボックスを再取得する（受信中はスキップ、受信失敗はサイレントでトーストを出さない、タブ切替と読み込み時もサイレント取得）。受信ボタンのアイコンは Lucide の `download`（`refresh-cw` は使わない）。
-- 検証: `npm run test:api:mail-test`（Jest 6項目・存在しない `issystem.example` 宛てなので接続は必ず失敗し、`status=FAILED` と成功系はプローブ差し替えで検証）と `npm run test:ui:mail`（ブラウザ 52項目：アカウントタブ・追加 `+`・タブ切替・アカウント削除・60秒定期受信フック・ダウンロードアイコン・再読み込み後継続）。
+- **自動受信（サーバー側 cron）**: 受信はサーバー側 cron（既定 60秒 = 毎分の 0秒時点、`MAIL_POLL_INTERVAL_MS`、最小 15秒）が設定済み全アカウントを `mailService.pollAllInboxes` で IMAP 取得し DB へ幂等に保存する。受信ボックスが変化したアカウントの所有者だけ `user:<id>` ルームの WSS (`mail:new_messages`) を受け取り、受信一覧カードの中身だけを無再描画で更新する（Animation 再発火抑止）。初回 poll は基準値の記録のみで通知せず、連続 5回（`MAIL_POLL_MAX_FAILURES`）失敗したアカウントは poll 状態をリセットして停止する。クライアント側の `setInterval` 自律受信（タブ非表示で停止）は廃止 (2026-11-13)。手動受信ボタンだけは IMAP (`POST /api/mail/inbox/refresh`) を使い、成否はトーストで知らせる。受信ボタンのアイコンは Lucide の `download`（`refresh-cw` は使わない）。
+- 検証: `npm run test:api:mail-test`（Jest 20項目・存在しない `issystem.example` 宛てなので接続は必ず失敗し、`status=FAILED` と成功系はプローブ差し替えで検証。サーバー側cron受信 `pollAllInboxes` の WSS 通知・受信ボックス変化検知・連続失敗5回停止・cron周期生成を含む）と `npm run test:ui:mail`（ブラウザ 54項目：アカウントタブ・追加 `+`・タブ切替・アカウント削除・WSS 通知による受信一覧カードの無再描画更新（ノード不変を実測）・ダウンロードアイコン・再読み込み後継続）。
 
 ## コマンド
 
@@ -84,16 +86,16 @@ PGPASSWORD='otome601' psql -h localhost -p 5432 -U postgres -d issystem
 | --- | --- |
 | `npm start` / `npm run dev` | サーバー起動 (HTTPS/WSS + Cron + CA配布用HTTP) |
 | `npm run cert:gen` | プライベートCAとサーバー証明書を生成（既存があればスキップ。`--force` で再発行） |
-| `npm test` | jest 統合テスト (12スイート / 150テスト、stack 秘匿 4項目 (error.middleware) + bcrypt ハッシュ非露出 (auth 8c) 含む。各スイートで pg プールを close するため `--forceExit` 不要。`pretest` がDBを作り直すので全ゲート用) |
+| `npm test` | jest 統合テスト (12スイート / 167テスト、stack 秘匿 4項目 (error.middleware) + bcrypt ハッシュ非露出 (auth 8c) 含む。各スイートで pg プールを close するため `--forceExit` 不要。`pretest` がDBを作り直すので全ゲート用) |
 | `npm run test:one -- test/<file>.test.js` | 開発中の単スイート実行（`--runInBand` 直列・`pretest` を踏まない＝DB再構築しない）。既存の seed データのまま1スイートだけ回す速い経路 |
 | `npm run api:check` | API スモークテスト (HTTPS の GET/POST/PUT/DELETE を実行しステータスを検証) |
 | `npm run test:socket-auth` | Socket 接続権限検証 (tokenless / garbage / demoトークン / 外部Origin の拒否、KYOMU・ADMIN gate、ロック自保持限定、chat メンバーシップ、職員全体グループが一覧に出ないことの 21項目。サーバー起動後に実行。Node 側通信は `ca: [certs/issystem-ca.crt]` を明示) |
 | `npm run test:rbac` | RBAC 権限検証 (`/api/users` 一覧のロール別最小化・追加 KYOMU のみ role=TEACHER 固定・削除 ADMIN のみ、招待コード発行 KYOMU/ADMIN、チャンネル削除 KYOMU/ADMIN の 17項目。TEACHER の権限昇格は 403。サーバー起動後に実行) |
 | `npm run test:ratelimit` | ログイン・招待コード レート制限検証 (不存在ユーザー 25 回失敗ログインで 401×5→429×20、失敗ログインの `LOGIN_FAILED` 監査記録、招待コード 128bit=32文字16進大写、架空コード 5 試行→429、使用済みコード 400、ADMIN 後片付けの 8項目。ユーザー単位ロックアウト 423 は `test/auth.test.js` で検証。サーバー起動後に実行) |
 | `npm run test:logsecurity` | ログ秘匿・保持検証 (404 レスポンスに stack なし、失敗ログイン 401 がアクセスログ `data/logs/access-YYYY-MM-DD.log` に記録、ログディレクトリ mode 700、アクセスログファイル mode 600、アクセスログに bcrypt ハッシュなし、ADMIN 監査 API に `LOGIN_FAILED`、監査 JSON にハッシュなし、レート制限 6回失敗=401×5+429×1 の 9項目。サーバー起動後に実行) |
-| `npm run test:api:mail-test` | メール接続テスト API 検証 (Jest `test/mail.test.js` 6項目) |
+| `npm run test:api:mail-test` | メール API 検証 (Jest `test/mail.test.js` 20項目・サーバー側cron受信の WSS 通知を含む) |
 | `npm run test:api:mail-defaults` | メール初期値 (.env プリフィル・Git 秘匿) API 検証 (12項目) |
-| `npm run test:ui:mail` | メール UI 検証 (初回設定・プリフィル・接続テスト・受信箱・複数アカウントタブ・60秒定期受信の 52項目) |
+| `npm run test:ui:mail` | メール UI 検証 (初回設定・プリフィル・接続テスト・受信箱・複数アカウントタブ・WSS 通知による受信一覧の無再描画更新の 54項目) |
 | `npm run test:ui:exambasic` | 定期考査 基本情報「3. 科目 × 実施クラス・コース」の列幅・チップ配置検証 (実施数列なし / 科目名14%・略称8% / チップ内容分63% / はみ出し0 / チップクリック・Shift範囲選択・保存反映の 4ビューポート 38項目) |
 | `npm run test:ui:examaddtop` | 考査 基本情報の「行の追加」が最上部・未入力の行1件だけ・ボタン無効（未入力の行の top が先頭：実測 487px < 保存済み行 552px < 末尾行 2426px / 行追加で画面がスクロールしない `main.scrollTop` 0→0 / ボタン disabled+aria-disabled / 2回押しても31件のまま / 保存 201→ボタン復活 / 未入力の行の削除 200→ベースライン復元 / 部屋 8→9→8 / 科目 9→10→9 / クラス 30→31→30 / 学年順＋名前順不変。クラス名は初期29名固定・学年内重複不可（409）・初期の行は削除不可（使用中の行の「削除」は使用状況照会後 DELETE 非送信、初期名の直接 DELETE は 409）の 22項目） |
 | `npm run test:ui:bulletin-search` | 職員掲示板の全日検索 UI 検証 (タイトル・本文・投稿者名を全日で検索して左列が対象日見出し付きの全日の列表になる / タイトルの `<mark>` ハイライト・件数「N 件」・行の対象日チップ / 中心日表示は「全日」になり ‹ ›・本日・日付クリック（カレンダー開閉）は disabled（data-day は維持・固定幅なので › の位置は動かず） / 結果クリックは中心日を動かさず右ペインに全文 / 検索ピルは存在しない / ←/→・T・C キーは停止 / ミニカレンダーの検索該当枠と日付セル disabled（合成クリックでも中心日は動かない） / 検索語クリアで通常表示とナビが復帰・投稿者名検索・後片付けの 23項目) |
@@ -130,7 +132,7 @@ PGPASSWORD='otome601' psql -h localhost -p 5432 -U postgres -d issystem
 | `test/exam.test.js` | 考査マスタ CRUD、教科・スロット・時間割セル、監督者配置、部屋割りのブロックソルバー、禁止時間帯、検証 API |
 | `test/absence.test.js` | 欠席・早期帰・遅刻の作成・一覧・修正・削除と期間集計 |
 | `test/schedules.test.js` | 学校日程の作成・年月一覧・当日取得・削除とカテゴリマッピング |
-| `test/mail.test.js` | メール設定保存・初期値プリフィル・接続テスト API (`status` VERIFIED/FAILED) (6項目) |
+| `test/mail.test.js` | メール設定保存・初期値プリフィル・接続テスト API (`status` VERIFIED/FAILED)・サーバー側cron受信 (`pollAllInboxes` + WSS `mail:new_messages` + 連続失敗停止) (20項目) |
 
 ## UI十条（UI契約）
 

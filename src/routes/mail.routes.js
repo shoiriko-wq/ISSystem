@@ -25,5 +25,7 @@ router.get('/mail/messages', requireAuth, mailController.getInbox);
 router.post('/mail/inbox/refresh', requireAuth, mailController.refreshInbox);
 router.post('/mail/send', requireAuth, mailController.sendMessage);
 router.post('/mail/messages/:id/read', requireAuth, mailController.markMessageRead);
+router.post('/mail/messages/:id/body', requireAuth, mailController.fetchMessageBody);
+router.get('/mail/messages/:id/attachment', requireAuth, mailController.fetchMessageAttachment);
 
 export default router;

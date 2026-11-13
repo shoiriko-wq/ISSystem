@@ -186,9 +186,22 @@ const snapshot = (page) => page.evaluate(() => {
       return at.getBoundingClientRect().bottom <= bt.getBoundingClientRect().top + 1;
     })(),
     refreshIconClass: (document.querySelector('#mail-btn-refresh svg')?.getAttribute('class') || ''),
+    boxCountText: (document.getElementById('mail-box-count')?.textContent || '').trim(),
+    inboxTabCountText: (document.getElementById('mail-inbox-count')?.textContent || '').trim(),
+    sentTabCountText: (document.getElementById('mail-sent-count')?.textContent || '').trim(),
+    listMarker: document.querySelector('#mail-inbox-list[data-ui-marker]')?.getAttribute('data-ui-marker') || '',
+    tabsMarker: document.querySelector('#mail-box-tabs[data-ui-marker]')?.getAttribute('data-ui-marker') || '',
+    tabUnreadMap: (() => {
+      const map = {};
+      document.querySelectorAll('#view-mail [data-mail-tab-unread]').forEach((el) => {
+        map[el.getAttribute('data-mail-tab-unread')] = el.textContent.trim();
+      });
+      return map;
+    })(),
     mailSnap: (() => {
       const s = window.__mailSnap ? window.__mailSnap() : null;
-      return s ? { pollMs: s.pollMs, polling: s.polling, activeAccountId: s.activeAccountId, accounts: s.accounts } : null;
+      return s ? { clientPollMs: s.clientPollMs, clientPolling: s.clientPolling, serverPollMs: s.serverPollMs,
+        socketBound: s.socketBound, activeAccountId: s.activeAccountId, accounts: s.accounts } : null;
     })(),
     headerInfo: (() => {
       const h = document.querySelector('#view-mail > div');
@@ -341,9 +354,10 @@ check('アカウントタブが受信ボックス・送信ボックスタブよ�
 check('アカウントタブの末尾にアカウント追加 (+) タブがある',
   configured.addAccountBtn === true, { addAccountBtn: configured.addAccountBtn });
 
-// 4a5. 自動受信・定期受信フック（メールタブ表示時に受信問い合わせを開始し、60秒周期で定期受信する）
-check('設定済みで定期受信フックが開始される（60秒周期。受信失敗はサイレントで表示を止めない）',
-  configured.mailSnap && configured.mailSnap.pollMs === 60000 && configured.mailSnap.polling === true &&
+// 4a5. サーバー側cron受信による WSS 通知フック（クライアント自律受信は廃止済み 2026/11/13）
+check('設定済みで WSS 通知ハンドラが登録される（60秒周期の受信はサーバー側cron。クライアント側 setInterval は無し）',
+  configured.mailSnap && configured.mailSnap.clientPollMs === null && configured.mailSnap.clientPolling === false &&
+  configured.mailSnap.serverPollMs === 60000 && configured.mailSnap.socketBound === true &&
   configured.mailSnap.activeAccountId === configured.mailSnap.accounts[0]?.id &&
   configured.toasts.every((t) => !t.includes('受信できませんでした')) &&
   configured.hasInbox === true && configured.listItems.length >= 3,
@@ -503,6 +517,40 @@ check('アカウントタブ切替で1件目の受信ボックス（3件）と�
   backFirst.detailBody.length > 40,
   { active: backFirst.accountTabActive, items: backFirst.listItems.length, detail: backFirst.detailSubject });
 
+// 4i. サーバー側cron受信 → WSS (mail:new_messages) 通知で一覧だけが無再描画に更新される
+// (実 IMAP は到達不能なので、cron が受信して DB へ保存した状態を DB 側で再現する)
+const wssAccountId = twoAccounts.mailSnap.accounts.find((a) => a.email === 'tanaka.ui@issystem.example').id;
+await page.evaluate((id) => document.querySelector(`#mail-account-tabs [data-mail-account="${id}"]`).click(), wssAccountId);
+await sleep(1200);
+await query(`INSERT INTO mail_messages (id, user_id, account_id, folder, uid, sender_name, sender_email, subject, body, is_read, received_at)
+  VALUES ('mail_kyomu01_wss', 'kyomu01', '${wssAccountId}', 'inbox', '9501', 'WSS 通知者', 'wss@issystem.example', 'WSS新着メール',
+    'サーバー側cronが受信してDBへ保存した新着メール。WSS通知で一覧だけが無再描画に更新されることを確認する本文です。', 0, '2026-11-13 09:00:00')`);
+
+// ノード作り替え (Animation 再発火) を実測するため一覧コンテナとタブ面へ識別マーカーを仕込む
+await page.evaluate(() => {
+  document.getElementById('mail-inbox-list').setAttribute('data-ui-marker', 'list');
+  document.getElementById('mail-box-tabs').setAttribute('data-ui-marker', 'tabs');
+});
+const appliedWss = await page.evaluate((payload) => window.__mailApply(payload), {
+  account_id: wssAccountId, user_id: 'kyomu01', account_email: 'tanaka.ui@issystem.example',
+  added: 1, unread: 3, total: 4, newest_subject: 'WSS新着メール', newest_sender: 'WSS 通知者',
+});
+await sleep(400);
+const afterWss = await snapshot(page);
+check('WSS 通知で受信ボックスが DB の最新へ更新される (4件・未読3・件数表示も追従)',
+  appliedWss === true && afterWss.listItems.length === 4 && afterWss.unreadBadgeText === '3' &&
+  afterWss.boxCountText.includes('全 4件 / 未読 3件') && afterWss.inboxTabCountText === '4件' &&
+  afterWss.listItems.some((i) => i.subject === 'WSS新着メール'),
+  { applied: appliedWss, items: afterWss.listItems.length, badge: afterWss.unreadBadgeText,
+    box: afterWss.boxCountText, tab: afterWss.inboxTabCountText });
+check('WSS 更新は一覧カードの中身だけを差し替える (一覧コンテナとタブ面のノードは無傷 = Animation 再発火なし)',
+  afterWss.listMarker === 'list' && afterWss.tabsMarker === 'tabs' && afterWss.detailBody.length > 40 &&
+  afterWss.tabUnreadMap[wssAccountId] === '3',
+  { listMarker: afterWss.listMarker, tabsMarker: afterWss.tabsMarker, tabUnread: afterWss.tabUnreadMap,
+    detail: afterWss.detailSubject });
+
+// 後続チェック (再読み込み後 3件・未読2) のため検証用レコードを片付ける
+await query(`DELETE FROM mail_messages WHERE id = 'mail_kyomu01_wss'`);
 // アカウント削除は表示中アカウントだけ（2件目を削除すると1件目が残る）
 const secondMailId = twoAccounts.mailSnap.accounts.find((a) => a.email === 'second.ui@issystem.example').id;
 await page.evaluate((id) => document.querySelector(`#mail-account-tabs [data-mail-account="${id}"]`).click(), secondMailId);
@@ -528,9 +576,10 @@ check('再読み込み後も設定済み', reloaded.hasInbox === true && reloade
 check('再読み込み後も左一覧と右本文',
   reloaded.listItems.length >= 3 && reloaded.detailSubject.length > 0 && reloaded.detailBody.length > 40,
   { titles: reloaded.listItems.map((i) => i.subject), detail: reloaded.detailSubject });
-check('再読み込み後もアカウントタブ・定期受信フック・ダウンロードアイコン',
+check('再読み込み後もアカウントタブ・WSS 通知ハンドラ・ダウンロードアイコン',
   reloaded.accountTabActive === 'tanaka.ui@issystem.example' && reloaded.accountTabCount === 1 &&
-  reloaded.mailSnap?.polling === true && reloaded.mailSnap?.pollMs === 60000 &&
+  reloaded.mailSnap?.socketBound === true && reloaded.mailSnap?.clientPollMs === null &&
+  reloaded.mailSnap?.serverPollMs === 60000 &&
   reloaded.refreshIconClass.includes('lucide-download'),
   { active: reloaded.accountTabActive, mailSnap: reloaded.mailSnap, icon: reloaded.refreshIconClass });
 check('接続テストの失敗状態 (status=FAILED) は再読み込み後もヘッダーに残る',

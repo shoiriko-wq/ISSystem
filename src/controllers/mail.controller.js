@@ -146,6 +146,34 @@ export const mailController = {
       next(error);
     }
   },
+
+  /**
+   * メッセージ本文の遅延取得 (未キャッシュ時は IMAP へ取りに行く)
+   * POST /api/mail/messages/:id/body
+   */
+  async fetchMessageBody(req, res, next) {
+    try {
+      const message = await mailService.getFullMessage(req.params.id, req.user);
+      return res.status(200).json({ success: true, message });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * メッセージ添付のダウンロード (section を指定)
+   * GET /api/mail/messages/:id/attachment?section=1.2
+   */
+  async fetchMessageAttachment(req, res, next) {
+    try {
+      const att = await mailService.getAttachment(req.user, req.params.id, req.query.section);
+      res.set('Content-Type', att.type || 'application/octet-stream');
+      res.set('Content-Disposition', `attachment; filename="${att.name}"`);
+      return res.status(200).send(Buffer.from(att.bytes));
+    } catch (error) {
+      next(error);
+    }
+  },
 };
 
 export default mailController;

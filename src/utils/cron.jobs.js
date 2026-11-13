@@ -8,12 +8,24 @@ import config from '../../config/default.js';
 import auditModel from '../models/audit.model.js';
 import newsService from '../services/news.service.js';
 import { cleanupAccessLogs } from './access-log.js';
+import { mailService } from '../services/mail.service.js';
+
+/**
+ * MAIL_POLL_INTERVAL_MS を node-cron の実行周期へ変換する (15秒未満は 15秒へ丸める)
+ * クライアント側の setInterval は廃止したため、受信周期はサーバー側でのみ決まる (2026/11/13)
+ */
+export function mailPollCronPattern(intervalMs) {
+  const seconds = Math.max(15, Math.round((intervalMs ?? 60000) / 1000));
+  return seconds >= 60 ? '0 * * * * *' : `*/${seconds} * * * * *`;
+}
+
 
 /**
  * ISSystem 定期バックグラウンドタスクの初期化
  * @param {import('socket.io').Server} [io] - オプションのSocket.ioインスタンス (リアルタイム通知用)
  */
 export function initializeCronJobs(io = null) {
+
   console.log('[Cron Jobs] 定期バックグラウンドタスクを初期化しています...');
 
   /**
@@ -102,6 +114,36 @@ export function initializeCronJobs(io = null) {
       console.error('[Cron Job Error] アクセスログ定期クリーンアップ中にエラーが発生しました:', error);
     }
   });
+
+  /**
+   * 4. メール常時接続 (IMAP IDLE) のアクティブ照合タスク
+   * 実行周期: MAIL_ACTIVE_SYNC_MS (既定 30000 = 30秒ごと)
+   * 接続中ユーザのアカウントのみ常時接続し、開いている間の新着は IDLE が即受信する (2〜3秒)。
+   * 本 cron はセッションの開始/停止の照合のみ行い、IMAP 取得はしない (実受信は IDLE ループ)。
+   */
+  const reconcilePattern = mailPollCronPattern(config.mail.activeSyncMs);
+
+  cron.schedule(reconcilePattern, async () => {
+    try {
+      await mailService.reconcileActiveWatchCron(io);
+    } catch (error) {
+      console.error('[Cron Mail Watch] アクティブ監視の照合中にエラーが発生しました:', error);
+    }
+  });
+
+  /**
+   * 5. 古すぎるメール本文のクリーンアップ (本文は body_cache_days 日で本文のみ削除、ヘッダと添付メタは残す)
+   * 実行周期: 毎日深夜 3:00 AM
+   */
+  cron.schedule('0 0 3 * * *', async () => {
+    try {
+      const result = await mailService.cleanupBodies();
+      console.log(`[Cron Mail Cleanup] ${config.mail.bodyCacheDays}日超のメール本文 ${result.removed} 件を削除しました。`);
+    } catch (error) {
+      console.error('[Cron Job Error] メール本文クリーンアップ中にエラーが発生しました:', error);
+    }
+  });
+
 
   console.log('[Cron Jobs] 全定期タスクの登録が完了しました。');
 }

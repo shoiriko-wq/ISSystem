@@ -152,6 +152,19 @@ const config = {
     displayName: process.env.MAIL_DISPLAY_NAME || '',
     // 接続テスト・送受信のタイムアウト (既定 12 秒)
     timeoutMs: toInt(process.env.MAIL_TIMEOUT_MS, 12000),
+    // サーバー側cronの定期受信間隔（クライアント側の setInterval は廃止 2026/11/13）
+    pollIntervalMs: toInt(process.env.MAIL_POLL_INTERVAL_MS, 60000),
+    // 到達不能サーバーへ毎分再接続しないための連続失敗上限（受信成功でリセット）
+    pollMaxFailures: toInt(process.env.MAIL_POLL_MAX_FAILURES, 5),
+    // アクティブ（接続中）ユーザのみ常時 IMAP IDLE で監視する (2026/11/13)
+    // activeSyncMs: 接続中のアカウント集合を cron で照合する周期（IMAP 取得はせず、IDLE セッションの開始/停止のみ）
+    activeSyncMs: toInt(process.env.MAIL_ACTIVE_SYNC_MS, 30000),
+    // IDLE セッションの再接続窓 (Dovecot の imap_idle_max 30分未満で自発 DONE + 再接続。乱数で負荷分散)
+    reconnectMinMs: toInt(process.env.MAIL_RECONNECT_MIN_MS, 1500000), // 25分
+    reconnectMaxMs: toInt(process.env.MAIL_RECONNECT_MAX_MS, 1740000), // 29分
+    // 本文キャッシュの夜間清理 (受信からこの日数超の受信ボックス本文だけを NULL に戻す)
+    bodyCacheDays: toInt(process.env.MAIL_BODY_CACHE_DAYS, 30),
+
   },
 
   // キャッシュ・運用制限 (仕様書 v2.1.0 準拠)

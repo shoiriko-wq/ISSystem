@@ -91,6 +91,17 @@ export const mailModel = {
     return res.rows[0] || null;
   },
 
+  /** 設定済み全アカウント (サーバー側定期受信ジョブ用 / IMAP 設定のある行のみ、登録順) */
+  async listAllAccounts() {
+    const res = await query(
+      `SELECT * FROM mail_accounts
+       WHERE imap_host IS NOT NULL AND imap_port IS NOT NULL
+       ORDER BY created_at, id`
+    );
+    return res.rows;
+  },
+
+
   /** ユーザーの登録メールアドレス (プロフィールからの初期値提示用) */
   async getUserEmail(userId) {
     const res = await query('SELECT email FROM users WHERE id = ?', [String(userId)]);
@@ -186,10 +197,20 @@ export const mailModel = {
   /** メッセージ一覧 (folder = 'inbox' 受信ボックス / 'sent' 送信ボックス / 指定アカウント / 新しい順) */
   async listMessages(accountId, folder = 'inbox', limit = 50) {
     const res = await query(
-      `SELECT * FROM mail_messages WHERE account_id = ? AND folder = ? ORDER BY received_at DESC LIMIT ?`,
+      `SELECT id, user_id, account_id, folder, uid, sender_name, sender_email, recipients, subject, attachments, has_attachments, html_stripped, is_read, received_at, created_at
+       FROM mail_messages WHERE account_id = ? AND folder = ? ORDER BY received_at DESC LIMIT ?`,
       [String(accountId), String(folder), Number(limit)]
     );
     return res.rows;
+  },
+
+  /** メッセージ 1 件 (id と user_id が一致する自分だけ。本文と添付情報を含む) */
+  async getMessageById(messageId, userId) {
+    const res = await query(
+      `SELECT * FROM mail_messages WHERE id = ? AND user_id = ? LIMIT 1`,
+      [String(messageId), String(userId)]
+    );
+    return res.rows[0] || null;
   },
 
   /** 未読件数 (受信ボックス) */
@@ -230,6 +251,58 @@ export const mailModel = {
       ]
     );
     return res.rows[0] || null;
+  },
+
+  /** 新着受信のヘッダのみ UPSERT (本文は NULL。件名・差出人・受信日時・添付有無・添付一覧のみ保存。本文は詳細閲覧時に UPDATE)
+   * 受信日時が Date ヘッダーから解析できない場合は nowIso フォールバック。account+folder+uid で重複排除。 */
+  async upsertHeader({ account_id, user_id, uid, sender_name, sender_email, subject, attachments, html_stripped, received_at }) {
+    const receivedAt = toJstWall(received_at) ?? nowIso();
+    const res = await query(
+      `INSERT INTO mail_messages (id, user_id, account_id, folder, uid, sender_name, sender_email, subject, body, attachments, has_attachments, html_stripped, is_read, received_at)
+       VALUES (?, ?, ?, 'inbox', ?, ?, ?, ?, NULL, ?, ?, ?, 0, ?)
+       ON CONFLICT (account_id, folder, uid) DO UPDATE SET
+         sender_name = EXCLUDED.sender_name,
+         sender_email = EXCLUDED.sender_email,
+         subject = EXCLUDED.subject,
+         attachments = EXCLUDED.attachments,
+         has_attachments = EXCLUDED.has_attachments,
+         html_stripped = EXCLUDED.html_stripped,
+         received_at = EXCLUDED.received_at
+       RETURNING id, account_id, folder, uid, is_read`,
+      [
+        `mail_${crypto.randomUUID()}`,
+        String(user_id),
+        String(account_id),
+        String(uid),
+        String(sender_name ?? sender_email ?? ''),
+        String(sender_email ?? '').toLowerCase(),
+        String(subject ?? ''),
+        JSON.stringify(Array.isArray(attachments) ? attachments : []),
+        Array.isArray(attachments) && attachments.length > 0 ? 1 : 0,
+        html_stripped ? 1 : 0,
+        receivedAt,
+      ]
+    );
+    return res.rows[0] || null;
+  },
+
+  /** 詳細閲覧時に本文 text/plain をキャッシュへ書き込む (body・html_stripped を UPDATE) */
+  async updateMessageBody(messageId, userId, body, html_stripped) {
+    const res = await query(
+      `UPDATE mail_messages SET body = ?, html_stripped = ? WHERE id = ? AND user_id = ? AND folder = 'inbox' RETURNING id`,
+      [String(body ?? ''), html_stripped ? 1 : 0, String(messageId), String(userId)]
+    );
+    return res.rows[0] || null;
+  },
+
+  /** 夜間清理: 受信から days 日超の受信ボックス本文だけを NULL へ戻す (詳細閲覧時に text/plain を再取得)。件名・差出人・添付有無・受信日時は保持 */
+  async nullOldBodies(days = 30) {
+    const d = Math.max(7, Number(days) || 30);
+    const res = await query(
+      `UPDATE mail_messages SET body = NULL WHERE folder = 'inbox' AND received_at < (CURRENT_TIMESTAMP - (? || ' days')::interval) AND body IS NOT NULL`,
+      [String(d)]
+    );
+    return res.rowCount ?? 0;
   },
 
   /** 送信ボックスへ送信記録を追加する */

@@ -8,6 +8,8 @@
 import { apiGet, apiPost, apiDelete } from '../api.js';
 import { escapeHTML, refreshLucideIcons, showToast, openModal, closeModal } from '../ui-helpers.js';
 import { state } from '../state.js';
+import { socketClient } from '../socket.js';
+import { switchTab } from '../main.js';
 
 const VIEW_ID = 'view-mail';
 
@@ -27,8 +29,8 @@ let testing = false;      // 接続テスト実行中（二重クリック防止
 let fetching = false;     // 受信ボックスの取得中（二重クリック防止）
 let sending = false;      // 送信中（二重クリック防止）
 
-const POLL_MS = 60000;    // 定期受信の間隔（60秒ごとに受信問い合わせ）
-let pollTimer = null;     // 定期受信タイマー
+const SERVER_POLL_MS = 60000; // サーバー側cronの定期受信間隔 (src/utils/cron.jobs.js / MAIL_POLL_INTERVAL_MS)
+let socketBound = false;      // WSS の mail:new_messages ハンドラを登録したか
 
 /** 表示中のボックス一覧 (受信 / 送信) */
 function currentList() {
@@ -262,7 +264,7 @@ function listHtml() {
       <h3 class="text-xs font-bold text-main flex items-center gap-2">
         <i data-lucide="${boxIcon}" class="w-4 h-4 text-info"></i> ${boxTitle}
       </h3>
-      <span class="text-[10px] text-muted">${isSent ? `全 ${list.length}件` : `全 ${list.length}件 / 未読 ${unreadCount()}件`}</span>
+      <span class="text-[10px] text-muted" id="mail-box-count">${isSent ? `全 ${list.length}件` : `全 ${list.length}件 / 未読 ${unreadCount()}件`}</span>
     </div>`;
 
   if (list.length === 0) {
@@ -332,6 +334,29 @@ function detailHtml() {
     ? `宛先: <span class="font-bold text-soft">${escapeHTML(msg.recipients.join(', '))}</span>`
     : `差出人: <span class="font-bold text-soft">${escapeHTML(msg.sender_name)}</span> &lt;${escapeHTML(msg.sender_email)}&gt;`;
 
+  // HTML専用メールはサーバー側でタグ除去しているため、その旨をbannerで示す
+  const htmlBanner = msg.html_stripped
+    ? '<div class="mt-3 text-[10px] text-warning leading-tight">※ HTMLメールのため、タグを除去して表示しています。</div>'
+    : '';
+
+  // 本文はまだキャッシュされていない受信メールは「読み込み中」プレースホルダ (selectMessage で遅延取得)
+  const bodyInner = msg.body
+    ? escapeHTML(msg.body)
+    : isSent
+      ? '<span class="text-muted">本文がありません。</span>'
+      : '<span class="text-muted">本文を読み込み中…</span>';
+
+  // 添付ファイルリスト (name / section。本文同様、実体は開いた時に遅延取得)
+  const atts = Array.isArray(msg.attachments) ? msg.attachments : [];
+  const attList = atts.length
+    ? `<div class="mt-3 flex flex-wrap gap-2">
+        ${atts.map((a) => `
+        <button type="button" class="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-divider bg-surface-strong text-main" data-attachment-download data-attachment-section="${escapeHTML(a.section)}" data-attachment-name="${escapeHTML(a.name)}" title="${escapeHTML(a.name)}">
+          <i data-lucide="paperclip" class="w-3 h-3"></i>${escapeHTML(a.name)}
+        </button>`).join('')}
+      </div>`
+    : '';
+
   return `
     <div class="card p-4" id="mail-detail">
       <div class="flex items-start justify-between gap-3">
@@ -342,7 +367,9 @@ function detailHtml() {
         <span>${who}</span>
         <span id="mail-detail-datetime" class="font-mono">${isSent ? '送信日時' : '受信日時'}: ${formatDateTime(msg.received_at)}</span>
       </div>
-      <div id="mail-detail-body" class="mt-3 pt-3 border-t border-divider text-xs text-main leading-relaxed whitespace-pre-wrap">${escapeHTML(msg.body)}</div>
+      ${htmlBanner}
+      <div id="mail-detail-body" class="mt-3 pt-3 border-t border-divider text-xs text-main leading-relaxed whitespace-pre-wrap">${bodyInner}</div>
+      ${attList}
     </div>`;
 }
 
@@ -356,7 +383,7 @@ function accountTabsHtml() {
       <button type="button" class="mail-tab-btn px-4 py-2.5 flex items-center gap-2 shrink-0" data-mail-account="${a.id}" role="tab" aria-selected="${active}">
         <i data-lucide="mail" class="w-4 h-4"></i>
         <span class="font-bold">${escapeHTML(a.email_address)}</span>
-        ${unread > 0 ? `<span class="text-[11px] font-bold text-danger-strong">${unread > 99 ? '99+' : unread}</span>` : ''}
+        ${unread > 0 ? `<span class="text-[11px] font-bold text-danger-strong" data-mail-tab-unread="${escapeHTML(a.id)}">${unread > 99 ? '99+' : unread}</span>` : ''}
       </button>`;
   }).join('');
 
@@ -380,13 +407,13 @@ function tabsHtml() {
               aria-selected="${folder === 'inbox'}" aria-controls="mail-box-area"
               class="mail-tab-btn px-3 py-2 text-xs font-bold flex items-center gap-1.5">
         <i data-lucide="inbox" class="w-3.5 h-3.5"></i> 受信ボックス
-        <span class="text-[10px] text-muted font-normal">${inboxMessages.length}件</span>
+        <span class="text-[10px] text-muted font-normal" id="mail-inbox-count">${inboxMessages.length}件</span>
       </button>
       <button type="button" id="mail-tab-sent" data-mail-folder="sent" role="tab"
               aria-selected="${folder === 'sent'}" aria-controls="mail-box-area"
               class="mail-tab-btn px-3 py-2 text-xs font-bold flex items-center gap-1.5 border-l border-main">
         <i data-lucide="send" class="w-3.5 h-3.5"></i> 送信ボックス
-        <span class="text-[10px] text-muted font-normal">${sentMessages.length}件</span>
+        <span class="text-[10px] text-muted font-normal" id="mail-sent-count">${sentMessages.length}件</span>
       </button>
     </div>`;
 }
@@ -577,25 +604,91 @@ async function fetchInboxFromServer({ silent = false } = {}) {
   }
 }
 
-/** 定期受信（表示中アカウントへ POLL_MS ごとに受信問い合わせ。他アカウントはタブ切替時に受信） */
-function startPolling() {
-  if (pollTimer) return;
-  pollTimer = setInterval(() => {
-    fetchInboxFromServer({ silent: true });
-  }, POLL_MS);
-}
+/**
+ * WSS の新着受信通知を適用する (サーバー側cronが IMAP から受信してDBへ保存済み。変化のあったアカウントだけ届く)
+ * 一覧カードの中身と件数表示だけを差し替える（ヘッダー・タブ・モーダルは再描画しない = アニメーション の再発火を防ぐ）
+ */
+export async function applyMailSocketUpdate(payload) {
+  const accountId = payload?.account_id;
+  if (!accountId || !state.currentUser) return false;
 
-function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer);
-    pollTimer = null;
+  const store = messagesByAccount[accountId];
+  if (!store) {
+    // 自分の画面がまだ読み込んでいないアカウントは未読バッジだけ更新する
+    updateMailUnreadBadge();
+    return false;
   }
+
+  try {
+    // サーバーは IMAP 受信と DB 保存を済ませている → DB の最新だけ読む (ブラウザは IMAP に接続しない)
+    const res = await apiGet(`/mail/messages?folder=inbox&account_id=${encodeURIComponent(accountId)}`);
+    store.inbox = res.messages || [];
+  } catch (err) {
+    return false;
+  }
+
+  updateMailUnreadBadge();
+
+  // アカウントタブの未読数だけ値を更新する (タブ自体は再描画しない)
+  const tabUnread = document.querySelector(`#view-mail [data-mail-tab-unread="${accountId}"]`);
+  if (tabUnread) {
+    const unread = store.inbox.filter((m) => !m.is_read).length;
+    tabUnread.textContent = unread > 99 ? '99+' : String(unread);
+  }
+
+  if (accountId !== activeAccountId) return true;
+
+  inboxMessages = store.inbox;
+  if (!inboxMessages.some((m) => m.id === selectedInboxId)) selectedInboxId = inboxMessages[0]?.id || null;
+
+  // 表示中なら一覧カードの中身だけを差し替える (全面再描画・スクロール復帰・アイコン再描画をしない)
+  const root = document.getElementById(VIEW_ID);
+  const listBox = root ? root.querySelector('#mail-inbox-list') : null;
+  if (listBox && folder === 'inbox' && !showSetupForm && state.currentTab === 'mail') {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = listHtml();
+    const fresh = tmp.querySelector('#mail-inbox-list');
+    if (fresh) listBox.innerHTML = fresh.innerHTML;
+    const boxCount = document.getElementById('mail-box-count');
+    if (boxCount) boxCount.textContent = `全 ${inboxMessages.length}件 / 未読 ${unreadCount()}件`;
+    const inboxCount = document.getElementById('mail-inbox-count');
+    if (inboxCount) inboxCount.textContent = `${inboxMessages.length}件`;
+  }
+  return true;
 }
 
-/** UI 検証用の内部状態（テストが定期受信フック・アカウントタブ・自動受信を実測するため公開する） */
+/** WSS の mail:new_messages ハンドラ登録 (未接続時は connect 時に貼り付けられる。二重登録しない) */
+export function bindMailSocket() {
+  if (!socketClient) return;
+
+  const registeredHandlers = new Map();
+  const register = (event, handler) => {
+    const prev = registeredHandlers.get(event);
+    if (prev) socketClient.off(event, prev);
+    registeredHandlers.set(event, handler);
+    socketClient.on(event, handler);
+  };
+
+  register('mail:new_messages', async (payload) => {
+    const applied = await applyMailSocketUpdate(payload);
+    const added = Number(payload?.added) || 0;
+    if (added > 0) {
+      const who = payload?.account_email || '';
+      const subject = payload.newest_subject ? `「${payload.newest_subject}」` : '';
+      showToast(`📪 ${who} に新着メール ${added}件 ${subject}`, 'info', () => switchTab('mail'));
+    }
+    return applied;
+  });
+
+  socketBound = true;
+}
+
+/** UI 検証用の内部状態 (クライアント側の自律受信が廃止済み・WSS 通知のみであることを実測するため公開する) */
 window.__mailSnap = () => ({
-  pollMs: POLL_MS,
-  polling: pollTimer !== null,
+  clientPollMs: null,           // クライアント側の setInterval 受信は廃止した
+  clientPolling: false,
+  serverPollMs: SERVER_POLL_MS, // サーバー側 cron の受信間隔 (src/utils/cron.jobs.js)
+  socketBound,
   activeAccountId,
   accounts: accounts.filter((a) => !a.needs_setup).map((a) => ({
     id: a.id,
@@ -603,6 +696,9 @@ window.__mailSnap = () => ({
     unread: (messagesByAccount[a.id]?.inbox || []).filter((m) => !m.is_read).length,
   })),
 });
+
+// WSS 通知の適用関数 (UI テストが socket 通知をシミュレートし、再描画なしで更新されることを検証するためのフック)
+window.__mailApply = (payload) => applyMailSocketUpdate(payload);
 
 /** 新規作成フォームの送信（SMTP へ送信 → 送信ボックスに記録 / 送信元は表示中アカウント） */
 async function sendComposeMessage(form) {
@@ -633,7 +729,7 @@ async function sendComposeMessage(form) {
   }
 }
 
-/** メールタブの実データ取得 (設定済みアカウント全部のボックスを読み、自動受信して定期受信を開始する) */
+/** メールタブの実データ取得 (設定済みアカウント全部のボックスをDBから読む。IMAP 受信はサーバー側cronが行う) */
 export async function loadMailData() {
   if (!state.currentUser || !state.authToken) return;
   const root = document.getElementById(VIEW_ID);
@@ -673,16 +769,12 @@ export async function loadMailData() {
       selectedInboxId = null;
       selectedSentId = null;
       showSetupForm = true;
-      stopPolling();
     }
 
     renderMailView();
-
-    // 自動受信: メールタブ表示時に受信問い合わせを行う（失敗はサイレント）。60秒周期で定期受信する
-    if (configured.length > 0) {
-      startPolling();
-      fetchInboxFromServer({ silent: true });
-    }
+    // ★ クライアント側の自律受信 (setInterval) は廃止した (2026/11/13)。
+    //   受信はサーバー側 cron (既定 60秒) が行い、受信ボックスが変化したアカウントだけ
+    //   WSS (mail:new_messages) で通知してくる。手動受信ボタンだけは IMAP を使う。
   } catch (err) {
     root.innerHTML = errorCardHtml(err.message);
     refreshLucideIcons();
@@ -729,12 +821,72 @@ async function selectMessage(id) {
   }
 
   renderMailView();
+
+  // 受信メールで本文が未キャッシュなら、WSS で本文を遅延取得して詳細ペインを埋める
+  if (msg.folder === 'inbox' && !msg.body) loadLazyBody(msg);
+}
+
+/** WSS に ack 形式でイベントを送り、応答を Promise で返す (socket 未接続時は success:false) */
+function requestMailSocket(event, payload) {
+  return new Promise((resolve) => {
+    const s = socketClient?.socket;
+    if (!s) { resolve({ success: false, message: 'WebSocket に接続されていません。' }); return; }
+    s.emit(event, payload, (res) => resolve(res || { success: false }));
+  });
+}
+
+/** base64 → Uint8Array */
+function base64ToBytes(b64) {
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+}
+
+/** 受信メール本文の遅延取得 (WSS mail:get_body。DBキャッシュ→無ければ IMAP 取得)。詳細ペインだけ埋める */
+async function loadLazyBody(msg) {
+  const res = await requestMailSocket('mail:get_body', { id: msg.id });
+  if (!res?.success) {
+    const bodyEl = document.getElementById('mail-detail-body');
+    if (bodyEl) bodyEl.innerHTML = `<span class="text-muted">${escapeHTML(res?.message || '本文を取得できませんでした。')}</span>`;
+    return;
+  }
+  msg.body = res.message.body ?? '';
+  msg.html_stripped = res.message.html_stripped === true;
+  msg.attachments = res.message.attachments ?? [];
+  msg.body_available = true;
+  // 詳細ペインだけ作り替える (一覧カードとタブ面は不変 = Animation 再発火抑止)
+  const detail = document.getElementById('mail-detail');
+  if (detail) detail.outerHTML = detailHtml();
+  refreshLucideIcons();
+}
+
+/** 添付ダウンロード (WSS mail:get_attachment。base64 → blob → ダウンロード) */
+async function downloadMailAttachment(btn) {
+  const section = btn.getAttribute('data-attachment-section');
+  const msg = currentList().find((m) => m.id === currentSelectedId());
+  if (!msg) return;
+  const res = await requestMailSocket('mail:get_attachment', { id: msg.id, section });
+  if (!res?.success) { showToast(res?.message || '添付を取得できませんでした。', 'warning'); return; }
+  const bytes = base64ToBytes(res.base64);
+  const blob = new Blob([bytes], { type: res.type || 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = res.name || btn.getAttribute('data-attachment-name') || 'attachment';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 /** モジュール初期化 (#view-mail への委譲イベント登録) */
 export function initMailModule() {
   const root = document.getElementById(VIEW_ID);
   if (!root) return;
+
+  // WSS の新着受信通知ハンドラ (サーバー側 cron が受信し、変化のあったアカウントだけ通知してくる)
+  bindMailSocket();
 
   root.addEventListener('submit', async (e) => {
     if (e.target.id === 'mail-setup-form') {
@@ -768,8 +920,6 @@ export function initMailModule() {
       if (!inboxMessages.some((m) => m.id === selectedInboxId)) selectedInboxId = inboxMessages[0]?.id || null;
       if (!sentMessages.some((m) => m.id === selectedSentId)) selectedSentId = sentMessages[0]?.id || null;
       renderMailView();
-      // アカウント切替時も受信問い合わせる（自動受信・サイレント）
-      fetchInboxFromServer({ silent: true });
       return;
     }
 
@@ -777,6 +927,12 @@ export function initMailModule() {
     if (tab) {
       folder = tab.getAttribute('data-mail-folder') === 'sent' ? 'sent' : 'inbox';
       renderMailView();
+      return;
+    }
+
+    const attDl = e.target.closest('[data-attachment-download]');
+    if (attDl) {
+      await downloadMailAttachment(attDl);
       return;
     }
 

@@ -318,6 +318,99 @@ class ImapSession {
     return await this.readTagged(tag);
   }
 
+  /** 応答締め切りを延長する (常時接続 IDLE で remaining() を延ばす) */
+  extend(ms) {
+    this.deadline = Date.now() + Math.max(1, ms);
+  }
+
+  /** SELECT INBOX → 現在件数 exists と UIDNEXT (次 UID) を取り出す */
+  async selectInbox(folder) {
+    const sel = await this.command(`SELECT ${imapQuote(folder)}`);
+    if (sel.status !== 'OK') throw new Error(`フォルダ「${folder}」を開けません: ${sel.text}`);
+    const exists = Number((/\* (\d+) EXISTS/i.exec(sel.all) || [])[1] ?? 0);
+    const uidNext = Number((/\[UIDNEXT (\d+)\]/i.exec(sel.all) || [])[1] ?? 0);
+    const uidValidity = Number((/\[UIDVALIDITY (\d+)\]/i.exec(sel.all) || [])[1] ?? 0);
+    return { exists, uidNext, uidValidity };
+  }
+
+  /** IDLE 開始 (tag IDLE → '+ idling' を待つ)。tag を返す */
+  async idleStart() {
+    const tag = `a${this.tagIndex}`;
+    this.tagIndex += 1;
+    this.reader.write(`${tag} IDLE`);
+    const cont = await this.reader.readLine(this.remaining());
+    if (!/^\+/.test(cont)) throw new Error(`IDLE が許可されませんでした: ${cont}`);
+    return tag;
+  }
+
+  /** IDLE 中の untagged 応答行を 1 行読む (timeoutMs で失敗) */
+  async idleReadLine(timeoutMs) {
+    return await this.reader.readLine(Math.max(1, timeoutMs));
+  }
+
+  /** IDLE 終了 (DONE → tag 付き応答) */
+  async idleDone(tag) {
+    this.reader.write('DONE');
+    return await this.readTagged(tag);
+  }
+
+  /** UID SEARCH UNSEEN (fromUid 以上)。未読 UID 配列 */
+  async uidSearchUnseen(fromUid) {
+    const set = fromUid > 0 ? `${fromUid}:*` : 'ALL';
+    const res = await this.command(`UID SEARCH UNSEEN ${set}`);
+    return extractUids(res.all).filter((u) => u >= fromUid);
+  }
+
+  /** UID FETCH range の ENVELOPE + BODYSTRUCTURE + FLAGS (本文は取得しない) */
+  async fetchEnvelopes(fromUid) {
+    const set = fromUid > 0 ? `${fromUid}:*` : 'ALL';
+    const res = await this.command(`UID FETCH ${set} (FLAGS BODYSTRUCTURE ENVELOPE)`);
+    const out = [];
+    for (const line of String(res.all).split('\n')) {
+      const m = /^\* \d+ FETCH \((.*)\)$/i.exec(line);
+      if (!m) continue;
+      const body = m[1];
+      const uid = Number((/\bUID (\d+)/i.exec(body) || [])[1] ?? 0);
+      if (!uid) continue;
+      const flags = (/FLAGS \(([^)]*)\)/i.exec(body) || [])[1] || '';
+      const envStr = extractSexpField(body, 'ENVELOPE');
+      const bsStr = extractSexpField(body, 'BODYSTRUCTURE');
+      const env = envStr ? parseEnvelope(envStr) : null;
+      const bs = bsStr ? parseBodyStructure(bsStr) : null;
+      out.push({
+        uid,
+        seen: /\\Seen/i.test(flags),
+        subject: env?.subject ?? '',
+        sender_name: env?.from?.name ?? '',
+        sender_email: env?.from?.email ?? '',
+        date: env?.date ?? null,
+        attachments: bs?.attachments ?? [],
+        is_html: bs?.hasHtml && !bs?.hasPlain ? true : false,
+      });
+    }
+    return out;
+  }
+
+  /** 1 UID の本文テキスト (text/plain パートを優先。無ければ全文を解析し HTML をタグ除去) */
+  async fetchBodyText(uid) {
+    const text = await this.command(`UID FETCH ${uid} (BODY.PEEK[TEXT])`);
+    if (text.status === 'OK' && text.literal && text.literal.trim()) {
+      return { body: decodePart(text.literal, '7bit', 'utf-8').replace(/\r\n/g, '\n').replace(/\s+$/, ''), html_stripped: false };
+    }
+    // text/plain が無い (HTML 専用メール) → 全文を解析してタグ除去
+    const full = await this.command(`UID FETCH ${uid} (BODY.PEEK[])`);
+    const raw = full.literal || '';
+    const parsed = parseMessage(raw, parseInternalDate(full.all));
+    return { body: parsed.body ?? '', html_stripped: true };
+  }
+
+  /** 1 UID の指定 BODY パートの生バイト (添付ダウンロード用。全文は BODY[]) */
+  async fetchAttachmentBytes(uid, section) {
+    const res = await this.command(`UID FETCH ${uid} (BODY.PEEK[${section}])`);
+    if (res.status !== 'OK') throw new Error(`添付 ${section} を取得できません: ${res.text}`);
+    return res.literal ?? '';
+  }
+
   /** tag 付き応答まで集める（Untagged 行と `{n}` リテラルを含む） */
   async readTagged(tag) {
     const lines = [];
@@ -353,6 +446,139 @@ function extractUids(text) {
   }
   return out;
 }
+
+/** IMAP s-expression をトークン列へ ('...' 文字列, (...) リスト, 数字/記号) */
+function tokenizeSexp(s) {
+  const toks = [];
+  let i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (c === ' ' || c === '\t' || c === '\r' || c === '\n') { i += 1; continue; }
+    if (c === '(' || c === ')') { toks.push(c); i += 1; continue; }
+    if (c === '"') {
+      let str = '';
+      i += 1;
+      while (i < s.length) {
+        if (s[i] === '\\' && i + 1 < s.length) { str += s[i + 1]; i += 2; continue; }
+        if (s[i] === '"') { i += 1; break; }
+        str += s[i]; i += 1;
+      }
+      toks.push(str);
+      continue;
+    }
+    let atom = '';
+    while (i < s.length && !' \t\r\n()'.includes(s[i])) { atom += s[i]; i += 1; }
+    toks.push(atom);
+  }
+  return toks;
+}
+
+/** トークン列から 1 つの要素 (文字列 / 数値 / リスト) を読む。pos を進める */
+function readSexp(toks, pos) {
+  const t = toks[pos];
+  if (t === undefined) return { value: null, pos };
+  if (t === '(') {
+    const list = [];
+    pos += 1;
+    while (pos < toks.length && toks[pos] !== ')') {
+      const r = readSexp(toks, pos);
+      list.push(r.value);
+      pos = r.pos;
+    }
+    return { value: list, pos: pos + 1 };
+  }
+  if (/^\d+$/.test(t)) return { value: Number(t), pos: pos + 1 };
+  return { value: t, pos: pos + 1 };
+}
+
+/** s-expression 文字列を JS 構造 (配列/文字列/数値) へ変換 */
+function parseSexp(s) {
+  const toks = tokenizeSexp(s);
+  const r = readSexp(toks, 0);
+  return r.value;
+}
+
+/** FETCH items から「NAME (...)」の (...) 部分 (NAME の開き括弧から対応する閉じ括弧まで) を切り出す。
+ *  本文リテラルの {...} を跨がないよう括弧の対応を数える。無ければ null。 */
+function extractSexpField(fetchBody, name) {
+  const idx = fetchBody.search(new RegExp(`\\b${name}\\s*\\(`, 'i'));
+  if (idx < 0) return null;
+  const start = fetchBody.indexOf('(', idx);
+  let depth = 0;
+  for (let j = start; j < fetchBody.length; j += 1) {
+    const c = fetchBody[j];
+    if (c === '(') depth += 1;
+    else if (c === ')') {
+      depth -= 1;
+      if (depth === 0) return fetchBody.slice(start, j + 1);
+    }
+  }
+  return null;
+}
+
+/** ENVELOPE s-expression → { subject, date, from:{name,email} } */
+function parseEnvelope(s) {
+  const env = parseSexp(s);
+  if (!Array.isArray(env)) return null;
+  // ENV-DATE, SUBJECT, FROM[], TO[], ...  FROM は [ [ name, addr-type, mailbox, host ] ]
+  const dateStr = env[0] ? String(env[0]) : '';
+  const subject = decodeHeaderWord(env[1] ? String(env[1]) : '');
+  const fromList = env[2];
+  let from = { name: '', email: '' };
+  if (Array.isArray(fromList) && Array.isArray(fromList[0])) {
+    const parts = fromList[0];
+    const name = parts[0] ? decodeHeaderWord(String(parts[0])) : '';
+    const email = parts[2] ? String(parts[2]).toLowerCase() : '';
+    const host = parts[3] ? String(parts[3]) : '';
+    from = { name, email: host ? `${email}@${host}` : email };
+  }
+  return { subject, date: parseRfc2822Date(dateStr), from };
+}
+
+const ATTACH_TOKENS = new Set(['image', 'audio', 'video', 'application']);
+
+/** BODYSTRUCTURE s-expression → { attachments:[{name,size,type}], hasPlain, hasHtml }
+ *  再帰的にテキスト/添付パートを列挙する。添付は filename を持つ非 text パート (image/audio/video/application)。
+ *  各添付のセクション番号（IMAP BODY[1]/BODY[2]… の数字）はテキストパートを数えながら決める。 */
+function parseBodyStructure(s) {
+  const root = parseSexp(s);
+  const attachments = [];
+  let hasPlain = false;
+  let hasHtml = false;
+  let section = 0; // パートのシリアル番号（singlepart の順）。IMAP は parts を 1..N で番号付け
+  function walk(node) {
+    if (!Array.isArray(node)) return;
+    const core = node;
+    const sub = core[0];
+    if (Array.isArray(sub)) { walk(sub); return; } // multipart
+    // singlepart: type, subtype, params, [id], [desc], [disp], [encl], size
+    const type = String(core[0] || '').toLowerCase();
+    const subtype = String(core[1] || '').toLowerCase();
+    const params = Array.isArray(core[2]) ? core[2] : [];
+    section += 1;
+    if (type === 'text') {
+      if (subtype === 'plain') hasPlain = true;
+      if (subtype === 'html') hasHtml = true;
+      return;
+    }
+    // 添付候補: filename 属性を持つ非 text パート
+    const filename = sexpParam(params, 'filename');
+    if (filename && ATTACH_TOKENS.has(type)) {
+      attachments.push({ name: decodeHeaderWord(filename), section, type: `${type}/${subtype}` });
+    }
+  }
+  walk(root);
+  return { attachments, hasPlain, hasHtml };
+}
+
+/** BODYSTRUCTURE のパラメータリスト ['k1','v1','k2','v2',...] から指定キーの値を取り出す */
+function sexpParam(params, key) {
+  for (let i = 0; i + 1 < params.length; i += 2) {
+    if (String(params[i]).toLowerCase() === key) return String(params[i + 1]);
+  }
+  return null;
+}
+
 
 const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
 
@@ -693,7 +919,35 @@ export async function imapFetchMessages({ host, port, tlsMode, user, password, f
   }
 }
 
-/** IMAP: メッセージを既読 (\Seen) にする (フォルダ未指定は受信ボックス INBOX) */
+/** IMAP: 常時接続の受信ボックスを開く (connect + SELECT + UID SEARCH ALL で maxUid を取る)。
+ *  本文は取得しない。新着検知のベースラインとして現在の最大 UID だけを返す (過去メールの本文は DB に保存しない)。 */
+export async function imapOpenInbox({ host, port, tlsMode, user, password, folder = 'INBOX', timeoutMs = DEFAULT_TIMEOUT_MS }) {
+  const session = new ImapSession({ host, port, tlsMode, user, password, timeoutMs });
+  await session.connect();
+  const { exists, uidNext, uidValidity } = await session.selectInbox(folder);
+  const search = await session.command('UID SEARCH ALL');
+  const uids = extractUids(search.all);
+  const maxUid = uids.length ? Math.max(...uids) : 0;
+  return { session, exists, uidNext, uidValidity, maxUid };
+}
+
+/** 常時接続セッションで fromUid 以上の未読メールのヘッダ (ENVELOPE+BODYSTRUCTURE) だけ取得する。本文は取得しない。 */
+export async function imapFetchNewEnvelopes(session, fromUid) {
+  const uids = await session.uidSearchUnseen(fromUid);
+  if (!uids.length) return [];
+  return await session.fetchEnvelopes(fromUid);
+}
+
+/** 常時接続セッションで 1UID の本文テキスト (text/plain 優先、無ければ HTML をタグ除去) を取得する */
+export async function imapFetchBodyText(session, uid) {
+  return await session.fetchBodyText(uid);
+}
+
+/** 常時接続セッションで 1UID の添付パート生バイトを取得する */
+export async function imapFetchAttachmentBytes(session, uid, section) {
+  return await session.fetchAttachmentBytes(uid, section);
+}
+
 export async function imapMarkSeen({ host, port, tlsMode, user, password, folder = 'INBOX', uid, timeoutMs = DEFAULT_TIMEOUT_MS }) {
   const session = new ImapSession({ host, port, tlsMode, user, password, timeoutMs });
   await session.connect();

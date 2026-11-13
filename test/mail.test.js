@@ -1,13 +1,19 @@
-﻿/**
+/**
  * メール接続設定 + 接続テスト API 統合テスト (mail)
  * 設定保存 → フォーム値プレテスト → 保存済み設定テスト (status 更新) → 削除 を検証する
  * ※ テストサーバー名は存在しないドメイン (issystem.example) なので接続テストは必ず失敗する
  */
+import { readdirSync } from 'node:fs';
+import path from 'node:path';
 import request from 'supertest';
 import app from '../src/app.js';
 import { setProbeOverrides } from '../src/services/mail.service.js';
+import mailService from '../src/services/mail.service.js';
+import { onlineUserIds } from '../src/utils/presence.js';
 import { parseMessage } from '../src/services/mail.transport.js';
 import { loginToken, bearer, closePool } from './helpers.js';
+import config from '../config/default.js';
+import { makeIdleHarness } from './mail.idle.mock.js';
 
 describe('Mail API (/api/mail)', () => {
   let token;
@@ -127,6 +133,8 @@ describe('Mail API (/api/mail)', () => {
  */
 describe('Mail 受信ボックス (inbox/refresh)', () => {
   let token;
+  let userId;
+  let accountId;
   const b64 = (s) => Buffer.from(s, 'utf8').toString('base64');
   const inboxSettings = {
     email_address: 'mail.test@issystem.example',
@@ -163,13 +171,40 @@ describe('Mail 受信ボックス (inbox/refresh)', () => {
     },
   ];
 
+  // ---- IMAP IDLE ハーネス (常時接続の openInbox / newEnvelopes / 本文 lazy を差し替える) ----
+  const makeIo = () => {
+    const emitted = [];
+    return { emitted, to() { return { emit(event, payload) { emitted.push({ room: this.room, event, payload }); } } } };
+  };
+  const counters = { openInbox: 0, newEnvelopes: 0, bodyText: 0, attachmentBytes: 0 };
+  const state = { exists: 0, uidNext: 1, maxUid: 0, lineQueue: [], envelopeQueue: {}, body: {}, attachment: {}, counters };
+  const env = (uid, subject) => ({
+    uid: String(uid),
+    sender_name: '山田 太郎',
+    sender_email: 'yamada@issystem.example',
+    subject,
+    date: '2026-11-12T01:00:00.000Z',
+    is_html: false,
+    attachments: [{ name: 'report.pdf', section: '1.2', type: 'application/pdf' }],
+  });
+  const harness = makeIdleHarness(state);
+  const harnessOpenInbox = harness.openInbox;
+  const harnessNewEnvelopes = harness.newEnvelopes;
+  const harnessBodyText = harness.bodyText;
+  const harnessAttachmentBytes = harness.attachmentBytes;
+  const settle = async (ms = 300) => { await new Promise((r) => setTimeout(r, ms)); };
+
   beforeAll(async () => {
     token = await loginToken(app);
     const created = await request(app).post('/api/mail/account').set('Authorization', bearer(token)).send(inboxSettings);
     expect(created.statusCode).toBe(201);
+    accountId = created.body.account.id;
+    userId = String(created.body.account.user_id);
+    console.log('[beforeAll] userId=', userId, 'accountId=', accountId);
   });
 
   afterAll(async () => {
+    mailService.resetActiveWatch();
     setProbeOverrides({});
     await request(app).delete('/api/mail/account').set('Authorization', bearer(token));
     await closePool();
@@ -225,6 +260,132 @@ describe('Mail 受信ボックス (inbox/refresh)', () => {
     const res = await request(app).post('/api/mail/inbox/refresh').set('Authorization', bearer(token)).send({});
     expect(res.statusCode).toBe(502);
     setProbeOverrides({});
+  });
+
+  /**
+   * Mail 常時接続 (IMAP IDLE) アクティブユーザ プル監査 + lazy 取得 (2026/11/13)
+   * 接続中のユーザのアカウントだけ常時 IMAP IDLE セッションを開き、新着は EXIST で
+   * 増長を確認してヘッダだけ UPSERT し、変化のあったアカウントだけ user:<id> へ通知する。
+   * 本文・添付は開封/ダウンロード時に lazy 取得する。
+   */
+  describe('Mail 常時接続 (IMAP IDLE) アクティブユーザ プル監査 + lazy 取得', () => {
+    const listAccountsForUser = async (uid) => {
+      const rows = await request(app).get('/api/mail/account').set('Authorization', bearer(token));
+      const account = rows.body.account;
+      if (!account) return [];
+      return [{
+        id: accountId, user_id: uid, email_address: account.email_address,
+        imap_host: account.imap_host, imap_port: account.imap_port, imap_tls: account.imap_tls,
+        imap_folder: 'INBOX', smtp_host: account.smtp_host, smtp_port: account.smtp_port,
+        smtp_tls: account.smtp_tls, smtp_use_imap: true, account,
+      }];
+    };
+    setProbeOverrides({
+      openInbox: harnessOpenInbox,
+      newEnvelopes: harnessNewEnvelopes,
+      bodyText: harnessBodyText,
+      attachmentBytes: harnessAttachmentBytes,
+    });
+
+    afterAll(async () => {
+      mailService.resetActiveWatch();
+      setProbeOverrides({});
+    });
+
+    it('接続中のユーザのアカウントだけ常時 IDLE セッションを開く (cron reconcile が開始/停止)', async () => {
+      state.exists = 0; state.uidNext = 1; state.maxUid = 0; state.lineQueue = [];
+      const io = makeIo();
+      mailService.resetActiveWatch();
+      onlineUserIds.add(userId);
+      const opened = await mailService.reconcileActiveWatchCron(io);
+      expect(opened.opened).toEqual([String(accountId)]);
+      expect(counters.openInbox).toBe(1);
+      onlineUserIds.delete(userId);
+      const dropped = await mailService.reconcileActiveWatchCron(io);
+      expect(dropped.dropped).toEqual([String(userId)]);
+      expect(counters.openInbox).toBe(1);
+      mailService.ensureActiveWatchForUser(userId, makeIo());
+      await settle(300);
+      expect(counters.openInbox).toBe(2);
+    });
+
+    it('常時 IDLE で EXIST 増長を検知してヘッダだけ UPSERT → user ルームへ mail:new_messages', async () => {
+      const io = makeIo();
+      setProbeOverrides({ openInbox: harnessOpenInbox, newEnvelopes: harnessNewEnvelopes, bodyText: harnessBodyText });
+      mailService.ensureActiveWatchForUser(userId, io);
+      await settle(300);
+      const before = counters.newEnvelopes;
+      state.envelopeQueue['1001'] = env(1001, '新着1');
+      state.envelopeQueue['1002'] = env(1002, '新着2');
+      state.exists = 2; state.uidNext = 3;
+      state.lineQueue.push('* 2 EXISTS');
+      await settle(300);
+      expect(counters.newEnvelopes).toBeGreaterThanOrEqual(before + 1);
+      expect(io.emitted.length).toBeGreaterThanOrEqual(1);
+      expect(io.emitted[0].room).toBe(`user:${userId}`);
+      expect(io.emitted[0].event).toBe('mail:new_messages');
+      expect(io.emitted[0].payload.account_id).toBe(accountId);
+      expect(io.emitted[0].payload.added).toBe(2);
+      expect(io.emitted[0].payload.newest_subject).toBe('新着2');
+
+      const listRes = await request(app).get('/api/mail/messages?folder=inbox').set('Authorization', bearer(token));
+      expect(listRes.statusCode).toBe(200);
+      expect(listRes.body.messages.length).toBe(2);
+      expect(listRes.body.messages.find((m) => m.uid === '1001').subject).toBe('新着1');
+      expect(listRes.body.messages.find((m) => m.uid === '1002').subject).toBe('新着2');
+
+      const msg = listRes.body.messages.find((m) => m.uid === '1001');
+      state.body['1001'] = { body: 'hello world', html_stripped: false };
+      const bodyRes = await request(app).post(`/api/mail/messages/${msg.id}/body`).set('Authorization', bearer(token)).send({});
+      expect(bodyRes.statusCode).toBe(200);
+      expect(bodyRes.body.message.body).toBe('hello world');
+      expect(bodyRes.body.message.html_stripped).toBe(false);
+      const bodyAgain = await request(app).post(`/api/mail/messages/${msg.id}/body`).set('Authorization', bearer(token)).send({});
+      expect(bodyAgain.body.message.body).toBe('hello world');
+      expect(counters.bodyText).toBe(1);
+
+      state.attachment['1.2'] = Buffer.from('PDFBYTES');
+      const attRes = await request(app).get(`/api/mail/messages/${msg.id}/attachment?section=1.2`).set('Authorization', bearer(token));
+      expect(attRes.statusCode).toBe(200);
+      expect(Buffer.from(attRes.body).toString('utf8')).toBe('PDFBYTES');
+      const attMissing = await request(app).get(`/api/mail/messages/${msg.id}/attachment?section=9`).set('Authorization', bearer(token));
+      expect(attMissing.statusCode).toBe(404);
+
+      mailService.dropWatchForUser(userId);
+      onlineUserIds.delete(userId);
+      const dropped = await mailService.reconcileActiveWatchCron(io);
+      expect(dropped.dropped).toHaveLength(0);
+
+      const cleaned = await mailService.cleanupBodies();
+      expect(cleaned.removed).toBe(0);
+    });
+
+    it('cron 照合・再接続窓・cron パターン・設定が想定値である', async () => {
+      const io = makeIo();
+      state.exists = 0; state.uidNext = 1; state.maxUid = 0; state.lineQueue = [];
+      mailService.resetActiveWatch();
+      onlineUserIds.add(userId);
+      const opened = await mailService.reconcileActiveWatchCron(io);
+      expect(opened.opened).toEqual([String(accountId)]);
+      mailService.resetActiveWatch();
+      onlineUserIds.delete(userId);
+      const closed = await mailService.reconcileActiveWatchCron(io);
+      expect(closed.opened).toHaveLength(0);
+
+      const files = readdirSync(path.resolve('src'));
+      expect(files).toContain('mail.transport.js');
+      expect(files).toContain('mail.model.js');
+      expect(files).toContain('mail.service.js');
+
+      const { mailPollCronPattern } = await import('../src/utils/cron.jobs.js');
+      expect(mailPollCronPattern(30000)).toBe('*/30 * * * * *');
+      expect(mailPollCronPattern(15000)).toBe('*/15 * * * * *');
+      expect(mailPollCronPattern(10000)).toBe('*/15 * * * * *');
+      expect(mailPollCronPattern(null)).toBe('0 * * * * *');
+      expect(config.mail.activeSyncMs).toBe(30000);
+      expect(config.mail.bodyCacheDays).toBe(30);
+      expect(config.mail.reconnectMaxMs).toBe(1740000);
+    });
   });
 });
 
