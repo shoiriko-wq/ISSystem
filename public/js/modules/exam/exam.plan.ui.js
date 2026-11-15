@@ -4,8 +4,9 @@
  *   ① 年間の考査名登録（考査名のみ。1年間に実施する考査名をすべて登録する）
  *   ② 実施科目調査（調査開始で科目・実施時間・出題者/巡回者・実施コース・要望が全教員に編集可能、
  *      調査終了後は教務のみ編集。学年・教科で表示を絞って編集できる）
- *   ③ 考査期間の登録（考査名ごとに開始日・終了日・1日の時限数・標準試験時間を登録する。
- *      年度と試験日数は開始日から自動算出されるため入力不要、使用教室は 教室割の作成 タブで扱う）
+ *   ③ 考査期間の登録（考査名を行とした表で、各行に開始日・終了日・1日の時限数を入力する（標準試験時間入力なし）。
+ *      年度と試験日数は自動算出、各行は焦点が行の外へ移った瞬間に自動登録する（基本情報の登録と同一の作法）、
+ *      使用教室は 教室割の作成 タブで扱う）
  * plan_phase: DRAFT(計画) → SURVEY(調査) → REGISTERED(期間登録) → DECIDED(科目確定)
  * メニュー順: 基本情報の登録 → 年間考査計画 → 実施科目調査 → 時間割 → 教室割 → 出張等 → 監督割
  */
@@ -27,10 +28,6 @@ function phaseBadgePlan(phase) {
   return `<span class="badge text-[10px] px-1.5 py-0.5 rounded font-bold ${meta.cls}">${meta.label}</span>`;
 }
 
-function field(label, inner) {
-  return `<div class="flex flex-col gap-1"><span class="text-[10px] text-muted font-semibold">${label}</span>${inner}</div>`;
-}
-
 /** 開始日〜終了日の暦日日数（試験日数の自動算出・年度は開始日の西暦） */
 function daysBetween(start, end) {
   if (!start || !end) return 0;
@@ -49,7 +46,7 @@ function daysBetween(start, end) {
 const STEPS = [
   { n: 1, title: '年間の考査名登録', desc: '1年間に実施する考査名をすべて登録（考査名のみ）', icon: 'file-plus' },
   { n: 2, title: '実施科目調査', desc: '調査開始で全教員が編集（科目・実施時間・出題者/巡回者・コース・要望）、学年・教科で絞って表示', icon: 'list-checks' },
-  { n: 3, title: '考査期間の登録', desc: '考査名ごとに開始日・終了日・1日の時限数・標準試験時間を登録', icon: 'calendar-check' },
+  { n: 3, title: '考査期間の登録', desc: '考査名を行とした表で開始日・終了日・1日の時限数を登録（標準試験時間入力なし）', icon: 'calendar-check' },
 ];
 
 /** ①→②→③ の進行状態（master 有無・subject_phase・plan_phase から判定） */
@@ -85,7 +82,7 @@ function stepperHtml(board) {
     </div>`;
   });
   return `<div class="card p-3 space-y-2">
-    <div class="text-[10px] text-muted font-semibold">作業順どりに進めてください：① 年間の考査名登録 → ② 実施科目調査（調査開始／終了）→ ③ 考査期間の登録（考査名ごとに開始日・終了日・1日の時限数・標準試験時間）</div>
+    <div class="text-[10px] text-muted font-semibold">作業順どりに進めてください：① 年間の考査名登録 → ② 実施科目調査（調査開始／終了）→ ③ 考査期間の登録（考査名を行とする表で開始日・終了日・1日の時限数。標準試験時間入力なし）</div>
     <div class="flex flex-wrap items-center gap-2">${chip.join('<span class="text-muted text-[11px]">→</span>')}</div>
   </div>`;
 }
@@ -151,19 +148,54 @@ function examStatusHtml(board) {
   </table></div>`;
 }
 
-/** ③ 考査期間の登録（② の実施教科数を見て期間・試験日数・1日のコマ数を決定する） */
-function periodCard(kyomu) {
-  const board = examStore.board;
-  const master = board?.master || {};
+/** 考査名を行とする ③ の表の1行（開始日・終了日・1日の時限数を入力する。標準試験時間入力はなく、試験日数とキャパは自動算出で表示する） */
+function periodRowHtml(m, editable, activeId, statusById) {
+  const dis = editable ? '' : 'disabled';
+  const id = String(m.id);
+  const isActive = id === String(activeId);
+  const days = daysBetween(m.start_date, m.end_date);
+  const slots = Number(m.daily_slots) || 0;
+  const cap = days * slots;
+  const st = statusById.get(id) || {};
+  const registered = !!m.start_date && !!m.end_date && slots > 0;
+  const badge = isActive
+    ? '<span class="badge bg-warning-soft border border-warning-soft text-warning-strong text-[10px] px-1.5 py-0.5 rounded font-bold">作業中の考査</span>'
+    : registered
+      ? `<span class="badge bg-success-soft border border-success-soft text-success-strong text-[10px] px-1.5 py-0.5 rounded font-bold">期間登録済${Number(st.decided) > 0 ? ` ／ 確定 ${Number(st.decided)}行` : ''}</span>`
+      : '<span class="badge bg-surface border border-main text-muted text-[10px] px-1.5 py-0.5 rounded font-bold">期間未登録</span>';
+  const openBtn = isActive
+    ? '<span class="text-[10px] text-muted">（対象考査）</span>'
+    : `<button data-plan-open="${escapeHTML(id)}" class="btn-secondary py-1 px-2 text-[10px]" ${dis}>この考査を開く</button>`;
+  const dstr = (v) => String(v ?? '').slice(0, 10);
+  return `<tr data-plan-row-id="${escapeHTML(id)}"${isActive ? ' class="bg-accent-soft"' : ''}>
+    <td class="border border-divider p-1.5 font-semibold text-main text-[11px]">${escapeHTML(String(m.title ?? ''))}</td>
+    <td class="border border-divider p-1.5"><input data-pf="start_date" type="date" value="${escapeHTML(dstr(m.start_date))}" class="input-field py-1 px-1.5 text-[11px] w-28" ${dis} /></td>
+    <td class="border border-divider p-1.5"><input data-pf="end_date" type="date" value="${escapeHTML(dstr(m.end_date))}" class="input-field py-1 px-1.5 text-[11px] w-28" ${dis} /></td>
+    <td class="border border-divider p-1.5 text-center"><input data-pf="daily_slots" type="number" min="1" max="8" value="${escapeHTML(String(m.daily_slots ?? ''))}" class="input-field py-1 px-1.5 text-[11px] w-12" ${dis} /></td>
+    <td class="border border-divider p-1.5 text-center"><span data-pdays class="text-[11px] font-bold ${days > 0 ? 'text-accent-strong' : 'text-muted'}">${days > 0 ? `${days} 日` : '− 日'}</span></td>
+    <td class="border border-divider p-1.5 text-center"><span data-pcap class="text-[11px] ${cap > 0 ? 'text-soft' : 'text-muted'}">${cap > 0 ? `${cap} コマ` : '− コマ'}</span></td>
+    <td class="border border-divider p-1.5 text-center text-[11px]">${Number(st.plan_rows) || 0} コマ</td>
+    <td class="border border-divider p-1.5 text-center">${badge}</td>
+    <td class="border border-divider p-1.5 text-center">${openBtn}</td>
+  </tr>`;
+}
+
+/** ③ 考査期間の登録（考査名を行とした表。各行で開始日・終了日・1日の時限数を入力し、焦点が行の外へ移った瞬間に自動登録する = 基本情報の登録と同じ作法） */
+function periodTable(kyomu, board) {
   const phases = board?.phases || {};
   const planPhase = phases.plan_phase || 'DRAFT';
   const subjectPhase = phases.subject_phase || 'DRAFT';
   const surveyEnded = subjectPhase === 'ENDED';
-  const editable = kyomu && planPhase !== 'DECIDED';
+  const activeId = String(board?.master?.id ?? '');
 
-  const input = (name, value, attrs = 'type="number"') =>
-    `<input id="plan-${name}" value="${escapeHTML(String(value ?? ''))}" class="input-field py-1.5 px-2 text-xs w-24" ${attrs} ${editable ? '' : 'disabled'} />`;
+  const masters = (examStore.masters && examStore.masters.length ? examStore.masters : board && board.master ? [board.master] : []).filter((m) => m && m.id);
+  const statusById = new Map((board?.exam_survey_status || []).map((s) => [String(s.id), s]));
+  const rowEditable = (m) => kyomu && !(String(m.id) === activeId && planPhase === 'DECIDED');
+  const tableRows = masters.length
+    ? masters.map((m) => periodRowHtml(m, rowEditable(m), activeId, statusById)).join('')
+    : '<tr><td colspan="9" class="p-2 text-[11px] text-muted border border-divider">考査名が登録されていません。① で考査名を登録するとこの表に行が並びます。</td></tr>';
 
+  const master = board?.master || {};
   const summary = board?.survey_summary || null;
   const perGrade = summary?.per_grade || [];
   const datesSet = !!master.start_date && !!master.end_date;
@@ -184,47 +216,43 @@ function periodCard(kyomu) {
           )
           .join('')}
       </div>`
-    : '<p class="text-[11px] text-muted">② の調査開始後に実施教科数・必要コマ数が集計されます。</p>';
+    : '<p class="text-[11px] text-muted">② の調査開始後に実施教科数・必要コマ数が集計されます（対象考査の学年別比較）。</p>';
 
   const actionRow = `
     <div class="flex flex-wrap items-center gap-2 text-[11px] pt-1">
-      ${actButton('register', '期間登録', 'calendar-check', kyomu, 'btn-warning border border-warning-soft text-warning-strong')}
       ${actButton('decide', '実施科目確定', 'stamp', kyomu && planPhase !== 'DECIDED', 'btn-success border border-success-soft text-success-strong')}
-      <span class="text-muted">実施科目確定は全科目提出後に教務が行います</span>
+      <span class="text-muted">各行の期間入力は焦点が行の外へ移った瞬間に自動登録されます（行の「保存」ボタンはありません）。実施科目確定は対象考査の全科目提出後に教務が行います。</span>
     </div>
     ${surveyEnded ? '' : '<p class="text-[11px] text-warning-strong font-semibold">② の実施科目調査を終了してから期間を登録してください（要望・実施教科数が揃います）。</p>'}
     ${
       datesSet && perGrade.length
-        ? `<div class="text-[11px] text-muted pt-1">最多学年の必要 ${neededMax}コマ ≤ 期間キャパ ${capacity}コマ ${
+        ? `<div class="text-[11px] text-muted pt-1">対象考査「${escapeHTML(String(master.title ?? ''))}」の最多学年の必要 ${neededMax}コマ ≤ 期間キャパ ${capacity}コマ ${
             neededMax <= capacity ? '<b class="text-success-strong">収まります</b>' : '<b class="text-danger-strong">日数・コマ数を増やしてください</b>'
           }</div>`
         : ''
     }`;
-
-  const examTitle = master.title ? `（「${master.title}」）` : '（① で対象考査を選んでください）';
-  const autoDays = master.start_date && master.end_date ? daysBetween(master.start_date, master.end_date) : 0;
-
   return sectionCard(
     'calendar-check',
-    `③ 考査期間の登録 ${examTitle}`,
-    `この考査名に対する開始日・終了日・1日の時限数・標準試験時間を入力します。年度と試験日数は入力不要です（年度は開始日の西暦、試験日数は開始日〜終了日から自動算出）。計画フェーズ: ${phaseBadgePlan(planPhase)} / 実施科目: ${phaseBadge(subjectPhase)}`,
+    '③ 考査期間の登録（考査名ごとの表）',
+    '行が考査名です。各行で開始日・終了日・1日の時限数を入力します（標準試験時間の入力はありません。実施時間は ② の実施科目調査で科目ごとに設定します）。試験日数・キャパ（日数×時限数）は自動算出、年度は開始日の西暦から導出されます。計画フェーズ: ' + phaseBadgePlan(planPhase) + ' / 実施科目: ' + phaseBadge(subjectPhase),
     `<div class="space-y-3">
-      ${gradeView}
-      <div class="flex flex-wrap items-end gap-3">
-        ${field('開始日', input('start_date', master.start_date || '', 'type="date"'))}
-        ${field('終了日', input('end_date', master.end_date || '', 'type="date"'))}
-        ${field('1日の時限数', `<input id="plan-daily_slots" type="number" min="1" max="8" value="${escapeHTML(String(master.daily_slots ?? ''))}" class="input-field py-1.5 px-2 text-xs w-24" ${editable ? '' : 'disabled'} />`)}
-        ${field('標準試験時間', `<select id="plan-default_duration" class="input-field py-1.5 px-2 text-xs w-24" ${editable ? '' : 'disabled'}>
-          <option value="50" ${Number(master.default_duration ?? 50) === 50 ? 'selected' : ''}>50分</option>
-          <option value="100" ${Number(master.default_duration ?? 50) === 100 ? 'selected' : ''}>100分</option>
-        </select>`)}
-        ${field('試験日数（自動算出）', `<span id="plan-days-preview" class="inline-flex items-center justify-center px-2 py-1.5 text-xs font-bold w-24 bg-accent-soft text-accent-strong border border-accent-soft rounded">${autoDays} 日</span>`)}
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse min-w-[880px]">
+          <thead><tr>
+            <th class="px-2 py-1.5 text-[10px] text-muted font-bold bg-inset">考査名</th>
+            <th class="px-2 py-1.5 text-[10px] text-muted font-bold bg-inset">開始日</th>
+            <th class="px-2 py-1.5 text-[10px] text-muted font-bold bg-inset">終了日</th>
+            <th class="px-2 py-1.5 text-[10px] text-muted font-bold bg-inset">1日の時限数</th>
+            <th class="px-2 py-1.5 text-[10px] text-muted font-bold bg-inset">試験日数（自動）</th>
+            <th class="px-2 py-1.5 text-[10px] text-muted font-bold bg-inset">キャパ（自動）</th>
+            <th class="px-2 py-1.5 text-[10px] text-muted font-bold bg-inset">② 実施コマ</th>
+            <th class="px-2 py-1.5 text-[10px] text-muted font-bold bg-inset">状態</th>
+            <th class="px-2 py-1.5 text-[10px] text-muted font-bold bg-inset">操作</th>
+          </tr></thead>
+          <tbody id="plan-period-body">${tableRows}</tbody>
+        </table>
       </div>
-      ${
-        master.start_date && master.end_date
-          ? ''
-          : `<p class="text-[11px] text-soft">① で登録した考査の ${perGrade.length ? '実施教科数・必要コマ数' : '実施教科数'}を見て、開始日・終了日・1日の時限数・標準試験時間を登録します。試験日数と年度は自動算出されます。</p>`
-      }
+      ${gradeView}
       ${actionRow}
     </div>`,
     `<button id="plan-refresh" class="btn-secondary py-1 px-2 text-[11px] flex items-center gap-1"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> 更新</button>`,
@@ -324,7 +352,7 @@ export function renderPlanTab(container, notice = '') {
       ${examFormHtml(masters, kyomu)}
       ${surveyCard(kyomu)}
       <div id="exam-survey-grid"></div>
-      ${periodCard(kyomu)}
+      ${periodTable(kyomu, board)}
     </div>
   `;
   renderSurveySection(container.querySelector('#exam-survey-grid'));
@@ -343,14 +371,7 @@ export function bindPlanTab(container, reload) {
   const surveyGrid = panel.querySelector('#exam-survey-grid');
   if (surveyGrid) bindSurveySection(surveyGrid, reload, renderSurveySection);
 
-  // ③ の入力は開始日・終了日・1日の時限数・標準試験時間のみ（年度・試験日数は自動算出）
-  const readPlan = () => ({
-    start_date: panel.querySelector('#plan-start_date')?.value || null,
-    end_date: panel.querySelector('#plan-end_date')?.value || null,
-    daily_slots: Number(panel.querySelector('#plan-daily_slots')?.value) || null,
-    default_duration: Number(panel.querySelector('#plan-default_duration')?.value) || 50,
-  });
-
+  // ③ の表の各行は焦点が行の外へ移った瞬間に自動登録する（基本情報の登録と同じ作法、行の「保存」ボタンは無い）
   const run = async (path, body, confirmText) => {
     if (confirmText && !window.confirm(confirmText)) return;
     try {
@@ -370,6 +391,13 @@ export function bindPlanTab(container, reload) {
         .catch(() => reload());
       return;
     }
+    const openRow = e.target.closest('[data-plan-open]');
+    if (openRow) {
+      examStore.examId = openRow.dataset.planOpen;
+      showToast('対象考査を切り替えました（対象考査の行が強調されます）。', 'info');
+      reload();
+      return;
+    }
     const btn = e.target.closest('[data-plan-act]');
     if (!btn) return;
     if (!id) {
@@ -379,27 +407,6 @@ export function bindPlanTab(container, reload) {
     const act = btn.dataset.planAct;
     if (act === 'survey-start') run(`/exam/${id}/subject-survey/start`, {}, '② 実施科目調査を開始し、科目マスタから実施予定科目を自動種付けして全教員に編集可能にします（期間は ③ で後から登録できます）。よろしいですか？');
     if (act === 'survey-end') run(`/exam/${id}/subject-survey/end`, {}, '② の実施科目調査を終了します（以降は教務権限者のみ編集できます）。よろしいですか？');
-    if (act === 'register') {
-      const plan = readPlan();
-      if (!plan.start_date || !plan.end_date) {
-        showToast('③ では開始日と終了日を入力してください。', 'warning');
-        return;
-      }
-      const days = daysBetween(plan.start_date, plan.end_date);
-      if (days < 1) {
-        showToast('③ の日程が不正です（開始日 ≦ 終了日）。', 'warning');
-        return;
-      }
-      if (!plan.daily_slots || plan.daily_slots < 1) {
-        showToast('③ では 1日の時限数（1〜8）を入力してください。', 'warning');
-        return;
-      }
-      run(
-        `/exam/${id}/plan/register`,
-        plan,
-        `③ の考査期間（開始日 ${plan.start_date} 〜 終了日 ${plan.end_date} ／ 試験日数 ${days}日 × 1日 ${plan.daily_slots}時限 ／ 標準試験時間 ${plan.default_duration}分）を登録します。よろしいですか？`
-      );
-    }
     if (act === 'decide') run(`/exam/${id}/plan/decide`, {}, '全実施科目が出題者により提出されたことを確認し、実施科目プランを確定します。よろしいですか？');
   });
 
@@ -412,13 +419,90 @@ export function bindPlanTab(container, reload) {
     else showToast('移動先のメニューが見つかりません。', 'warning');
   });
 
-  // 試験日数は開始日〜終了日から自動算出する（入力欄は開始日・終了日・1日の時限数・標準試験時間のみ）
+  // ③ の表の自動登録（基本情報の登録と同一の作法）: 焦点が行の外へ移った瞬間にその行を書く。
+  // 行内の次の入力欄へ移っている間は書き終えていないので書かない。内容が変わっていない行は書かない。
+  if (panel.__planAutoCtl) panel.__planAutoCtl.abort();
+  const autoCtl = new AbortController();
+  panel.__planAutoCtl = autoCtl;
+  const sig = { signal: autoCtl.signal };
+  const rowVals = (tr) => ({
+    start_date: (tr.querySelector('[data-pf="start_date"]')?.value || '').trim(),
+    end_date: (tr.querySelector('[data-pf="end_date"]')?.value || '').trim(),
+    daily_slots: Number(tr.querySelector('[data-pf="daily_slots"]')?.value) || 0,
+  });
+  /** 行の試験日数とキャパ（日数×時限数）を入力値から再計算して表示する（標準試験時間の入力欄はない） */
+  const paintRow = (tr) => {
+    const v = rowVals(tr);
+    const d = daysBetween(v.start_date, v.end_date);
+    const cap = d * v.daily_slots;
+    const pd = tr.querySelector('[data-pdays]');
+    if (pd) {
+      pd.textContent = d > 0 ? `${d} 日` : '− 日';
+      pd.className = `text-[11px] font-bold ${d > 0 ? 'text-accent-strong' : 'text-muted'}`;
+    }
+    const pc = tr.querySelector('[data-pcap]');
+    if (pc) {
+      pc.textContent = cap > 0 ? `${cap} コマ` : '− コマ';
+      pc.className = `text-[11px] ${cap > 0 ? 'text-soft' : 'text-muted'}`;
+    }
+  };
+  const writeQueue = [];
+  let writing = false;
+  const flushQueue = async () => {
+    if (writing) return;
+    const job = writeQueue.shift();
+    if (!job) return;
+    writing = true;
+    const id = job.tr.dataset.planRowId;
+    const name = (examStore.masters.find((m) => String(m.id) === String(id)) || {}).title || id;
+    try {
+      const res = await examApi.post(`/exam/${id}/plan/register`, {
+        start_date: job.v.start_date,
+        end_date: job.v.end_date,
+        daily_slots: job.v.daily_slots,
+        default_duration: 50,
+      });
+      showToast(res?.message || `考査「${name}」の期間を登録しました。`, 'success');
+      examStore.masters = [];
+      await reload();
+    } catch (err) {
+      job.tr.dataset.autoKey = '';   // 失敗時は同じ内容でもう一度書き直せる
+      showToast(`考査「${name}」の期間を自動登録できませんでした（${err.message}）`, 'error');
+    }
+    writing = false;
+    if (writeQueue.length) flushQueue();
+  };
+  const queueRow = (tr) => {
+    const v = rowVals(tr);
+    const key = JSON.stringify(v);
+    if (tr.dataset.autoKey === key) return;   // 内容が変わっていなければ書き込まない
+    tr.dataset.autoKey = key;
+    if (!v.start_date || !v.end_date) return;   // 期間が揃っていない行（未入力の行）は書き込まない
+    if (daysBetween(v.start_date, v.end_date) < 1) {
+      showToast('③ の日程が不正です（開始日 ≦ 終了日）。書き込んでいません。', 'warning');
+      return;
+    }
+    if (v.daily_slots < 1 || v.daily_slots > 8) {
+      showToast('③ の 1日の時限数は 1〜8 で入力してください。書き込んでいません。', 'warning');
+      return;
+    }
+    writeQueue.push({ tr, v });
+    flushQueue();
+  };
   panel.addEventListener('change', (e) => {
-    if (e.target.id !== 'plan-start_date' && e.target.id !== 'plan-end_date') return;
-    const span = panel.querySelector('#plan-days-preview');
-    if (!span) return;
-    const d = daysBetween(panel.querySelector('#plan-start_date')?.value, panel.querySelector('#plan-end_date')?.value);
-    span.textContent = d > 0 ? `${d} 日` : '− 日';
+    const tr = e.target.closest?.('tr[data-plan-row-id]');
+    if (tr && e.target.dataset && e.target.dataset.pf) paintRow(tr);
+  }, sig);
+  panel.addEventListener('focusout', (e) => {
+    const tr = e.target?.closest?.('tr[data-plan-row-id]');
+    if (!tr) return;
+    const next = e.relatedTarget;
+    if (next && next.closest?.('tr[data-plan-row-id]') === tr) return;   // 行内の次の入力欄へ移った間は書き込まない
+    queueRow(tr);
+  }, sig);
+  // 各行の初期内容をキーとして控える（入力していない行は焦点が外れても書き込まない）
+  panel.querySelectorAll('tr[data-plan-row-id]').forEach((tr) => {
+    tr.dataset.autoKey = JSON.stringify(rowVals(tr));
   });
 
   refreshLucideIcons();

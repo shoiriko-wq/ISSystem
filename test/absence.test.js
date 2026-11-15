@@ -17,6 +17,8 @@ describe('Absence API Endpoints (/api/absences)', () => {
   let kyomuUser = null;
   let teacherUser = null;
   let leaveRecordId = null;
+  let kyomuRecordId = null;
+  let tripRecordId = null;
 
   const login = async (staffCode) => request(app).post('/api/auth/login').send({ staff_code: staffCode, password: PASSWORD });
 
@@ -176,7 +178,89 @@ describe('Absence API Endpoints (/api/absences)', () => {
     expect(finalRes.body.records).toHaveLength(0);
   });
 
-  // 11. 存在しないレコード
+  // 11. 期間プリセット (初期の全日 = 08:30〜17:00。期間未入力は全日へ正規化される)
+  it('POST /api/absences - 期間未入力は 全日 (08:30〜17:00) に正規化され、取得JSONに始終時刻が入ること', async () => {
+    const res = await request(app)
+      .post('/api/absences')
+      .set('Authorization', `Bearer ${kyomuToken}`)
+      .send({ user_id: teacherUser.id, record_type: 'TRIP', record_date: TEST_DATE });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.body.record).toHaveProperty('start_time', '08:30');
+    expect(res.body.record).toHaveProperty('end_time', '17:00');
+    expect(res.body.message).toContain('08:30〜17:00');
+    tripRecordId = res.body.record.id;
+
+    const list = await request(app).get(`/api/absences?date=${TEST_DATE}`).set('Authorization', `Bearer ${kyomuToken}`);
+    const trip = list.body.records.find((r) => r.record_type === 'TRIP');
+    expect(trip).toHaveProperty('start_time', '08:30');
+    expect(trip).toHaveProperty('end_time', '17:00');
+  });
+
+  // 12. 半日（午前）08:30〜13:00 の登録と、同一区分の再登録による期間上書き
+  it('POST /api/absences - 半日（午前）08:30〜13:00 が保存され、全日再登録は同一レコードの期間を上書きすること', async () => {
+    const am = await request(app)
+      .post('/api/absences')
+      .set('Authorization', `Bearer ${kyomuToken}`)
+      .send({ user_id: teacherUser.id, record_type: 'TRIP', record_date: TEST_DATE, period_preset: 'AM', start_time: '08:30', end_time: '13:00' });
+
+    expect(am.statusCode).toBe(201);
+    expect(am.body.record.start_time).toBe('08:30');
+    expect(am.body.record.end_time).toBe('13:00');
+    expect(am.body.record.id).toBe(tripRecordId);
+
+    const full = await request(app)
+      .post('/api/absences')
+      .set('Authorization', `Bearer ${kyomuToken}`)
+      .send({ user_id: teacherUser.id, record_type: 'TRIP', record_date: TEST_DATE, period_preset: 'FULL', start_time: '08:30', end_time: '17:00' });
+
+    expect(full.statusCode).toBe(201);
+    expect(full.body.record.end_time).toBe('17:00');
+
+    // 教員×日付×区分は1件に集約される (件数が増えない)
+    const list = await request(app).get(`/api/absences?date=${TEST_DATE}`).set('Authorization', `Bearer ${kyomuToken}`);
+    expect(list.body.counts).toEqual({ LEAVE: 0, TRIP: 1 });
+    expect(list.body.records).toHaveLength(1);
+  });
+
+  // 13. 期間不正 (終了が開始より後でない) は 400
+  it('POST /api/absences - 終了時刻が開始時刻より後でない期間は 400 になること', async () => {
+    const backwards = await request(app)
+      .post('/api/absences')
+      .set('Authorization', `Bearer ${kyomuToken}`)
+      .send({ user_id: teacherUser.id, record_type: 'TRIP', record_date: TEST_DATE, start_time: '13:00', end_time: '08:30' });
+    expect(backwards.statusCode).toBe(400);
+    expect(backwards.body.message).toContain('期間');
+
+    const same = await request(app)
+      .post('/api/absences')
+      .set('Authorization', `Bearer ${kyomuToken}`)
+      .send({ user_id: teacherUser.id, record_type: 'TRIP', record_date: TEST_DATE, start_time: '09:00', end_time: '09:00' });
+    expect(same.statusCode).toBe(400);
+  });
+
+  // 14. HH:MM 形式でない時刻は 400 (24:00 / 8:30 など)
+  it('POST /api/absences - HH:MM 形式でない時刻は 400 になり既存登録は変わらないこと', async () => {
+    const badEnd = await request(app)
+      .post('/api/absences')
+      .set('Authorization', `Bearer ${kyomuToken}`)
+      .send({ user_id: teacherUser.id, record_type: 'TRIP', record_date: TEST_DATE, start_time: '08:30', end_time: '24:00' });
+    expect(badEnd.statusCode).toBe(400);
+    expect(badEnd.body.message).toContain('終了時刻');
+
+    const badStart = await request(app)
+      .post('/api/absences')
+      .set('Authorization', `Bearer ${kyomuToken}`)
+      .send({ user_id: teacherUser.id, record_type: 'TRIP', record_date: TEST_DATE, start_time: '8:30', end_time: '17:00' });
+    expect(badStart.statusCode).toBe(400);
+    expect(badStart.body.message).toContain('開始時刻');
+
+    const list = await request(app).get(`/api/absences?date=${TEST_DATE}`).set('Authorization', `Bearer ${kyomuToken}`);
+    expect(list.body.records).toHaveLength(1);
+    expect(list.body.records[0].end_time).toBe('17:00');
+  });
+
+  // 15. 存在しないレコード
   it('DELETE /api/absences/:id - 存在しない ID は 404 になること', async () => {
     const res = await request(app).delete('/api/absences/abs_999999').set('Authorization', `Bearer ${kyomuToken}`);
     expect(res.statusCode).toBe(404);

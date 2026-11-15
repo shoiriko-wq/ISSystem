@@ -1,6 +1,6 @@
 /**
  * メール接続設定 + 接続テスト API 統合テスト (mail)
- * 設定保存 → フォーム値プレテスト → 保存済み設定テスト (status 更新) → 削除 を検証する
+ * 設定保存 → フォーム値プレテスト → 設定メニューのテスト (account_id + フォーム値で status 更新) → 保存済み設定テスト (status 更新) → 削除 を検証する
  * ※ テストサーバー名は存在しないドメイン (issystem.example) なので接続テストは必ず失敗する
  */
 import { readdirSync } from 'node:fs';
@@ -9,6 +9,8 @@ import request from 'supertest';
 import app from '../src/app.js';
 import { setProbeOverrides } from '../src/services/mail.service.js';
 import mailService from '../src/services/mail.service.js';
+import mailModel from '../src/models/mail.model.js';
+import { query } from '../config/database.js';
 import { onlineUserIds } from '../src/utils/presence.js';
 import { parseMessage } from '../src/services/mail.transport.js';
 import { loginToken, bearer, closePool } from './helpers.js';
@@ -17,6 +19,7 @@ import { makeIdleHarness } from './mail.idle.mock.js';
 
 describe('Mail API (/api/mail)', () => {
   let token;
+  let accountId = null;
 
   const settings = {
     email_address: 'mail.test@issystem.example',
@@ -53,6 +56,7 @@ describe('Mail API (/api/mail)', () => {
     expect(res.body.account.email_address).toBe('mail.test@issystem.example');
     expect(res.body.account.status).toBe('UNVERIFIED');
     expect(JSON.stringify(res.body)).not.toContain('mail-secret-123');
+    accountId = res.body.account.id;
   });
 
   it('POST /api/mail/test - 未保存フォーム値のプレテストは失敗 (status は DB に書き込まない)', async () => {
@@ -108,6 +112,51 @@ describe('Mail API (/api/mail)', () => {
     } finally {
       setProbeOverrides({});
     }
+  });
+
+  it('POST /api/mail/test - account_id 付きのフォーム値テスト（メール設定メニュー内の接続テスト）は成否をそのアカウントの status へ保存する', async () => {
+    // 直前のテストで status=VERIFIED になっている。到達不能サーバーのフォーム値テストで FAILED へ更新されることを実測する
+    const res = await request(app)
+      .post('/api/mail/test')
+      .set('Authorization', bearer(token))
+      .send({
+        account_id: accountId,
+        email_address: 'mail.test@issystem.example',
+        password: 'mail-secret-123',
+        imap_host: 'imap.issystem.example',
+        imap_port: 993,
+        smtp_host: 'smtp.issystem.example',
+        smtp_port: 465,
+      });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.status).toBe('FAILED');
+    expect(res.body.account?.status).toBe('FAILED');
+    expect(JSON.stringify(res.body)).not.toContain('mail-secret-123');
+
+    const after = await request(app).get('/api/mail/account').set('Authorization', bearer(token));
+    expect(after.body.account.status).toBe('FAILED');
+    expect(after.body.account.last_checked_at).toBeTruthy();
+  });
+
+  it('POST /api/mail/test - 他人の account_id 付きフォーム値テストは status を書き換えない', async () => {
+    const res = await request(app)
+      .post('/api/mail/test')
+      .set('Authorization', bearer(token))
+      .send({
+        account_id: 'someone-else-account',
+        email_address: 'probe.test@issystem.example',
+        password: 'probe-secret-123',
+        imap_host: 'imap.issystem.example',
+        imap_port: 993,
+        smtp_host: 'smtp.issystem.example',
+        smtp_port: 465,
+      });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.status).toBe('FAILED');
+    expect(res.body.account).toBeUndefined();
+
+    const after = await request(app).get('/api/mail/account').set('Authorization', bearer(token));
+    expect(after.body.account.status).toBe('FAILED'); // 自分（1件目）の status は変わらない
   });
 
   it('POST /api/mail/test - 未設定では 409、不正メールは 400、未認証は 401', async () => {
@@ -279,6 +328,156 @@ describe('Mail 送信 (POST /api/mail/send)', () => {
 });
 
 /**
+ * 返信・転送 (POST /api/mail/send に reply_to_id / reply_mode を添える)
+ * In-Reply-To / References ヘッダー、\Answered /\Forwarded、監査コード、IMAP best-effort を検証する
+ */
+describe('Mail 返信・転送 (reply / forward)', () => {
+  let token;
+  let userId;
+  let accountId;
+  let sourceId;
+  const b64 = (s) => Buffer.from(s, 'utf8').toString('base64');
+  const replySettings = {
+    email_address: 'reply.test@issystem.example',
+    password: 'reply-secret-123',
+    imap_host: 'imap.issystem.example',
+    imap_port: 993,
+    smtp_host: 'smtp.issystem.example',
+    smtp_port: 465,
+  };
+  const srcRaw = [
+    'From: 田中 <tanaka@issystem.example>',
+    'To: reply.test@issystem.example',
+    `Subject: =?UTF-8?B?${b64('出欠確認')}?=`,
+    'Date: Mon, 12 Nov 2026 10:00:00 +0900',
+    'Message-ID: <src-1@issystem.example>',
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    b64('5時間目の教室へ'),
+  ].join('\r\n');
+
+  const flagsOf = async (id) => String((await mailModel.getMessageById(id, userId))?.imap_flags || '');
+  const lastAudit = async (targetId) => {
+    const res = await query('SELECT action FROM audit_logs WHERE resource_id = ? ORDER BY id DESC LIMIT 1', [targetId]);
+    return res.rows[0]?.action ?? null;
+  };
+
+  beforeAll(async () => {
+    token = await loginToken(app);
+    const created = await request(app).post('/api/mail/account').set('Authorization', bearer(token)).send(replySettings);
+    expect(created.statusCode).toBe(201);
+    accountId = created.body.account.id;
+    const me = await request(app).get('/api/auth/me').set('Authorization', bearer(token));
+    userId = String(me.body.user?.id ?? me.body.id);
+    // 返信・転送元メールを IMAP 受信経路でDBへ入れる (Message-ID を mail_messages へ保存する)
+    setProbeOverrides({ fetch: async () => [{ uid: '9201', seen: true, raw: srcRaw, internaldate: '12 Nov 2026 10:00:00 +0900' }] });
+    const refreshed = await request(app).post('/api/mail/inbox/refresh').set('Authorization', bearer(token)).send({});
+    expect(refreshed.statusCode).toBe(200);
+    sourceId = refreshed.body.messages.find((m) => m.uid === '9201').id;
+  });
+
+  afterAll(async () => {
+    setProbeOverrides({});
+    await request(app).delete('/api/mail/account').set('Authorization', bearer(token));
+  });
+
+  it('受信メールの Message-ID が DB へ保存される', async () => {
+    const row = await mailModel.getMessageById(sourceId, userId);
+    expect(row.message_id).toBe('<src-1@issystem.example>');
+    expect(row.uid).toBe('9201');
+  });
+
+  it('返信は In-Reply-To を付け、返信元へ \\Answered を付け、監査 MAIL_REPLY を残す', async () => {
+    const captured = [];
+    setProbeOverrides({
+      send: async (params) => { captured.push(params.raw); return { ok: true, message: 'mock 送信完了' }; },
+      append: async () => true,
+      setKeywords: async () => true,
+    });
+
+    const res = await request(app).post('/api/mail/send').set('Authorization', bearer(token)).send({
+      to: 'tanaka@issystem.example',
+      subject: 'Re: 出欠確認',
+      body: 'はい、行きます',
+      reply_to_id: sourceId,
+      reply_mode: 'reply',
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.body.message).toBe('返信を送信しました。');
+    expect(captured[0]).toContain('In-Reply-To: <src-1@issystem.example>');
+    expect(res.body.message_row.in_reply_to).toBe('<src-1@issystem.example>');
+    expect(await flagsOf(sourceId)).toContain('\\Answered');
+    expect(await lastAudit(res.body.message_row.id)).toBe('MAIL_REPLY');
+  });
+
+  it('転送は References にスレッド連鎖を付け、転送元へ \\Forwarded を付け、監査 MAIL_FORWARD を残す', async () => {
+    const captured = [];
+    setProbeOverrides({
+      send: async (params) => { captured.push(params.raw); return { ok: true, message: 'mock 送信完了' }; },
+      append: async () => true,
+      setKeywords: async () => true,
+    });
+
+    const res = await request(app).post('/api/mail/send').set('Authorization', bearer(token)).send({
+      to: 'suzuki@issystem.example',
+      subject: 'Fwd: 出欠確認',
+      body: '共有します',
+      reply_to_id: sourceId,
+      reply_mode: 'forward',
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.body.message).toBe('転送を送信しました。');
+    expect(captured[0]).toContain('In-Reply-To: <src-1@issystem.example>');
+    expect(captured[0]).toContain('References: <src-1@issystem.example>');
+    expect(await flagsOf(sourceId)).toContain('\\Forwarded');
+    expect(await flagsOf(sourceId)).toContain('\\Answered'); // 既存の返信マークは保持される
+    expect(await lastAudit(res.body.message_row.id)).toBe('MAIL_FORWARD');
+  });
+
+  it('IMAP のマーク付け失敗は送信成功を消さない (201 + 警告、DB のマークは残る)', async () => {
+    setProbeOverrides({
+      send: async () => ({ ok: true, message: 'mock 送信完了' }),
+      append: async () => { throw new Error('フォルダ「Sent」を開けません'); },
+      setKeywords: async () => { throw new Error('IMAP: サーバーへ到達できません。'); },
+    });
+
+    const res = await request(app).post('/api/mail/send').set('Authorization', bearer(token)).send({
+      to: 'tanaka@issystem.example',
+      subject: 'Re: 出欠確認',
+      body: '追送',
+      reply_to_id: sourceId,
+      reply_mode: 'reply',
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.body.message).toContain('返信を送信しました。');
+    expect(res.body.message).toContain('送信済みフォルダに保存できませんでした');
+    expect(res.body.message).toContain('マークを付けられませんでした');
+    expect(await flagsOf(sourceId)).toContain('\\Answered');
+  });
+
+  it('返信元が無ければ 404、reply_mode が無ければ 400 で送信ボックスへ記録しない', async () => {
+    setProbeOverrides({ send: async () => ({ ok: true, message: 'mock' }), append: async () => true, setKeywords: async () => true });
+
+    const missing = await request(app).post('/api/mail/send').set('Authorization', bearer(token)).send({
+      to: 'tanaka@issystem.example', subject: 'Re: 不存在', body: 'x', reply_to_id: 'mail_missing', reply_mode: 'reply',
+    });
+    expect(missing.statusCode).toBe(404);
+
+    const noMode = await request(app).post('/api/mail/send').set('Authorization', bearer(token)).send({
+      to: 'tanaka@issystem.example', subject: 'Re: 形式なし', body: 'x', reply_to_id: sourceId,
+    });
+    expect(noMode.statusCode).toBe(400);
+
+    const sent = await request(app).get('/api/mail/messages?folder=sent').set('Authorization', bearer(token));
+    const subjects = sent.body.messages.map((m) => m.subject);
+    expect(subjects).not.toContain('Re: 不存在');
+    expect(subjects).not.toContain('Re: 形式なし');
+  });
+});
+
+
+/**
  * 受信ボックス (POST /api/mail/inbox/refresh)
  * IMAP 取得結果を DB へ書き込む経路。Date ヘッダー欠損・+0900 オフセット・UID 重複を扱う
  */
@@ -323,9 +522,10 @@ describe('Mail 受信ボックス (inbox/refresh)', () => {
   ];
 
   // ---- IMAP IDLE ハーネス (常時接続の openInbox / newEnvelopes / 本文 lazy を差し替える) ----
+  // io.to(room).emit(event, payload) を記録するモック (to() の room 引数を捕まえないと room が undefined になる)
   const makeIo = () => {
     const emitted = [];
-    return { emitted, to() { return { emit(event, payload) { emitted.push({ room: this.room, event, payload }); } } } };
+    return { emitted, to(room) { return { room, emit(event, payload) { emitted.push({ room, event, payload }); } } } };
   };
   const counters = { openInbox: 0, newEnvelopes: 0, bodyText: 0, attachmentBytes: 0 };
   const state = { exists: 0, uidNext: 1, maxUid: 0, lineQueue: [], envelopeQueue: {}, body: {}, attachment: {}, counters };
@@ -350,7 +550,9 @@ describe('Mail 受信ボックス (inbox/refresh)', () => {
     const created = await request(app).post('/api/mail/account').set('Authorization', bearer(token)).send(inboxSettings);
     expect(created.statusCode).toBe(201);
     accountId = created.body.account.id;
-    userId = String(created.body.account.user_id);
+    // user_id はアカウント表示 (toView) に含まれないため /api/auth/me から取る
+    const me = await request(app).get('/api/auth/me').set('Authorization', bearer(token));
+    userId = String(me.body.user?.id ?? me.body.id);
     console.log('[beforeAll] userId=', userId, 'accountId=', accountId);
   });
 
@@ -362,7 +564,8 @@ describe('Mail 受信ボックス (inbox/refresh)', () => {
   });
 
   it('Date ヘッダー欠損メールでも 500 にならず受信日時が埋まる (INTERNALDATE フォールバック)', async () => {
-    setProbeOverrides({ fetch: fetchStub });
+    setProbeOverrides({ fetch: fetchStub, openInbox: harnessOpenInbox, bodyText: harnessBodyText });
+    state.body['9101'] = { body: 'hello', html_stripped: false };
 
     const res = await request(app).post('/api/mail/inbox/refresh').set('Authorization', bearer(token)).send({});
     expect(res.statusCode).toBe(200);
@@ -373,10 +576,16 @@ describe('Mail 受信ボックス (inbox/refresh)', () => {
     expect(byUid['9101'].sender_name).toBe('山田 太郎');
     expect(byUid['9101'].sender_email).toBe('yamada@issystem.example');
     expect(byUid['9101'].subject).toBe('ユーザー2');
-    expect(byUid['9101'].body).toBe('hello');
+    // 一覧はヘッダのみ返す (本文は SELECT 外。本文は詳細閲覧時の lazy 取得、30日超は cron で本文だけ消す)
+    expect(byUid['9101'].body).toBe('');
     expect(byUid['9101'].is_read).toBe(false);
     // +0900 を絶対時刻として扱う (V8 の Date.parse はオフセットを無視して UTC 扱いにすることがある)
     expect(wall(byUid['9101'].received_at)).toBe('2026-11-12 10:00:00');
+
+    // 詳細閲覧の lazy 取得 (GET /api/mail/messages/:id/body) は本文を返す
+    const lazy = await request(app).get(`/api/mail/messages/${byUid['9101'].id}/body`).set('Authorization', bearer(token));
+    expect(lazy.statusCode).toBe(200);
+    expect(lazy.body.body).toBe('hello');
 
     // Date ヘッダーが無いメールは INTERNALDATE を受信日時へ使う
     expect(wall(byUid['9102'].received_at)).toBe('2026-11-11 12:00:00');
@@ -431,11 +640,15 @@ describe('Mail 受信ボックス (inbox/refresh)', () => {
         smtp_tls: account.smtp_tls, smtp_use_imap: true, account,
       }];
     };
-    setProbeOverrides({
-      openInbox: harnessOpenInbox,
-      newEnvelopes: harnessNewEnvelopes,
-      bodyText: harnessBodyText,
-      attachmentBytes: harnessAttachmentBytes,
+    // ハーネスの差し替えは beforeAll で行う (前段のテストが setProbeOverrides({}) でリセットするため、
+    // describe 本体で登録すると 502 テストの後に消されて常時接続テストが実接続試行になる)
+    beforeAll(async () => {
+      setProbeOverrides({
+        openInbox: harnessOpenInbox,
+        newEnvelopes: harnessNewEnvelopes,
+        bodyText: harnessBodyText,
+        attachmentBytes: harnessAttachmentBytes,
+      });
     });
 
     afterAll(async () => {
@@ -463,6 +676,10 @@ describe('Mail 受信ボックス (inbox/refresh)', () => {
     it('常時 IDLE で EXIST 増長を検知してヘッダだけ UPSERT → user ルームへ mail:new_messages', async () => {
       const io = makeIo();
       setProbeOverrides({ openInbox: harnessOpenInbox, newEnvelopes: harnessNewEnvelopes, bodyText: harnessBodyText });
+      // 前テストの常時接続を閉じてから新しい io で開き直す (watch は作成時の io へ emit するため、
+      // 既存 watch を使い回すとこの io.emitted が空になる)
+      mailService.resetActiveWatch();
+      onlineUserIds.add(userId);
       mailService.ensureActiveWatchForUser(userId, io);
       await settle(300);
       const before = counters.newEnvelopes;
@@ -481,7 +698,8 @@ describe('Mail 受信ボックス (inbox/refresh)', () => {
 
       const listRes = await request(app).get('/api/mail/messages?folder=inbox').set('Authorization', bearer(token));
       expect(listRes.statusCode).toBe(200);
-      expect(listRes.body.messages.length).toBe(2);
+      // 前段の inbox/refresh テストが同アカウントへ 3件登録済みのため 2件ちょうどにはならない (新着2件の存在で検証)
+      expect(listRes.body.messages.length).toBeGreaterThanOrEqual(2);
       expect(listRes.body.messages.find((m) => m.uid === '1001').subject).toBe('新着1');
       expect(listRes.body.messages.find((m) => m.uid === '1002').subject).toBe('新着2');
 
@@ -523,10 +741,13 @@ describe('Mail 受信ボックス (inbox/refresh)', () => {
       const closed = await mailService.reconcileActiveWatchCron(io);
       expect(closed.opened).toHaveLength(0);
 
-      const files = readdirSync(path.resolve('src'));
-      expect(files).toContain('mail.transport.js');
-      expect(files).toContain('mail.model.js');
-      expect(files).toContain('mail.service.js');
+      // モジュール実体は src/services と src/models に置く (配置崩れ防止の実測)
+      const serviceFiles = readdirSync(path.resolve('src/services'));
+      expect(serviceFiles).toContain('mail.transport.js');
+      expect(serviceFiles).toContain('mail.service.js');
+      expect(readdirSync(path.resolve('src/models'))).toContain('mail.model.js');
+      expect(readdirSync(path.resolve('src/controllers'))).toContain('mail.controller.js');
+      expect(readdirSync(path.resolve('src/sockets'))).toContain('mail.socket.js');
 
       const { mailPollCronPattern } = await import('../src/utils/cron.jobs.js');
       expect(mailPollCronPattern(30000)).toBe('*/30 * * * * *');

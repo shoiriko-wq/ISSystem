@@ -87,6 +87,8 @@ export function verifySocketToken(rawToken) {
     is_kyomu: role === 'KYOMU' || decoded.is_kyomu === true,
     grade: decoded.grade ?? null,
     department: decoded.department ?? null,
+    // v3.1.15 CSV 一括登録: 初期パスワード未変更アカウントはアプリ系要求を遮断する (§5)
+    must_change_password: decoded.pwd === 1
   };
 }
 

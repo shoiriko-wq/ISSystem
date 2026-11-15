@@ -11,8 +11,8 @@ import { cleanupAccessLogs } from './access-log.js';
 import { mailService } from '../services/mail.service.js';
 
 /**
- * MAIL_POLL_INTERVAL_MS を node-cron の実行周期へ変換する (15秒未満は 15秒へ丸める)
- * クライアント側の setInterval は廃止したため、受信周期はサーバー側でのみ決まる (2026/11/13)
+ * MAIL_ACTIVE_SYNC_MS を node-cron の実行周期へ変換する (15秒未満は 15秒へ丸める)
+ * cron は接続中アカウント集合の照合（IDLE セッション開始/停止）だけ行う。実受信は常時 IDLE ループ (2026-11-14)
  */
 export function mailPollCronPattern(intervalMs) {
   const seconds = Math.max(15, Math.round((intervalMs ?? 60000) / 1000));

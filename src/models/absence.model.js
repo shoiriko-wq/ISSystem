@@ -24,6 +24,19 @@ function formatDateValue(value) {
   return String(value).trim().substring(0, 10);
 }
 
+/**
+ * 時刻値 (HH:MM 文字列 / Date) を HH:MM に正規化 (未設定は初期値)
+ * @param {string|Date} value 保存値
+ * @param {string} fallback 未設定時の既定 (08:30 / 17:00)
+ */
+function formatTimeValue(value, fallback) {
+  if (value instanceof Date) {
+    return `${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`;
+  }
+  const s = String(value || '').trim().substring(0, 5);
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(s) ? s : fallback;
+}
+
 function mapRecord(row) {
   const type = row.record_type;
   return {
@@ -35,6 +48,9 @@ function mapRecord(row) {
     record_date: formatDateValue(row.record_date),
     record_type: type,
     record_type_label: ABSENCE_TYPE_LABELS[type] || type,
+    // 期間 (開始・終了時刻 HH:MM)。プリセット名は保存せずラベルは時刻から算出する
+    start_time: formatTimeValue(row.start_time, '08:30'),
+    end_time: formatTimeValue(row.end_time, '17:00'),
     reason: row.reason || '',
     recorded_by: row.recorded_by,
     recorded_by_name: row.recorded_by_name || '',
@@ -111,18 +127,22 @@ export const absenceModel = {
 
   /**
    * 登録の作成・更新 (同一 教員×日付×区分 は 1件に集約)
-   * @param {object} data { user_id, record_date, record_type, reason, recorded_by, recorded_by_name, id? }
+   * @param {object} data { user_id, record_date, record_type, start_time, end_time, reason, recorded_by, recorded_by_name, id? }
    */
   async upsert(data) {
     const db = await openDb();
     const recordDate = formatDateValue(data.record_date);
+    const startTime = formatTimeValue(data.start_time, '08:30');
+    const endTime = formatTimeValue(data.end_time, '17:00');
     const id = data.id || `abs_${Date.now()}_${Math.floor(Math.random() * 900) + 100}`;
 
     const result = await db.query(
       `INSERT INTO absence_records
-        (id, user_id, record_date, record_type, reason, recorded_by, recorded_by_name, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, user_id, record_date, record_type, start_time, end_time, reason, recorded_by, recorded_by_name, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (user_id, record_date, record_type) DO UPDATE SET
+         start_time = EXCLUDED.start_time,
+         end_time = EXCLUDED.end_time,
          reason = EXCLUDED.reason,
          recorded_by = EXCLUDED.recorded_by,
          recorded_by_name = EXCLUDED.recorded_by_name,
@@ -133,6 +153,8 @@ export const absenceModel = {
         data.user_id,
         recordDate,
         data.record_type,
+        startTime,
+        endTime,
         data.reason || '',
         data.recorded_by,
         data.recorded_by_name || '',

@@ -71,7 +71,8 @@ export const absenceController = {
   /**
    * 年休等・出張 の手動登録
    * POST /api/absences
-   * Body: { user_id, record_type: 'LEAVE'|'TRIP', record_date, reason }
+   * Body: { user_id, record_type: 'LEAVE'|'TRIP', record_date, start_time: 'HH:MM', end_time: 'HH:MM', period_preset?, reason? }
+   * ※ start_time/end_time 未入力は 08:30 / 17:00 に正規化、終了は開始より後 (违反は 400)
    */
   async recordAbsence(req, res, next) {
     try {
@@ -83,6 +84,8 @@ export const absenceController = {
         date: saved.record_date,
         record_type: saved.record_type,
         record_type_label: ABSENCE_TYPE_LABELS[saved.record_type],
+        start_time: saved.start_time,
+        end_time: saved.end_time,
         user_id: saved.user_id,
         userName: saved.user_name,
         operatorId: user.id || user._id,
@@ -91,7 +94,7 @@ export const absenceController = {
 
       return res.status(201).json({
         success: true,
-        message: `「${ABSENCE_TYPE_LABELS[saved.record_type]}」${saved.user_name} 教員を登録しました。`,
+        message: `「${ABSENCE_TYPE_LABELS[saved.record_type]}」${saved.user_name} 教員を ${saved.start_time}〜${saved.end_time} に登録しました。`,
         record: saved,
       });
     } catch (error) {

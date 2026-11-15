@@ -417,8 +417,18 @@ const typeRow = async (kind, values) => {
     const isSelect = await page.evaluate((s) => document.querySelector(s)?.tagName === 'SELECT', sel);
     await page.click(sel);
     await sleep(150);
-    if (isSelect) await page.select(sel, String(val));
-    else await page.type(sel, String(val));
+    if (isSelect) {
+      await page.select(sel, String(val));
+    } else {
+      // 既定値（例: room の seats=40）が残ったまま実タイピングだと末尾に連結して 400 になるため、
+      // 焦点を当てた入力欄を空にしてから書く（行の初期状態から書き換える実操作を再現する）
+      await page.evaluate((s) => {
+        const el = document.querySelector(s);
+        el.value = '';
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      }, sel);
+      await page.type(sel, String(val));
+    }
     await sleep(150);
   }
 };
@@ -457,18 +467,23 @@ const findRowId = (kind, name) =>
   }, kind, name);
 
 
+// 行の編集は自動登録（R7）なので「保存」ボタンは存在しない。操作列のボタンは「削除」だけ。
+// → 期待値は現実（削除ボタンが全行にある）へ更新し、「保存」は全テーブルで0個であることを併せて測る。
 const allRowsHaveButtons = await page.evaluate((kinds) => {
   const out = {};
   for (const k of kinds) {
     const rows = [...document.querySelectorAll(`#basic-body-${k} tr`)];
-    out[k] = rows.length > 0 && rows.every((r) => r.querySelector('[data-act="save"]') && r.querySelector('[data-act="delete"]'));
+    out[k] = rows.length > 0 && rows.every((r) => !r.querySelector('[data-act="save"]') && r.querySelector('[data-act="delete"]'));
     out[`${k}Count`] = rows.length;
+    out[`${k}Save`] = rows.reduce((n, r) => n + r.querySelectorAll('[data-act="save"]').length, 0);
   }
   return out;
 }, Object.keys(API_PATH));
 
 const missingBtns = Object.keys(API_PATH).filter((k) => allRowsHaveButtons[`${k}Count`] > 0 && !allRowsHaveButtons[k]);
-check('すべての行に保存・削除ボタンがある（4テーブル）', missingBtns.length === 0, missingBtns.join(',') || '');
+check('すべての行に削除ボタンがあり「保存」ボタンはない（4テーブル）',
+  missingBtns.length === 0 && Object.keys(API_PATH).every((k) => allRowsHaveButtons[`${k}Save`] === 0),
+  missingBtns.join(',') || '');
 
 // 追加→自動登録→削除に使う名前（サーバー側は初期名を固定せず、クラス名・教科名も自由に付けられる）
 // このテストが作り、最後に削除する一意な名前を使う

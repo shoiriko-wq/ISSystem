@@ -54,7 +54,7 @@ export const userModel = {
 
     try {
       const res = await query(
-        `SELECT id, staff_code, email, name, role, grade, department, extension_number, subjects, password_hash, created_at FROM users WHERE id = $1`,
+        `SELECT id, staff_code, email, name, role, grade, department, extension_number, subjects, password_hash, must_change_password, created_at FROM users WHERE id = $1`,
         [id]
       );
       return withSubjects(res.rows[0] || null);
@@ -78,7 +78,7 @@ export const userModel = {
 
     try {
       const res = await query(
-        `SELECT id, staff_code, email, name, role, grade, department, extension_number, subjects, password_hash, created_at
+        `SELECT id, staff_code, email, name, role, grade, department, extension_number, subjects, password_hash, must_change_password, created_at
          FROM users WHERE UPPER(staff_code) = UPPER($1) OR UPPER(id) = UPPER($2)`,
         [staffCode, staffCode]
       );
@@ -101,7 +101,7 @@ export const userModel = {
 
     try {
       const res = await query(
-        `SELECT id, staff_code, email, name, role, grade, department, extension_number, subjects, password_hash, created_at FROM users WHERE LOWER(email) = LOWER($1)`,
+        `SELECT id, staff_code, email, name, role, grade, department, extension_number, subjects, password_hash, must_change_password, created_at FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1`,
         [email]
       );
       return withSubjects(res.rows[0] || null);
@@ -116,7 +116,7 @@ export const userModel = {
    */
   async listAll() {
     try {
-      const res = await query(`SELECT id, staff_code, email, name, role, grade, department, extension_number, avatar_url, subjects FROM users ORDER BY name ASC`);
+      const res = await query(`SELECT id, staff_code, email, name, role, grade, department, extension_number, avatar_url, subjects, must_change_password FROM users ORDER BY name ASC`);
       return res.rows.map(withSubjects);
     } catch (err) {
       return Array.from(mockUsers.values());
@@ -157,16 +157,80 @@ export const userModel = {
       const ts = nowIso();
       newUser.created_at = ts;
       newUser.updated_at = ts;
+      newUser.must_change_password = userData.must_change_password ? 1 : 0;
       await query(
-        `INSERT INTO users (id, staff_code, email, password_hash, name, role, department, extension_number, avatar_url, subjects, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-        [newUser.id, newUser.staff_code, newUser.email, newUser.password_hash, newUser.name, newUser.role, newUser.department, newUser.extension_number, newUser.avatar_url, JSON.stringify(newUser.subjects), ts, ts]
+        `INSERT INTO users (id, staff_code, email, password_hash, name, role, department, extension_number, avatar_url, subjects, must_change_password, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        [newUser.id, newUser.staff_code, newUser.email, newUser.password_hash, newUser.name, newUser.role, newUser.department, newUser.extension_number, newUser.avatar_url, JSON.stringify(newUser.subjects), newUser.must_change_password, ts, ts]
       );
     } catch (err) {
       console.warn('[UserModel PG Warning] create user failed:', err.message);
     }
 
     return newUser;
+  },
+
+  /**
+   * CSV 一括登録 (トランザクション)。rows は検証済みの { id, staff_code, password_hash, name, ... } の配列。
+   * users へ INSERT し、座席セルの初期状態 (seating_status) を同じトランザクションで UPSERT する。
+   * 1件でも CONSTRAINT violation が出たら呼び出し側のトランザクション全体が ROLLBACK される
+   * (PostgreSQL の FK と UNIQUE は文レベルで即検出。テストデータでは検出できない)。
+   * @param {Array<Object>} rows 検証済み行
+   * @param {Object} [client] 共有トランザクションのクライアント (省略時は単発 pool クエリ)
+   * @returns {Promise<Array<Object>>} 作成したユーザー (must_change_password=1)
+   */
+  async bulkCreate(rows, client = null) {
+    const runQuery = async (sql, params) => {
+      if (client) return client.query(sql, params);
+      return query(sql, params);
+    };
+    const ts = nowIso();
+    const created = [];
+
+    for (const row of rows) {
+      const user = {
+        id: row.id || `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        staff_code: row.staff_code,
+        email: row.email || null,
+        password_hash: row.password_hash,
+        name: row.name || '',
+        role: row.role || 'TEACHER',
+        grade: row.grade || null,
+        department: row.department || null,
+        extension_number: row.extension_number || null,
+        avatar_url: row.avatar_url || null,
+        subjects: parseSubjectList(row.subjects),
+        // CSV 一括登録の初期パスワードは必ず自分で変更させる (§5)
+        must_change_password: 1
+      };
+
+      mockUsers.set(user.id, user);
+
+      await runQuery(
+        `INSERT INTO users (id, staff_code, email, password_hash, name, role, grade, department, extension_number, avatar_url, subjects, must_change_password, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+        [user.id, user.staff_code, user.email, user.password_hash, user.name, user.role, user.grade, user.department, user.extension_number, user.avatar_url, JSON.stringify(user.subjects), user.must_change_password, ts, ts]
+      );
+
+      const deskNumber = String(row.desk_number || '').trim();
+      if (deskNumber) {
+        await runQuery(
+          `INSERT INTO seating_status (id, user_id, desk_number, group_zone, current_status, status_note, updated_at)
+           VALUES ($1, $2, $3, $4, 'PRESENT', $5, $6)
+           ON CONFLICT (user_id) DO UPDATE SET
+             desk_number = EXCLUDED.desk_number,
+             group_zone = EXCLUDED.group_zone,
+             updated_at = EXCLUDED.updated_at`,
+          [`seat_${user.id}`, user.id, deskNumber, row.group_zone || 'staff', row.status_note || '', ts]
+        );
+      }
+
+      user.created_at = ts;
+      user.updated_at = ts;
+      created.push(user);
+    }
+
+    return created;
   },
 
   /**
@@ -218,15 +282,17 @@ export const userModel = {
     const cached = mockUsers.get(userId);
     if (cached) {
       cached.password_hash = newPasswordHash;
+      cached.must_change_password = 0;
     }
     for (const u of mockUsers.values()) {
       if (u && u.staff_code === (cached && cached.staff_code)) {
         u.password_hash = newPasswordHash;
+        u.must_change_password = 0;
       }
     }
 
     try {
-      await query(`UPDATE users SET password_hash = $1 WHERE id = $2 OR staff_code = $3`, [newPasswordHash, userId, userId]);
+      await query(`UPDATE users SET password_hash = $1, must_change_password = 0, updated_at = $2 WHERE id = $3 OR staff_code = $4`, [newPasswordHash, nowIso(), userId, userId]);
     } catch (err) {
       console.warn('[UserModel PG Warning] updatePasswordHash failed:', err.message);
     }
@@ -255,7 +321,7 @@ export const userModel = {
         );
       }
       const userRes = await db.query(
-        `SELECT id, staff_code, email, name, role, grade, department, extension_number FROM users WHERE id = $1`,
+        `SELECT id, staff_code, email, name, role, grade, department, extension_number, must_change_password FROM users WHERE id = $1`,
         [userId]
       );
       const user = userRes.rows[0];

@@ -28,6 +28,9 @@ data/
 nohup.out
 *.tmp
 tmp-probe.mjs
+scripts/tmp-*.mjs
+probe-*.mjs
+tmp/
 scripts/tmp/
 ui*.txt
 t*.txt

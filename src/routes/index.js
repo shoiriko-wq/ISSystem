@@ -40,6 +40,8 @@ import mailController from '../controllers/mail.controller.js';
 import absenceController from '../controllers/absence.controller.js';
 import subjectController from '../controllers/subject.controller.js';
 import basicinfoController from '../controllers/basicinfo.controller.js';
+import userImportController from '../controllers/user-import.controller.js';
+import examImportController from '../controllers/exam-import.controller.js';
 import auditService from '../services/audit.service.js';
 
 const router = Router();
@@ -76,6 +78,11 @@ router.get('/users', authenticateToken, safe(authController?.listUsers));
 router.post('/users', authenticateToken, requireKyomuRole, safe(authController?.createUser));
 router.delete('/users/:id', authenticateToken, requireAdminRole, safe(authController?.deleteUser));
 
+// v3.1.15 CSV 一括登録 (教務部限定): preview は検証のみ、commit は承認行を 1 トランザクションで INSERT (§5)
+router.post('/users/import/preview', authenticateToken, requireKyomuRole, safe(userImportController?.preview));
+router.post('/users/import/commit', authenticateToken, requireKyomuRole, safe(userImportController?.commit));
+router.get('/users/import/template', authenticateToken, requireKyomuRole, safe(userImportController?.getTemplate));
+
 // 教科マスタ API (一覧は全教職員 / 追加・改名・削除は教務部 KYOMU のみ)
 router.get('/subjects', authenticateToken, safe(subjectController?.listSubjects));
 router.post('/subjects', authenticateToken, requireKyomuRole, safe(subjectController?.createSubject));
@@ -97,6 +104,13 @@ router.delete('/basic-info/:kind/:id', authenticateToken, requireKyomuRole, safe
 // 他教員がロック中の書き込みと再取得は 423。lock:status_changed で全員へ通知する。
 router.post('/exam/basic-lock/:kind', authenticateToken, requireKyomuRole, safe(basicinfoController?.acquireSectionLock));
 router.delete('/exam/basic-lock/:kind', authenticateToken, requireKyomuRole, safe(basicinfoController?.releaseSectionLock));
+
+// 基本情報 CSV 一括登録（教務部のみ。検証 preview → 確定 commit の2段階、部分作成あり）
+// セクションは class / group / subject / room / decision。preview は編集ロックを取得し 15分・5件上限で staging する。
+router.post('/exam/import/preview', authenticateToken, requireKyomuRole, safe(examImportController?.preview));
+router.post('/exam/import/commit', authenticateToken, requireKyomuRole, safe(examImportController?.commit));
+router.post('/exam/import/cancel', authenticateToken, requireKyomuRole, safe(examImportController?.cancel));
+router.get('/exam/import/template/:section', authenticateToken, requireKyomuRole, safe(examImportController?.template));
 
 // エイリアス（同じレート制限を適用）
 router.post('/auth/register', authIpLimiter, registerInvitationLimiter, safe(authController?.registerWithInvitation));
@@ -175,13 +189,28 @@ router.post('/mail/test', authenticateToken, safe(mailController?.testConnection
 // 受信箱 API (左：件名と日時、右：本文 / 既読記録)
 // ?account_id= 未指定はそのユーザーの1件目のアカウント。refresh は受信ボックスの IMAP 取得 (自動受信を含む)、
 // send は SMTP 送信 + 送信済みボックス保存 (POST body.account_id で送信元アカウントを選ぶ)
+// folder=inbox 受信 / sent 送信済み / drafts 下書き / trash ごみ箱 (4フォルダ。keyset ページング)
 router.get('/mail/messages', authenticateToken, safe(mailController?.getInbox));
 router.post('/mail/inbox/refresh', authenticateToken, safe(mailController?.refreshInbox));
 // 受信ボックスの過去分（無限スクロール。IMAP のまだ DB に無い UID を1ページ分取り込む）
 router.post('/mail/inbox/older', authenticateToken, safe(mailController?.loadOlderInbox));
+// 下書き・ごみ箱・送信済みフォルダの IMAP 同期 (UID 集合と DB を突き合わせ、未保存のヘッダだけ取り込む)
+router.post('/mail/folder/sync', authenticateToken, safe(mailController?.syncFolder));
+// 4フォルダの件数 (受信箱の未読件数も含める。フォルダタブのバッヂ用)
+router.get('/mail/counts', authenticateToken, safe(mailController?.mailboxCounts));
+// 下書きの保存 (id 指定はその下書きを更新) と下書きの送信 (SMTP + 送信ボックス記録)
+router.post('/mail/draft', authenticateToken, safe(mailController?.saveDraft));
 router.post('/mail/send', authenticateToken, safe(mailController?.sendMessage));
+router.post('/mail/draft/:id/send', authenticateToken, safe(mailController?.sendDraft));
 router.post('/mail/messages/:id/read', authenticateToken, safe(mailController?.markMessageRead));
+// ごみ箱への移動 / ごみ箱からの復元 / ごみ箱からの完全削除
+router.post('/mail/messages/:id/trash', authenticateToken, safe(mailController?.moveToTrash));
+router.post('/mail/messages/:id/restore', authenticateToken, safe(mailController?.restoreMessage));
+router.post('/mail/messages/:id/purge', authenticateToken, safe(mailController?.purgeMessage));
+// IMAP データ消去 (ごみ箱のメールは IMAP の \Deleted フラグを外して受信箱へ戻す。受信箱は消去後 IMAP から自動再取得)
+router.post('/mail/imap-data/clear', authenticateToken, safe(mailController?.clearImapData));
 router.post('/mail/messages/:id/body', authenticateToken, safe(mailController?.fetchMessageBody));
+router.get('/mail/messages/:id/body', authenticateToken, safe(mailController?.fetchMessageBody));
 router.get('/mail/messages/:id/attachment', authenticateToken, safe(mailController?.fetchMessageAttachment));
 
 // ==========================================

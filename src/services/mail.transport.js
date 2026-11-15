@@ -742,11 +742,14 @@ export function parseMessage(raw, internaldate = null) {
     subject: decodeHeaderWord(headers['subject'] || ''),
     body: bodyText.replace(/\r\n/g, '\n').replace(/\s+$/, ''),
     received_at: receivedAt,
+    // 返信・転送の threading 用 (ヘッダーの Message-ID と In-Reply-To をキー名で返す)
+    message_id: headers['message-id'] || null,
+    in_reply_to: headers['in-reply-to'] || null,
   };
 }
 
-/** RFC822 メッセージを組み立てる (UTF-8 base64 本文・日本語件名) */
-export function buildRawMessage({ from, displayName, to, subject, body }) {
+/** RFC822 メッセージを組み立てる (UTF-8 base64 本文・日本語件名。返信・転送は In-Reply-To / References を付ける) */
+export function buildRawMessage({ from, displayName, to, subject, body, inReplyTo = null, references = null }) {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const pad = (n) => String(n).padStart(2, '0');
@@ -760,6 +763,8 @@ export function buildRawMessage({ from, displayName, to, subject, body }) {
     `Subject: ${encodeHeaderWord(subject)}`,
     `Date: ${dateHeader}`,
     `Message-ID: <${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}@issystem>`,
+    ...(inReplyTo ? [`In-Reply-To: ${inReplyTo}`] : []),
+    ...(references ? [`References: ${references}`] : []),
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset=UTF-8',
     'Content-Transfer-Encoding: base64',
@@ -995,6 +1000,77 @@ export async function imapAppend({ host, port, tlsMode, user, password, folder =
   }
 }
 
+/** IMAP: メッセージをフォルダ間で移動する (UID COPY → 元フォルダで \Deleted フラグ + UID EXPUNGE) */
+export async function imapMoveMessage({ host, port, tlsMode, user, password, fromFolder, toFolder, uid, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+  const session = new ImapSession({ host, port, tlsMode, user, password, timeoutMs });
+  await session.connect();
+  try {
+    const sel = await session.command(`SELECT ${imapQuote(fromFolder)}`);
+    if (sel.status !== 'OK') throw new Error(`フォルダ「${fromFolder}」を開けません: ${sel.text}`);
+    const copied = await session.command(`UID COPY ${uid} ${imapQuote(toFolder)}`);
+    if (copied.status !== 'OK') throw new Error(`フォルダ「${toFolder}」へコピーできません: ${copied.text}`);
+    const stored = await session.command(`UID STORE ${uid} +FLAGS (\\Deleted)`);
+    if (stored.status !== 'OK') throw new Error(`削除フラグが付けられません: ${stored.text}`);
+    await session.command(`UID EXPUNGE ${uid}`); // EXPUNGE 失敗はコピー済みなので成功扱い
+    return true;
+  } finally {
+    await session.logout();
+  }
+}
+
+/** IMAP: メッセージの \Deleted フラグを消す (フォルダ表示消去後にIMAP側で復元する) */
+export async function imapUnflagDeleted({ host, port, tlsMode, user, password, folder, uid, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+  const session = new ImapSession({ host, port, tlsMode, user, password, timeoutMs });
+  await session.connect();
+  try {
+    const sel = await session.command(`SELECT ${imapQuote(folder)}`);
+    if (sel.status !== 'OK') throw new Error(`フォルダ「${folder}」を開けません: ${sel.text}`);
+    const stored = await session.command(`UID STORE ${uid} -FLAGS (\\Deleted)`);
+    if (stored.status !== 'OK') throw new Error(`削除フラグを消せません: ${stored.text}`);
+    return true;
+  } finally {
+    await session.logout();
+  }
+}
+
+/** IMAP: メッセージに返信・転送マーク (\Answered /\Forwarded) を付ける (UID STORE +FLAGS) */
+export async function imapSetKeywords({ host, port, tlsMode, user, password, folder = 'INBOX', uid, keywords = ['\\Answered'], timeoutMs = DEFAULT_TIMEOUT_MS }) {
+  const session = new ImapSession({ host, port, tlsMode, user, password, timeoutMs });
+  await session.connect();
+  try {
+    const sel = await session.command(`SELECT ${imapQuote(folder)}`);
+    if (sel.status !== 'OK') throw new Error(`フォルダ「${folder}」を開けません: ${sel.text}`);
+    for (const keyword of keywords) {
+      const stored = await session.command(`UID STORE ${uid} +FLAGS (${keyword})`);
+      if (stored.status !== 'OK') throw new Error(`${keyword} が付けられません: ${stored.text}`);
+    }
+    return true;
+  } finally {
+    await session.logout();
+  }
+}
+
+/** 送信済み RFC822 文字列から Message-ID を取り出す (DB の message_id に保存する) */
+export function extractMessageId(raw) {
+  return (/\bMessage-ID:\s*(<[^>\r\n]+>)/i.exec(String(raw || '')) || [])[1] || null;
+}
+
+/** IMAP: フォルダ内のメッセージを完全に削除する (\Deleted フラグ + UID EXPUNGE) */
+export async function imapDeleteMessage({ host, port, tlsMode, user, password, folder, uid, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+  const session = new ImapSession({ host, port, tlsMode, user, password, timeoutMs });
+  await session.connect();
+  try {
+    const sel = await session.command(`SELECT ${imapQuote(folder)}`);
+    if (sel.status !== 'OK') throw new Error(`フォルダ「${folder}」を開けません: ${sel.text}`);
+    const stored = await session.command(`UID STORE ${uid} +FLAGS (\\Deleted)`);
+    if (stored.status !== 'OK') throw new Error(`削除フラグが付けられません: ${stored.text}`);
+    await session.command(`UID EXPUNGE ${uid}`);
+    return true;
+  } finally {
+    await session.logout();
+  }
+}
+
 /** SMTP: メッセージを送信する (AUTH LOGIN -> MAIL FROM -> RCPT TO -> DATA) */
 export async function smtpSend({ host, port, tlsMode, user, password, from, to, raw, timeoutMs = DEFAULT_TIMEOUT_MS }) {
   const mode = normalizeTlsMode(tlsMode);
@@ -1076,4 +1152,4 @@ export async function smtpSend({ host, port, tlsMode, user, password, from, to, 
   }
 }
 
-export default { probeImap, probeSmtp, imapFetchMessages, imapAppend, imapMarkSeen, smtpSend, parseMessage, buildRawMessage };
+export default { probeImap, probeSmtp, imapFetchMessages, imapAppend, imapMarkSeen, smtpSend, parseMessage, buildRawMessage, imapSetKeywords, extractMessageId };

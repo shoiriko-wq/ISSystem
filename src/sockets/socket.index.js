@@ -40,6 +40,13 @@ export function initializeSockets(io) {
     }
 
     socket.user = user;
+
+    // v3.1.15 CSV 一括登録: 初期パスワード未変更のアカウントはアプリ系 WSS を接続拒否する (§5)
+    if (user.must_change_password) {
+      console.warn(`[UserImportGate] 初期パスワード未変更のため WSS 接続を拒否しました。User ID: ${user.id}`);
+      return next(new Error('PASSWORD_CHANGE_REQUIRED: 初期パスワードを変更してください'));
+    }
+
     next();
   });
 

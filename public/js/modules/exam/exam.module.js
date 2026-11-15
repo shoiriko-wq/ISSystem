@@ -192,7 +192,7 @@ export async function loadExamData() {
       renderHeader();
       renderSubTabs();
       const noExamText = isKyomuUser()
-        ? 'active な考査がありません。「年間考査計画」の ① で1年間に実施する考査名をすべて登録してください（期間・1日の時限数・標準試験時間は ③ で登録します）。'
+        ? 'active な考査がありません。「年間考査計画」の ① で1年間に実施する考査名をすべて登録してください（期間・1日の時限数は ③ の表で登録します）。'
         : '現在閲覧できる公開中の考査がありません。教務による公表を待ちください。';
       // 教員は公表ビューのみ、教務は年間考査計画（考査の登録を含む）から作成できる
       const targetSub = isKyomuUser() ? 'plan' : 'view';

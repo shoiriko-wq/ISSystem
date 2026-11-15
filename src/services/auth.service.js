@@ -192,6 +192,8 @@ export const authService = {
         status: user.status || 'PRESENT',
         // v3.1: 登録日 (users.created_at)。フロント側で 'YYYY-MM-DD' (JST) に正規化して未読バッヂの登録日以降条件に使う
         created_at: user.created_at || null,
+        // v3.1.15: CSV 一括登録の初期パスワードが未変更 (true → ログイン後パスワード変更モーダル強制、アプリ系 API 403)
+        must_change_password: user.must_change_password === 1 || user.must_change_password === true
       },
     };
   },
@@ -232,6 +234,8 @@ export const authService = {
       subjects: subjects || [],
       is_kyomu: false,
       invited_by_user_id: validCode.created_by_user_id,
+      // v3.1.15 §5: 新規登録の初期パスワードは初回ログインで自分で変更させる (must_change_password=1)
+      must_change_password: true,
     });
 
     const newUserId = newUser._id || newUser.id;
@@ -372,7 +376,11 @@ export const authService = {
       console.warn('[Audit Log Warning]', auditErr.message);
     }
 
-    return { message: 'パスワードが正常に変更されました。' };
+    // 変更成功で must_change_password は 0 へ戻る (model 側)。古いトークンは pwd=1 のまま残るため
+    // クライアントは応答の新しいトークンへ差し替える (api.js の change-password 分岐)
+    const token = this.generateTokenForUser({ ...user, password_hash: newHash, must_change_password: 0 });
+
+    return { message: 'パスワードが正常に変更されました。', token };
   },
 
   /**
@@ -389,6 +397,8 @@ export const authService = {
       is_kyomu: isKyomuRole,
       department: user.department || null,
       subjects: parseSubjectList(user.subjects),
+      // v3.1.15 CSV 一括登録: 初期パスワード未変更ならアプリ系 API を 403 で止める (§5)
+      pwd: user.must_change_password === 1 || user.must_change_password === true ? 1 : 0
     };
 
     const jwtSecret = (config && config.auth && config.auth.jwtSecret)

@@ -12,8 +12,9 @@
  * ★ 全日未読ボタン（検索ボックスの右。ラベル「未読 N」＝サイドバーと同一の全日未読数。
  *   クリックで左列が全日の未読一覧（対象日見出し付き）になり、中心日表示は「未読」になる。
  *   列表は押した時点の未読をピン留めする＝タイトルをクリックして既読になっても行は左列に残る（バッヂだけ消える）。
- *   未読表示中は ‹ ›・カレンダー開閉・←/→ は止まるが未読ボタンは押せる。もう一度押すか T キーで日付表示へ戻る
- *   （未読行が残っていても復帰できる））
+ *   ★ 未読が 0 件（全件既読）になっても未読表示は閉じない＝列表はピン留めした未読行のまま残る。
+ *     未読表示中は ‹ ›・カレンダー開閉・←/→ は止まるが未読ボタンは押せる（未読 0 件でも visible・enabled）。
+ *     復帰は未読ボタンをもう一度押す時（T キー・カレンダーの「本日へ」も同じ明示操作）。閉じた時点でピンは捨てる））
  * ★ ツールバーの「本日」ボタンは撤廃。本日へはカレンダー内（年月選択メニュー）の「本日へ」と T キーで戻る。
  *   カレンダーの年月部分はスケジュールのカレンダーと同じ形（‹ [年月] ›、年月ラベルクリックで年月選択メニュー）
  * キー操作の手引きは収納（キー操作ボタンで開閉）、詳細モーダル・API連携
@@ -159,9 +160,12 @@ export function initBulletinModule() {
           <input type="text" id="bulletin-search-input" class="input-field pl-8 pr-2 w-full" placeholder="タイトル・本文・投稿者名で検索" aria-label="掲示検索（タイトル・本文・投稿者名）">
         </div>
         <!-- ★ 全日未読ボタン（検索ボックスの右。ラベル「未読 N」＝サイドバーと同一の全日未読数、100 以上は 99+。
-             クリックで左列が全日の未読一覧（対象日見出し付き）になり中心日表示は「未読」になる。
-             全日表示中はこのボタンは押せない（disabled）。閉じて本日へ戻るには T キー
-             （または年月選択ラベルクリック・ミニカレンダー・「本日へ」）。未読 0 件は main.js が hidden にする＝押せない。
+             クリックで左列が全日の未読一覧（対象日見出し付き・押した時点の未読をピン留め）になり中心日表示は「未読」になる。
+             未読表示中は ‹ ›・中心日クリック・年月選択・←/→・C は止まるが、このボタンは押せる（もう一度押すと日付表示へ戻る）。
+             ★ 未読が 0 件（全件既読）になっても未読表示は閉じない＝列表はピン留めした未読行のまま残り、
+               このボタンは visible・enabled のまま（復帰はこのボタンをもう一度押す時。T キー・「本日へ」も同じ明示操作）。
+             日付表示で未読 0 件は hidden＝押せない。検索語入力中（全日表示）は disabled（未読表示との二重状態を作らない）。
+             visible/disabled は syncUnreadButtonToState() が表示モード込みで一元決定する（main.js はラベル数だけ書く）。
              枠・文字は検索ボックスと同一（1.05rem・700・角丸 0.5rem・border + border-main の 2px 実線 1枚。
              btn-secondary は使わず readability.css が直接張る） -->
         <button type="button" id="bulletin-btn-unread" class="bulletin-unread-btn border border-main shrink-0 hidden"
@@ -201,7 +205,7 @@ export function initBulletinModule() {
       <span><kbd class="kbd-key">C</kbd> カレンダー（‹ › の間の日付をクリックでも開く）</span>
       <span>検索＝タイトル・本文・投稿者名。検索語入力中は中心日表示が「全日」になり、結果の行クリックは中心日を動かさない。検索語を消すと日付表示へ戻る</span>
       <span>既読はタイトル行をクリック（↑/↓ で選択、詳細モーダルを開く、ダッシュボード「本日の連絡」カードを押す）して付く。右ペインに表示されるだけ（初期表示・日移動）では既読にならない</span>
-      <span>未読＝検索ボックス右の未読ボタン。クリックで全日の未読一覧（対象日見出し付き）が出る。行をクリックして既読になっても行は残る（バッヂだけ消える）。もう一度押すと日付表示へ戻る</span>
+      <span>未読＝検索ボックス右の未読ボタン。クリックで全日の未読一覧（対象日見出し付き）が出る。行をクリックして既読になっても行は残る（バッヂだけ消える）。未読が 0 件になっても未読表示は閉じず列表は残るので、未読ボタンをもう一度押すと日付表示へ戻る</span>
       <span>本日へはカレンダー内の「本日へ」ボタンと <kbd class="kbd-key">T</kbd> キーで戻る（ツールバーの本日ボタンは撤廃）</span>
       <span><kbd class="kbd-key">?</kbd> 手引き開閉</span>
     </div>
@@ -729,16 +733,18 @@ function setDayNavEnabled(enabled) {
   syncUnreadButtonToState();
 }
 
-/** サイドバーの「未読 N」項目の有効／無効を全日表示状態へ追従させる（全日表示中は読まない＝押せない）。
- *   ツールバー側の同じ id のボタンはモジュール側で active 表示する（2 つあるため querySelectorAll で揃える） */
+/** サイドバーの「未読 N」項目の有効／無効と表示／非表示を全日表示状態へ追従させる（同じ id が 2 つあるので querySelectorAll で揃える）。
+ *   ★ 未読表示中は未読 0 件でも visible のまま（未読列表のピン留め行が左列に残る。未読ボタンをもう一度押して日付表示へ戻る）。
+ *     未読表示中の未読 0 件で hidden にすると復帰の手段が消える（auto-exit も撤廃済み＝未読表示は閉じない）。
+ *   日付表示（未読表示でない）で未読 0 件は hidden＝押せない。検索語入力中（全日表示）は押せない（未読表示との二重状態を作らない）。
+ *   ツールバー側の同じ id のボタンはモジュール側で active 表示する */
 export function syncUnreadButtonToState() {
-  // 未読ボタンはツールバーのボタンとサイドバー項目の 2 つ（同じ id）。両方を表示モードへ揃える：
-  //   ★ 未読表示中は押せる（もう一度押すと日付表示へ戻る＝未読行が残っていても復帰できる）。
-  //     中心日を動かす ‹ ›・中心日クリック・年月選択・←/→・C は止まる（setDayNavEnabled が同じ条件で止める）。
-  //   検索語入力中（全日表示）は押せない（検索語が列表を決めるので未読表示との二重状態を作らない）。
-  //   未読 0 件は main.js が hidden にする＝押せない。
   const searchMode = Boolean(currentSearch);
+  // 未読 0 件は hidden（main.js がラベル数を書く）。未読表示中は hidden にしない
+  const zeroUnread = Number((state.unreadCounts && state.unreadCounts.bulletin) ?? 0) === 0;
+  const hidden = zeroUnread && !unreadMode;
   document.querySelectorAll('#bulletin-btn-unread').forEach((btn) => {
+    btn.classList.toggle('hidden', hidden);
     btn.disabled = searchMode;
     btn.setAttribute('aria-disabled', String(searchMode));
   });
@@ -1061,7 +1067,9 @@ function allUnreadMatches() {
 }
 
 /**
- * ★ 全日未読表示の入り／出し（検索ボックス右の未読ボタン・T キーから呼ぶ）
+ * ★ 全日未読表示の入り／出し（検索ボックス右の未読ボタン・T キー・カレンダーの「本日へ」から呼ぶ）
+ * ★ 未読が 0 件（全件既読）になっても未読表示は自動では閉じない。復帰は未読ボタンをもう一度押す時（T キー・「本日へ」も明示操作）。
+ *   ピン留め行は既読化しても列表に残る（バッヂだけ消える）。閉じた時点でピンは捨てる
  * @param {boolean} on true で全日の未読一覧（対象日見出し付き・中心日表示「未読」）、false で中心日の日付表示
  */
 export function setUnreadMode(on) {
@@ -1510,6 +1518,24 @@ function focusDetailPane() {
 }
 
 /**
+ * 掲示をキャッシュから除く（DELETE 成功時と `bulletin:deleted` 受信時、両方から呼ぶ）
+ * ピン留め（未読列表）からも外す＝削除された行は未読列表に残さない。選択行が消えた場合は次の行を自動選択する（表示のみ＝既読化しない）。
+ * 未読バッヂは `recomputeUnreadBadges()` で再計算（未読 0 件になっても未読表示は閉じない＝`main.js` に auto-exit は無い）
+ * @param {string} id 掲示ID
+ */
+export function dropBulletin(id) {
+  const key = String(id ?? '');
+  if (!key) return;
+  const idx = bulletinsCache.findIndex((b) => String(b.id) === key);
+  if (idx < 0) return;
+  bulletinsCache.splice(idx, 1);
+  commentsById.delete(key);
+  pinnedUnreadIds.delete(key);
+  recomputeUnreadBadges();
+  renderBulletinList();
+}
+
+/**
  * 掲示の削除（詳細モーダル内の「削除」ボタンからのみ。投稿者本人にだけボタンが出る）
  * 確認後に DELETE /api/bulletins/:id。成功時はキャッシュから除き、次の行へ選択を進める
  * @param {string} id 掲示ID
@@ -1522,13 +1548,8 @@ async function deleteBulletinPost(id) {
 
   try {
     await apiDelete(`/bulletins/${key}`);
-    bulletinsCache = bulletinsCache.filter((b) => String(b.id) !== key);
-    commentsById.delete(key);
-    const ids = filteredBulletins().map((b) => String(b.id));
-    if (!ids.includes(String(selectedId))) selectedId = ids[0] || '';
-    recomputeUnreadBadges();
+    dropBulletin(key);   // キャッシュ・コメント・未読列表のピン留めから落として未読バッヂを再計算（選択行は自動選択で追従）
     showToast('削除しました', 'success');
-    renderBulletinList();
     focusSelectedRow();
   } catch (err) {
     console.warn('[Bulletin] 削除失敗:', err.message);

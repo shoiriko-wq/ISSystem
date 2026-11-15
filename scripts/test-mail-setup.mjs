@@ -9,9 +9,10 @@
  *  3. 不正メールアドレスの送信はエラートーストになり、フォームは残る
  *  4. 正常な設定保存で受信箱パネルへ切り替わり、アカウントタブにアドレスが表示される（ヘッダーの接続アカウント行は廃止）
  *  4a. ヘッダーデザインは職員掲示板・施設物品予約と同一（ツールバー面＋text-base タイトル＋w-4 アイコン、
- *      コントロール高さは 2.4rem に統一）。「はじめてご利用…暗号化して保存されます」の案内文は存在しない
- *  4a-test. ヘッダーの「接続テスト」で IMAP / SMTP を実接続テストし、結果パネルと status (接続失敗) が出る
- *  4f-2. フォーム内の「接続テスト（保存前に試す）」は未保存の入力値でテストし、フォームは残る
+ *      コントロール高さは 2.4rem に統一。メール設定と再読み込みは 2.4rem 正方形のアイコンのみ）。
+ *      ヘッダーに接続テストボタンは無く、「設定保存済み（未接続確認）」バッヂも出ない
+ *  4f-2. 接続テストはメール設定メニュー内の「接続テスト」だけで実行し、結果パネルは設定メニュー直下に出す。
+ *        編集中のアカウントなので成否は status に記録されヘッダーバッヂが「接続失敗」へ更新される（フォーム入力値は無再描画で保持）
  *  4g. 受信/送信済みタブ: 検証用メッセージを DB へ直接登録し、タブ切替で受信1ページ目50件（DB総件数118）・
  *      送信済み1ページ目50件（DB総件数60）と右本文を実測。左一覧の初期選択・未読バッジ (26->25) も実測
  *  4g3. 無限スクロール: 受信・送信ボックスとも最下部スクロールで50件ずつAppendする。受信はDBの118件で尽きた後、
@@ -185,7 +186,12 @@ const snapshot = (page) => page.evaluate(() => {
     passwordField: !!document.getElementById('mail-setup-password'),
     hasInbox: !!document.getElementById('mail-inbox-list'),
     settingsBtn: (document.getElementById('mail-btn-settings')?.textContent || '').replace(/\s+/g, ' ').trim(),
-    testBtnText: (document.getElementById('mail-btn-test')?.textContent || '').replace(/\s+/g, ' ').trim(),
+    settingsAriaLabel: document.getElementById('mail-btn-settings')?.getAttribute('aria-label') || '',
+    settingsIconClass: (document.querySelector('#mail-btn-settings svg')?.getAttribute('class') || ''),
+    hasHeaderTestBtn: !!document.getElementById('mail-btn-test'),
+    statusBadgeText: (document.getElementById('mail-status-badge')?.textContent || '').trim(),
+    // 接続テスト結果パネルはメール設定メニュー（設定フォーム）の中にある（受信箱面には出ない）
+    resultInSettings: !!document.getElementById('mail-test-result') && !!document.getElementById('mail-setup-form') && !document.getElementById('mail-inbox-list'),
     testResultText: (document.getElementById('mail-test-result')?.textContent || '').replace(/\s+/g, ' ').trim(),
     formTestBtnText: (document.getElementById('mail-btn-test-form')?.textContent || '').replace(/\s+/g, ' ').trim(),
     listItems: items,
@@ -266,7 +272,9 @@ const snapshot = (page) => page.evaluate(() => {
     mailSnap: (() => {
       const s = window.__mailSnap ? window.__mailSnap() : null;
       return s ? { clientPollMs: s.clientPollMs, clientPolling: s.clientPolling, serverPollMs: s.serverPollMs,
-        socketBound: s.socketBound, activeAccountId: s.activeAccountId, accounts: s.accounts } : null;
+        idleReconnectMinMs: s.idleReconnectMinMs, idleReconnectMaxMs: s.idleReconnectMaxMs,
+        socketBound: s.socketBound, activeAccountId: s.activeAccountId, pageSize: s.pageSize,
+        pagination: s.pagination, accounts: s.accounts, compose: s.compose } : null;
     })(),
     headerInfo: (() => {
       const h = document.querySelector('#view-mail > div');
@@ -274,7 +282,7 @@ const snapshot = (page) => page.evaluate(() => {
       const rootFont = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
       const h2 = h.querySelector('h2');
       const sb = document.getElementById('mail-btn-settings');
-      const tb = document.getElementById('mail-btn-test');
+      const cb = document.getElementById('mail-btn-compose');
       const rb = document.getElementById('mail-btn-refresh');
       const px = (el) => (el ? Math.round(parseFloat(getComputedStyle(el).height) * 10) / 10 : null);
       const wx = (el) => (el ? Math.round(parseFloat(getComputedStyle(el).width) * 10) / 10 : null);
@@ -286,12 +294,30 @@ const snapshot = (page) => page.evaluate(() => {
         h2Size: h2 ? Math.round(parseFloat(getComputedStyle(h2).fontSize) * 10) / 10 : null,
         iconClass: h2?.querySelector('i[data-lucide], svg')?.getAttribute('class') || '',
         settingsH: px(sb),
-        testH: px(tb),
+        settingsW: wx(sb),
+        composeH: px(cb),
         refreshH: px(rb),
         refreshW: wx(rb),
         targetH: Math.round(rootFont * 2.4 * 10) / 10,
       };
     })(),
+    // 4フォルダタブ (下書き・ごみ箱) とフォルダ別の操作ボタン、ヘッダーアイコンの aria-label
+    draftsTabText: (document.getElementById('mail-tab-drafts')?.textContent || '').replace(/\s+/g, ' ').trim(),
+    trashTabText: (document.getElementById('mail-tab-trash')?.textContent || '').replace(/\s+/g, ' ').trim(),
+    draftsTabActive: document.getElementById('mail-tab-drafts')?.getAttribute('aria-selected') === 'true',
+    trashTabActive: document.getElementById('mail-tab-trash')?.getAttribute('aria-selected') === 'true',
+    actionButtons: (() => {
+      const map = {};
+      document.querySelectorAll('#view-mail [data-mail-action]').forEach((el) => {
+        map[el.getAttribute('data-mail-action')] = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      });
+      return map;
+    })(),
+    clearBtnAria: document.getElementById('mail-imap-clear-btn')?.getAttribute('aria-label') || '',
+    refreshBtnAria: document.getElementById('mail-btn-refresh')?.getAttribute('aria-label') || '',
+    saveDraftBtnText: (document.getElementById('mail-save-draft-btn')?.textContent || '').replace(/\s+/g, ' ').trim(),
+    detailBadgeText: (document.querySelector('#mail-detail .badge')?.textContent || '').trim(),
+    composeTitleText: (document.getElementById('mail-compose-title')?.textContent || '').replace(/\s+/g, ' ').trim(),
     toasts,
   };
 });
@@ -399,11 +425,13 @@ check('アカウントタブに接続アカウントのアドレスが表示さ�
   !/接続アカウント|最終受信確認/.test(configured.fullViewText),
   { count: configured.accountTabCount, active: configured.accountTabActive, text: configured.accountTabsText.slice(0, 120) });
 
-// 4a2. ヘッダーコントロール高さは掲示板・施設物品予約と同じ 2.4rem に統一
+// 4a2. ヘッダーコントロール高さは掲示板・施設物品予約と同じ 2.4rem に統一（メール設定と再読み込みは 2.4rem 正方形）
 const hc = configured.headerInfo;
-check('メール設定・接続テスト・再読み込みボタンは 2.4rem 高に統一（再読み込みは正方形）',
-  hc && hc.settingsH === hc.targetH && hc.testH === hc.targetH && hc.refreshH === hc.targetH && hc.refreshW === hc.targetH,
-  { settingsH: hc?.settingsH, testH: hc?.testH, refreshH: hc?.refreshH, refreshW: hc?.refreshW, targetH: hc?.targetH });
+check('メール設定・新規作成・再読み込みボタンは 2.4rem 高に統一（メール設定と再読み込みは 2.4rem 正方形）',
+  hc && hc.settingsH === hc.targetH && hc.settingsW === hc.targetH && hc.composeH === hc.targetH &&
+  hc.refreshH === hc.targetH && hc.refreshW === hc.targetH,
+  { settingsH: hc?.settingsH, settingsW: hc?.settingsW, composeH: hc?.composeH,
+    refreshH: hc?.refreshH, refreshW: hc?.refreshW, targetH: hc?.targetH });
 check('設定済みヘッダーに受信箱案内文は出ない',
   !/はじめてご利用|暗号化して保存/.test(configured.fullViewText),
   { fullViewText: configured.fullViewText.slice(0, 120) });
@@ -420,40 +448,35 @@ check('アカウントタブの末尾にアカウント追加 (+) タブがあ�
   configured.addAccountBtn === true, { addAccountBtn: configured.addAccountBtn });
 
 // 4a5. サーバー側cron受信による WSS 通知フック（クライアント自律受信は廃止済み 2026/11/13）
-check('設定済みで WSS 通知ハンドラが登録される（60秒周期の受信はサーバー側cron。クライアント側 setInterval は無し）',
+check('設定済みで WSS 通知ハンドラが登録される（受信は常時 IMAP IDLE。クライアント側 setInterval も60秒cron受信も無し。再接続窓は25〜29分）',
   configured.mailSnap && configured.mailSnap.clientPollMs === null && configured.mailSnap.clientPolling === false &&
-  configured.mailSnap.serverPollMs === 60000 && configured.mailSnap.socketBound === true &&
+  configured.mailSnap.serverPollMs === null &&
+  configured.mailSnap.idleReconnectMinMs === 1500000 && configured.mailSnap.idleReconnectMaxMs === 1740000 &&
+  configured.mailSnap.socketBound === true &&
   configured.mailSnap.activeAccountId === configured.mailSnap.accounts[0]?.id &&
   configured.toasts.every((t) => !t.includes('受信できませんでした')) &&
   configured.hasInbox === true && configured.listItems.length >= 3,
   { mailSnap: configured.mailSnap, toasts: configured.toasts.slice(-2), items: configured.listItems.length });
 
-// 4a-test. ヘッダーの「接続テスト」→ IMAP / SMTP を実接続テスト（到達不能サーバーなので NG になる）
-check('ヘッダーに接続テストボタンがある', configured.testBtnText.includes('接続テスト'), configured.testBtnText);
-await page.click('#mail-btn-test');
-await sleep(600);
-const testingToast = await snapshot(page);
-check('接続テスト実行中の案内トースト', testingToast.toasts.some((t) => t.includes('接続テストを実行しています')), testingToast.toasts.slice(-2));
-await sleep(2000);
-const tested = await snapshot(page);
-check('接続テスト結果パネルに IMAP / SMTP が並ぶ',
-  tested.testResultText.includes('接続テスト結果') &&
-  tested.testResultText.includes('IMAP (受信)') &&
-  tested.testResultText.includes('SMTP (送信)'),
-  { testResultText: tested.testResultText.slice(0, 160) });
-check('到達不能サーバーのテストは IMAP / SMTP とも接続 NG',
-  tested.testResultText.includes('IMAP (受信): 接続 NG') && tested.testResultText.includes('SMTP (送信): 接続 NG'),
-  { testResultText: tested.testResultText.slice(0, 200) });
-check('テスト失敗でヘッダーの状態が接続失敗になりトーストが出る',
-  tested.headerText.includes('接続失敗') && tested.toasts.some((t) => t.includes('接続テスト: 接続失敗')),
-  { headerText: tested.headerText.slice(0, 110), toasts: tested.toasts.slice(-1) });
-// 設定を削除する前に受信箱表示と既読状態が続くことを確認する
-check('接続テスト後も受信箱と右本文が表示される',
-  tested.hasInbox === true && tested.listItems.length >= 3 && tested.detailBody.length > 40,
-  { items: tested.listItems.length, detail: tested.detailSubject });
+// 4a-test. ヘッダーに接続テストボタンは無い（接続テストはメール設定メニューに統合済み）
+check('ヘッダーに接続テストボタンは無い（接続テストはメール設定メニューへ統合）',
+  configured.hasHeaderTestBtn === false, { hasHeaderTestBtn: configured.hasHeaderTestBtn });
+check('メール設定ボタンはアイコンのみ（文字なし・aria-label・settings アイコン・2.4rem 正方形）',
+  configured.settingsBtn === '' && configured.settingsAriaLabel.includes('メール設定') &&
+  configured.settingsIconClass.includes('lucide-settings') &&
+  hc && hc.settingsH === hc.targetH && hc.settingsW === hc.targetH,
+  { settingsBtn: configured.settingsBtn, aria: configured.settingsAriaLabel, icon: configured.settingsIconClass,
+    settingsH: hc?.settingsH, settingsW: hc?.settingsW });
+check('「設定保存済み（未接続確認）」バッヂは出ない（未接続確認ではヘッダーにバッヂが無い）',
+  configured.statusBadgeText === '' && !/未接続確認|設定保存済み/.test(configured.fullViewText),
+  { statusBadgeText: configured.statusBadgeText, headerText: configured.headerText.slice(0, 110) });
+// 4f-2 でメール設定メニュー内の「接続テスト」を実行する（受信箱表示と右本文はそのまま続く）
 
-// 4b. 「メール設定」ボタン
-check('メール設定ボタンがある', configured.settingsBtn.includes('メール設定'), configured.settingsBtn);
+// 4b. 「メール設定」ボタン（アイコンのみ）と受信箱案内文
+check('設定済みヘッダーの右端にメール設定ボタン（アイコンのみ）と受信ボタンが並ぶ',
+  configured.settingsBtn === '' && configured.settingsAriaLabel.includes('メール設定') &&
+  configured.refreshIconClass.includes('lucide-download'),
+  { settingsBtn: configured.settingsBtn, aria: configured.settingsAriaLabel, icon: configured.refreshIconClass });
 
 // 4c. 左ペイン: タイトルと日時
 const timeRe = /^\d{2}\/\d{2} \d{2}:\d{2}$/;
@@ -634,14 +657,20 @@ check('受信ボックスタブへ戻すと先頭表示（スクロール位置�
   backTopInbox.mailSnap?.pagination?.inboxTotal === SEED_INBOX_TOTAL,
   { scrollTop: backTopInbox.listScrollTop, items: backTopInbox.listItems.length, loaded: backTopInbox.mailSnap?.pagination?.loadedInbox });
 
-// 4f. 「メール設定」でフォームを開く -> 「変更しない」で受信箱へ戻る
+// 4f. 「メール設定」（アイコンのみ）でメール設定メニューを開く -> メニュー内に接続テストボタンがある
 await page.click('#mail-btn-settings');
 await sleep(600);
 const opened = await snapshot(page);
-check('メール設定ボタンでフォームを開く', opened.hasForm === true && opened.emailValue === 'tanaka.ui@issystem.example', { hasForm: opened.hasForm, emailValue: opened.emailValue });
+check('メール設定ボタン（アイコンのみ）でメール設定メニューが開く',
+  opened.hasForm === true && opened.emailValue === 'tanaka.ui@issystem.example' &&
+  opened.formTestBtnText.includes('接続テスト') && opened.testResultText === '',
+  { hasForm: opened.hasForm, emailValue: opened.emailValue, formTestBtnText: opened.formTestBtnText });
+check('メール設定メニューを開いても「設定保存済み（未接続確認）」バッヂは出ない',
+  opened.statusBadgeText === '' && !/未接続確認|設定保存済み/.test(opened.fullViewText),
+  { statusBadgeText: opened.statusBadgeText, headerText: opened.headerText.slice(0, 110) });
 
-// 4f-2. フォーム内の「接続テスト（保存前に試す）」→ 未保存の入力値でテスト（DB の status は変わらない）
-check('フォーム内に接続テストボタンがある', opened.formTestBtnText.includes('接続テスト（保存前に試す）'), opened.formTestBtnText);
+// 4f-2. メニュー内の「接続テスト」→ 現在の入力値で IMAP / SMTP を実接続テスト（到達不能サーバーなので IMAP/SMTP とも NG）。
+//       編集中のアカウントのテストなので成否は status=FAILED に記録され、ヘッダーバッヂが「接続失敗」へ更新される
 await page.evaluate(() => {
   document.getElementById('mail-setup-password').value = 'ui-secret-123';
   document.getElementById('mail-setup-imap-host').value = 'imap.issystem.example';
@@ -650,21 +679,42 @@ await page.evaluate(() => {
   document.getElementById('mail-setup-smtp-port').value = '465';
 });
 await page.click('#mail-btn-test-form');
-await sleep(2600);
+await sleep(600);
+const formTesting = await snapshot(page);
+check('接続テスト実行中の案内トースト', formTesting.toasts.some((t) => t.includes('接続テストを実行しています')), formTesting.toasts.slice(-2));
+await sleep(2400);
 const formTested = await snapshot(page);
-check('フォーム値の接続テストで結果パネルが出る',
+check('テスト結果パネルはメール設定メニューの直下に出る（受信箱面には出ない）',
+  formTested.hasForm === true && formTested.hasInbox === false && formTested.resultInSettings === true,
+  { hasForm: formTested.hasForm, hasInbox: formTested.hasInbox, resultInSettings: formTested.resultInSettings });
+check('テスト結果パネルに IMAP / SMTP が並び、入力値のサーバー:ポートが実測される',
+  formTested.testResultText.includes('接続テスト結果') &&
   formTested.testResultText.includes('imap.issystem.example:993') &&
   formTested.testResultText.includes('smtp.issystem.example:465') &&
-  formTested.testResultText.includes('IMAP (受信): 接続 NG'),
+  formTested.testResultText.includes('IMAP (受信): 接続 NG') &&
+  formTested.testResultText.includes('SMTP (送信): 接続 NG'),
   { testResultText: formTested.testResultText.slice(0, 200) });
-check('フォーム値テストではフォームが消えず、テスト中のトーストが出る',
-  formTested.hasForm === true && formTested.toasts.some((t) => t.includes('接続テスト')),
-  { hasForm: formTested.hasForm, toasts: formTested.toasts.slice(-1) });
+check('編集中のアカウントのテスト成否は status=FAILED に記録され、ヘッダーバッヂが「接続失敗」へ更新される',
+  formTested.statusBadgeText === '接続失敗' && formTested.headerText.includes('接続失敗') &&
+  formTested.toasts.some((t) => t.includes('接続テスト: 接続失敗')),
+  { statusBadgeText: formTested.statusBadgeText, headerText: formTested.headerText.slice(0, 110), toasts: formTested.toasts.slice(-1) });
+check('結果表示で設定フォームは消えず、入力値は無再描画でそのまま残る',
+  formTested.hasForm === true && formTested.emailValue === 'tanaka.ui@issystem.example' &&
+  formTested.imapHostValue === 'imap.issystem.example' && formTested.imapPortValue === '993' &&
+  formTested.smtpHostValue === 'smtp.issystem.example' && formTested.smtpPortValue === '465',
+  { email: formTested.emailValue, imap: `${formTested.imapHostValue}:${formTested.imapPortValue}`,
+    smtp: `${formTested.smtpHostValue}:${formTested.smtpPortValue}` });
 
+// 4f-3. 「変更しない」で受信箱へ戻る（テスト結果パネルは設定メニュー専用。受信箱面には出さない）
 await page.click('#mail-btn-cancel-edit');
 await sleep(600);
 const back = await snapshot(page);
-check('「変更しない」で受信箱へ戻る', back.hasInbox === true && back.hasForm === false && back.listItems.length >= 3, { hasInbox: back.hasInbox, items: back.listItems.length });
+check('「変更しない」で受信箱へ戻る（テスト結果パネルは受信箱面に出さない）',
+  back.hasInbox === true && back.hasForm === false && back.listItems.length >= 3 &&
+  back.testResultText === '' && back.resultInSettings === false,
+  { hasInbox: back.hasInbox, items: back.listItems.length, testResultText: back.testResultText.slice(0, 60) });
+check('テスト失敗状態 (status=FAILED) は受信箱面のヘッダーバッヂとして残る',
+  back.statusBadgeText === '接続失敗', { statusBadgeText: back.statusBadgeText });
 
 // 4h. 複数アカウントの同時表示: 「+」タブで 2件目を追加し、アカウントタブで切り替える
 await page.click('#mail-btn-add-account');
@@ -704,6 +754,22 @@ check('アカウントタブ切替で1件目の受信ボックス（読み込み
 const wssAccountId = twoAccounts.mailSnap.accounts.find((a) => a.email === 'tanaka.ui@issystem.example').id;
 await page.evaluate((id) => document.querySelector(`#mail-account-tabs [data-mail-account="${id}"]`).click(), wssAccountId);
 await sleep(1200);
+// WSS 検証節だけ受信ボックスを 4件（未読3）に整える（118件のシードは件数表示の検証用。節末で seedMailMessages() が戻る）
+await query(`DELETE FROM mail_messages WHERE user_id = 'kyomu01' AND folder = 'inbox' AND account_id = '${wssAccountId}'`);
+const wssSeedRows = [
+  ['mail_kyomu01_wss_seed1', '9101', 'WSS 検証差出人1', 'wss1@issystem.example', 'WSS検証メール1',
+    'WSS 検証用に整えた受信ボックスの1件目（既読）。件数表示と未読バッジの実測用本文です。', 1, '2026-11-10 09:00:00'],
+  ['mail_kyomu01_wss_seed2', '9102', 'WSS 検証差出人2', 'wss2@issystem.example', 'WSS検証メール2',
+    'WSS 検証用に整えた受信ボックスの2件目（未読）。件数表示と未読バッジの実測用本文です。', 0, '2026-11-11 10:00:00'],
+  ['mail_kyomu01_wss_seed3', '9103', 'WSS 検証差出人3', 'wss3@issystem.example', 'WSS検証メール3',
+    'WSS 検証用に整えた受信ボックスの3件目（未読）。件数表示と未読バッジの実測用本文です。', 0, '2026-11-12 11:00:00'],
+];
+for (const [id, uid, senderName, senderEmail, subject, body, isRead, receivedAt] of wssSeedRows) {
+  await query(`INSERT INTO mail_messages (id, user_id, account_id, folder, uid, sender_name, sender_email, subject, body, is_read, received_at)
+    VALUES ($1, 'kyomu01', $2, 'inbox', $3, $4, $5, $6, $7, $8, $9)`,
+    [id, wssAccountId, uid, senderName, senderEmail, subject, body, isRead, receivedAt]);
+}
+// cron が受信して DB へ保存した状態を DB 側で再現する（実 IMAP は到達不能）
 await query(`INSERT INTO mail_messages (id, user_id, account_id, folder, uid, sender_name, sender_email, subject, body, is_read, received_at)
   VALUES ('mail_kyomu01_wss', 'kyomu01', '${wssAccountId}', 'inbox', '9501', 'WSS 通知者', 'wss@issystem.example', 'WSS新着メール',
     'サーバー側cronが受信してDBへ保存した新着メール。WSS通知で一覧だけが無再描画に更新されることを確認する本文です。', 0, '2026-11-13 09:00:00')`);
@@ -731,8 +797,9 @@ check('WSS 更新は一覧カードの中身だけを差し替える (一覧コ�
   { listMarker: afterWss.listMarker, tabsMarker: afterWss.tabsMarker, tabUnread: afterWss.tabUnreadMap,
     detail: afterWss.detailSubject });
 
-// 後続チェック (再読み込み後 3件・未読2) のため検証用レコードを片付ける
-await query(`DELETE FROM mail_messages WHERE id = 'mail_kyomu01_wss'`);
+// 後続チェック（アカウント削除後・再読み込み後の 1ページ目50件と未読94）のため受信シード118件を戻し、1件だけ既読にする
+await seedMailMessages();
+await query(`UPDATE mail_messages SET is_read = 1 WHERE id = 'mail_kyomu01_inbox_9002'`);
 // アカウント削除は表示中アカウントだけ（2件目を削除すると1件目が残る）
 const secondMailId = twoAccounts.mailSnap.accounts.find((a) => a.email === 'second.ui@issystem.example').id;
 await page.evaluate((id) => document.querySelector(`#mail-account-tabs [data-mail-account="${id}"]`).click(), secondMailId);
@@ -762,18 +829,259 @@ check('再読み込み後も左一覧と右本文',
 check('再読み込み後もアカウントタブ・WSS 通知ハンドラ・ダウンロードアイコン',
   reloaded.accountTabActive === 'tanaka.ui@issystem.example' && reloaded.accountTabCount === 1 &&
   reloaded.mailSnap?.socketBound === true && reloaded.mailSnap?.clientPollMs === null &&
-  reloaded.mailSnap?.serverPollMs === 60000 &&
+  reloaded.mailSnap?.serverPollMs === null &&
+  reloaded.mailSnap?.idleReconnectMinMs === 1500000 && reloaded.mailSnap?.idleReconnectMaxMs === 1740000 &&
   reloaded.refreshIconClass.includes('lucide-download'),
   { active: reloaded.accountTabActive, mailSnap: reloaded.mailSnap, icon: reloaded.refreshIconClass });
-check('接続テストの失敗状態 (status=FAILED) は再読み込み後もヘッダーに残る',
-  reloaded.headerText.includes('接続失敗') && reloaded.testResultText === '',
-  { headerText: reloaded.headerText.slice(0, 110), testResultText: reloaded.testResultText.slice(0, 60) });
+check('接続テストの失敗状態 (status=FAILED) は再読み込み後もヘッダーバッヂとして残り、テスト結果パネルは出ない（設定メニュー専用）',
+  reloaded.headerText.includes('接続失敗') && reloaded.statusBadgeText === '接続失敗' && reloaded.testResultText === '',
+  { headerText: reloaded.headerText.slice(0, 110), statusBadgeText: reloaded.statusBadgeText, testResultText: reloaded.testResultText.slice(0, 60) });
 check('再読み込み後も既読状態が DB に残る (受信118件中1件既読・未読バッジ 25。1ページ目50件表示)',
   reloaded.listItems.length === PAGE && reloaded.unreadBadgeText === String(SEED_INBOX_UNREAD - 1) &&
   reloaded.listItems.filter((i) => i.readDot).length === 1,
   { badge: reloaded.unreadBadgeText, dots: reloaded.listItems.map((i) => (i.readDot ? 'read' : 'unread')) });
 
 await page.screenshot({ path: path.join(OUT_DIR, 'mail-setup.png'), fullPage: false });
+
+// 4g4. 4フォルダタブ（受信・送信・下書き・ごみ箱）、下書き保存、下書きのごみ箱移動と復元、
+//      ごみ箱の完全削除、IMAPデータ消去。実 IMAP は到達不能なので下書き2件・ごみ箱1件を DB へ直接登録し、
+//      DB 読み出しの描画と件数表示を実測する（IMAP 側の操作は到達不能で失敗トーストになる）
+const SEED_DRAFTS = 2;
+const SEED_TRASH = 1;
+const folderAccountId = backTopInbox.mailSnap.activeAccountId;
+const seedDraft = async (id, subject, body, receivedAt) => query(
+  `INSERT INTO mail_messages (id, user_id, account_id, folder, sender_name, sender_email, recipients, subject, body, is_read, received_at)
+   VALUES ($1, 'kyomu01', $2, 'drafts', '田中太郎', 'tanaka.ui@issystem.example', 'yamada@issystem.example', $3, $4, 1, $5)`,
+  [id, folderAccountId, subject, body, receivedAt]
+);
+const seedTrashRow = async (id, uid, subject, body, receivedAt) => query(
+  `INSERT INTO mail_messages (id, user_id, account_id, folder, uid, sender_name, sender_email, subject, body, is_read, received_at)
+   VALUES ($1, 'kyomu01', $2, 'trash', $3, '山田太郎', 'yamada@issystem.example', $4, $5, 0, $6)`,
+  [id, folderAccountId, uid, subject, body, receivedAt]
+);
+await seedDraft('mail_kyomu01_draft1', '下書きメール1',
+  '下書き1の本文です。下書きタブの表示と「下書き保存」で増える件数を実測する文章です。', '2026-06-05 09:00:00');
+await seedDraft('mail_kyomu01_draft2', '下書きメール2',
+  '下書き2の本文です。この下書きをごみ箱へ移動して受信箱へ復元する流れを実測する文章です。', '2026-06-06 10:00:00');
+await seedTrashRow('mail_kyomu01_trash1', '7101', 'ごみ箱メール1',
+  'ごみ箱の本文です。完全に削除（IMAP からも削除）とIMAPデータ消去を実測する文章です。', '2026-05-20 12:00:00');
+
+// ごみ箱移動・完全削除・IMAPデータ消去は確認ダイアログを出すので自動で承諾する
+page.on('dialog', (d) => d.accept());
+const clickMailRow = async (id) => page.evaluate((mid) => {
+  const el = document.querySelector(`#mail-inbox-list [data-mail-id="${mid}"]`);
+  if (el) el.click();
+}, id);
+const countsOf = (snap) => snap.mailSnap?.pagination?.counts || {};
+
+await page.reload({ waitUntil: 'networkidle2' });
+await sleep(1200);
+await page.click('.app-sidebar [data-tab="mail"]');
+await sleep(1800);
+const foldersView = await snapshot(page);
+check('4フォルダタブが並び件数表示される（受信118・送信60・下書き2・ごみ箱1）',
+  foldersView.tabs.inboxText.includes(`全 ${SEED_INBOX_TOTAL}件`) &&
+  foldersView.tabs.sentText.includes(`全 ${SEED_SENT_TOTAL}件`) &&
+  foldersView.draftsTabText.includes(`下書き 全 ${SEED_DRAFTS}件`) &&
+  foldersView.trashTabText.includes(`ごみ箱 全 ${SEED_TRASH}件`) &&
+  countsOf(foldersView).drafts === SEED_DRAFTS && countsOf(foldersView).trash === SEED_TRASH &&
+  foldersView.saveDraftBtnText.includes('下書き保存'),
+  { inbox: foldersView.tabs.inboxText, sent: foldersView.tabs.sentText, drafts: foldersView.draftsTabText,
+    trash: foldersView.trashTabText, counts: countsOf(foldersView), saveDraft: foldersView.saveDraftBtnText });
+
+// 下書きタブ：2件と「下書き」バッヂ、操作は「この下書きを送信」とごみ箱（復元・完全削除は出ない）
+await page.click('#mail-tab-drafts');
+await sleep(600);
+await clickMailRow('mail_kyomu01_draft2');
+await sleep(600);
+const draftView = await snapshot(page);
+check('下書きタブは2件と「下書き」バッヂ、「この下書きを送信」とごみ箱ボタン（復元・完全削除は出ない）',
+  draftView.draftsTabActive === true && draftView.tabs.inboxActive === false &&
+  draftView.listItems.length === SEED_DRAFTS &&
+  draftView.listItems.every((i) => i.subject.startsWith('下書きメール')) &&
+  draftView.detailSubject === '下書きメール2' && draftView.detailBadgeText === '下書き' &&
+  draftView.detailBody.includes('下書き2の本文') &&
+  (draftView.actionButtons['send-draft'] || '').includes('この下書きを送信') &&
+  (draftView.actionButtons['trash'] || '').includes('ごみ箱') &&
+  !draftView.actionButtons['restore'] && !draftView.actionButtons['purge'],
+  { items: draftView.listItems.length, detail: draftView.detailSubject, badge: draftView.detailBadgeText,
+    buttons: draftView.actionButtons, draftsActive: draftView.draftsTabActive,
+    inboxActive: draftView.tabs.inboxActive, bodyLen: draftView.detailBody.length });
+
+// 下書き保存：新規作成モーダルの内容で保存し、件数が増える（IMAP 下書きフォルダは到達不能なので警告付き）
+await page.evaluate(() => document.getElementById('mail-btn-compose')?.click());
+await sleep(600);
+const composeOpen = await snapshot(page);
+check('下書きタブで新規作成モーダルが開く', composeOpen.modalOpen === true,
+  { modalOpen: composeOpen.modalOpen, toasts: composeOpen.toasts });
+await page.evaluate(() => {
+  document.getElementById('mail-compose-to').value = 'sato@issystem.example';
+  document.getElementById('mail-compose-subject').value = 'UI検証下書き3';
+  document.getElementById('mail-compose-body').value = '下書き保存ボタンで作成する3件目の下書きの本文です。';
+});
+await page.evaluate(() => document.getElementById('mail-compose-save-draft-btn')?.click());
+await sleep(1800);
+const draftSaved = await snapshot(page);
+check('「下書き保存」で下書きが3件へ増え、IMAP下書きフォルダ到達不能の警告付きトーストが出る',
+  draftSaved.toasts.some((t) => t.includes('下書きを保存しました')) && countsOf(draftSaved).drafts === SEED_DRAFTS + 1 &&
+  draftSaved.listItems.some((i) => i.subject === 'UI検証下書き3'),
+  { toasts: draftSaved.toasts.slice(-1), drafts: countsOf(draftSaved).drafts,
+    subjects: draftSaved.listItems.map((i) => i.subject), modalOpen: draftSaved.modalOpen });
+await page.evaluate(() => document.querySelector('#mail-compose-modal button.modal-close')?.click());
+await sleep(400);
+
+// 下書きタブの再取得（IMAP同期）は到達不能で失敗トーストだけ。表示は止まらず3件と右本文が残る
+await clickMailRow('mail_kyomu01_draft2');
+await sleep(400);
+const draftAria = (await snapshot(page)).refreshBtnAria;
+await page.click('#mail-btn-refresh');
+await sleep(2500);
+const draftSyncFail = await snapshot(page);
+check('下書きタブの再取得ボタンはIMAP下書きフォルダを閲覧できず失敗トーストだけ（3件と右本文はそのまま）',
+  draftAria.includes('IMAP の下書きから再取得') &&
+  draftSyncFail.toasts.some((t) => t.includes('IMAP フォルダ') && t.includes('閲覧できません')) &&
+  draftSyncFail.listItems.length === SEED_DRAFTS + 1 && draftSyncFail.detailBody.includes('下書き2の本文'),
+  { aria: draftAria, toasts: draftSyncFail.toasts.slice(-1), items: draftSyncFail.listItems.length });
+
+// 下書きをごみ箱へ移動（IMAP のごみ箱移動は到達不能で警告付き）→ ごみ箱2件、表示はごみ箱タブへ
+await clickMailRow('mail_kyomu01_draft2');
+await sleep(400);
+await page.evaluate(() => document.querySelector('#view-mail [data-mail-action="trash"]').click());
+await sleep(1800);
+const draftToTrash = await snapshot(page);
+check('下書きをごみ箱へ移動するとごみ箱2件・下書き2件へ更新され、表示はごみ箱タブへ切り替わる',
+  draftToTrash.toasts.some((t) => t.includes('ごみ箱へ移動しました')) &&
+  countsOf(draftToTrash).trash === SEED_TRASH + 1 && countsOf(draftToTrash).drafts === SEED_DRAFTS &&
+  draftToTrash.trashTabActive === true && draftToTrash.listItems.length === SEED_TRASH + 1 &&
+  draftToTrash.detailSubject === '下書きメール2',
+  { toasts: draftToTrash.toasts.slice(-1), counts: countsOf(draftToTrash),
+    active: draftToTrash.trashTabActive, detail: draftToTrash.detailSubject });
+
+// ごみ箱から受信箱へ復元（IMAP のコピーは到達不能で警告付き）→ 受信箱119件・ごみ箱1件、表示は受信箱タブへ
+await page.evaluate(() => document.querySelector('#view-mail [data-mail-action="restore"]').click());
+await sleep(1800);
+const restored = await snapshot(page);
+check('ごみ箱から受信箱へ復元すると受信箱119件・ごみ箱1件へ更新され、表示は受信箱タブへ切り替わる',
+  restored.toasts.some((t) => t.includes('受信箱へ復元しました')) &&
+  countsOf(restored).inbox === SEED_INBOX_TOTAL + 1 && countsOf(restored).trash === SEED_TRASH &&
+  countsOf(restored).drafts === SEED_DRAFTS && restored.tabs.inboxActive === true,
+  { toasts: restored.toasts.slice(-1), counts: countsOf(restored), inboxActive: restored.tabs.inboxActive });
+
+// ごみ箱タブ：1件と「ごみ箱」バッヂ、操作は「受信箱へ復元」と「完全に削除」（下書き送信・ごみ箱ボタンは出ない）
+await page.click('#mail-tab-trash');
+await sleep(600);
+await clickMailRow('mail_kyomu01_trash1');
+await sleep(600);
+const trashView = await snapshot(page);
+check('ごみ箱タブは1件と「ごみ箱」バッヂ、「受信箱へ復元」と「完全に削除」ボタン（下書き送信・ごみ箱は出ない）',
+  trashView.trashTabActive === true && trashView.listItems.length === SEED_TRASH &&
+  trashView.listItems[0].subject === 'ごみ箱メール1' &&
+  trashView.detailBadgeText === 'ごみ箱' && trashView.detailBody.includes('ごみ箱の本文') &&
+  (trashView.actionButtons['restore'] || '').includes('受信箱へ復元') &&
+  (trashView.actionButtons['purge'] || '').includes('完全に削除') &&
+  !trashView.actionButtons['send-draft'] && !trashView.actionButtons['trash'],
+  { items: trashView.listItems.length, badge: trashView.detailBadgeText, buttons: trashView.actionButtons });
+
+// ごみ箱の完全削除（IMAP 削除は到達不能で警告付き）→ ごみ箱0件、表示はごみ箱タブのまま
+await page.evaluate(() => document.querySelector('#view-mail [data-mail-action="purge"]').click());
+await sleep(1800);
+const purged = await snapshot(page);
+check('ごみ箱の完全削除でDB行が消えごみ箱0件（IMAP到達不能の警告付きトースト、表示はごみ箱タブのまま）',
+  purged.toasts.some((t) => t.includes('完全に削除しました')) && countsOf(purged).trash === 0 &&
+  purged.trashTabActive === true && purged.listItems.length === 0,
+  { toasts: purged.toasts.slice(-1), trash: countsOf(purged).trash, items: purged.listItems.length });
+
+// IMAPデータ消去（ごみ箱）：aria-label はごみ箱用、消去後は0件。IMAP削除フラグは到達不能で 0件（警告付き）
+const trashClearAria = (await snapshot(page)).clearBtnAria;
+await page.click('#mail-imap-clear-btn');
+await sleep(1800);
+const trashCleared = await snapshot(page);
+check('ごみ箱のIMAPデータ消去は表示とDBキャッシュを消す（トーストに削除フラグ0件とIMAP到達不能の警告、0件へ）',
+  trashClearAria.includes('ごみ箱の表示とDBキャッシュ') &&
+  trashCleared.toasts.some((t) => t.includes('ごみ箱の表示とDBキャッシュを消し') && t.includes('IMAPの削除フラグ 0件')) &&
+  countsOf(trashCleared).trash === 0,
+  { aria: trashClearAria, toasts: trashCleared.toasts.slice(-1), trash: countsOf(trashCleared).trash });
+
+// IMAPデータ消去（下書き）：aria-label は下書き用、消去後は0件（IMAPの下書き削除は到達不能で 0件）
+await page.click('#mail-tab-drafts');
+await sleep(600);
+const draftClearAria = (await snapshot(page)).clearBtnAria;
+await page.click('#mail-imap-clear-btn');
+await sleep(1800);
+const draftCleared = await snapshot(page);
+check('下書きのIMAPデータ消去は表示とDBキャッシュとIMAP下書きを消す（3件→0件、IMAP到達不能の警告付き）',
+  draftClearAria.includes('下書きの表示とDBキャッシュ') &&
+  draftCleared.toasts.some((t) => t.includes('下書きの表示とDBキャッシュを消し')) &&
+  countsOf(draftCleared).drafts === 0 && countsOf(draftCleared).trash === 0,
+  { aria: draftClearAria, toasts: draftCleared.toasts.slice(-1), drafts: countsOf(draftCleared).drafts });
+
+// 受信箱タブへ戻す（後続の設定削除検証は受信箱面から行う）
+await page.click('#mail-tab-inbox');
+await sleep(600);
+
+// 7. 返信・転送ボタン: 受信箱メールの操作ボタン、プレフィル内容、SMTP到達不能の送信トースト、状態クリア
+await clickMailRow('mail_kyomu01_inbox_9003');
+await sleep(700);
+const replyButtons = await snapshot(page);
+check('受信箱のメールに「返信」「全員に返信」「転送」ボタンが出る（ごみ箱ボタンも残り下書き送信は出ない）',
+  (replyButtons.actionButtons['reply'] || '').includes('返信') &&
+  (replyButtons.actionButtons['reply-all'] || '').includes('全員に返信') &&
+  (replyButtons.actionButtons['forward'] || '').includes('転送') &&
+  (replyButtons.actionButtons['trash'] || '').includes('ごみ箱') &&
+  !replyButtons.actionButtons['send-draft'],
+  { buttons: replyButtons.actionButtons });
+
+// 「返信」は確認ダイアログを出さず作成フォームを開き、差出人・Re:・引用文をプレフィルする
+await page.evaluate(() => document.querySelector('#view-mail [data-mail-action="reply"]')?.click());
+await sleep(1200);
+const replyOpen = await snapshot(page);
+const replyCompose = replyOpen.mailSnap?.compose || {};
+check('「返信」で作成フォームが開き宛先・Re: 件名・引用本文と「メール返信」タイトルがプレフィルされる',
+  replyOpen.modalOpen === true && replyOpen.composeTitleText.includes('メール返信') &&
+  replyCompose.mode === 'reply' && replyCompose.reply_to_id === 'mail_kyomu01_inbox_9003' &&
+  replyCompose.to === 'kyomu@issystem.example' && replyCompose.subject === 'Re: UI検証メール3' &&
+  replyCompose.body.includes('> 本文三') &&
+  replyOpen.toasts.some((t) => t.includes('返信の作成フォームを開きました')),
+  { title: replyOpen.composeTitleText, compose: replyCompose, toasts: replyOpen.toasts.slice(-2) });
+
+// 送信はSMTP到達不能で失敗トースト。フォームは開いたまま入力を保持し、送信ボックス件数は増えない
+await page.evaluate(() => document.querySelector('#mail-compose-form button[type="submit"]')?.click());
+await sleep(2000);
+const replySent = await snapshot(page);
+const sentCompose = replySent.mailSnap?.compose || {};
+check('返信送信はSMTP到達不能で失敗トースト（送信ボックス60件と入力はそのまま、返信状態も保持）',
+  replySent.toasts.some((t) => t.includes('返信を送信中')) &&
+  replySent.toasts.some((t) => t.includes('送信できませんでした')) &&
+  countsOf(replySent).sent === SEED_SENT_TOTAL && sentCompose.mode === 'reply' &&
+  sentCompose.to === 'kyomu@issystem.example' && sentCompose.body.includes('> 本文三'),
+  { toasts: replySent.toasts.slice(-2), sent: countsOf(replySent).sent, compose: sentCompose });
+
+// 閉じると返信状態がクリアされ、新規作成は空フォームと「メール新規作成」タイトルへ戻る
+await page.evaluate(() => document.querySelector('#mail-compose-modal button.modal-close')?.click());
+await sleep(400);
+const closedCompose = await snapshot(page);
+check('閉じると返信状態がクリアされ、新規作成は空フォームと「メール新規作成」タイトルへ戻る',
+  closedCompose.modalOpen === false && closedCompose.mailSnap?.compose?.mode === null &&
+  closedCompose.mailSnap?.compose?.to === '' && closedCompose.mailSnap?.compose?.body === '' &&
+  closedCompose.mailSnap?.compose?.reply_to_id === null &&
+  closedCompose.composeTitleText.includes('メール新規作成'),
+  { compose: closedCompose.mailSnap?.compose, title: closedCompose.composeTitleText });
+
+// 「転送」は Fwd: 件名・転送ヘッダ・引用文をプレフィルする（宛先は空のまま）
+await page.evaluate(() => document.querySelector('#view-mail [data-mail-action="forward"]')?.click());
+await sleep(1200);
+const fwdOpen = await snapshot(page);
+const fwdCompose = fwdOpen.mailSnap?.compose || {};
+check('「転送」で作成フォームが開き Fwd: 件名・転送ヘッダ・引用本文と「メール転送」タイトルがプレフィルされる',
+  fwdOpen.modalOpen === true && fwdOpen.composeTitleText.includes('メール転送') &&
+  fwdCompose.mode === 'forward' && fwdCompose.reply_to_id === 'mail_kyomu01_inbox_9003' &&
+  fwdCompose.subject === 'Fwd: UI検証メール3' && fwdCompose.to === '' &&
+  fwdCompose.body.includes('---------- 転送されたメッセージ ----------') &&
+  fwdCompose.body.includes('> 本文三') &&
+  fwdOpen.toasts.some((t) => t.includes('転送の作成フォームを開きました')),
+  { title: fwdOpen.composeTitleText, compose: fwdCompose });
+await page.evaluate(() => document.querySelector('#mail-compose-modal button.modal-close')?.click());
+await sleep(400);
 
 // 6. 設定を削除して初回フォームへ戻す (検証後に DB を未設定状態へ戻す)
 await page.click('#mail-btn-settings');
@@ -785,13 +1093,27 @@ check('設定削除で初回フォームへ戻る', reset.hasForm === true && re
 check('削除で未読バッジが消える', reset.unreadBadgeHidden === true, { badge: reset.unreadBadgeText, hidden: reset.unreadBadgeHidden });
 check('アカウント全削除（初回フォーム）では新規作成モーダルも撤去される', reset.composeMounted === null, { composeMounted: reset.composeMounted });
 
-// 6b. 未設定状態での接続テストは「先に登録が必要」の警告トーストになる
-await page.click('#mail-btn-test');
+// 6b. 未設定（初回フォーム）の接続テスト: パスワードが無ければ警告トーストだけ（テストは実行しない）。
+//     パスワードがあればフォーム値でテストし、結果パネルはメール設定メニューに出す（アカウントが無いので status は書き込まれない）
+check('初回フォームにも「設定保存済み（未接続確認）」バッヂは出ない',
+  reset.statusBadgeText === '' && !/未接続確認|設定保存済み/.test(reset.fullViewText),
+  { statusBadgeText: reset.statusBadgeText, headerText: reset.headerText.slice(0, 110) });
+await page.click('#mail-btn-test-form');
 await sleep(600);
+const noPass = await snapshot(page);
+check('未設定でパスワード無しテストは「パスワードが必要」の警告トーストだけ（テストは実行しない）',
+  noPass.toasts.some((t) => t.includes('接続テストにはメールパスワードが必要です')) &&
+  noPass.hasForm === true && noPass.testResultText === '',
+  { toasts: noPass.toasts.slice(-1), hasForm: noPass.hasForm, testResultText: noPass.testResultText.slice(0, 40) });
+await page.evaluate(() => { document.getElementById('mail-setup-password').value = 'ui-secret-789'; });
+await page.click('#mail-btn-test-form');
+await sleep(2400);
 const unsetting = await snapshot(page);
-check('未設定の接続テストは登録案内の警告トースト',
-  unsetting.toasts.some((t) => t.includes('接続テストの前にメールアドレスとパスワードを登録')),
-  { toasts: unsetting.toasts.slice(-1) });
+check('未設定でもフォーム値の接続テストは結果パネルがメール設定メニューに出る（状態バッヂは出ない）',
+  unsetting.hasForm === true && unsetting.hasInbox === false && unsetting.resultInSettings === true &&
+  unsetting.testResultText.includes('IMAP (受信): 接続 NG') && unsetting.statusBadgeText === '' &&
+  unsetting.toasts.some((t) => t.includes('接続テスト: 接続失敗')),
+  { testResultText: unsetting.testResultText.slice(0, 120), statusBadgeText: unsetting.statusBadgeText, toasts: unsetting.toasts.slice(-1) });
 
 await browser.close();
 

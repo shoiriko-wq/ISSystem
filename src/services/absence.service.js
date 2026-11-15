@@ -2,6 +2,9 @@
  * ISSystem 年休等・出張 欠席登録サービス
  * ダッシュボードサマリー取得・教員による手動記入（登録/取消）と権限判定
  *
+ * 記入欄は「対象日・期間（プリセット 全日08:30〜17:00/半日（午前）08:30〜13:00/半日（午後）13:00〜17:00/個別入力）・区分・対象教員」。
+ * 理由は入力欄を撤廃したが reason 列は保持する（座席バッヂ・考査出張派生・監査ログが参照するため）。
+ *
  * 権限:
  *  - 教務・管理職 (PRIVILEGED_RECORDING_ROLES) は全教員の登録を行える
  *  - 一般教員は「自分の分」だけを登録・取消できる
@@ -37,6 +40,38 @@ function isValidDateStr(s) {
 function resolveDate(raw) {
   const s = String(raw || '').trim().substring(0, 10);
   return isValidDateStr(s) ? s : new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+}
+
+/** HH:MM (00:00〜23:59) の形式検証 */
+function isValidTimeStr(s) {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(s);
+}
+
+/**
+ * 期間の開始・終了時刻を正規化 (未入力は初期値、不正は null を返す)
+ * @param {string} raw 入力 (HH:MM)
+ * @param {string} fallback 初期値 ('08:30' / '17:00')
+ */
+function resolveTime(raw, fallback) {
+  const s = String(raw || '').trim().substring(0, 5);
+  if (!s) return fallback;
+  return isValidTimeStr(s) ? s : null;
+}
+
+/**
+ * 期間プリセット名 (UI の PERIOD_PRESETS と対応)。ラベルは開始・終了時刻から算出するため DB には保存しない。
+ * 全日 08:30〜17:00 / 半日（午前）08:30〜13:00 / 半日（午後）13:00〜17:00 / 個別入力 CUSTOM
+ */
+export const PERIOD_PRESET_NAMES = ['FULL', 'AM', 'PM', 'CUSTOM'];
+
+/**
+ * 開始・終了時刻から期間ラベルを算出 (プリセット名は二重保存しないので表示側で使う)
+ */
+export function periodLabelOf(startTime, endTime) {
+  if (startTime === '08:30' && endTime === '17:00') return '全日';
+  if (startTime === '08:30' && endTime === '13:00') return '半日（午前）';
+  if (startTime === '13:00' && endTime === '17:00') return '半日（午後）';
+  return '個別';
 }
 
 /**
@@ -86,7 +121,7 @@ export const absenceService = {
 
   /**
    * 年休等・出張 の登録 (手動記入)
-   * @param {object} payload { user_id, record_type, record_date, reason }
+   * @param {object} payload { user_id, record_type, record_date, start_time, end_time, period_preset, reason }
    * @param {object} user 登録操作者のJWTペイロード
    */
   async recordAbsence(payload, user) {
@@ -114,12 +149,32 @@ export const absenceService = {
       throw new ApiError(400, '対象日 (YYYY-MM-DD) が不正です。存在する日付を指定してください。');
     }
     const recordDate = rawDate;
+
+    // 期間（開始・終了時刻）。未入力は初期値 08:30 / 17:00、終了は開始より後（跨日は扱えない）
+    const startTime = resolveTime(payload.start_time, '08:30');
+    const endTime = resolveTime(payload.end_time, '17:00');
+    if (!startTime) {
+      throw new ApiError(400, '開始時刻 (HH:MM) が不正です。00:00〜23:59 で指定してください。');
+    }
+    if (!endTime) {
+      throw new ApiError(400, '終了時刻 (HH:MM) が不正です。00:00〜23:59 で指定してください。');
+    }
+    if (endTime <= startTime) {
+      throw new ApiError(400, '期間が不正です。終了時刻は開始時刻より後にしてください（同日内の期間のみ登録可）。');
+    }
+
+    // プリセット名は監査ログにだけ残す (DB は開始・終了時刻だけ保持し、ラベルは時刻から算出する)
+    const rawPreset = String(payload.period_preset || '').trim().toUpperCase();
+    const periodPreset = PERIOD_PRESET_NAMES.includes(rawPreset) ? rawPreset : null;
+
     const reason = String(payload.reason || '').trim().substring(0, 200);
 
     const saved = await absenceModel.upsert({
       user_id: targetUserId,
       record_date: recordDate,
       record_type: recordType,
+      start_time: startTime,
+      end_time: endTime,
       reason,
       recorded_by: user.id || user._id,
       recorded_by_name: user.name || '教員',
@@ -141,6 +196,10 @@ export const absenceService = {
         user_id: saved.user_id,
         record_date: saved.record_date,
         record_type: saved.record_type,
+        start_time: saved.start_time,
+        end_time: saved.end_time,
+        period_preset: periodPreset,
+        period_label: periodLabelOf(saved.start_time, saved.end_time),
         reason: saved.reason,
         recorded_by_name: saved.recorded_by_name,
       }),

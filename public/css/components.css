@@ -565,30 +565,23 @@
   gap: 0.35rem;
 }
 
-/* ===== メールヘッダーのコントロール統一（職員掲示板・施設物品予約と同じ 2.4rem 高・0.875rem 文字） ===== */
+/* ===== メールヘッダーのコントロール統一（職員掲示板・施設物品予約と同じ 2.4rem 高・0.875rem 文字） =====
+   メール設定ボタンはアイコンのみ（ラベルなし）で 2.4rem 正方形。接続テストはメール設定メニューの中にある
+   （ヘッダーに接続テストボタンは無い。ヘッダーの状態バッヂは「接続確認済み」「接続失敗」だけ出す） */
 #view-mail #mail-btn-settings,
-#view-mail #mail-btn-test,
-#view-mail #mail-btn-refresh {
-  height: 2.4rem;
-}
-
-#view-mail #mail-btn-settings,
-#view-mail #mail-btn-test {
-  padding: 0 0.8rem;
-  font-size: 0.875rem;
-  font-weight: 700;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-/* 再読み込みは内容に依存しない固定サイズの正方形（掲示板のキー操作ボタンと同じ寸法） */
 #view-mail #mail-btn-refresh {
   width: 2.4rem;
+  height: 2.4rem;
   padding: 0;
 }
 
-/* 新規作成ボタン（接続テストと同じ寸法・文字サイズ） */
+#view-mail #mail-btn-settings {
+  color: var(--text-soft);
+  border-color: var(--border-color);
+  background-color: var(--bg-surface);
+}
+
+/* 新規作成ボタン（アイコン＋文字。2.4rem 高・0.875rem 文字） */
 #view-mail #mail-btn-compose {
   height: 2.4rem;
   padding: 0 0.8rem;

@@ -12,7 +12,7 @@ import { loadMessages } from './modules/chat.module.js';
 import { loadSeatingData } from './modules/seating.module.js';
 import { fetchWeatherData } from './modules/dashboard.module.js';
 import { loadAbsenceSummary } from './modules/absence.module.js';
-import { loadBulletins, ingestBulletin } from './modules/bulletin.module.js';
+import { loadBulletins, ingestBulletin, dropBulletin } from './modules/bulletin.module.js';
 import { loadSubjects } from './modules/subjects.module.js';
 
 
@@ -334,6 +334,13 @@ export const socketClient = {
       showToast(`💬 ${name} が回覧・掲示板にコメントを追加しました`, 'info', () => {
         switchTab('bulletin');
       });
+    });
+
+    // ★ 掲示削除の通知（DELETE /api/bulletins/:id 成功時にサーバーが全クライアントへ emit）。
+    //   キャッシュから行を落とし、未読バッヂと未読列表のピン留めを再計算する（削除行は未読列表に残さない）
+    socket.on('bulletin:deleted', (data) => {
+      const id = data?.bulletinId ?? data?.bulletin?.id ?? data?.id;
+      if (id) dropBulletin(id);
     });
 
     // 8. ユーザー追加・削除のリアルタイム通知

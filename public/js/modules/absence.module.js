@@ -15,6 +15,40 @@ const TYPE_META = {
   TRIP: { label: '出張', icon: 'briefcase', textClass: 'text-warning', borderClass: 'border-warning-soft', bgClass: 'bg-warning-soft' },
 };
 
+/**
+ * 期間プリセット (記入欄の初期は 全日 08:30〜17:00)。
+ * ラベルは開始・終了時刻から算出するのでプリセット名は DB に保存しない (server の periodLabelOf と同一ロジック)。
+ * CUSTOM は個別入力 = 開始・終了を自由に設定できる (プリセット外 = ラベル「個別」)
+ */
+const PERIOD_PRESETS = {
+  FULL: { label: '全日', start: '08:30', end: '17:00' },
+  AM: { label: '半日（午前）', start: '08:30', end: '13:00' },
+  PM: { label: '半日（午後）', start: '13:00', end: '17:00' },
+  CUSTOM: { label: '個別入力', start: null, end: null },
+};
+
+/** HH:MM (00:00〜23:59) の形式検証 */
+function isValidTimeStr(s) {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(s);
+}
+
+/** 開始・終了時刻 (HH:MM) から期間ラベル (全日/半日（午前）/半日（午後）/個別) を算出 */
+function periodLabelOf(start, end) {
+  for (const key of ['FULL', 'AM', 'PM']) {
+    const p = PERIOD_PRESETS[key];
+    if (p.start === start && p.end === end) return p.label;
+  }
+  return '個別';
+}
+
+/** 対象日 (YYYY-MM-DD) に 曜日 を添える (YYYY-MM-DD (火) 形式) */
+function formatAbsenceDate(dateStr) {
+  const parts = String(dateStr || '').split('-');
+  if (parts.length !== 3) return dateStr || '';
+  const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  return `${dateStr} (${d.toLocaleDateString('ja-JP', { weekday: 'short' })})`;
+}
+
 let latestSummary = null;
 let currentFilter = 'ALL';
 let teachersLoaded = false;
@@ -34,6 +68,30 @@ export function initAbsenceModule() {
   document.getElementById('absence-date')?.addEventListener('change', (e) => {
     loadAbsenceSummary(e.target.value);
   });
+
+  // 期間プリセット選択 → 開始・終了時刻をプリセット値へ自動設定 (CUSTOM は現在の値を保つ)
+  document.getElementById('absence-period-select')?.addEventListener('change', (e) => {
+    const preset = PERIOD_PRESETS[e.target.value] || PERIOD_PRESETS.CUSTOM;
+    if (!preset.start || !preset.end) return;
+    const startInput = document.getElementById('absence-start-time');
+    const endInput = document.getElementById('absence-end-time');
+    if (startInput) startInput.value = preset.start;
+    if (endInput) endInput.value = preset.end;
+  });
+
+  // 開始・終了の手動変更 → プリセットと一致すればセレクトを該当プリセットへ、不一致は「個別入力」へ
+  const syncPeriodFromTimes = () => {
+    const startInput = document.getElementById('absence-start-time');
+    const endInput = document.getElementById('absence-end-time');
+    const periodSelect = document.getElementById('absence-period-select');
+    if (!startInput || !endInput || !periodSelect) return;
+    const s = (startInput.value || '').substring(0, 5);
+    const e = (endInput.value || '').substring(0, 5);
+    const matched = ['FULL', 'AM', 'PM'].find((k) => PERIOD_PRESETS[k].start === s && PERIOD_PRESETS[k].end === e);
+    periodSelect.value = matched || 'CUSTOM';
+  };
+  document.getElementById('absence-start-time')?.addEventListener('change', syncPeriodFromTimes);
+  document.getElementById('absence-end-time')?.addEventListener('change', syncPeriodFromTimes);
 
   // 更新ボタン
   document.getElementById('absence-btn-refresh')?.addEventListener('click', () => {
@@ -140,15 +198,12 @@ export async function loadAbsenceSummary(targetDate = null) {
 
 /**
  * モーダル内の区分別人数表示と権限案内
+ * モーダルの赤・黄色の人数枠は撤廃した（件数だけフィルタ行の「表示: n 件」で示す）。
+ * ダッシュボードの区分別人数タイル（n名）と権限案内を描画する。
  */
 function renderAbsenceCounts() {
   if (!latestSummary) return;
   const counts = latestSummary.counts;
-
-  const leaveCountEl = document.getElementById('absence-count-leave');
-  const tripCountEl = document.getElementById('absence-count-trip');
-  if (leaveCountEl) leaveCountEl.textContent = String(counts.LEAVE ?? 0);
-  if (tripCountEl) tripCountEl.textContent = String(counts.TRIP ?? 0);
 
   // ダッシュボードの区分別人数表示
   const dashLeaveEl = document.getElementById('dash-absence-leave');
@@ -193,6 +248,9 @@ function renderAbsenceList() {
     const meta = TYPE_META[r.record_type] || TYPE_META.LEAVE;
     const isSelf = String(r.user_id) === myId;
     const canDelete = latestSummary.can_record || isSelf;
+    // 期間 (HH:MM)。プリセット名は保存せずラベルは開始・終了時刻から算出する
+    const start = r.start_time || '08:30';
+    const end = r.end_time || '17:00';
 
     return `
       <div class="flex items-center justify-between gap-3 p-3 rounded-lg border ${meta.borderClass} bg-surface-strong">
@@ -203,11 +261,14 @@ function renderAbsenceList() {
             <span class="text-xs font-bold text-main truncate">${escapeHTML(r.user_name)} 先生</span>
             ${isSelf ? '<span class="text-[9px] px-1.5 rounded bg-accent-soft text-accent-strong font-bold">自分</span>' : ''}
           </div>
-          <div class="text-[11px] text-soft mt-1 truncate">
-            理由: ${escapeHTML(r.reason) || '<span class="text-muted">（未記入）</span>'}
+          <div class="text-[11px] text-soft mt-1 flex items-center gap-1.5 font-mono">
+            <i data-lucide="calendar" class="w-3.5 h-3.5 flex-shrink-0 text-muted"></i>
+            <span>${escapeHTML(formatAbsenceDate(r.record_date))}</span>
+            <i data-lucide="clock" class="w-3.5 h-3.5 flex-shrink-0 text-muted"></i>
+            <span>${periodLabelOf(start, end)} ${start}〜${end}</span>
           </div>
           <div class="text-[10px] text-muted mt-0.5 font-mono">
-            ${escapeHTML(r.record_date)} 登録 by ${escapeHTML(r.recorded_by_name) || '不明'} / ${formatDate(r.updated_at, true)}
+            登録 by ${escapeHTML(r.recorded_by_name) || '不明'} / ${formatDate(r.updated_at, true)}
           </div>
         </div>
         ${canDelete
@@ -268,24 +329,45 @@ export function openAbsenceModal(filterType = 'ALL') {
 }
 
 /**
- * 手動記入フォームの送信
+ * 手動記入フォームの送信 (対象日・期間・区分・対象教員。理由・行き先入力は撤廃)
+ * 期間は HH:MM。終了が開始より後でないと登録できない (server 側の校验と同一条件)
  */
 async function submitAbsenceRecord() {
   const userSelect = document.getElementById('absence-user-select');
   const typeSelect = document.getElementById('absence-type-select');
-  const reasonInput = document.getElementById('absence-reason-input');
   const dateInput = document.getElementById('absence-date');
+  const periodSelect = document.getElementById('absence-period-select');
+  const startInput = document.getElementById('absence-start-time');
+  const endInput = document.getElementById('absence-end-time');
   const saveBtn = document.getElementById('absence-btn-save');
+
+  const preset = PERIOD_PRESETS[periodSelect ? periodSelect.value : 'FULL'] || PERIOD_PRESETS.CUSTOM;
+  const start = (startInput ? startInput.value : '').substring(0, 5) || preset.start || '08:30';
+  const end = (endInput ? endInput.value : '').substring(0, 5) || preset.end || '17:00';
 
   const payload = {
     user_id: userSelect ? userSelect.value : '',
     record_type: typeSelect ? typeSelect.value : '',
     record_date: dateInput ? dateInput.value : todayJst(),
-    reason: reasonInput ? reasonInput.value.trim() : '',
+    period_preset: periodSelect ? periodSelect.value : 'FULL',
+    start_time: start,
+    end_time: end,
   };
 
   if (!payload.user_id) {
     showToast('登録対象の教員を選択してください', 'warning');
+    return;
+  }
+  if (!payload.record_date) {
+    showToast('対象日を入力してください', 'warning');
+    return;
+  }
+  if (!isValidTimeStr(start) || !isValidTimeStr(end)) {
+    showToast('期間の開始・終了は HH:MM (00:00〜23:59) で入力してください', 'warning');
+    return;
+  }
+  if (end <= start) {
+    showToast(`期間が不正です（${start}〜${end}）。終了は開始より後にしてください`, 'warning');
     return;
   }
 
@@ -294,8 +376,6 @@ async function submitAbsenceRecord() {
   try {
     const data = await apiPost('/absences', payload);
     showToast(data.message || '登録しました', 'success');
-
-    if (reasonInput) reasonInput.value = '';
     await loadAbsenceSummary(payload.record_date);
   } catch (err) {
     showToast(err.message || '年休等・出張の登録に失敗しました', 'error');

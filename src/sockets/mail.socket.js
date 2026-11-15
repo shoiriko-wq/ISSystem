@@ -1,6 +1,7 @@
 /**
  * ISSystem Mail Realtime Socket Handlers
  * 開封時遅延本文取得 (mail:get_body) と添付ダウンロード (mail:get_attachment) を扱う。
+ * 下書き・ごみ箱・送信済みフォルダの IMAP 同期 (mail:sync_folder) も ack で扱う。
  * 本文は DB キャッシュ (未キャッシュ時は IMAP へ取りに行く)。権限は mailService 側で検証 (self / admin)。
  */
 
@@ -40,6 +41,18 @@ export default function registerMailSocketHandlers(io, socket) {
       callback({ success: true, name: att.name, type: att.type, base64 });
     } catch (err) {
       callback({ success: false, message: err?.userMessage || '添付の取得に失敗しました' });
+    }
+  });
+
+  // フォルダの IMAP 同期 (下書き・ごみ箱・送信済み。ack で追加件数と総件数を返す)
+  socket.on('mail:sync_folder', async (payload, callback) => {
+    if (typeof callback !== 'function') return;
+    const folder = ['inbox', 'sent', 'drafts', 'trash'].includes(payload?.folder) ? payload.folder : 'inbox';
+    try {
+      const result = await mailService.syncImapFolder(user, payload?.account_id ?? null, folder);
+      callback({ success: true, ...result });
+    } catch (err) {
+      callback({ success: false, message: err?.userMessage || err?.message || 'フォルダの同期に失敗しました' });
     }
   });
 }

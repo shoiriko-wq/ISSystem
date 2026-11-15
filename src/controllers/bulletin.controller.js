@@ -407,6 +407,17 @@ export const bulletinController = {
 
       const result = await bulletinService.deleteBulletin(id, user);
 
+      // ★ 削除を全クライアントへ通知（客户端キャッシュは投稿の DELETE で自動更新されないため、未読バッヂ・未読列表のピン留めが
+      //   消えないまま残る。`public/js/socket.js` の `bulletin:deleted` が `dropBulletin()` でキャッシュから落とす）
+      const io = req.app ? req.app.get('io') : null;
+      if (io) {
+        io.emit('bulletin:deleted', {
+          bulletinId: id,
+          userId: user.id || user._id,
+          userName: user.name || '教員'
+        });
+      }
+
       return res.status(200).json({
         success: true,
         message: result ? result.message : '削除しました。',

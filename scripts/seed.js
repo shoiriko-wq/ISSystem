@@ -161,10 +161,12 @@ const dummyExamExemptions = [
 
 // 15. 年休等・出張 欠席登録 (当日基準でデモデータを生成)
 const todayStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+// 期間 start_time/end_time は HH:MM。プリセットの初期対応:
+//   全日 08:30〜17:00 / 半日（午前）08:30〜13:00 / 半日（午後）13:00〜17:00 / 個別入力
 const dummyAbsenceRecords = [
-  { id: 'abs_1', user_id: 't-takahashi', record_date: todayStr, record_type: 'LEAVE', reason: '年休（通院治療）', recorded_by: 'kyomu01', recorded_by_name: '教務 主任' },
-  { id: 'abs_2', user_id: 't-suzuki', record_date: todayStr, record_type: 'TRIP', reason: '県教育委員会 研修（午後）', recorded_by: 'kyomu01', recorded_by_name: '教務 主任' },
-  { id: 'abs_3', user_id: 't-sato', record_date: todayStr, record_type: 'TRIP', reason: '進路指導部 校外打ち合わせ', recorded_by: 'kyomu01', recorded_by_name: '教務 主任' }
+  { id: 'abs_1', user_id: 't-takahashi', record_date: todayStr, record_type: 'LEAVE', start_time: '08:30', end_time: '17:00', reason: '年休（通院治療）', recorded_by: 'kyomu01', recorded_by_name: '教務 主任' },
+  { id: 'abs_2', user_id: 't-suzuki', record_date: todayStr, record_type: 'TRIP', start_time: '13:00', end_time: '17:00', reason: '県教育委員会 研修（午後）', recorded_by: 'kyomu01', recorded_by_name: '教務 主任' },
+  { id: 'abs_3', user_id: 't-sato', record_date: todayStr, record_type: 'TRIP', start_time: '08:30', end_time: '13:00', reason: '進路指導部 校外打ち合わせ', recorded_by: 'kyomu01', recorded_by_name: '教務 主任' }
 ];
 
 // 14. 考査コマ（科目時間割）と監督割当を決定論的に生成
@@ -338,14 +340,16 @@ async function seedDatabase() {
 
     for (const ab of dummyAbsenceRecords) {
       await client.query(
-        `INSERT INTO absence_records (id, user_id, record_date, record_type, reason, recorded_by, recorded_by_name)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO absence_records (id, user_id, record_date, record_type, start_time, end_time, reason, recorded_by, recorded_by_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT (user_id, record_date, record_type) DO UPDATE SET
+           start_time = EXCLUDED.start_time,
+           end_time = EXCLUDED.end_time,
            reason = EXCLUDED.reason,
            recorded_by = EXCLUDED.recorded_by,
            recorded_by_name = EXCLUDED.recorded_by_name,
            updated_at = CURRENT_TIMESTAMP`,
-        [ab.id, ab.user_id, ab.record_date, ab.record_type, ab.reason, ab.recorded_by, ab.recorded_by_name]
+        [ab.id, ab.user_id, ab.record_date, ab.record_type, ab.start_time, ab.end_time, ab.reason, ab.recorded_by, ab.recorded_by_name]
       );
     }
 

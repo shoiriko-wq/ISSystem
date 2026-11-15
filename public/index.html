@@ -675,6 +675,60 @@
             <p class="text-[10px] text-muted mt-1">コードを職員本人へ伝え、ログイン画面の該当タブで入力させます。</p>
           </div>
 
+          <!-- CSV 一括登録 (v3.1.15 §5): テンプレート→検証プレビュー→承認行の確定 (1トランザクション INSERT) -->
+          <div id="user-import-card" class="bg-surface p-4 rounded-xl border border-main">
+            <h4 class="font-bold text-main mb-2 flex items-center gap-1.5 text-sm">
+              <i data-lucide="file-up" class="w-4 h-4 text-accent"></i> CSV 一括登録（教職員アカウント）
+            </h4>
+            <p class="text-[11px] text-muted mb-3">
+              ヘッダー行
+              <span class="font-mono text-main">staff_code,name,role,grade,department,email,password,extension_number,desk_number,group_zone,status_note,subjects</span>
+              の UTF-8 (BOM 付き) CSV を読み込みます。<span class="font-bold text-main">1回200行まで・プレビュー15分・未消費5件まで。</span>
+              同一教職員番号・同一 email は DB と突合してエラー行になります。CSV 内の role は ADMIN のみ指定可、
+              教務部 (KYOMU) は role TEACHER のアカウントのみ作成できます。
+              プレビューで登録行を承認すると <span class="font-bold text-main">1トランザクションで INSERT</span> し、
+              登録者は初回ログイン後にパスワード変更を義務付けられます (must_change_password)。
+            </p>
+            <div class="flex items-center gap-3 flex-wrap">
+              <button type="button" id="user-import-template-btn" class="btn-secondary py-1.5 px-3 text-xs rounded border border-main bg-surface text-main flex items-center gap-1.5">
+                <i data-lucide="download" class="w-3.5 h-3.5"></i> テンプレートをダウンロード
+              </button>
+              <label class="btn-primary py-1.5 px-3 text-xs font-bold bg-accent hover-primary text-main rounded flex items-center gap-1.5 cursor-pointer">
+                <i data-lucide="file-up" class="w-3.5 h-3.5"></i> CSV を選択
+                <input type="file" id="user-import-file" accept=".csv,text/csv" class="hidden">
+              </label>
+              <span id="user-import-filename" class="text-[11px] text-muted font-mono">未選択</span>
+            </div>
+            <div id="user-import-preview" class="hidden mt-3">
+              <p id="user-import-summary" class="text-[11px] text-main mb-2"></p>
+              <div class="overflow-x-auto border border-main rounded-lg">
+                <table class="w-full text-left border-collapse text-[11px]">
+                  <thead>
+                    <tr class="bg-surface border-b border-main text-soft">
+                      <th class="p-2 text-center">登録</th>
+                      <th class="p-2">行</th>
+                      <th class="p-2">教職員番号</th>
+                      <th class="p-2">氏名</th>
+                      <th class="p-2">role</th>
+                      <th class="p-2">学年 / 所属</th>
+                      <th class="p-2">内線</th>
+                      <th class="p-2">座席</th>
+                      <th class="p-2">検証</th>
+                    </tr>
+                  </thead>
+                  <tbody id="user-import-tbody" class="divide-y divide-divider"></tbody>
+                </table>
+              </div>
+              <div class="flex justify-end gap-2 pt-2">
+                <button type="button" id="user-import-commit-btn" class="btn-primary py-1.5 px-3 text-xs font-bold bg-success hover-success-strong text-main rounded flex items-center gap-1.5">
+                  <i data-lucide="check-circle" class="w-3.5 h-3.5"></i> 登録行を確定
+                </button>
+                <button type="button" id="user-import-cancel-btn" class="btn-secondary py-1.5 px-3 text-xs rounded border border-main bg-surface text-main">取り消す</button>
+              </div>
+            </div>
+            <p id="user-import-result" class="text-[11px] mt-2 hidden"></p>
+          </div>
+
           <!-- 新規教員追加フォーム -->
           <div class="bg-surface p-4 rounded-xl border border-main">
             <h4 class="font-bold text-main mb-3 flex items-center gap-1.5 text-sm">
@@ -751,6 +805,41 @@
     </div>
   </div>
 
+  <!-- 初期パスワード変更モーダル (v3.1.15 §5): CSV 一括登録アカウントの初回ログイン時に強制表示。閉じるボタンなし -->
+  <div id="password-change-modal" class="modal-overlay hidden">
+    <div class="modal-card modal-card--compact">
+      <div class="modal-header">
+        <h3 class="modal-title"><i data-lucide="key-round" class="w-5 h-5 text-warning"></i> パスワードの変更が必要です</h3>
+      </div>
+      <div class="modal-body">
+        <p class="text-[11px] text-muted mb-3">
+          教務部が発行した初期パスワードは自分自身のパスワードとして管理してください。
+          新しいパスワード（8文字以上）を設定するまでアプリは利用できません
+          （API・リアルタイム接続は遮断されます）。
+        </p>
+        <div id="forced-password-error" class="hidden p-3 rounded-lg bg-danger-soft border border-danger-soft text-danger text-xs font-semibold mb-2"></div>
+        <form id="forced-password-form" class="space-y-3">
+          <div>
+            <label class="block text-[11px] font-semibold text-soft mb-1">現在のパスワード（教務部が発行した初期パスワード）</label>
+            <input type="password" id="forced-current-password" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" autocomplete="current-password" required>
+          </div>
+          <div>
+            <label class="block text-[11px] font-semibold text-soft mb-1">新しいパスワード（8文字以上）</label>
+            <input type="password" id="forced-new-password" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" autocomplete="new-password" required>
+          </div>
+          <div>
+            <label class="block text-[11px] font-semibold text-soft mb-1">新しいパスワード（確認）</label>
+            <input type="password" id="forced-new-password-confirm" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" autocomplete="new-password" required>
+          </div>
+          <div class="flex justify-end gap-2 pt-2">
+            <button type="button" id="forced-logout-btn" class="btn-secondary py-2 px-4 text-xs rounded border border-main bg-surface text-soft">ログアウト</button>
+            <button type="submit" class="btn-primary py-2 px-4 text-xs font-bold bg-warning hover-warning-strong text-main rounded">パスワードを変更する</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
   <!-- 配色テーマ設定モーダル（アカウント名ドロップダウンから開く） -->
   <div id="theme-modal" class="modal-overlay hidden">
     <div class="modal-card modal-card--compact">
@@ -777,60 +866,57 @@
       </div>
       <div class="modal-body">
 
-      <!-- 対象日 & 更新 -->
-      <div class="flex flex-wrap items-end gap-3 mb-4">
-        <div>
-          <label class="block text-[10px] text-muted mb-1">対象日</label>
-          <input type="date" id="absence-date" class="input-field py-1.5 text-xs w-36">
-        </div>
-        <button id="absence-btn-refresh" class="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1">
-          <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> 更新
-        </button>
-      </div>
-
-      <!-- 区分別人数サマリー -->
-      <div class="grid grid-cols-2 gap-3 mb-3">
-        <div class="p-3 rounded-lg bg-danger-soft border border-danger-soft text-center">
-          <span class="text-2xl font-black text-danger" id="absence-count-leave">0</span>
-          <span class="block text-[10px] text-muted">年休等（欠席）</span>
-        </div>
-        <div class="p-3 rounded-lg bg-warning-soft border border-warning-soft text-center">
-          <span class="text-2xl font-black text-warning" id="absence-count-trip">0</span>
-          <span class="block text-[10px] text-muted">出張</span>
-        </div>
-      </div>
-
-      <!-- 表示フィルタ -->
-      <div class="flex flex-wrap items-center gap-2 mb-2 text-[11px]">
+      <!-- ① 区別フィルタ（すべて/年休等/出張）と該当ユーザの一覧 —— モーダルメイン部の最上部 -->
+      <div class="flex flex-wrap items-center gap-2 mb-2 text-[11px]" id="absence-filter-row">
         <button class="absence-filter-btn py-1 px-2.5 rounded-lg border border-main text-muted hover-text-main transition-colors" data-absence-filter="ALL">すべて</button>
         <button class="absence-filter-btn py-1 px-2.5 rounded-lg border border-main text-muted hover-text-main transition-colors" data-absence-filter="LEAVE">年休等</button>
         <button class="absence-filter-btn py-1 px-2.5 rounded-lg border border-main text-muted hover-text-main transition-colors" data-absence-filter="TRIP">出張</button>
         <span class="text-muted ml-auto font-mono text-[10px]" id="absence-filter-note">表示: すべて (0 件)</span>
+        <button id="absence-btn-refresh" class="btn-secondary py-1 px-2.5 text-[11px] flex items-center gap-1" title="対象日の登録一覧を再読み込み">
+          <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> 再読込
+        </button>
       </div>
 
-      <!-- 登録詳細一覧 -->
+      <!-- ② 登録一覧（カードは 区分・対象日・期間・登録者 を表示） -->
       <div id="absence-list" class="space-y-2 mb-4"></div>
 
-      <!-- 手動記入フォーム -->
+      <!-- ③ 手動記入フォーム（対象日・期間・区分・対象教員。理由・行き先は撤廃） -->
       <form id="absence-form" class="p-3 rounded-xl border border-divider bg-inset">
         <div class="text-xs font-bold text-main mb-2 flex items-center gap-2">
           <i data-lucide="pen-line" class="w-4 h-4 text-accent"></i> 記入（新規登録）
         </div>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
-            <label class="block text-[10px] text-muted mb-1">区分</label>
-            <select id="absence-type-select" class="input-field py-1.5 text-xs">
+            <label for="absence-date" class="block text-[10px] text-muted mb-1">対象日</label>
+            <input type="date" id="absence-date" class="input-field py-1.5 text-xs w-full">
+          </div>
+          <div>
+            <label for="absence-period-select" class="block text-[10px] text-muted mb-1">期間</label>
+            <select id="absence-period-select" class="input-field py-1.5 text-xs w-full">
+              <option value="FULL">全日 (08:30〜17:00)</option>
+              <option value="AM">半日（午前） (08:30〜13:00)</option>
+              <option value="PM">半日（午後） (13:00〜17:00)</option>
+              <option value="CUSTOM">個別入力</option>
+            </select>
+          </div>
+          <div>
+            <label for="absence-start-time" class="block text-[10px] text-muted mb-1">開始</label>
+            <input type="time" id="absence-start-time" value="08:30" class="input-field py-1.5 text-xs w-full">
+          </div>
+          <div>
+            <label for="absence-end-time" class="block text-[10px] text-muted mb-1">終了</label>
+            <input type="time" id="absence-end-time" value="17:00" class="input-field py-1.5 text-xs w-full">
+          </div>
+          <div>
+            <label for="absence-type-select" class="block text-[10px] text-muted mb-1">区分</label>
+            <select id="absence-type-select" class="input-field py-1.5 text-xs w-full">
               <option value="LEAVE">年休等</option>
               <option value="TRIP">出張</option>
             </select>
           </div>
           <div>
-            <label class="block text-[10px] text-muted mb-1">対象教員</label>
-            <select id="absence-user-select" class="input-field py-1.5 text-xs"></select>
-          </div>
-          <div>
-            <label class="block text-[10px] text-muted mb-1">理由・行き先（任意）</label>
-            <input type="text" id="absence-reason-input" class="input-field py-1.5 text-xs" placeholder="例: 年休（通院） / 県教委研修">
+            <label for="absence-user-select" class="block text-[10px] text-muted mb-1">対象教員</label>
+            <select id="absence-user-select" class="input-field py-1.5 text-xs w-full"></select>
           </div>
         </div>
         <p class="text-[10px] text-muted mt-2 flex items-center gap-1.5" id="absence-permission-note"></p>

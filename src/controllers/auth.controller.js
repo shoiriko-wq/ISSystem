@@ -276,6 +276,9 @@ export const authController = {
       return res.status(200).json({
         success: true,
         message: result.message,
+        // v3.1.15: 変更完了で must_change_password は 0 へ。新しいトークンを返すのでクライアントは差し替える (§5)
+        token: result.token,
+        user: { id: userId, must_change_password: false }
       });
     } catch (error) {
       next(error);

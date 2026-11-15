@@ -16,6 +16,7 @@
 
 import { escapeHTML, refreshLucideIcons, showToast } from '../../ui-helpers.js';
 import { examStore, examApi, sectionCard, isKyomuUser, sectionLockState } from './exam.shared.js';
+import { importCardHtml, bindImportCard } from './exam-import.ui.js';
 
 const GRADE_OPTS = [[1, '1年'], [2, '2年'], [3, '3年']];
 const KIND_LABELS = { class: 'クラス・コース', group: '教科', subject: '科目', room: '教室' };
@@ -116,10 +117,14 @@ function classCoursePicker(d, selectedIds) {
 
 /** クリック・長押しドラッグでクラス・コースを連続選択（Shift+クリックで範囲選択）
  *  選択を終えた（ポインタを離した）瞬間に onSelectionEnd(その行) を呼ぶ = 書き終えたのでその行を自動登録する */
+// 直前に選択したチップは data-cc の id で覚える。自動登録後の reload で行が再描画され要素が作り替わり、
+// イベント購読も再バインドされる（クロースタート変数は消える）ため、
+// anchor はモジュールスコープへ置く（「選んだ→自動登録→Shift+クリックで範囲」で範囲が効くように）
+let ccAnchorId = null;
+
 function bindClassCourseSelection(panel, sig, onSelectionEnd) {
   let painting = false;
   let paintOn = true;
-  let anchor = null;
 
   const chipsIn = (listEl) => [...listEl.querySelectorAll('[data-cc]')];
 
@@ -140,19 +145,20 @@ function bindClassCourseSelection(panel, sig, onSelectionEnd) {
     if (chipRow && isLocked(chipRow.dataset.kind)) return;   // 編集ロック中はクラス・コース選択を変えない
     e.preventDefault();
     const list = chip.closest('.cc-list');
-    if (e.shiftKey && anchor && list === anchor.closest('.cc-list')) {
+    const anchorEl = ccAnchorId ? list.querySelector(`[data-cc="${ccAnchorId}"]`) : null;
+    if (e.shiftKey && anchorEl) {
       const items = chipsIn(list);
-      const a = items.indexOf(anchor);
+      const a = items.indexOf(anchorEl);
       const b = items.indexOf(chip);
       const [lo, hi] = a <= b ? [a, b] : [b, a];
       for (const el of items.slice(lo, hi + 1)) setSel(el, true);
-      anchor = chip;
+      ccAnchorId = chip.dataset.cc;
       painting = true;   // 範囲選択も選択終了（ポインタを離す）で自動登録する
       return;
     }
     paintOn = !chip.classList.contains('bg-accent-soft');
     setSel(chip, paintOn);
-    anchor = chip;
+    ccAnchorId = chip.dataset.cc;
     painting = true;
   }, sig);
 
@@ -386,6 +392,7 @@ export function renderBasicTab(container) {
         ['7%', '14%', '8%', '63%', '8%'],
       )}
       ${tableHtml('room', '4. 教室・座席数', ['教室名', '座席数', '備考', ''], d.rooms, (r) => roomRow(r, kyomu), kyomu, d, '教室名と座席数のみ登録します（種別・使用学年はありません）。')}
+      ${importCardHtml(kyomu)}
     </div>
   `;
   refreshLucideIcons();
@@ -570,6 +577,9 @@ export function bindBasicTab(container, reload) {
     }
     applyLockState(panel, kind);   // 描画直後のロック状態（既定は編集ロック）を実枠へ反映する
   });
+
+  // CSV 一括登録カード (教務部のみ。テンプレート・CSV選択・確定・取り消し)
+  bindImportCard(panel, reload, autoCtl.signal);
 
   refreshLucideIcons();
   bindClassCourseSelection(panel, sig, queueRow);

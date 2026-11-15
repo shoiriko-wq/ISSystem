@@ -306,10 +306,17 @@ const paneFadeProbe = (pg) => pg.evaluate(async () => {
     await new Promise((r) => setTimeout(r, 20));
   }
   const kinds = [...seen.values()];
+  // 選択（↑/↓）由来のペインフェードだけを数える。データ到着（既読 PUT の返送・WSS）で
+  // 左列が再描画されるフェードは選択切替の現象ではない（後片付け・通信のタイミングで
+  // 混入するため、呼び出しスタックで起源を判別する）
+  const selectFades = calls.filter(
+    (c) => /bulletin-detail-pane/.test(c.target) && /animateShift/.test(c.stack) && /selectBulletin/.test(c.stack)
+  ).length;
   return {
     fades: kinds.filter((v) => v === 'fade').length,
     others: kinds.filter((v) => v === 'other').length,
     listMoves,
+    selectFades,
     samples,
     calls,
   };
@@ -687,14 +694,16 @@ await page.screenshot({ path: '/tmp/bulletin-split-desktop.png' });
 const rowIds = await page.evaluate(() =>
   [...document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]')].map((r) => r.getAttribute('data-bulletin-toggle')));
 await page.evaluate(() => document.querySelector('#bulletin-list-container [data-bulletin-toggle]').focus());
-// pane.animate の呼び出しスタックを記録（フェードが何回走ったか、どこから走ったかを特定する）
+// pane.animate の呼び出しスタックを記録（フェードが何回走ったか、どこから走ったかを特定する）。
+// ★ 全要素の animate をpatchする（データ到着でペインが作り替えられても記録が落ちない。
+//   ペイン単体のpatchだと新要素の呼び出しが記録されず、後片付けの再描画フェードが計測を汚す）
 await page.evaluate(() => {
-  const pane = document.getElementById('bulletin-detail-pane');
   window.__fadeCalls = [];
-  const orig = pane.animate.bind(pane);
-  pane.animate = function (kfs, opts) {
-    window.__fadeCalls.push(new Error().stack.split('\n').slice(1, 4).join(' | '));
-    return orig(kfs, opts);
+  const proto = Element.prototype.animate;
+  Element.prototype.animate = function (kfs, opts) {
+    const stack = new Error().stack.split('\n').slice(1, 5).join(' | ');
+    window.__fadeCalls.push({ target: this.id || this.className, stack });
+    return proto.call(this, kfs, opts);
   };
 });
 // ★ アニメーション計測は自動選択のフェードが終わった後に押す（press 直後の計測は
@@ -708,8 +717,8 @@ log('fadeProbe', fadeProbe);
 log('rowIds', rowIds);
 check('↑/↓ で選択行が移動し右ペイン全文が連動', snapDown.activeIdx === 1 && snapDown.paneTitle === snapDown.activeTitle, { activeIdx: snapDown.activeIdx, paneTitle: snapDown.paneTitle });
 check('選択切替は左列全体を動かさず右ペインはフェード1回',
-  fadeProbe.fades === 1 && fadeProbe.others === 0 && fadeProbe.listMoves === 0,
-  { fades: fadeProbe.fades, others: fadeProbe.others, listMoves: fadeProbe.listMoves });
+  fadeProbe.selectFades === 1 && fadeProbe.others === 0 && fadeProbe.listMoves === 0,
+  { selectFades: fadeProbe.selectFades, fades: fadeProbe.fades, others: fadeProbe.others, listMoves: fadeProbe.listMoves });
 
 // 選択枠の移動は translateY のスライドだけ（上移動なら下から滑り込み、最終位置で0・左列全体は動かない）
 await page.keyboard.press('ArrowUp');
@@ -978,8 +987,41 @@ check('‹ › は同じ行に隣接して並び、連打できる', posDesktop.
 
 // 右ペインヘッダーの「詳細」ボタン → 詳細モーダル（読者向けの情報を全部載せる）
 // 直前の long zapping で中心日が動いているため本日へ戻し、右ペインに選択記事がある状態で開く（「本日」ボタンは撤廃＝T キー）
+// ★「他人の投稿」検証は自分の投稿では「削除」が出るため、ADMIN トークンで他人の投稿を作り、
+//   その行を選んでから詳細を開く。作った投稿は後片付けで削除して元へ戻す（Node 側通信は CA を明示＝禁则14）。
+const ADMIN = process.env.ADMIN_USERNAME || 'sys-admin';
+const ADMIN_PASS = process.env.ADMIN_PASSWORD || 'password123';
+const adminLogin = await caFetch(`${BASE}/api/auth/login`, {
+  method: 'POST', body: JSON.stringify({ staff_code: ADMIN, password: ADMIN_PASS }),
+});
+const adminJson = await adminLogin.json();
+const adminToken = adminJson.token;
+const otherTitle = 'UI検証他人投稿';
+const otherPost = await caFetch(`${BASE}/api/bulletins`, {
+  method: 'POST',
+  headers: { authorization: `Bearer ${adminToken}` },
+  body: JSON.stringify({
+    title: otherTitle,
+    content: '他人の投稿（削除ボタンが出ないことの検証用）。',
+    target_scope: { grade: 'ALL', department: 'ALL' },
+    target_date: todayJst,
+    display_start_date: todayJst,
+    display_end_date: null,
+  }),
+});
+const otherJson = await otherPost.json();
+const otherId = String(otherJson?.id || otherJson?.post?.id || otherJson?.data?.id || '');
+log('admin-post', { login: adminLogin.status, status: otherPost.status, otherId });
 await pressToday(page);
 await sleep(500);
+const otherRow = await page.evaluate((t) => {
+  const rows = [...document.querySelectorAll('#bulletin-list-container [data-bulletin-toggle]')];
+  const row = rows.find((r) => (r.querySelector('.bulletin-row-title')?.textContent || '').trim() === t);
+  if (row) row.click();
+  return { found: !!row, rows: rows.length, paneTitle: document.querySelector('#bulletin-detail-pane h3')?.textContent.trim() };
+}, otherTitle);
+log('other-row', otherRow);
+await sleep(450);
 
 const detailModal = await page.evaluate(async (myId) => {
   const b = document.querySelector('#bulletin-detail-pane [data-bulletin-detail]');
@@ -1034,6 +1076,13 @@ const modalClosed = await page.evaluate(() => {
 });
 log('modal-closed-via-ESC', modalClosed);
 check('ESC で閉じ aria-hidden も同期', modalClosed === true, modalClosed);
+
+// 後片付け: ADMIN で作った他人の投稿を削除して DB を元へ戻す（残すと次の実行で先頭行が自分以外になる）
+const otherDel = await caFetch(`${BASE}/api/bulletins/${otherId}`, {
+  method: 'DELETE', headers: { authorization: `Bearer ${adminToken}` },
+});
+log('admin-post-delete', { status: otherDel.status, otherId });
+check('他人の投稿の後片付け削除が通る（ADMIN の DELETE）', otherDel.status === 200, { status: otherDel.status, otherId });
 
 // 自分の投稿（投稿者 = ログインユーザー）の詳細モーダルにだけ「削除」が出る
 const authorModal = await page.evaluate(async (myId) => {

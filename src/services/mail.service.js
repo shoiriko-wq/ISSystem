@@ -10,8 +10,9 @@ import auditModel from '../models/audit.model.js';
 import { ApiError } from '../middlewares/error.middleware.js';
 import {
   probeImap, probeSmtp, imapFetchMessages, imapAppend, imapMarkSeen, imapSearchUids, smtpSend,
-  parseMessage, buildRawMessage,
+  parseMessage, buildRawMessage, imapSetKeywords, extractMessageId,
   imapOpenInbox, imapFetchNewEnvelopes, imapFetchBodyText, imapFetchAttachmentBytes,
+  imapMoveMessage, imapDeleteMessage, imapUnflagDeleted,
   normalizeTlsMode, DEFAULT_TIMEOUT_MS,
 } from './mail.transport.js';
 import { onlineUserIds } from '../utils/presence.js';
@@ -39,6 +40,8 @@ function mailDefaults() {
     smtp_port: m.smtpPort ?? null,
     smtp_tls: normalizeTlsMode(m.smtpTls),
     sent_folder: m.sentFolder ?? 'Sent',
+    draft_folder: m.draftFolder ?? '[Drafts]',
+    trash_folder: m.trashFolder ?? '[Trash]',
     display_name: m.displayName ?? null,
     timeout_ms: m.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   };
@@ -132,6 +135,8 @@ function toView(row, suggestedEmail = '') {
     smtp_port: row?.smtp_port ?? d.smtp_port,
     smtp_tls: row?.smtp_tls ?? d.smtp_tls,
     sent_folder: row?.sent_folder ?? d.sent_folder,
+    draft_folder: row?.draft_folder ?? d.draft_folder,
+    trash_folder: row?.trash_folder ?? d.trash_folder,
     display_name: row?.display_name ?? d.display_name,
     last_checked_at: row?.last_checked_at ?? null,
     updated_at: row ? row.updated_at : null,
@@ -154,6 +159,9 @@ function toMessageView(row) {
     html_stripped: Number(row.html_stripped) === 1,
     is_read: Number(row.is_read) === 1,
     received_at: row.received_at,
+    message_id: row.message_id ?? null,
+    in_reply_to: row.in_reply_to ?? null,
+    imap_flags: String(row.imap_flags || ''),
   };
 }
 
@@ -181,6 +189,10 @@ const probes = {
   newEnvelopes: imapFetchNewEnvelopes,
   bodyText: imapFetchBodyText,
   attachmentBytes: imapFetchAttachmentBytes,
+  move: imapMoveMessage,
+  deleteMsg: imapDeleteMessage,
+  unflagDeleted: imapUnflagDeleted,
+  setKeywords: imapSetKeywords,
 };
 
 /**
@@ -199,6 +211,10 @@ export function setProbeOverrides(overrides = {}) {
   probes.newEnvelopes = overrides.newEnvelopes ?? imapFetchNewEnvelopes;
   probes.bodyText = overrides.bodyText ?? imapFetchBodyText;
   probes.attachmentBytes = overrides.attachmentBytes ?? imapFetchAttachmentBytes;
+  probes.move = overrides.move ?? imapMoveMessage;
+  probes.deleteMsg = overrides.deleteMsg ?? imapDeleteMessage;
+  probes.unflagDeleted = overrides.unflagDeleted ?? imapUnflagDeleted;
+  probes.setKeywords = overrides.setKeywords ?? imapSetKeywords;
 }
 
 /** 接続設定から IMAP / SMTP をテストし status を決める (暗号化モードは設定値を使う) */
@@ -243,9 +259,19 @@ function transportParams(row) {
     smtpPort: row.smtp_port ?? d.smtp_port,
     smtpTls: normalizeTlsMode(row.smtp_tls ?? d.smtp_tls),
     sentFolder: row.sent_folder ?? d.sent_folder,
+    draftFolder: row.draft_folder ?? d.draft_folder,
+    trashFolder: row.trash_folder ?? d.trash_folder,
     displayName: row.display_name ?? d.display_name ?? row.sender_name ?? null,
     timeoutMs: d.timeout_ms,
   };
+}
+
+/** DB のフォルダ名 ('inbox'/'sent'/'drafts'/'trash') をそのアカウントの IMAP フォルダ名へ対応付ける */
+function folderImapName(p, folder) {
+  if (folder === 'sent') return p.sentFolder;
+  if (folder === 'drafts') return p.draftFolder;
+  if (folder === 'trash') return p.trashFolder;
+  return p.imapFolder;
 }
 
 /** 受信サーバーの必須チェック (未設定では受信箱を取得できない) */
@@ -315,6 +341,8 @@ export const mailService = {
     const smtpPort = normalizePort(body.smtp_port ?? body.smtpPort, '送信サーバー (SMTP)') ?? d.smtp_port;
     const smtpTls = normalizeTlsField(body.smtp_tls ?? body.smtpTls, '送信サーバー (SMTP)', d.smtp_tls);
     const sentFolder = normalizeFolder(body.sent_folder ?? body.sentFolder, '送信済みフォルダ', d.sent_folder);
+    const draftFolder = normalizeFolder(body.draft_folder ?? body.draftFolder, '下書きフォルダ', d.draft_folder);
+    const trashFolder = normalizeFolder(body.trash_folder ?? body.trashFolder, 'ごみ箱フォルダ', d.trash_folder);
     const displayName = normalizeDisplayName(body.display_name ?? body.displayName);
 
     // id 指定は自分のアカウントを更新、未指定は同一アドレスがあれば更新 / 無ければ新規作成
@@ -337,6 +365,8 @@ export const mailService = {
       smtp_port: smtpPort,
       smtp_tls: smtpTls,
       sent_folder: sentFolder,
+      draft_folder: draftFolder,
+      trash_folder: trashFolder,
       display_name: displayName,
       status: 'UNVERIFIED',
     });
@@ -401,7 +431,7 @@ export const mailService = {
       throw new ApiError(409, 'メール接続設定が未登録です。最初にメールアドレスとパスワードを登録してください。');
     }
 
-    const normalized = folder === 'sent' ? 'sent' : 'inbox';
+    const normalized = ['inbox', 'sent', 'drafts', 'trash'].includes(folder) ? folder : 'inbox';
     const limit = Math.min(100, Math.max(1, Number(options.limit) || PAGE_SIZE));
     const cursor = options.before && options.before_id ? { received_at: options.before, id: options.before_id } : null;
     const { rows, hasMore } = await mailModel.listMessagesPage(account.id, normalized, limit, cursor);
@@ -418,7 +448,7 @@ export const mailService = {
 
   /**
    * 1アカウントの受信 (IMAP へ接続し、未保存の新着をDBへ幂等に書き込んで受信ボックスを一覧化)
-   * UI の手動受信 (fetchInbox) とサーバー側cron (pollAllInboxes) の両方から使う単一実装
+   * UI の手動受信ボタン (fetchInbox) が使う。常時接続 IDLE はヘッダだけ取り込む ingestNewEnvelopes を使う (本文は lazy 取得)
    */
   async fetchInboxForAccount(user, account) {
     const p = transportParams(account);
@@ -442,7 +472,7 @@ export const mailService = {
 
     let added = 0;
     for (const item of fetched) {
-      const existing = await mailModel.findInboxByUid(account.id, item.uid);
+      const existing = await mailModel.findByUid(account.id, 'inbox', item.uid);
       if (existing) continue;
       // raw から解析し、項目が欠けていれば取得値・アカウントアドレス・サーバー時刻で埋める (NOT NULL 維持)
       const parsed = parseMessage(item.raw ?? '', item.internaldate ?? item.received_at ?? null);
@@ -457,6 +487,8 @@ export const mailService = {
         body: parsed.body ?? item.body ?? '',
         is_read: item.seen === true,
         received_at: parsed.received_at ?? item.received_at ?? item.internaldate ?? new Date().toISOString(),
+        message_id: parsed.message_id ?? null,
+        in_reply_to: parsed.in_reply_to ?? null,
       });
       if (saved) added += 1;
     }
@@ -542,7 +574,7 @@ export const mailService = {
 
     let added = 0;
     for (const item of fetched) {
-      const existing = await mailModel.findInboxByUid(account.id, item.uid);
+      const existing = await mailModel.findByUid(account.id, 'inbox', item.uid);
       if (existing) continue;
       // raw から解析し、項目が欠けていれば取得値・アカウントアドレス・サーバー時刻で埋める (NOT NULL 維持)
       const parsed = parseMessage(item.raw ?? '', item.internaldate ?? item.received_at ?? null);
@@ -557,6 +589,8 @@ export const mailService = {
         body: parsed.body ?? item.body ?? '',
         is_read: item.seen === true,
         received_at: parsed.received_at ?? item.received_at ?? item.internaldate ?? new Date().toISOString(),
+        message_id: parsed.message_id ?? null,
+        in_reply_to: parsed.in_reply_to ?? null,
       });
       if (saved) added += 1;
     }
@@ -613,12 +647,25 @@ export const mailService = {
     if (!subject) throw new ApiError(400, '件名を入力してください。');
     if (!bodyText) throw new ApiError(400, '本文を入力してください。');
 
+    // 返信・転送 (reply_mode と返信・転送元のメールIDで In-Reply-To / References と \Answered /\Forwarded を決める)
+    const replyMode = ['reply', 'reply-all', 'forward'].includes(String(payload?.reply_mode ?? '')) ? String(payload.reply_mode) : null;
+    const replyToId = payload?.reply_to_id ? String(payload.reply_to_id) : null;
+    if (replyToId && !replyMode) throw new ApiError(400, '返信・転送の形式が指定されていません。');
+    let source = null;
+    if (replyToId) {
+      source = await mailModel.getMessageById(replyToId, user.id);
+      if (!source) throw new ApiError(404, '返信・転送元のメールが見つかりません。');
+      if (String(source.account_id) !== String(account.id)) throw new ApiError(400, '返信・転送元は同じアカウントのメールだけです。');
+    }
+
     const raw = buildRawMessage({
       from: p.email,
       displayName: p.displayName,
       to: recipients,
       subject,
       body: bodyText,
+      inReplyTo: source?.message_id ?? null,
+      references: [source?.in_reply_to, source?.message_id].filter(Boolean).join(' '),
     });
 
     // 送信失敗（DNS/接続/ログイン）は 502 で返す（500 の SERVER_ERROR 相当の 502 として監査ログに記録される）
@@ -651,6 +698,8 @@ export const mailService = {
       recipients,
       subject,
       body: bodyText,
+      message_id: extractMessageId(raw),
+      in_reply_to: source?.message_id ?? null,
     });
 
     // 送信済みフォルダへの保存は送信成功とは切り分ける (IMAP 未設定なら行わない)
@@ -672,15 +721,48 @@ export const mailService = {
       }
     }
 
+    // 返信・転送元へ \Answered / \Forwarded を付ける (DB は必ず、IMAP は uid がある行だけ best-effort)
+    let keywordWarning = null;
+    if (source) {
+      const keyword = replyMode === 'forward' ? '\\Forwarded' : '\\Answered';
+      await mailModel.markKeywords(source.id, user.id, [keyword]);
+      if (p.imapHost && p.imapPort && source.uid) {
+        try {
+          await probes.setKeywords({
+            host: p.imapHost,
+            port: p.imapPort,
+            tlsMode: p.imapTls,
+            user: p.email,
+            password: p.password,
+            folder: folderImapName(p, source.folder),
+            uid: source.uid,
+            keywords: [keyword],
+            timeoutMs: p.timeoutMs,
+          });
+        } catch (err) {
+          keywordWarning = `IMAP の返信元${replyMode === 'forward' ? '転送元' : '返信元'}にマークを付けられませんでした: ${err.message}`;
+        }
+      }
+    }
+
     await auditModel.logAction({
       userId: user.id,
-      action: 'MAIL_SEND',
+      action: replyMode === 'forward' ? 'MAIL_FORWARD' : replyMode === 'reply-all' ? 'MAIL_REPLY_ALL' : replyMode === 'reply' ? 'MAIL_REPLY' : 'MAIL_SEND',
       targetEntity: 'MAIL_MESSAGE',
       targetId: row?.id ?? null,
-      changesJson: JSON.stringify({ recipients, subject }),
+      changesJson: JSON.stringify({ recipients, subject, reply_mode: replyMode, reply_to_id: replyToId }),
     });
 
-    return { ok: true, message: toMessageView(row), append_warning: appendWarning };
+    return {
+      ok: true,
+      message: toMessageView(row),
+      append_warning: appendWarning,
+      keyword_warning: keywordWarning,
+      reply_sent: replyMode === 'reply' || replyMode === 'reply-all',
+      forward_sent: replyMode === 'forward',
+      reply_mode: replyMode,
+      reply_to_id: replyToId,
+    };
   },
 
   /** メッセージを既読にする (自分のボックスのみ。受信ボックスでは IMAP 側にも既読フラグを立てる) */
@@ -732,7 +814,8 @@ export const mailService = {
   },
 
   /**
-   * 接続テスト (設定済みなら保存設定でテストし status を更新、未保存のフォーム値はテストのみ)
+   * 接続テスト (設定済みなら保存設定でテストし status を更新、未保存のフォーム値はテストのみ。
+   * フォーム値テストに account_id があればそのアカウントの status と監査へ成否を記録する)
    * POST /api/mail/test
    */
   async testConnection(payload, user) {
@@ -751,7 +834,7 @@ export const mailService = {
     let smtpTls = null;
 
     if (wantsProbe) {
-      // フォーム入力値でのプレテスト (DB へ書き込まず status も変更しない)
+      // フォーム入力値でのプレテスト (フォーム値だけで DB へ書き込まない。account_id があればそのアカウントの status へ成否を記録する)
       email = normalizeEmail(body.email_address ?? body.email);
       password = normalizePassword(body.password);
       imapHost = normalizeHost(body.imap_host ?? body.imapHost, '受信サーバー') ?? d.imap_host;
@@ -760,6 +843,9 @@ export const mailService = {
       smtpHost = normalizeHost(body.smtp_host ?? body.smtpHost, '送信サーバー') ?? d.smtp_host;
       smtpPort = normalizePort(body.smtp_port ?? body.smtpPort, '送信ポート') ?? d.smtp_port;
       smtpTls = normalizeTlsField(body.smtp_tls ?? body.smtpTls, '送信サーバー', d.smtp_tls);
+      // メール設定メニューで編集中のアカウント（account_id 付き）は成否をそのアカウントへ反映する。他人のアカウントは照合されない（null）
+      const probeAccountId = body.account_id ?? body.accountId ?? null;
+      if (probeAccountId) row = await mailModel.getAccountById(probeAccountId, user.id);
     } else {
       row = await resolveAccount(user, body.account_id ?? body.accountId ?? null);
       if (!row) {
@@ -810,7 +896,7 @@ export const mailService = {
       smtp_tls: smtpTls,
     };
 
-    // 保存済み設定のテスト時のみ status を更新し監査ログへ残す (テストしたアカウント単位)
+    // 保存済み設定のテスト（account_id を添えたフォーム値テストを含む）は status を更新し監査ログへ残す (テストしたアカウント単位)
     if (row) {
       const updated = await mailModel.setStatus(row.id, status);
       result.account = toView(updated);
@@ -865,36 +951,42 @@ export const mailService = {
   },
 
   /** メール詳細の本文取得。本文キャッシュにあれば DB から返す (IMAP 取得なし)。
-   *  無ければ常時接続セッションで text/plain を取得し (HTML 専用メールはタグ除去) キャッシュへ UPDATE する */
+   *  無ければそのメッセージのフォルダ (受信箱・送信済み・下書き・ごみ箱) から text/plain を取得し
+   *  (HTML 専用メールはタグ除去) キャッシュへ UPDATE する。uid の無い行 (下書き・自システム送信) は IMAP 取得しない */
   async getMessageBody(user, messageId) {
     const row = await mailModel.getMessageById(messageId, user.id);
     if (!row) throw new ApiError(404, 'メールが見つかりません。');
-    if (row.folder !== 'inbox') {
-      return { id: row.id, body: row.body ?? '', html_stripped: Number(row.html_stripped) === 1, attachments: parseAttachments(row.attachments) };
-    }
     // キャッシュヒット: 本文があればそのまま返す (IMAP 取得しない)
     if (row.body != null && row.body !== '') {
       return { id: row.id, body: row.body, html_stripped: Number(row.html_stripped) === 1, attachments: parseAttachments(row.attachments) };
     }
-    // キャッシュミス: 常時接続セッションで本文 text/plain を取得し UPDATE
+    // uid が無いレコード (下書きと自システム送信) は IMAP から取得できない
+    if (!row.uid) {
+      return { id: row.id, body: row.body ?? '', html_stripped: Number(row.html_stripped) === 1, attachments: parseAttachments(row.attachments) };
+    }
+    // キャッシュミス: メッセージのフォルダ名を IMAP フォルダへ対応付けて取得する
     const account = await mailModel.getAccountById(row.account_id, user.id);
     if (!account) throw new ApiError(409, 'メール接続設定が見つかりません。');
     const p = transportParams(account);
     requireImap(p);
+    const imapFolder = folderImapName(p, row.folder);
     let fetched = null;
-    const watch = pollState.watch.get(account.id);
-    if (watch?.connected && watch.session) {
-      try {
-        fetched = await probes.bodyText(watch.session, row.uid);
-      } catch (_err) {
-        fetched = null; // 常時接続が切れているので単発接続へフォールバック
+    // 受信箱は常時接続セッションを優先する (他フォルダは単発接続)
+    if (row.folder === 'inbox') {
+      const watch = pollState.watch.get(account.id);
+      if (watch?.connected && watch.session) {
+        try {
+          fetched = await probes.bodyText(watch.session, row.uid);
+        } catch (_err) {
+          fetched = null; // 常時接続が切れているので単発接続へフォールバック
+        }
       }
     }
     if (!fetched) {
-      // 単発接続フォールバック (接続中でないユーザの共有アカウント閲覧など)
+      // 単発接続 (接続中でないユーザ・下書き/送信済み/ごみ箱のフォルダ)
       const session = await probes.openInbox({
         host: p.imapHost, port: p.imapPort, tlsMode: p.imapTls,
-        user: p.email, password: p.password, folder: p.imapFolder, timeoutMs: p.timeoutMs,
+        user: p.email, password: p.password, folder: imapFolder, timeoutMs: p.timeoutMs,
       });
       try {
         fetched = await session.fetchBodyText(row.uid);
@@ -911,6 +1003,339 @@ export const mailService = {
   /** メール詳細全文 (本文 + html_stripped + 添付メタ)。本文は lazy 取得 (キャッシュ優先)。getFullMessage(messageId, user) */
   async getFullMessage(messageId, user) {
     return this.getMessageBody(user, messageId);
+  },
+
+  /** 4フォルダの件数 (受信箱の未読件数も含める) */
+  async mailboxCounts(user, accountId = null) {
+    const account = await resolveAccount(user, accountId);
+    if (!account) throw new ApiError(409, 'メール接続設定が見つかりません。');
+    const counts = await mailModel.countByFolders(account.id);
+    const unread = await mailModel.countUnreadAccount(account.id, 'inbox');
+    return {
+      account_id: account.id,
+      counts: { inbox: counts.inbox, sent: counts.sent, drafts: counts.drafts, trash: counts.trash },
+      unread,
+    };
+  },
+
+  /** IMAP フォルダ同期 (下書き・ごみ箱・送信済み)。UID 集合を DB と突き合わせ、未保存のヘッダだけ取り込む */
+  async syncImapFolder(user, accountId, folder) {
+    const normalized = ['inbox', 'sent', 'drafts', 'trash'].includes(folder) ? folder : 'inbox';
+    const account = await resolveAccount(user, accountId);
+    if (!account) throw new ApiError(409, 'メール接続設定が見つかりません。');
+    const p = transportParams(account);
+    requireImap(p);
+    const imapFolder = folderImapName(p, normalized);
+    const stored = new Set(await mailModel.listStoredUids(account.id, normalized));
+    let uids = [];
+    try {
+      uids = await probes.search({
+        host: p.imapHost, port: p.imapPort, tlsMode: p.imapTls,
+        user: p.email, password: p.password, folder: imapFolder, timeoutMs: p.timeoutMs,
+      });
+    } catch (err) {
+      throw new ApiError(502, `IMAP フォルダ「${imapFolder}」を閲覧できません: ${err.message}`);
+    }
+    // DB に無い UID は新しい順に1ページ分だけ取り込む (既存取り込み分は再取得しない)
+    const missing = uids.filter((u) => !stored.has(u)).sort((a, b) => b - a).slice(0, IMAP_PAGE_SIZE);
+    let added = 0;
+    if (missing.length > 0) {
+      const fetched = await probes.fetch({
+        host: p.imapHost, port: p.imapPort, tlsMode: p.imapTls,
+        user: p.email, password: p.password, folder: imapFolder,
+        limit: IMAP_PAGE_SIZE, uids: missing, timeoutMs: p.timeoutMs,
+      });
+      for (const item of fetched) {
+        const parsed = parseMessage(item.raw ?? '', item.internaldate ?? item.received_at ?? null);
+        const senderEmail = (parsed.sender_email || item.sender_email || account.email_address).toLowerCase();
+        const saved = await mailModel.upsertHeader({
+          account_id: account.id,
+          user_id: user.id,
+          folder: normalized,
+          uid: item.uid,
+          sender_name: parsed.sender_name || item.sender_name || senderEmail,
+          sender_email: senderEmail,
+          subject: parsed.subject || item.subject || '',
+          attachments: parsed.attachments ?? [],
+          html_stripped: parsed.html_stripped === true,
+          is_read: item.seen === true,
+          received_at: parsed.received_at ?? item.received_at ?? item.internaldate ?? new Date().toISOString(),
+          message_id: parsed.message_id ?? null,
+          in_reply_to: parsed.in_reply_to ?? null,
+        });
+        if (saved) added += 1;
+      }
+    }
+    const total = await mailModel.countMessages(account.id, normalized);
+    return { folder: normalized, imap_folder: imapFolder, added, total };
+  },
+
+  /**
+   * フォルダのIMAPデータを消す (表示・DBキャッシュ・IMAP側)
+   * inbox: IMAPの削除フラグを消して復元し、IMAPから自動再取得する
+   * sent : DBキャッシュだけ消す (IMAPの送信済みフォルダは消さない)
+   * drafts: IMAPの下書きメッセージも削除する
+   * trash: IMAPの削除フラグを消す (自動では再取得しない)
+   */
+  async clearImapData(user, payload = {}) {
+    const normalized = ['inbox', 'sent', 'drafts', 'trash'].includes(payload.folder) ? payload.folder : 'inbox';
+    const account = await resolveAccount(user, payload.account_id ?? payload.accountId);
+    if (!account) throw new ApiError(409, 'メール接続設定が見つかりません。');
+    const p = transportParams(account);
+    const imapFolder = folderImapName(p, normalized);
+    const uids = await mailModel.clearFolderRows(account.id, normalized);
+
+    // IMAP側の消去は best-effort (DBキャッシュ消去が正)。送信済みフォルダは消さない
+    const imap = { touched: 0, failed: 0, skipped: true };
+    let lastError = null;
+    if (normalized !== 'sent' && p.imapHost && p.imapPort) {
+      for (const uid of uids) {
+        const call = normalized === 'drafts' ? probes.deleteMsg : probes.unflagDeleted;
+        try {
+          await call({
+            host: p.imapHost, port: p.imapPort, tlsMode: p.imapTls,
+            user: p.email, password: p.password, folder: imapFolder,
+            uid, timeoutMs: p.timeoutMs,
+          });
+          imap.touched += 1;
+        } catch (err) {
+          imap.failed += 1;
+          lastError = err.message;
+        }
+      }
+      imap.skipped = false;
+    }
+
+    const messages = {
+      inbox: `受信箱の表示とDBキャッシュを消し、IMAPの削除フラグ ${imap.touched}件 を消しました。IMAPから自動で再取得します。`,
+      sent: '送信ボックスの表示とDBキャッシュを消しました（IMAPの送信済みフォルダは消していません）。',
+      drafts: `下書きの表示とDBキャッシュを消し、IMAPの下書き ${imap.touched}件 も削除しました。`,
+      trash: `ごみ箱の表示とDBキャッシュを消し、IMAPの削除フラグ ${imap.touched}件 を消しました（自動では再取得しません）。`,
+    }[normalized];
+
+    await auditModel.logAction({
+      userId: user.id,
+      action: 'MAIL_IMAP_DATA_CLEAR',
+      targetEntity: 'MAIL_ACCOUNT',
+      targetId: account.id,
+      changesJson: JSON.stringify({ folder: normalized, removed: uids.length, imap }),
+    });
+
+    return {
+      ok: true,
+      folder: normalized,
+      imap_folder: imapFolder,
+      removed: uids.length,
+      imap,
+      message: messages,
+      warning: imap.failed > 0 ? `IMAPで消せない分 ${imap.failed}件（${lastError}）` : null,
+    };
+  },
+
+  /** 下書きを保存する (本文は DB に保持し、IMAP 下書きフォルダへ APPEND は best-effort) */
+  async saveDraft(user, payload = {}) {
+    const account = await resolveAccount(user, payload.account_id ?? payload.accountId);
+    if (!account) throw new ApiError(409, 'メール接続設定が見つかりません。');
+    const recipients = normalizeRecipients(payload.to ?? payload.recipients);
+    const subject = String(payload.subject ?? '').trim().slice(0, 200);
+    const bodyText = String(payload.body ?? payload.text ?? '').replace(/\r/g, '');
+    const p = transportParams(account);
+
+    const row = await mailModel.upsertDraft({
+      id: payload.id ? String(payload.id) : null,
+      account_id: account.id,
+      user_id: user.id,
+      sender_email: account.email_address,
+      recipients: recipients.join(','),
+      subject,
+      body: bodyText,
+    });
+    if (!row) throw new ApiError(404, '下書きが見つかりません。');
+
+    // IMAP の下書きフォルダへ APPEND (新規のみ。既存下書きの更新は DB が正で IMAP 側は追記しない)
+    let appendWarning = null;
+    if (!payload.id && p.imapHost && p.imapPort) {
+      try {
+        const raw = buildRawMessage({
+          from: p.email, displayName: p.displayName, to: recipients, subject, body: bodyText,
+        });
+        await probes.append({
+          host: p.imapHost, port: p.imapPort, tlsMode: p.imapTls,
+          user: p.email, password: p.password, folder: p.draftFolder,
+          raw, timeoutMs: p.timeoutMs,
+        });
+      } catch (err) {
+        appendWarning = `下書きフォルダに保存できませんでした: ${err.message}`;
+      }
+    }
+
+    await auditModel.logAction({
+      userId: user.id,
+      action: 'MAIL_DRAFT_SAVE',
+      targetEntity: 'MAIL_MESSAGE',
+      targetId: row.id,
+      changesJson: JSON.stringify({ recipients, subject }),
+    });
+
+    return { ok: true, message: toMessageView(row), append_warning: appendWarning };
+  },
+
+  /** 下書きを送信する (SMTP 送信 → レコードを送信済みへ変更 → IMAP 送信済みフォルダ APPEND は best-effort) */
+  async sendDraft(user, messageId, payload = {}) {
+    const draft = await mailModel.getDraft(messageId, user.id);
+    if (!draft) throw new ApiError(404, '下書きが見つかりません。');
+    const account = await resolveAccount(user, draft.account_id);
+    if (!account) throw new ApiError(409, 'メール接続設定が見つかりません。');
+    const p = transportParams(account);
+    if (!p.smtpHost || !p.smtpPort) throw new ApiError(409, '送信サーバー (SMTP) が設定されていません。');
+
+    const recipients = payload.to ?? payload.recipients
+      ? normalizeRecipients(payload.to ?? payload.recipients)
+      : String(draft.recipients || '').split(',').filter(Boolean);
+    if (recipients.length === 0) throw new ApiError(400, '宛先メールアドレスを入力してください。');
+
+    const raw = buildRawMessage({
+      from: p.email, displayName: p.displayName, to: recipients,
+      subject: draft.subject, body: draft.body ?? '',
+    });
+    await probes.send({
+      host: p.smtpHost, port: p.smtpPort, tlsMode: p.smtpTls,
+      user: p.email, password: p.password, from: p.email, to: recipients, raw,
+      timeoutMs: p.timeoutMs,
+    });
+
+    const row = await mailModel.markDraftSent(draft.id, user.id, recipients.join(','));
+
+    // 送信済みフォルダへの APPEND は送信成功とは切り分ける
+    let appendWarning = null;
+    if (p.imapHost && p.imapPort) {
+      try {
+        await probes.append({
+          host: p.imapHost, port: p.imapPort, tlsMode: p.imapTls,
+          user: p.email, password: p.password, folder: p.sentFolder,
+          raw, timeoutMs: p.timeoutMs,
+        });
+      } catch (err) {
+        appendWarning = `送信済みフォルダに保存できませんでした: ${err.message}`;
+      }
+    }
+
+    await auditModel.logAction({
+      userId: user.id,
+      action: 'MAIL_DRAFT_SEND',
+      targetEntity: 'MAIL_MESSAGE',
+      targetId: draft.id,
+      changesJson: JSON.stringify({ recipients, subject: draft.subject }),
+    });
+
+    return { ok: true, message: toMessageView(row), append_warning: appendWarning };
+  },
+
+  /** メッセージをごみ箱へ移動する (DB の folder を trash へ。uid があれば IMAP でも COPY + 削除フラグ) */
+  async moveToTrash(user, messageId) {
+    const row = await mailModel.getMessageById(messageId, user.id);
+    if (!row) throw new ApiError(404, 'メールが見つかりません。');
+    if (row.folder === 'trash') return { ok: true, message: toMessageView(row), move_warning: null };
+
+    let moveWarning = null;
+    if (row.uid) {
+      const account = await mailModel.getAccountById(row.account_id, user.id);
+      const p = transportParams(account);
+      try {
+        await probes.move({
+          host: p.imapHost, port: p.imapPort, tlsMode: p.imapTls,
+          user: p.email, password: p.password,
+          fromFolder: folderImapName(p, row.folder), toFolder: p.trashFolder,
+          uid: row.uid, timeoutMs: p.timeoutMs,
+        });
+      } catch (err) {
+        moveWarning = `IMAP のごみ箱へ移動できませんでした: ${err.message}`;
+      }
+    }
+
+    const moved = await mailModel.moveMessageFolder(row.id, user.id, 'trash');
+    if (!moved) throw new ApiError(404, 'メールが見つかりません。');
+
+    await auditModel.logAction({
+      userId: user.id,
+      action: 'MAIL_MESSAGE_TRASH',
+      targetEntity: 'MAIL_MESSAGE',
+      targetId: moved.id,
+      changesJson: JSON.stringify({ subject: moved.subject, from: row.folder }),
+    });
+
+    return { ok: true, message: toMessageView(moved), move_warning: moveWarning };
+  },
+
+  /** ごみ箱から受信箱へ復元する (uid があれば IMAP でもごみ箱 → 受信フォルダへコピー) */
+  async restoreFromTrash(user, messageId) {
+    const row = await mailModel.getMessageById(messageId, user.id);
+    if (!row) throw new ApiError(404, 'メールが見つかりません。');
+    if (row.folder !== 'trash') throw new ApiError(409, 'ごみ箱のメールだけを復元できます。');
+
+    let moveWarning = null;
+    if (row.uid) {
+      const account = await mailModel.getAccountById(row.account_id, user.id);
+      const p = transportParams(account);
+      try {
+        await probes.move({
+          host: p.imapHost, port: p.imapPort, tlsMode: p.imapTls,
+          user: p.email, password: p.password,
+          fromFolder: p.trashFolder, toFolder: p.imapFolder,
+          uid: row.uid, timeoutMs: p.timeoutMs,
+        });
+      } catch (err) {
+        moveWarning = `IMAP の受信箱へ復元できませんでした: ${err.message}`;
+      }
+    }
+
+    const restored = await mailModel.moveMessageFolder(row.id, user.id, 'inbox');
+    if (!restored) throw new ApiError(404, 'メールが見つかりません。');
+
+    await auditModel.logAction({
+      userId: user.id,
+      action: 'MAIL_MESSAGE_RESTORE',
+      targetEntity: 'MAIL_MESSAGE',
+      targetId: restored.id,
+      changesJson: JSON.stringify({ subject: restored.subject }),
+    });
+
+    return { ok: true, message: toMessageView(restored), move_warning: moveWarning };
+  },
+
+  /** ごみ箱のメッセージを完全に削除する (DB 行を DELETE + uid があれば IMAP で削除フラグ + EXPUNGE) */
+  async purgeMessage(user, messageId) {
+    const row = await mailModel.getMessageById(messageId, user.id);
+    if (!row) throw new ApiError(404, 'メールが見つかりません。');
+
+    let deleteWarning = null;
+    if (row.uid) {
+      const account = await mailModel.getAccountById(row.account_id, user.id);
+      const p = transportParams(account);
+      try {
+        await probes.deleteMsg({
+          host: p.imapHost, port: p.imapPort, tlsMode: p.imapTls,
+          user: p.email, password: p.password,
+          folder: folderImapName(p, row.folder),
+          uid: row.uid, timeoutMs: p.timeoutMs,
+        });
+      } catch (err) {
+        deleteWarning = `IMAP から削除できませんでした: ${err.message}`;
+      }
+    }
+
+    const removed = await mailModel.deleteMessageById(row.id, user.id);
+    if (!removed) throw new ApiError(404, 'メールが見つかりません。');
+
+    await auditModel.logAction({
+      userId: user.id,
+      action: 'MAIL_MESSAGE_PURGE',
+      targetEntity: 'MAIL_MESSAGE',
+      targetId: row.id,
+      changesJson: JSON.stringify({ subject: row.subject, folder: row.folder }),
+    });
+
+    return { ok: true, message: '完全に削除しました。', delete_warning: deleteWarning };
   },
 
   /** 添付ファイルダウンロード。BODYSTRUCTURE のセクション番号で IMAP から生バイトを取得する */
@@ -971,6 +1396,8 @@ export const mailService = {
   /** 定期受信の状態 (常時接続セッション・接続中ユーザ・実行中フラグ) をリセット (検証用) */
   resetActiveWatch() {
     for (const w of pollState.watch.values()) {
+      // ループを止める側は closed にしてからログアウトする (closed を置かないと IDLE ループが動き続ける)
+      w.closed = true;
       try { w.session?.logout(); } catch { /* 切断済みなら無視 */ }
     }
     pollState.watch.clear();

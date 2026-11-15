@@ -310,6 +310,63 @@ if (reservationId) {
   await del(`/facilities/reservations/${reservationId}`);
 }
 
+// --- CSV 一括登録 API (v3.1.15 §5・§7)。実行ごとに一意な教職員番号を作り、最後に ADMIN で削除する ---
+const importStaff = `T9${String(Date.now()).slice(-6)}`;
+const importCsv = [
+  'staff_code,name,role,password,grade,department,email,extension_number,desk_number,group_zone,status_note,subjects',
+  `${importStaff},API確認 一郎,TEACHER,Init2026!8,1,１学年,api-import@example.com,221,,,テスト,`,
+  'T2026001,API確認 二朗,TEACHER,Init2026!8,,,,,,,',
+  'API確認 三郎,TEACHER,short',
+].join('\n');
+const importB64 = Buffer.from(importCsv, 'utf-8').toString('base64');
+
+const tmplRes = await req('GET', '/users/import/template', '', adminToken);
+const tmplJson = JSON.parse(tmplRes.text || '{}');
+const tmplHead4 = (tmplJson.required_columns || []).join(',');
+console.log('IMPORT_TEMPLATE', tmplRes.status, tmplHead4 === 'staff_code,name,password,role' ? 'OK (必須4列)' : `NG (${tmplHead4})`);
+
+const teacherLoginRes = await req('POST', '/auth/login', JSON.stringify({ staff_code: 'T2026002', password: 'password123' }), '');
+const teacherJson = JSON.parse(teacherLoginRes.text || '{}');
+const teacherToken = teacherJson.token;
+
+const previewTeacherRes = await req('POST', '/users/import/preview', JSON.stringify({ csvBase64: importB64, fileName: 'api-smoke.csv' }), teacherToken);
+console.log('IMPORT_PREVIEW_TEACHER', previewTeacherRes.status, previewTeacherRes.status === 403 ? 'OK (TEACHER拒否)' : 'NG');
+
+const previewKyomuRes = await req('POST', '/users/import/preview', JSON.stringify({ csvBase64: importB64, fileName: 'api-smoke.csv' }), adminToken);
+const previewJson = JSON.parse(previewKyomuRes.text || '{}');
+const previewId = previewJson.preview_id;
+const previewOk = previewKyomuRes.status === 200 && previewJson.valid_rows === 1 && previewJson.invalid_rows === 2;
+console.log('IMPORT_PREVIEW_KYOMU', previewKyomuRes.status, previewOk ? `OK (valid=${previewJson.valid_rows} invalid=${previewJson.invalid_rows})` : `NG (valid=${previewJson.valid_rows} invalid=${previewJson.invalid_rows})`);
+
+const badCommitRes = await req('POST', '/users/import/commit', JSON.stringify({ preview_id: previewId, rows: [1, 3] }), adminToken);
+console.log('IMPORT_COMMIT_INVALID_ROW', badCommitRes.status, badCommitRes.status === 400 ? 'OK (登録不可行混入 400)' : 'NG');
+
+const commitRes = await req('POST', '/users/import/commit', JSON.stringify({ preview_id: previewId, rows: [1] }), adminToken);
+const commitJson = JSON.parse(commitRes.text || '{}');
+console.log('IMPORT_COMMIT', commitRes.status, commitJson.created_count === 1 && commitJson.must_change_password === true ? 'OK (1件 must_change_password=1)' : 'NG');
+
+const reCommitRes = await req('POST', '/users/import/commit', JSON.stringify({ preview_id: previewId, rows: [2] }), adminToken);
+console.log('IMPORT_COMMIT_CONSUMED', reCommitRes.status, reCommitRes.status === 400 ? 'OK (消費済み 400)' : 'NG');
+
+const newLoginRes = await req('POST', '/auth/login', JSON.stringify({ staff_code: importStaff, password: 'Init2026!8' }), '');
+const newLoginJson = JSON.parse(newLoginRes.text || '{}');
+const newToken = newLoginJson.token;
+console.log('IMPORT_FIRST_LOGIN', newLoginRes.status, newLoginJson.user?.must_change_password === true ? 'OK (must_change=true)' : 'NG');
+
+const gateRes = await req('GET', '/subjects', '', newToken);
+console.log('IMPORT_GATE_BLOCK', gateRes.status, gateRes.status === 403 ? 'OK (アプリ系 403)' : 'NG');
+
+const changeRes = await req('PUT', '/auth/change-password', JSON.stringify({ currentPassword: 'Init2026!8', newPassword: 'Changed2026!8' }), newToken);
+const changeJson = JSON.parse(changeRes.text || '{}');
+console.log('IMPORT_CHANGE_PASSWORD', changeRes.status, changeJson.token ? 'OK (新トークン発行)' : 'NG');
+
+const releasedRes = await req('GET', '/subjects', '', changeJson.token || newToken);
+console.log('IMPORT_GATE_RELEASED', releasedRes.status, releasedRes.status === 200 ? 'OK (解禁)' : 'NG');
+
+const importCleanup = await req('DELETE', `/users/${importStaff}`, '', adminToken);
+console.log('IMPORT_CLEANUP', importCleanup.status, importCleanup.status === 200 ? 'OK (ADMIN が削除)' : 'NG');
+
+
 // --- 全トップレベルAPI被覆確認（読取専用 GET。各セグメントがスモークで叩かれる） ---
 // 読取のみでデータを変えない。ステータスを表示し、スモークが全APIセグメントを網羅していることを
 // node scripts/verify-docs.mjs が src/routes/index.js と突き合わせて検証する。

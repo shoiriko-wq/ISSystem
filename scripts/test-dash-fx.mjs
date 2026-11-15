@@ -18,6 +18,10 @@
  *  8. 幅 390px で横スクロールが出ず、パネルの全コントロールに label.for と枠線がある
  *  9. 「記入する」ボタンは画面に存在せず、区分別人数タイルのクリックと Enter で登録・確認モーダルが開く
  *     (bindAbsenceTile は件数非依存＝件数ゲート無し。0名表示のタイルでもクリックで開く)
+ *  10. 年休等・出張モーダルは 赤・黄色の人数枠を持たず（件数ラベルだけ）、フィルタ行→登録一覧→記入フォームの順で
+ *      最上部に並ぶ。記入欄は 対象日・期間（全日08:30〜17:00/半日（午前）08:30〜13:00/半日（午後）13:00〜17:00/個別入力）・
+ *      開始・終了・区分・対象教員。プリセット選択は始終時刻へ自動反映し、プリセット外は 個別入力 へ戻る。
+ *      一覧カードは 区分・対象日(曜日)・期間ラベル＋始終時刻を出す（理由は出さない）
  * 実行: npm run test:ui:fx  （ISSystem サーバーが必要 UI_BASE / UI_USER / UI_PASS）
  */
 import path from 'node:path';
@@ -524,6 +528,89 @@ const byKey = await page.evaluate(() => ({
 }));
 check('キーボード Enter でも出張タイルからモーダルが開く',
   byKey.open && byKey.activeFilter[0] === 'TRIP', byKey);
+
+// ---- 10. 年休等・出張モーダル（赤・黄色の人数枠なし、フィルタ+一覧が最上部、期間 08:30〜17:00 の記入欄） ----
+const modalHtml = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');
+check('年休等・出張モーダルの赤・黄色の人数枠 (#absence-count-leave / #absence-count-trip) は撤廃済み',
+  !modalHtml.includes('absence-count-leave') && !modalHtml.includes('absence-count-trip')
+  && !absSrc.includes('absence-count-leave') && !absSrc.includes('absence-count-trip'), null);
+
+await page.evaluate(() => document.getElementById('dash-absence-leave-tile').dispatchEvent(new MouseEvent('click', { bubbles: true })));
+await sleep(700);
+const modalLayout = await page.evaluate(() => {
+  const body = document.querySelector('#absence-modal .modal-body');
+  const top = (id) => Math.round(document.getElementById(id)?.getBoundingClientRect().top ?? -1);
+  return {
+    firstBodyChild: body?.firstElementChild?.id || null,
+    rowTop: top('absence-filter-row'),
+    listTop: top('absence-list'),
+    formTop: top('absence-form'),
+    countFrames: [...document.querySelectorAll('#absence-modal div, #absence-modal span')]
+      .filter((el) => el.id === 'absence-count-leave' || el.id === 'absence-count-trip').length,
+    note: (document.getElementById('absence-filter-note')?.textContent || '').trim(),
+    formOrder: [...document.querySelectorAll('#absence-form label')].map((l) => l.htmlFor).join(','),
+    periodOptions: [...(document.getElementById('absence-period-select')?.options || [])].map((o) => o.value).join(','),
+    hasReasonInput: !!document.getElementById('absence-reason-input'),
+  };
+});
+check('モーダルは フィルタ行 → 登録一覧 → 記入フォーム の順（実測 top と modal-body 最初の要素で確認）',
+  modalLayout.firstBodyChild === 'absence-filter-row'
+  && modalLayout.rowTop >= 0 && modalLayout.rowTop < modalLayout.listTop && modalLayout.listTop < modalLayout.formTop,
+  modalLayout);
+check('モーダルに赤・黄色の人数枠は無く件数ラベル（表示: n 件）だけ',
+  modalLayout.countFrames === 0 && modalLayout.note.startsWith('表示: ') && modalLayout.note.includes('件'), modalLayout.note);
+check('記入欄は 対象日→期間→開始→終了→区分→対象教員 の順で全入力に label.for があり理由入力は無い',
+  modalLayout.formOrder === 'absence-date,absence-period-select,absence-start-time,absence-end-time,absence-type-select,absence-user-select'
+  && modalLayout.periodOptions === 'FULL,AM,PM,CUSTOM' && !modalLayout.hasReasonInput, modalLayout);
+
+const presetOut = await page.evaluate(() => {
+  const period = document.getElementById('absence-period-select');
+  const startInput = document.getElementById('absence-start-time');
+  const endInput = document.getElementById('absence-end-time');
+  const fire = (el) => el.dispatchEvent(new Event('change', { bubbles: true }));
+  const out = {};
+  period.value = 'AM'; fire(period);
+  out.am = `${startInput.value}〜${endInput.value}`;
+  period.value = 'PM'; fire(period);
+  out.pm = `${startInput.value}〜${endInput.value}`;
+  startInput.value = '09:15'; fire(startInput);
+  endInput.value = '15:30'; fire(endInput);
+  out.custom = period.value;
+  period.value = 'FULL'; fire(period);
+  out.full = `${startInput.value}〜${endInput.value}`;
+  out.fullSelected = period.value;
+  return out;
+});
+check('期間プリセット選択は 開始・終了時刻へ自動反映（AM 08:30〜13:00 / PM 13:00〜17:00 / FULL 08:30〜17:00）',
+  presetOut.am === '08:30〜13:00' && presetOut.pm === '13:00〜17:00'
+  && presetOut.full === '08:30〜17:00' && presetOut.fullSelected === 'FULL', presetOut);
+check('開始・終了をプリセット外へ変えると期間セレクトは 個別入力 (CUSTOM) へ戻る',
+  presetOut.custom === 'CUSTOM', presetOut);
+
+await page.evaluate(() => {
+  const all = [...document.querySelectorAll('.absence-filter-btn')].find((b) => b.dataset.absenceFilter === 'ALL');
+  all?.click();
+});
+await sleep(400);
+const cards = await page.evaluate(() => {
+  const list = document.getElementById('absence-list');
+  const txt = (list.textContent || '').replace(/\s+/g, ' ');
+  return {
+    cards: list.querySelectorAll('[data-absence-delete]').length,
+    full: txt.includes('全日 08:30〜17:00'),
+    pm: txt.includes('半日（午後） 13:00〜17:00'),
+    am: txt.includes('半日（午前） 08:30〜13:00'),
+    weekday: /\d{4}-\d{2}-\d{2} \([^)]+\)/.test(txt),
+    reasonRow: txt.includes('理由:'),
+    note: (document.getElementById('absence-filter-note')?.textContent || '').trim(),
+  };
+});
+check('一覧カードは 区分・対象日(曜日)・期間ラベルと 始終時刻を出す（理由は出さない。本日のデモ3件）',
+  cards.full && cards.pm && cards.am && cards.weekday && !cards.reasonRow && cards.cards === 3
+  && cards.note === '表示: すべて (3 件)', cards);
+
+await page.click('#absence-modal .modal-close-x');
+await sleep(300);
 
 await browser.close();
 

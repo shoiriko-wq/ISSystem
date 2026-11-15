@@ -147,6 +147,19 @@ await page.evaluate(() => {
 const toastTexts = (pg) => pg.evaluate(() =>
   [...document.querySelectorAll('#toast-container .toast')].map((el) => el.textContent.replace(/\s+/g, ' ').trim()));
 
+/** トーストは 5秒（+フェード200ms）で自動消滅する（`ui-helpers.js` の `showToast`）。
+ *  ボタン中心の実測（オーバーレイ検査）は定常状態で行うため、直前の操作トーストが消えるのを待つ。
+ *  チェック項目は減らさない（トーストがボタン中心を覆った瞬間は実クリックが吸収される実測値として残す）。 */
+const clearToasts = async (pg, timeoutMs = 6500) => {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const n = await pg.evaluate(() => document.querySelectorAll('#toast-container .toast').length);
+    if (n === 0) return true;
+    if (Date.now() > deadline) return false;
+    await sleep(300);
+  }
+};
+
 /** 左列のタイトルテキストで投稿行を選択する（クリック＝即既読化して右ペインが全文になる） */
 const selectRowByTitle = async (pg, title) => {
   await pg.evaluate((t) => {
@@ -283,7 +296,9 @@ check('Content-Length が元ファイルのバイト数と一致（レスポン�
 apiStatuses.length = 0;
 await page.evaluate(() => { window.__dl.length = 0; });
 
-// ★ 実クリック前にボタンの中央に他の要素（オーバーレイ）が載っていないか実測する（UI の枠・重なり規則）
+// ★ 実クリック前にボタンの中央に他の要素（オーバーレイ）が載っていないか実測する（UI の枠・重なり規則）。
+//   直前の投稿・操作トースト（右下・`.toast` は pointer-events auto）が消えてからの定常状態を実測する
+await clearToasts(page);
 const paneOverlay = await page.evaluate(() => {
   const btn = document.querySelector('#bulletin-detail-pane [data-attachment-download]');
   if (!btn) return { found: false };
@@ -311,6 +326,8 @@ const paneClicked = await page.evaluate(() => {
   if (!overlayFree) btn.click();  // オーバーレイ対策（evaluate で直接発火）
   return overlayFree;
 });
+// オーバーレイが無ければ puppeteer の実クリックで発火させる（覆われている場合のみ evaluate のフォールバック発火）
+if (paneClicked) await page.click('#bulletin-detail-pane [data-attachment-download]');
 await sleep(1600);
 
 const dl1 = await page.evaluate(async () => {
@@ -341,6 +358,8 @@ check('取得後にボタンは再度押せる（disabled=false）', dl1.btnDisa
 
 // --- 7. UI: 詳細モーダルのボタンでも同じ（モーダルは閉じない） ---
 // 「詳細」ボタンもオーバーレイ実測 → 覆われていれば evaluate で発火（フォールバック）
+// 右ペインからのダウンロードで出たトースト（右下・pointer-events auto）が消えてから定常状態を実測する
+await clearToasts(page);
 const detailOverlay = await page.evaluate(() => {
   const btn = document.querySelector('#bulletin-detail-pane [data-bulletin-detail]');
   if (!btn) return { found: false };
@@ -375,6 +394,7 @@ check('詳細モーダルにも添付行とボタンがある（直リンク <a>
 
 apiStatuses.length = 0;
 await page.evaluate(() => { window.__dl.length = 0; });
+await clearToasts(page);
 const modalOverlay = await page.evaluate(() => {
   const btn = document.querySelector('#detail-bulletin-attachments [data-attachment-download]');
   if (!btn) return { found: false };
@@ -425,7 +445,10 @@ check('ホバーで影（リング）と浮きが出る（UI十条5）', hover.r
 await page.screenshot({ path: path.join(OUT, 'bulletin-download.png'), fullPage: false });
 
 // --- 7b. UI: 一般教員（投稿者ではない）にはダウンロードボタンが出ない（ルール27） ---
-const page2 = await browser.newPage();
+// 教務のセッションを共有しない隔離コンテキストで開く。同じ localStorage（`is_system_jwt_token_v251`）を共有すると
+// page2 は教務トークンで自動ログインしてしまい、一般教員の権限判定が実測できない
+const teacherCtx = await browser.createBrowserContext();
+const page2 = await teacherCtx.newPage();
 page2.on('pageerror', (e) => console.log(`[teacher page js error] ${e.message}`));
 await page2.goto(`${BASE}/`, { waitUntil: 'networkidle2' });
 await page2.type('#login-userid', TEACHER_CODE);
@@ -433,14 +456,21 @@ await page2.type('#login-password', TEACHER_PASS);
 await page2.evaluate(() => window.handleLoginClick());
 await page2.waitForSelector('#app-container:not(.hidden)', { timeout: 10000 });
 await sleep(1000);
+const teacherWho = await page2.evaluate(() => {
+  const u = window.__canDownloadDebug ? window.__canDownloadDebug({}, {}) : null;
+  return u ? u.me : null;
+});
+console.log(`teacher-who = ${JSON.stringify(teacherWho)}`);
 await page2.evaluate(() => document.querySelector('a[data-tab="bulletin"]').click());
 await sleep(900);
+await clearToasts(page2);
 
 // 掲示期間内の投稿なので TEACHER の一覧にも出る（スコープ ALL）。行を選んで右ペインを見る
 await selectRowByTitle(page2, TITLE);
 
 // ★ ルール27 判定ロジックの実測（UI 側の判定関数と、その入力を読む）
-const listForTeacher = JSON.parse(await caReq('GET', '/bulletins', '', teacherToken));
+// `caReq` は `{status, headers, text, buffer}` を返すので JSON 化するのは `.text`（オブジェクトを String() すると "[object Object]" になる）
+const listForTeacher = JSON.parse((await caReq('GET', '/bulletins', '', teacherToken)).text || '{}');
 const bT = (listForTeacher.bulletins || []).find((x) => (x.title || '').includes(MARK));
 const aT = (bT?.attachments || [])[0];
 const perm = await page2.evaluate((bb, aa) => window.__canDownloadDebug(bb, aa), bT, aT);
@@ -460,7 +490,8 @@ const teacherPane = await page2.evaluate(() => {
 check('ルール27: 一般教員の右ペインに添付行はあるがダウンロードボタンは出ない',
   teacherPane.attRows === 1 && teacherPane.buttons === 0 && teacherPane.hint === true, teacherPane);
 
-// 詳細モーダルでもボタンは出ない（モーダルの添付欄を見る）
+// 詳細モーダルでもボタンは出ない（モーダルの添付欄を見る）。トーストが消えた定常状態で実クリックする
+await clearToasts(page2);
 await page2.click('#bulletin-detail-pane [data-bulletin-detail]');
 await sleep(900);
 const teacherModal = await page2.evaluate(() => {
@@ -507,6 +538,7 @@ const afterList = await caReq('GET', '/bulletins', '', token);
 check('後片付け: 検証投稿は API 一覧に残らない', !(afterList.text || '').includes(MARK), { status: afterList.status });
 
 await pool.end();
+await teacherCtx.close();
 await browser.close();
 console.log(`\n${failures.length === 0 ? 'ALL PASSED' : `${failures.length} FAILURES`}`);
 process.exit(failures.length === 0 ? 0 : 1);

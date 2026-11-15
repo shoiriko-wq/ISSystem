@@ -15,6 +15,7 @@ import { errorHandler, notFoundHandler } from './middlewares/error.middleware.js
 import { parseCorsOrigin } from './utils/origins.js';
 import { createAccessLogStream } from './utils/access-log.js';
 import config from '../config/default.js';
+import jwt from 'jsonwebtoken';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,6 +64,42 @@ app.get('/api/health', (req, res) => {
 
 // 6. プライベートCAダウンロードページ / 証明書配布 (/ca)
 app.use('/ca', caRoutes);
+
+// 6b. v3.1.15 初期パスワード変更ゲート (CSV 一括登録): must_change_password=1 のアカウントは
+// パスワード変更完了までアプリ系 API を 403 で遮断する (§5)。
+// ログイン・招待登録・パスワード変更・CA配布・監査ログ閲覧はゲートの対象外（変更手続きに必要）。
+const PASSWORD_GATE_EXEMPT = new Set(['auth', 'ca', 'audit', 'health']);
+const gateJwtSecret = config.auth?.jwtSecret || 'dev-secret-key-change-in-production';
+
+app.use('/api', (req, res, next) => {
+  const firstSegment = String(req.path || '').split('/').filter(Boolean)[0] || '';
+  if (PASSWORD_GATE_EXEMPT.has(firstSegment)) return next();
+
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+  if (!token) return next(); // 未認証は authenticateToken が 401 を返す
+
+  let payload = null;
+  try {
+    payload = jwt.verify(token, gateJwtSecret);
+  } catch {
+    return next(); // 不正トークンは authenticateToken が 401 で止める
+  }
+
+  if (payload && payload.pwd === 1) {
+    console.warn('[UserImportGate] 初期パスワード未変更のアカウントをアプリ系 API 要求から遮断しました。', {
+      id: payload.id,
+      staff_code: payload.staff_code
+    });
+    return res.status(403).json({
+      success: false,
+      message: '初期パスワードの変更が完了するまでアプリは利用できません。パスワードを変更してください。',
+      code: 'PASSWORD_CHANGE_REQUIRED'
+    });
+  }
+
+  return next();
+});
 
 // 7. マスター API ルーティング登録 (/api)
 app.use('/api', routes);

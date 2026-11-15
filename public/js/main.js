@@ -11,7 +11,7 @@ import { socketClient } from './socket.js';
 // 各機能モジュールの初期化およびデータロード関数インポート
 import { initDashboardModule, loadDashboardData, fetchWeatherData } from './modules/dashboard.module.js';
 import { initSeatingModule, loadSeatingData } from './modules/seating.module.js';
-import { initBulletinModule, loadBulletins, setUnreadMode, isFullMode, syncUnreadButtonToState } from './modules/bulletin.module.js';
+import { initBulletinModule, loadBulletins, isFullMode, syncUnreadButtonToState } from './modules/bulletin.module.js';
 import { initChatModule, loadChannels, loadMessages } from './modules/chat.module.js';
 import { initFacilityModule, loadReservations } from './modules/facility.module.js';
 import { initScheduleModule, loadSchedules } from './modules/schedule.module.js';
@@ -20,6 +20,7 @@ import { initMailModule, loadMailData } from './modules/mail.module.js';
 import { initAbsenceModule, loadAbsenceSummary } from './modules/absence.module.js';
 import { initExamModule, loadExamData } from './modules/exam/exam.module.js';
 import { initSubjectsModule, loadSubjects, renderSubjectPicker, renderSubjectPickerAsync, readSubjectPicker, subjectChipsHtml, openSubjectAdmin, isKyomuUser, setUserSubjects } from './modules/subjects.module.js';
+import { initUserImportModule, applyPasswordGate, applyUserImportCardVisibility } from './modules/user-import.module.js';
 
 
 /**
@@ -151,8 +152,14 @@ function renderAuthScreen() {
     loginScreen?.classList.add('hidden');
     appContainer?.classList.remove('hidden');
     
-    // ログイン済みの場合、WebSocket リアルタイム接続を開始
-    socketClient.init();
+    // v3.1.15 §5: CSV 一括登録アカウント (must_change_password=true) は初期パスワードの変更完了まで
+    // アプリを利用できない。サーバー側も API を 403・WSS を接続拒否するため、ここでは WSS を接続しない
+    if (applyPasswordGate(state.currentUser)) {
+      socketClient.disconnect();
+    } else {
+      // ログイン済みの場合、WebSocket リアルタイム接続を開始
+      socketClient.init();
+    }
 
     if (userBadge) {
       // ISSystem仕様書 §9 (users): 氏名(name) 未設定時は 教職員番号(staff_code) を表示
@@ -166,6 +173,8 @@ function renderAuthScreen() {
     }
     // 2026/11/8 RBAC: 招待コード発行カードは教務部 (KYOMU/ADMIN) 権限のユーザーのみ表示
     document.getElementById('invitation-issuance-card')?.classList.toggle('hidden', !isKyomuUser());
+    // v3.1.15 §5: CSV 一括登録カードも教務部 (KYOMU/ADMIN) のみ表示
+    applyUserImportCardVisibility();
     const userAvatar = document.getElementById('header-user-avatar');
     if (userAvatar) {
       if (state.currentUser?.avatar_url) {
@@ -236,8 +245,11 @@ window.handleLoginClick = async function() {
     initFacilityModule();
     refreshLucideIcons();
     
-    // ログイン成功後にアクティブタブの実データをロード
-    switchTab(state.currentTab || 'dashboard');
+    // ログイン成功後にアクティブタブの実データをロード。
+    // 初期パスワード未変更 (must_change_password) のアカウントはアプリ系 API が 403 遮断されるため読み込まない
+    if (!applyPasswordGate(state.currentUser)) {
+      switchTab(state.currentTab || 'dashboard');
+    }
 
     const welcomeName = resData.user?.name ? `${resData.user.name} 先生` : `教職員番号: ${resData.user?.staff_code || staffCodeInput}`;
     showToast(`ログインしました: ${welcomeName}`, 'success');
@@ -364,15 +376,16 @@ function initEventsAndListeners() {
         bBadge.classList.toggle('hidden', bCount === 0);
       }
       // ★ 全日未読ボタン（検索ボックスの右。サイドバーと同一値。ラベル「未読 N」。0 は hidden＝押せない）
-      // ★ 全日未読ボタン（ツールバーの検索ボックス右＋サイドバー項目。同じ id が 2 つあるので両方同じ数で揃える。0 は hidden＝押せない）
+      // ★ 全日未読ボタン（ツールバーの検索ボックス右＋サイドバー項目。同じ id が 2 つあるので両方同じ数で揃える）
+      // ★ 未読 0 件で hidden になるのは「日付表示のとき」だけ。未読表示中は未読 0 件でも visible のまま
+      //   （未読列表のピン留め行が左列に残り、未読ボタンをもう一度押して日付表示へ復帰できる）。
+      // ★ 未読が 0 件になっても未読表示を自動で閉じない（auto-exit は撤廃）。visible/disabled は
+      //   bulletin.module.js の syncUnreadButtonToState() が表示モード込みで一元決定する。
       document.querySelectorAll('#bulletin-btn-unread').forEach((unreadBtn) => {
         unreadBtn.textContent = `未読 ${cap(bCount)}`;
         unreadBtn.setAttribute('aria-label', `全日の未読検索（未読 ${cap(bCount)} 件）`);
-        unreadBtn.classList.toggle('hidden', bCount === 0);
-        // 未読が 0 件になったときは未読表示を閉じて日付表示へ戻す（空の未読一覧を残さない）
-        if (bCount === 0) setUnreadMode(false);
       });
-      // 全日表示（検索語・未読表示）中は中心日を動かす操作を止める（年月選択・サイドバーの「未読」）
+      // 全日表示（検索語・未読表示）中は中心日を動かす操作を止める（年月選択・未読ボタンの visible/disabled も同関数で揃える）
       refreshBulletinControls();
       // ダッシュボード「本日の連絡」ヘッダーバッヂ（本日未読）
       const dashBadge = document.getElementById('dash-today-bulletin-unread');
@@ -450,12 +463,17 @@ function initEventsAndListeners() {
         password,
         department
       });
+      // (res.token / res.user は新規登録直後のセッションとして使う)
 
       if (res && res.success && res.token) {
         setUserSession(res.user, res.token);
         renderAuthScreen();
         showToast('新規アカウント登録が完了しました', 'success');
-        switchTab('dashboard');
+        // 新規登録の初期パスワードは初回ログインで変更必須 (must_change_password=true §5)。
+        // ゲート中はアプリ系 API が 403 で遮断されるため実データは読み込まない
+        if (!applyPasswordGate(res.user)) {
+          switchTab('dashboard');
+        }
       }
     } catch (err) {
       if (errorEl) {
@@ -909,6 +927,11 @@ function initEventsAndListeners() {
           const el = document.getElementById(id);
           if (el) el.value = '';
         });
+        // 変更成功でサーバーは新トークンを返す (pwd 込みの旧トークンは無効化される)。
+        // セッションを新トークンへ差し替える (§5)
+        if (res.token && typeof res.token === 'string') {
+          setUserSession(state.currentUser, res.token);
+        }
         showToast('パスワードを変更しました', 'success');
       }
     } catch (err) {
@@ -1108,6 +1131,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   await initAbsenceModule();
   // 教科マスタ・担当教科モジュール (DOM生成のみ。マスタ読み込みはログイン後)
   await initSubjectsModule();
+  // v3.1.15 §5: CSV 一括登録モジュール (教務部のユーザー管理カード + 初期パスワード変更モーダル)
+  initUserImportModule();
+  // 一括登録確定後は職員一覧を再読み込み / 初期パスワード変更完了後はタブ実データを再ロード / 強制ログアウトも処理
+  document.addEventListener('users:imported', () => loadUsersList());
+  document.addEventListener('password:changed', () => switchTab(state.currentTab || 'dashboard'));
+  document.addEventListener('auth:logout', () => handleLogout());
   // 定期考査モジュールは renderAuthScreen (ログイン時のロール判定込み) で初期化される
 
 
@@ -1116,9 +1145,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 5. 有効なセッション（ログイン保持）が存在する場合のみ実データをロード
   if (state.currentUser && state.authToken) {
-    // 教科マスタは担当教科ピッカー/チップ専用 (タブを持たない) ためここで読む
-    await loadSubjects(true);
-    switchTab(state.currentTab || 'dashboard');
+    // 初期パスワード未変更のアカウントはアプリ系 API が 403 遮断されるため、実データは読み込まない
+    if (!applyPasswordGate(state.currentUser)) {
+      // 教科マスタは担当教科ピッカー/チップ専用 (タブを持たない) ためここで読む
+      await loadSubjects(true);
+      switchTab(state.currentTab || 'dashboard');
+    }
   }
 
   refreshLucideIcons();

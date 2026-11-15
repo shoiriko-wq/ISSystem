@@ -27,6 +27,11 @@ CREATE INDEX IF NOT EXISTS idx_users_department ON users(department);
 -- 1b. 教務フラグと招待コード発行者 (後続マイグレーション対応)
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_kyomu INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS invited_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL;
+-- 1b-2. CSV 一括登録で設定した初期パスワードの強制変更フラグ (2026-11-15 追加)
+-- 一括登録 (POST /api/users/import/commit) は must_change_password = 1 で作成し、
+-- パスワード変更 (PUT /api/auth/change-password) で 0 へ戻す。1 の間はアプリ系 API が 403 (§5)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_users_must_change_password ON users(must_change_password);
 
 -- 1c. 自主分散招待コード (invitation_codes)
 CREATE TABLE IF NOT EXISTS invitation_codes (
@@ -475,6 +480,12 @@ CREATE INDEX IF NOT EXISTS idx_absence_date ON absence_records(record_date);
 CREATE INDEX IF NOT EXISTS idx_absence_date_type ON absence_records(record_date, record_type);
 CREATE INDEX IF NOT EXISTS idx_absence_user ON absence_records(user_id);
 
+-- 期間（開始・終了時刻）の冪等追加 (2026-11-14)
+-- 記入欄が「対象日＋期間（08:30〜17:00 を初期状態、プリセット 全日/半日（午前）08:30〜13:00/半日（午後）13:00〜17:00/個別入力）」へ変化した。
+-- HH:MM の TEXT で保持する（TIME 型は JOIN・正規化が重い）。ラベルは時刻から算出するのでプリセット名は保存しない。
+ALTER TABLE absence_records ADD COLUMN IF NOT EXISTS start_time TEXT NOT NULL DEFAULT '08:30';
+ALTER TABLE absence_records ADD COLUMN IF NOT EXISTS end_time TEXT NOT NULL DEFAULT '17:00';
+
 -- -------------------------------------------------------------
 -- 初期デモデータ (パスワードは bcrypt salt=10 / password123)
 -- ※ INSERT OR IGNORE → ON CONFLICT DO NOTHING
@@ -555,10 +566,10 @@ ON CONFLICT DO NOTHING;
 -- 教科マスタの初期データ (教務部が追加・改名・削除できる)
 
 -- 年休等・出張 欠席登録 (本日のデモデータ)
-INSERT INTO absence_records (id, user_id, record_date, record_type, reason, recorded_by, recorded_by_name)
+INSERT INTO absence_records (id, user_id, record_date, record_type, start_time, end_time, reason, recorded_by, recorded_by_name)
 VALUES
-  ('abs_1', 't-takahashi', CURRENT_DATE, 'LEAVE', '年休（通院）', 'kyomu01', '教務 主任'),
-  ('abs_2', 't-suzuki', CURRENT_DATE, 'TRIP', '県教育委員会 研修', 'kyomu01', '教務 主任')
+  ('abs_1', 't-takahashi', CURRENT_DATE, 'LEAVE', '08:30', '17:00', '年休（通院）', 'kyomu01', '教務 主任'),
+  ('abs_2', 't-suzuki', CURRENT_DATE, 'TRIP', '13:00', '17:00', '県教育委員会 研修', 'kyomu01', '教務 主任')
 ON CONFLICT DO NOTHING;
 
 -- -------------------------------------------------------------
@@ -1211,6 +1222,8 @@ CREATE TABLE IF NOT EXISTS mail_accounts (
   smtp_port INTEGER,
   smtp_tls TEXT NOT NULL DEFAULT 'none',
   sent_folder TEXT NOT NULL DEFAULT 'Sent',
+  draft_folder TEXT NOT NULL DEFAULT '[Drafts]',
+  trash_folder TEXT NOT NULL DEFAULT '[Trash]',
   display_name TEXT,
   status TEXT NOT NULL DEFAULT 'UNVERIFIED',
   last_checked_at TIMESTAMP,
@@ -1230,14 +1243,16 @@ ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS imap_tls TEXT NOT NULL DEFAUL
 ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS imap_folder TEXT NOT NULL DEFAULT 'INBOX';
 ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS smtp_tls TEXT NOT NULL DEFAULT 'none';
 ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS sent_folder TEXT NOT NULL DEFAULT 'Sent';
+ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS draft_folder TEXT NOT NULL DEFAULT '[Drafts]';
+ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS trash_folder TEXT NOT NULL DEFAULT '[Trash]';
 ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS display_name TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_mail_accounts_user ON mail_accounts(user_id);
 
 -- ==========================================
 -- 23. メールメッセージ (mail_messages) — mail.model.js / mail.service.js 用
--- folder = 'inbox'（受信ボックス）/ 'sent'（送信ボックス）
--- uid = IMAP の UID（受信メッセージのみ。送信ボックスのレコードは uid = NULL）
+-- folder = 'inbox'（受信ボックス）/ 'sent'（送信ボックス）/ 'drafts'（下書き）/ 'trash'（ごみ箱）
+-- uid = IMAP の UID（IMAP から取得したメッセージのみ。下書きと自システム送信のレコードは uid = NULL）
 -- account_id = メッセージを保有する接続アカウント（アカウント削除は ON DELETE CASCADE でメッセージも消える）
 -- ==========================================
 CREATE TABLE IF NOT EXISTS mail_messages (
@@ -1287,6 +1302,13 @@ ALTER TABLE mail_messages ALTER COLUMN body DROP NOT NULL;
 ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS attachments TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS has_attachments INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS html_stripped INTEGER NOT NULL DEFAULT 0;
+
+-- 返信・転送のスレッド用 (Message-ID と In-Reply-To を保存し、\Answered /\Forwarded は imap_flags に保持する)
+ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS message_id TEXT;
+ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS in_reply_to TEXT;
+ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS imap_flags TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_mail_messages_message_id ON mail_messages(message_id);
+CREATE INDEX IF NOT EXISTS idx_mail_messages_in_reply_to ON mail_messages(in_reply_to);
 -- 本文キャッシュの夜間清理 (受信から body_cache_days 日超の受信ボックス本文だけを NULL に戻す) は cron 側で行う
 CREATE INDEX IF NOT EXISTS idx_mail_messages_received ON mail_messages(received_at);
 

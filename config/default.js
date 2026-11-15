@@ -148,12 +148,13 @@ const config = {
     // 受信フォルダと送信済みフォルダの初期値 (IMAP フォルダ名)
     inboxFolder: process.env.MAIL_INBOX_FOLDER || 'INBOX',
     sentFolder: process.env.MAIL_SENT_FOLDER || 'Sent',
+    // 下書きとごみ箱の IMAP フォルダ初期値 (Dovecot の標準サブフォルダ [Drafts] / [Trash])
+    draftFolder: process.env.MAIL_DRAFT_FOLDER || '[Drafts]',
+    trashFolder: process.env.MAIL_TRASH_FOLDER || '[Trash]',
     // 差出人名の初期値 (SMTP 送信時の表示名)
     displayName: process.env.MAIL_DISPLAY_NAME || '',
     // 接続テスト・送受信のタイムアウト (既定 12 秒)
     timeoutMs: toInt(process.env.MAIL_TIMEOUT_MS, 12000),
-    // サーバー側cronの定期受信間隔（クライアント側の setInterval は廃止 2026/11/13）
-    pollIntervalMs: toInt(process.env.MAIL_POLL_INTERVAL_MS, 60000),
     // 到達不能サーバーへ毎分再接続しないための連続失敗上限（受信成功でリセット）
     pollMaxFailures: toInt(process.env.MAIL_POLL_MAX_FAILURES, 5),
     // アクティブ（接続中）ユーザのみ常時 IMAP IDLE で監視する (2026/11/13)
