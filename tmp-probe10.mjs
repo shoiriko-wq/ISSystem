@@ -1,0 +1,11 @@
+import { examService } from './src/services/exam.service.js';
+import { query, pool } from './config/database.js';
+const p = await query(`SELECT grade, subject_name, class_ids FROM exam_subject_plan WHERE exam_master_id='e2e-exam' AND grade=2 ORDER BY subject_name`, []);
+console.log('PLAN g2', JSON.stringify(p.rows));
+const s = await query(`SELECT grade, class_id, subject_name, day_number, slot_number, slot_span FROM exam_slots WHERE exam_master_id='e2e-exam' AND grade=2 ORDER BY day_number, slot_number`, []);
+console.log('SLOTS g2', JSON.stringify(s.rows));
+const KYOMU = { id: 'et-kyomu', role: 'KYOMU' };
+const built = await examService.buildProctorInput('e2e-exam', KYOMU);
+const t2 = built.timetable.filter(t=>t.grade===2);
+console.log('TIMETABLE g2', t2.length, JSON.stringify(t2.slice(0,2)));
+await pool.end();

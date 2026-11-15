@@ -1,0 +1,11 @@
+import { examService } from './src/services/exam.service.js';
+import { solveProctor } from './src/utils/exam-proctor-solver.js';
+import { pool } from './config/database.js';
+const KYOMU = { id: 'et-kyomu', role: 'KYOMU' };
+const built = await examService.buildProctorInput('e2e-exam', KYOMU);
+console.log('TIMETABLE', built.timetable.length);
+const res = solveProctor(built.input);
+const g = {}; for (const a of res.assignments) g[a.grade] = (g[a.grade]||0)+1;
+console.log('ASSIGN', res.assignments.length, JSON.stringify(g), 'unassigned', res.unassigned);
+console.log(JSON.stringify(res.assignments.filter(a=>a.grade===2).map(a=>[a.grade,a.class_id,a.day,a.slot,a.subject_name,a.room_name,a.proctor_teacher_id])));
+await pool.end();

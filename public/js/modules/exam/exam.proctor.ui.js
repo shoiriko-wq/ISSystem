@@ -27,6 +27,9 @@ const PROCTOR_DEFAULTS = {
   considerations: [],
   kyomu_priority: 4,
   parttime_prefer: 6,
+  role_model: true,
+  count_creator: true,
+  count_patrol: false,
   weights: { load: 40, fairness: 10, special_extra: 40, parttime_late: 6, unassigned: 1000, rotation_outside: 25, spread: 30 },
 };
 
@@ -459,9 +462,18 @@ function proctorGridHtml(kyomu, editable) {
                   : '';
               const room = c.room_type ? `<span class="text-[10px] text-info ml-1">${c.room_type}</span>` : '';
               const subj = `<span class="text-[10px] font-bold text-main block">${escapeHTML(c.subject_name || '')}${room}</span>`;
+              // 役割表示（出題者=Creator / 巡回者=Patroller）。巡回者は負換0で監督と同一コマを占有する
+              const creatorName = c.creator_name || c.setter_teacher_name || null;
+              const patrolName = c.patrol_name || null;
+              const roleParts = [];
+              if (creatorName) roleParts.push(`出 ${escapeHTML(creatorName)}`);
+              if (patrolName) roleParts.push(`巡 ${escapeHTML(patrolName)}`);
+              const roleLine = roleParts.length
+                ? `<span class="text-[9px] text-muted block" title="出題者 ${escapeHTML(creatorName || '-')} / 巡回者 ${escapeHTML(patrolName || '-')}">${roleParts.join(' / ')}</span>`
+                : '';
               const inner = editable
-                ? `${subj}${spanLabel}<select data-cell="proctor" data-key="${key}" class="input-field w-full py-1 text-[10px]">${staffOptions(c.proctor_teacher_id, true)}</select>`
-                : `${subj}${spanLabel}<span class="text-[11px] font-bold ${c.is_mine ? 'text-accent-strong' : 'text-soft'}">${escapeHTML(c.proctor_name || '未割当')}</span>`;
+                ? `${subj}${spanLabel}${roleLine}<select data-cell="proctor" data-key="${key}" class="input-field w-full py-1 text-[10px]">${staffOptions(c.proctor_teacher_id, true)}</select>`
+                : `${subj}${spanLabel}${roleLine}<span class="text-[11px] font-bold ${c.is_mine ? 'text-accent-strong' : 'text-soft'}">${escapeHTML(c.proctor_name || '未割当')}</span>`;
               return `<td class="border border-divider p-1 align-top">${inner}</td>`;
             })
             .join('');
@@ -477,7 +489,18 @@ function proctorGridHtml(kyomu, editable) {
     .join('');
 
   const loadChips = (board.loads || [])
-    .map((l) => `<span class="badge bg-surface text-soft border border-main text-[10px] px-1.5 py-0.5">${escapeHTML(nameOf(l.id))} : ${l.load}</span>`)
+    .map((l) => {
+      const proctor = Number(l.proctor ?? 0);
+      const creator = Number(l.creator ?? 0);
+      const patrol = Number(l.patrol ?? 0);
+      const parts = [];
+      if (proctor) parts.push(`監督 ${proctor}`);
+      if (creator) parts.push(`出題 ${creator}`);
+      const formula = parts.length ? parts.join(' + ') : '監督 0';
+      const title = `監督 ${proctor} + 出題 ${creator}（巡回 ${patrol} は負荷0）`;
+      const cls = l.load === 0 && patrol > 0 ? 'text-muted' : 'text-soft';
+      return `<span class="badge bg-surface ${cls} border border-main text-[10px] px-1.5 py-0.5" title="${escapeHTML(title)}">${escapeHTML(nameOf(l.id))} : ${l.load}<span class="text-muted">（${formula}）</span></span>`;
+    })
     .join(' ');
 
   return sectionCard(

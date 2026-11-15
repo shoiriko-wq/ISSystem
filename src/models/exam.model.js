@@ -1278,9 +1278,10 @@ export const examModel = {
   // ==========================================================
   async listProctorAssignments(examMasterId) {
     const res = await query(
-      `SELECT pa.*, u.name AS proctor_name
+      `SELECT pa.*, u.name AS proctor_name, p.name AS patrol_teacher_name
        FROM exam_proctor_assignments pa
        LEFT JOIN users u ON pa.proctor_teacher_id = u.id
+       LEFT JOIN users p ON pa.patrol_teacher_id = p.id
        WHERE pa.exam_master_id = ?
        ORDER BY pa.day_number ASC, pa.slot_number ASC, pa.grade ASC`,
       [examMasterId]
@@ -1305,8 +1306,9 @@ export const examModel = {
       const res = await query(
         `INSERT INTO exam_proctor_assignments
           (exam_master_id, day_number, slot_number, grade, class_id, subject_name, proctor_teacher_id,
-           setter_teacher_id, setter_teacher_name, room_name, notes, updated_by, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+           patrol_teacher_id, patrol_teacher_name,
+           setter_teacher_id, setter_teacher_name, room_name, room_type, notes, updated_by, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
          RETURNING *`,
         [
           examMasterId,
@@ -1316,9 +1318,12 @@ export const examModel = {
           r.class_id,
           r.subject_name || null,
           r.proctor_teacher_id || null,
+          r.patrol_teacher_id || null,
+          r.patrol_teacher_name || r.patrol_name || null,
           r.setter_teacher_id || null,
           r.setter_teacher_name || null,
           r.room_name || null,
+          r.room_type || 'CLASS',
           r.notes || null,
           updatedBy,
         ]

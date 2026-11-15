@@ -1,0 +1,12 @@
+import { query, pool } from './config/database.js';
+const p = await query(`SELECT grade, subject_name, setter_teacher_id, patrol_teacher_id, duration_slots FROM exam_subject_plan WHERE exam_master_id = 'e2e-exam' ORDER BY grade, subject_name`, []);
+console.log('PLAN', p.rows.length, JSON.stringify(p.rows.slice(0,4)));
+const d = await query(`SELECT grade, subject_name, setter_teacher_id, patrol_teacher_id FROM exam_subject_decisions WHERE exam_master_id = 'e2e-exam'`, []);
+console.log('DECISIONS', d.rows.length, JSON.stringify(d.rows.slice(0,4)));
+const s = await query(`SELECT grade, class_id, subject_name, day_number, slot_number FROM exam_slots WHERE exam_master_id = 'e2e-exam' ORDER BY grade, day_number, slot_number`, []);
+console.log('SLOTS', s.rows.length, JSON.stringify(s.rows.slice(0,4)));
+const pa = await query(`SELECT grade, class_id, day_number, slot_number, proctor_teacher_id, patrol_teacher_id FROM exam_proctor_assignments WHERE exam_master_id = 'e2e-exam' AND class_id LIKE 'e2e-cls-%' ORDER BY grade, day_number, slot_number`, []);
+console.log('E2E PROCTORS', pa.rows.length, JSON.stringify(pa.rows.slice(0,4)));
+const cl = await query(`SELECT id, grade, name FROM classes ORDER BY id`, []);
+console.log('CLASSES', cl.rows.length, JSON.stringify(cl.rows.slice(0,6)));
+await pool.end();

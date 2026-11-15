@@ -252,6 +252,8 @@ ALTER TABLE resources ADD COLUMN IF NOT EXISTS sort_order INTEGER;
 -- 8. 施設・備品予約記録 (reservations)
 CREATE TABLE IF NOT EXISTS reservations (
   id TEXT PRIMARY KEY,
+
+
   resource_id TEXT NOT NULL,
   facility_id TEXT,
   user_id TEXT,
@@ -1033,6 +1035,17 @@ ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS decision_status TEXT NOT 
 ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS surveyed_by TEXT;
 ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS surveyed_at TIMESTAMP;
 ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS confirmed_by TEXT;
+ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMP;
+CREATE INDEX IF NOT EXISTS idx_subject_plan_decision ON exam_subject_plan(exam_master_id, decision_status);
+
+-- 19g. 監督表の試験責任者（巡回担当）列。users.id (TEXT) と比較するため TEXT で統一
+ALTER TABLE exam_proctor_assignments ADD COLUMN IF NOT EXISTS patrol_teacher_id TEXT;
+ALTER TABLE exam_proctor_assignments ADD COLUMN IF NOT EXISTS patrol_teacher_name TEXT;
+ALTER TABLE exam_proctor_assignments ALTER COLUMN patrol_teacher_id TYPE TEXT;
+ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS patrol_teacher_name TEXT;
+CREATE INDEX IF NOT EXISTS idx_proctor_patrol ON exam_proctor_assignments (exam_master_id, patrol_teacher_id);
+CREATE INDEX IF NOT EXISTS idx_subject_plan_patrol ON exam_subject_plan (exam_master_id, patrol_teacher_id);
+
 ALTER TABLE exam_subject_plan ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMP;
 CREATE INDEX IF NOT EXISTS idx_subject_plan_decision ON exam_subject_plan(exam_master_id, decision_status);
 

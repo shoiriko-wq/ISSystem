@@ -1,0 +1,10 @@
+import { query, pool } from './config/database.js';
+const s = await query(`SELECT grade, class_id, subject_name, day_number, slot_number, duration_slots FROM exam_slots WHERE exam_master_id = 'e2e-exam' ORDER BY grade, day_number, slot_number`, []);
+console.log('SLOTS', s.rows.length, JSON.stringify(s.rows.slice(0,6)));
+const r = await query(`SELECT grade, class_id, subject_name, day_number, slot_number, room_name, duration_slots FROM exam_room_assignments WHERE exam_master_id = 'e2e-exam' ORDER BY grade, day_number, slot_number`, []);
+console.log('ROOMS', r.rows.length, JSON.stringify(r.rows.slice(0,6)));
+const p = await query(`SELECT grade, class_id, day_number, slot_number, proctor_teacher_id, patrol_teacher_id, subject_name FROM exam_proctor_assignments WHERE exam_master_id = 'e2e-exam' ORDER BY grade, day_number, slot_number`, []);
+console.log('PROCTORS', p.rows.length, JSON.stringify(p.rows.slice(0,6)));
+const cls = await query(`SELECT id, grade, name FROM classes WHERE id LIKE 'e2e-cls-%'`, []);
+console.log('CLASSES', JSON.stringify(cls.rows));
+await pool.end();

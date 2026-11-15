@@ -1,0 +1,10 @@
+import { examService } from './src/services/exam.service.js';
+import { examModel } from './src/models/exam.model.js';
+import { pool } from './config/database.js';
+const KYOMU = { id: 'et-kyomu', role: 'KYOMU' };
+const p = await examService.solveProctorBoard('e2e-exam', KYOMU);
+console.log('PHASE', p.saved, p.unassigned);
+const rows = await examModel.listProctorAssignments('e2e-exam');
+console.log('TOTAL', rows.length, 'noPatrol', rows.filter(r=>!r.patrol_teacher_id).length);
+console.log(JSON.stringify(rows.slice(0,2).map(r=>[r.grade,r.class_id,r.day_number,r.slot_number,r.subject_name,r.proctor_teacher_id,r.patrol_teacher_id])));
+await pool.end();

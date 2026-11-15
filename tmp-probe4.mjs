@@ -1,0 +1,12 @@
+import { query, pool } from './config/database.js';
+const c = await query(`SELECT grade, count(*) n FROM exam_proctor_assignments WHERE exam_master_id = 'e2e-exam' GROUP BY grade ORDER BY grade`, []);
+console.log('PROCTORS', JSON.stringify(c.rows));
+const s = await query(`SELECT grade, count(*) n FROM exam_slots WHERE exam_master_id = 'e2e-exam' GROUP BY grade ORDER BY grade`, []);
+console.log('SLOTS', JSON.stringify(s.rows));
+const r = await query(`SELECT grade, count(*) n FROM exam_room_assignments WHERE exam_master_id = 'e2e-exam' GROUP BY grade ORDER BY grade`, []);
+console.log('ROOMS', JSON.stringify(r.rows));
+const cl = await query(`SELECT grade, count(*) n FROM classes GROUP BY grade ORDER BY grade`, []);
+console.log('CLASSES', JSON.stringify(cl.rows));
+const ra = await query(`SELECT grade, class_id, subject_name, room_name, day_number, slot_number FROM exam_room_assignments WHERE exam_master_id='e2e-exam' ORDER BY grade, day_number, slot_number LIMIT 6`, []);
+console.log('ROOMROWS', JSON.stringify(ra.rows));
+await pool.end();

@@ -1,0 +1,10 @@
+import { examService } from './src/services/exam.service.js';
+import { solveProctor } from './src/utils/exam-proctor-solver.js';
+import { pool } from './config/database.js';
+const KYOMU = { id: 'et-kyomu', role: 'KYOMU' };
+const built = await examService.buildProctorInput('e2e-exam', KYOMU);
+const res = solveProctor(built.input);
+const un = res.assignments.filter(a=>!a.proctor_teacher_id);
+console.log('UNASSIGNED', JSON.stringify(un.map(a=>[a.grade,a.class_id,a.day,a.slot,a.subject_name,a.room_name,a.kind])));
+console.log('DIAG', JSON.stringify((res.diagnostics||[]).map(d=>[d.code,d.grade,d.day,d.slot,d.subject_name,d.level])));
+await pool.end();

@@ -1,0 +1,17 @@
+import { examService } from './src/services/exam.service.js';
+import { query, pool } from './config/database.js';
+const KYOMU = { id: 'et-kyomu', role: 'KYOMU' };
+const built = await examService.buildProctorInput('e2e-exam', KYOMU);
+const byGrade = {};
+for (const t of built.input.timetable) byGrade[t.grade] = (byGrade[t.grade]||0)+1;
+console.log('TIMETABLE', built.input.timetable.length, JSON.stringify(byGrade));
+const cb = {};
+for (const c of built.input.cells) cb[c.grade] = (cb[c.grade]||0)+1;
+console.log('CELLS', built.input.cells.length, JSON.stringify(cb));
+const res = await examService.runPhase('e2e-exam', 'proctor', KYOMU);
+const pg = {};
+for (const r of res.plan) pg[r.grade] = (pg[r.grade]||0)+1;
+console.log('PLAN', res.plan.length, JSON.stringify(pg), 'unassigned', res.unassigned.length);
+const db = await query(`SELECT grade, count(*) n FROM exam_proctor_assignments WHERE exam_master_id='e2e-exam' GROUP BY grade`, []);
+console.log('DB', JSON.stringify(db.rows));
+await pool.end();

@@ -1,0 +1,13 @@
+import { Client } from 'pg';
+import config from './config/default.js';
+const c = new Client(config.db);
+await c.connect();
+const cols = await c.query("SELECT table_name, column_name FROM information_schema.columns WHERE table_name IN ('exam_proctor_assignments','exam_subject_plan') AND column_name LIKE '%patrol%' ORDER BY table_name, column_name");
+console.log('PATROL_COLS:', JSON.stringify(cols.rows));
+const users = await c.query('SELECT role, COUNT(*)::int AS n FROM users GROUP BY role ORDER BY role');
+console.log('USERS:', JSON.stringify(users.rows));
+const ex = await c.query('SELECT id, name, status, proctor_phase FROM exam_masters ORDER BY id');
+console.log('EXAMS:', JSON.stringify(ex.rows));
+const sp = await c.query("SELECT COUNT(*)::int AS n FROM exam_subject_plan WHERE patrol_teacher_id IS NOT NULL");
+console.log('PLAN_PATROL:', JSON.stringify(sp.rows));
+await c.end();

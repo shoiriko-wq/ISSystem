@@ -121,6 +121,8 @@ function planToUnits(plan) {
     scope: p.scope || 'GRADE',
     setter_teacher_id: p.setter_teacher_id || null,
     setter_teacher_name: p.setter_teacher_name || null,
+    patrol_teacher_id: p.patrol_teacher_id || null,
+    patrol_teacher_name: p.patrol_teacher_name || null,
     duration_slots: Number(p.duration_slots) || 1,
     fixed_slot: p.fixed_slot ? Number(p.fixed_slot) : null,
     shared_slot: !!p.shared_slot,
@@ -154,7 +156,7 @@ function slotsToTimetable(slots) {
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({
-      unit_id: s.unit_id || s.subject_id,
+      unit_id: s.unit_id || s.subject_id || `${Number(s.grade)}|${String(s.subject_name || '').trim()}`,
       grade: Number(s.grade),
       day: Number(s.day_number),
       slot: Number(s.slot_number),
@@ -200,7 +202,7 @@ function normalizeClassIds(rows, planById) {
  * 実施科目プランが class_ids を持つ場合はそのクラスだけ、未指定（学年プラン）はその学年の全クラスへ展開する。
  * 旧データの exam_slots が学年キー（G{grade} → 最初のクラス）で登録されている場合も学年全体へ展開する。
  */
-function slotsToClassTimetable(slots, classesByGrade, classById, planById) {
+function slotsToClassTimetable(slots, classesByGrade, classById, planById, planBySubject) {
   const out = [];
   const seen = new Set();
   for (const s of slots || []) {
@@ -208,20 +210,28 @@ function slotsToClassTimetable(slots, classesByGrade, classById, planById) {
     const grade = Number(s.grade) || 0;
     const day = Number(s.day_number);
     const slot = Number(s.slot_number);
-    const plan = planById.get(String(s.unit_id || s.subject_id)) || null;
+    // 計画行は unit_id で引く。unit_id が無いスロット（計画から自動生成された行）は grade+科目名で引く
+    const plan = planById.get(String(s.unit_id || s.subject_id))
+      || planBySubject?.get(`${grade}|${String(s.subject_name || '').trim()}`)
+      || null;
     const planIds = plan?.class_ids?.length ? plan.class_ids.map(String) : null;
     const slotCid = s.class_id ? String(s.class_id) : null;
     const gradeClasses = classesByGrade.get(grade) || [];
     let targets = planIds ? gradeClasses.filter((c) => planIds.includes(String(c.id))) : gradeClasses;
-    if (planIds && slotCid) targets = targets.filter((c) => String(c.id) === slotCid);
-    if (!targets.length && slotCid && classById.has(slotCid)) targets = [classById.get(slotCid)];
+    if (planIds && slotCid) {
+      // スロットのクラスIDが計画対象クラスに無い（旧データの学年代表クラス等）ときは計画対象を維持する
+      const bySlot = targets.filter((c) => String(c.id) === slotCid);
+      if (bySlot.length) targets = bySlot;
+    }
+    if (!targets.length && slotCid && classById.has(slotCid) && !planIds) targets = [classById.get(slotCid)];
     if (!targets.length) targets = [{ id: slotCid, name: null, grade }];
     for (const c of targets) {
       const key = `${c.id ?? grade}#${day}#${slot}`;
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({
-        unit_id: s.unit_id || s.subject_id,
+        // plan row id が存在しないスロット（自動生成行）は "grade|subject" キーで計画行を参照する
+        unit_id: s.unit_id || s.subject_id || `${grade}|${String(s.subject_name || '').trim()}`,
         grade,
         day,
         slot,
@@ -2388,7 +2398,12 @@ export const examService = {
     const slots = ctx.examSlots;
     const plan = await conductSubjects(examMasterId);
     const units = planToUnits(plan);
-    const unitsById = new Map(units.map((u) => [u.id, u]));
+    const unitsById = new Map();
+    for (const u of units) {
+      unitsById.set(u.id, u);
+      // 特別教室セルやソルバー参照は "grade|subject" 形式の unit_id も使うため両方のキーで登録する
+      unitsById.set(`${u.grade}|${u.subject_name}`, u);
+    }
 
     const rooms = await examModel.listRooms(examMasterId);
     const roomConfig = {
@@ -2468,8 +2483,9 @@ export const examService = {
     const classesByGrade = groupClassesByGrade(classes);
     const classById = new Map(classes.map((c) => [String(c.id), c]));
     const planById = new Map(plan.map((p) => [String(p.id), p]));
+    const planBySubject = new Map(plan.map((p) => [`${Number(p.grade)}|${String(p.subject_name || '').trim()}`, p]));
 
-    const timetable = slotsToClassTimetable(slots, classesByGrade, classById, planById).map((t) => ({
+    const timetable = slotsToClassTimetable(slots, classesByGrade, classById, planById, planBySubject).map((t) => ({
       unit_id: t.unit_id,
       grade: t.grade,
       day: t.day,
@@ -2549,19 +2565,24 @@ export const examService = {
     const result = solveProctor(built.input);
 
     const rows = result.assignments.map((a) => {
-      const unit = unitsById.get(a.unit_id) || {};
+      // unit_id は plan row id / "grade|subject" の両形式で登録されている。ソルバー由来の unit_id が無かった場合は学年+科目で引く
+      const unit = unitsById.get(a.unit_id) ?? unitsById.get(`${a.grade}|${a.subject_name}`) ?? {};
       const isSpecial = a.kind === 'SPECIAL';
+      // 特別教室コマでもクラスIDは元のクラスを保持する（class_id は classes 外部キー。教室名は room_name に保持）
       const classKey = a.class_id ?? `G${a.grade}`;
       return {
         grade: a.grade,
-        class_id: isSpecial ? roomNameByType.get(a.room_type) || a.room_type : classKey,
+        class_id: classKey,
         day_number: a.day,
         slot_number: a.slot,
         subject_name: a.subject_name,
         proctor_teacher_id: a.proctor_teacher_id,
+        patrol_teacher_id: unit.patrol_teacher_id || a.patrol_teacher_id || null,
+        patrol_teacher_name: unit.patrol_teacher_name || a.patrol_name || null,
         setter_teacher_id: unit.setter_teacher_id || null,
         setter_teacher_name: unit.setter_teacher_name || null,
-        room_name: isSpecial ? roomNameByType.get(a.room_type) || a.room_type : roomLookup(a.class_id, a.grade, a.day, a.slot),
+        room_name: roomLookup(a.class_id, a.grade, a.day, a.slot) ?? (isSpecial ? roomNameByType.get(a.room_type) || a.room_type : null),
+        room_type: built.roomTypeByName.get(roomLookup(a.class_id, a.grade, a.day, a.slot) ?? '') ?? (isSpecial ? a.room_type : 'CLASS'),
         notes: a.proctor_teacher_id ? null : '未割当',
       };
     });
@@ -2592,8 +2613,11 @@ export const examService = {
         room_type: built.roomTypeByName.get(r.room_name) ?? null,
         proctor_teacher_id: r.proctor_teacher_id,
         proctor_name: r.proctor_name,
+        patrol_teacher_id: r.patrol_teacher_id ?? null,
+        patrol_name: r.patrol_teacher_name ?? null,
         setter_teacher_id: r.setter_teacher_id,
         setter_teacher_name: r.setter_teacher_name,
+        creator_name: r.setter_teacher_name,
         is_mine: String(r.proctor_teacher_id) === String(user.id),
         notes: r.notes,
       };
@@ -2602,11 +2626,27 @@ export const examService = {
     const diagnostics = validateProctor(built.input, rows);
     const hard = diagnostics.filter((d) => d.level === 'HARD');
 
-    const loads = new Map();
+    // 負荷内訳: 監督=1コマ、作成者=1単位（同一科目は日単位で合算）、巡回者=負荷0
+    const proctorLoad = new Map();
+    const creatorUnits = new Set();
+    const patrolCount = new Map();
     for (const r of rows) {
-      if (!r.proctor_teacher_id) continue;
-      loads.set(r.proctor_teacher_id, (loads.get(r.proctor_teacher_id) || 0) + 1);
+      if (r.proctor_teacher_id) proctorLoad.set(r.proctor_teacher_id, (proctorLoad.get(r.proctor_teacher_id) || 0) + 1);
+      if (r.setter_teacher_id) creatorUnits.add(`${r.setter_teacher_id}|${r.subject_name}|${r.day_number}`);
+      if (r.patrol_teacher_id) patrolCount.set(r.patrol_teacher_id, (patrolCount.get(r.patrol_teacher_id) || 0) + 1);
     }
+    const creatorLoad = new Map();
+    for (const key of creatorUnits) {
+      const tid = String(key).split('|')[0];
+      creatorLoad.set(tid, (creatorLoad.get(tid) || 0) + 1);
+    }
+    const allIds = new Set([...proctorLoad.keys(), ...creatorLoad.keys(), ...patrolCount.keys()]);
+    const loads = [...allIds].map((id) => {
+      const proctor = proctorLoad.get(id) || 0;
+      const creator = creatorLoad.get(id) || 0;
+      const patrol = patrolCount.get(id) || 0;
+      return { id, load: proctor + creator, proctor, creator, patrol };
+    });
 
     return {
       master: built.master,
@@ -2623,7 +2663,7 @@ export const examService = {
       diagnostics,
       hard_count: hard.length,
       ok: hard.length === 0,
-      loads: [...loads.entries()].map(([id, load]) => ({ id, load })),
+      loads,
       is_kyomu: isKyomu(user),
     };
   },
@@ -2747,6 +2787,8 @@ export const examService = {
       slot_number: Number(r.slot_number),
       subject_name: r.subject_name || null,
       proctor_teacher_id: r.proctor_teacher_id || null,
+      patrol_teacher_id: r.patrol_teacher_id || null,
+      patrol_teacher_name: r.patrol_teacher_name || r.patrol_name || null,
       setter_teacher_id: r.setter_teacher_id || null,
       setter_teacher_name: r.setter_teacher_name || null,
       room_name: r.room_name || null,
@@ -2769,6 +2811,13 @@ export const examService = {
     const unassigned = list.filter((p) => !p.proctor_teacher_id).length;
     if (unassigned > 0) {
       const err = new Error(`未割当のコマが ${unassigned} 件あります。監督教員を割り当ててから公表してください。`);
+      err.statusCode = 400;
+      throw err;
+    }
+    // 役割モデル: 巡回者未設定のコマは公表できない（作成者は実施科目調査で必須）
+    const missingPatrol = list.filter((p) => !p.patrol_teacher_id).length;
+    if (missingPatrol > 0) {
+      const err = new Error(`巡回者未設定のコマが ${missingPatrol} 件あります。巡回者を設定してから公表してください。`);
       err.statusCode = 400;
       throw err;
     }

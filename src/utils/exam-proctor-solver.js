@@ -31,6 +31,11 @@ export const DEFAULT_PROCTOR_RULES = {
   considerations: [],
   kyomu_priority: 4,
   parttime_prefer: 6,
+  // 役割モデル（role_model）: 作成者(出題者)=1単位の負荷、巡回者=負荷0、監督=1コマの負荷。
+  // 作成者・巡回者は自科目の実施コマを占有するため、同一コマで監督を兼任できない。
+  role_model: true,
+  count_creator: true,
+  count_patrol: false,
   weights: { load: 40, fairness: 10, special_extra: 40, parttime_late: 6, unassigned: 1000, rotation_outside: 25, spread: 30 },
 };
 
@@ -74,6 +79,7 @@ export function buildProctorCells(input, ctx) {
         special_type: ctx.specialByRoom.get(rn) ?? null,
         solo: !!u.solo,
         setter: u.setter_teacher_id ?? null,
+        patrol: u.patrol_teacher_id ?? null,
       });
     }
   }
@@ -130,10 +136,53 @@ export function buildProctorPool(input, ctx) {
   return list;
 }
 
-/** 教員のそのコマの可否（出張・非常勤出勤可能・連続上限・日上限） */
+/** 作成者・巡回者の占有コマと負荷（作成者=1単位、巡回者=負荷0）を構築する */
+export function buildRoleSlots(input, ctx) {
+  const roleBusy = new Set();
+  const creatorUnits = new Set();
+  const patrolUnits = new Set();
+  const patrolSlots = new Map();
+  for (const t of input.timetable || []) {
+    const u = ctx.unitById.get(t.unit_id) || {};
+    const creator = u.setter_teacher_id ?? null;
+    const patrol = u.patrol_teacher_id ?? null;
+    if (!creator && !patrol) continue;
+    const day = Number(t.day);
+    const duration = Math.min(Number(t.duration_slots) || u.duration || 1, ctx.slots - t.slot + 1);
+    for (let s = t.slot; s < t.slot + duration; s++) {
+      if (creator) roleBusy.add(`${creator}|${day}|${s}`);
+      if (patrol) {
+        roleBusy.add(`${patrol}|${day}|${s}`);
+        const pk = `${patrol}|${day}|${s}`;
+        if (!patrolSlots.has(pk)) patrolSlots.set(pk, new Set());
+        patrolSlots.get(pk).add(t.unit_id);
+      }
+    }
+    if (creator) creatorUnits.add(`${creator}|${t.unit_id}|${day}`);
+    if (patrol) patrolUnits.add(`${patrol}|${t.unit_id}|${day}`);
+  }
+  ctx.roleBusy = roleBusy;
+  ctx.patrolSlots = patrolSlots;
+  ctx.creatorCount = new Map();
+  ctx.patrolCount = new Map();
+  for (const key of creatorUnits) {
+    const tid = String(key).split('|')[0];
+    ctx.creatorCount.set(tid, (ctx.creatorCount.get(tid) ?? 0) + 1);
+  }
+  for (const key of patrolUnits) {
+    const tid = String(key).split('|')[0];
+    ctx.patrolCount.set(tid, (ctx.patrolCount.get(tid) ?? 0) + 1);
+  }
+  ctx.effectiveLoad = (tid) =>
+    (ctx.totalLoad.get(tid) ?? 0) + (ctx.rules.count_creator ? (ctx.creatorCount.get(tid) ?? 0) : 0);
+}
+
+/** 教員のそのコマの可否（出張・非常勤出勤可能・連続上限・日上限・作成者/巡回者占有） */
 export function teacherCan(ctx, teacher, cell) {
   const key = `${teacher.id}|${cell.day}|${cell.slot}`;
   if (ctx.rules.trips_block && ctx.tripsSet.has(key)) return false;
+  // 作成者・巡回者は自科目の実施コマを占有する（同一コマでの監督兼任は HARD で不可）
+  if (ctx.rules.role_model && ctx.roleBusy?.has(key)) return false;
   if (teacher.parttime && ctx.rules.enforce_parttime_availability && !ctx.availabilitySet.has(key)) return false;
   const dayCount = ctx.dayCount.get(`${teacher.id}|${cell.day}`) ?? 0;
   const limit = teacher.daily_limit;
@@ -156,8 +205,8 @@ export function teacherCan(ctx, teacher, cell) {
     const rot = ctx.rules.special_room_rotation.find((r) => r.type === cell.special_type);
     if (rot && rot.teacher_ids.length && !rot.teacher_ids.includes(teacher.id)) return false;
   }
-  // ソロ科目は出題者本人が監督（HARD）
-  if (cell.solo && ctx.rules.solo_subject_self && teacher.id !== cell.setter) return false;
+  // ソロ科目は出題者本人が監督（HARD）。役割モデルでは出題者が自コマを占有するため本人監督は行わず第三者が監督する
+  if (cell.solo && ctx.rules.solo_subject_self && !ctx.rules.role_model && teacher.id !== cell.setter) return false;
   // 出題者本人は自科目の監督を避ける（HARD、ソロ科目を除く）
   if (!cell.solo && ctx.rules.avoid_setter && teacher.id === cell.setter) return false;
   return true;
@@ -166,7 +215,7 @@ export function teacherCan(ctx, teacher, cell) {
 /** 候補教員スコア（小さいほど良い）: 負荷・日負荷・教務・遅コマ避勤・特別教室余計割当 */
 export function proctorScore(ctx, teacher, cell) {
   const w = ctx.rules.weights;
-  const load = ctx.totalLoad.get(teacher.id) ?? 0;
+  const load = ctx.effectiveLoad ? ctx.effectiveLoad(teacher.id) : (ctx.totalLoad.get(teacher.id) ?? 0);
   const dayLoad = ctx.dayCount.get(`${teacher.id}|${cell.day}`) ?? 0;
   let score = w.load * load + w.fairness * dayLoad;
   if (teacher.kyomu) score -= ctx.rules.kyomu_priority;
@@ -176,6 +225,8 @@ export function proctorScore(ctx, teacher, cell) {
   }
   if (cell.special_type && ctx.specialLoad.get(teacher.id)) score += w.special_extra;
   if (cell.solo && teacher.id === cell.setter) score -= w.load * 2;
+  // 巡回者は自科目コマの監督に選まない（作成者は avoid_setter で回避済み）
+  if (ctx.rules.role_model && teacher.id === cell.patrol) score += w.unassigned;
   return score;
 }
 
@@ -222,7 +273,7 @@ export function totalScore(ctx) {
   for (const [key, tid] of ctx.assignment.entries()) {
     const cell = ctx.cellByKey.get(key);
     const teacher = ctx.teacherById.get(tid);
-    const load = ctx.totalLoad.get(tid) ?? 0;
+    const load = ctx.effectiveLoad ? ctx.effectiveLoad(tid) : (ctx.totalLoad.get(tid) ?? 0);
     score += w.load * load;
     score += w.fairness * (ctx.dayCount.get(`${tid}|${cell.day}`) ?? 0);
     if (teacher?.kyomu) score += ctx.rules.kyomu_priority;
@@ -240,13 +291,14 @@ export function totalScore(ctx) {
     if (rot && !rot.teacher_ids.includes(tid)) score += w.rotation_outside;
   }
 
-  // 全教員（未割当を含む）の負荷分布の広がり
-  const allLoads = ctx.pool.map((t) => ctx.totalLoad.get(t.id) ?? 0);
+  // 全教員（未割当を含む）の負荷分布の広がり（監督＋作成者単位の有効負荷）
+  const loadOf = (t) => (ctx.effectiveLoad ? ctx.effectiveLoad(t.id) : (ctx.totalLoad.get(t.id) ?? 0));
+  const allLoads = ctx.pool.map((t) => loadOf(t));
   if (allLoads.length > 1) score += w.spread * (Math.max(...allLoads) - Math.min(...allLoads));
 
   if (ctx.rules.balance_groups) {
-    const regular = [...ctx.pool].filter((t) => !t.parttime).reduce((s, t) => s + (ctx.totalLoad.get(t.id) ?? 0), 0);
-    const parttime = [...ctx.pool].filter((t) => t.parttime).reduce((s, t) => s + (ctx.totalLoad.get(t.id) ?? 0), 0);
+    const regular = [...ctx.pool].filter((t) => !t.parttime).reduce((s, t) => s + loadOf(t), 0);
+    const parttime = [...ctx.pool].filter((t) => t.parttime).reduce((s, t) => s + loadOf(t), 0);
     const perRegular = Math.max(1, [...ctx.pool].filter((t) => !t.parttime).length);
     const perParttime = Math.max(1, [...ctx.pool].filter((t) => t.parttime).length);
     score += w.fairness * Math.abs(Math.round((regular / perRegular) * 10 - (parttime / perParttime) * 10));
@@ -289,6 +341,7 @@ export function localSwap(ctx, maxPasses = 6) {
         if (!ca || !cb || !ta || !tb) continue;
         if (ta.id === tb.id) continue;
         if (ctx.rules.avoid_setter && (ta.id === cb.setter || tb.id === ca.setter)) continue;
+        if (ctx.rules.role_model && (ta.id === cb.patrol || tb.id === ca.patrol)) continue;
         if (ca.solo || cb.solo) continue;
         unassign(ctx, ca);
         unassign(ctx, cb);
@@ -325,6 +378,7 @@ export function localMove(ctx, maxPasses = 6) {
       for (const t of sortedByLoad) {
         if (t.id === cur) break; // 昇順なので現担当より重い教員は検討しない
         if (ctx.rules.avoid_setter && !cell.solo && t.id === cell.setter) continue;
+        if (ctx.rules.role_model && t.id === cell.patrol) continue;
         unassign(ctx, cell);
         let afterScore = Infinity;
         if (teacherCan(ctx, t, cell)) {
@@ -393,12 +447,13 @@ export function proctorDiagnostics(ctx, assignments) {
     }
   }
 
-  const loads = ctx.pool.map((t) => ctx.totalLoad.get(t.id) ?? 0);
+  const loadOf = (t) => (ctx.effectiveLoad ? ctx.effectiveLoad(t.id) : (ctx.totalLoad.get(t.id) ?? 0));
+  const loads = ctx.pool.map((t) => loadOf(t));
   if (loads.length > 1) {
     const mx = Math.max(...loads);
     const mn = Math.min(...loads);
     if (mx - mn > 3) {
-      out.push({ code: 'PROCTOR_IMBALANCE', level: 'INFO', msg: `監督コマ数の偏りが ${mn}〜${mx} コマあります（均等化を推奨）。` });
+      out.push({ code: 'PROCTOR_IMBALANCE', level: 'INFO', msg: `監督＋作成者負荷の偏りが ${mn}〜${mx} コマあります（巡回者は負荷0、均等化を推奨）。` });
     }
   }
 
@@ -409,12 +464,34 @@ export function proctorDiagnostics(ctx, assignments) {
   }
 
   for (const cell of ctx.cells) {
-    if (cell.solo && ctx.assignment.get(cell.key) && ctx.assignment.get(cell.key) !== cell.setter) {
+    const tid = ctx.assignment.get(cell.key);
+    if (!ctx.rules.role_model && cell.solo && tid && tid !== cell.setter) {
       out.push({ code: 'SOLO_NOT_SELF', level: 'SOFT', subject_name: cell.subject_name, day: cell.day, slot: cell.slot, msg: `ソロ科目「${cell.subject_name}」(${cell.day}日目${cell.slot}限) の監督が出題者本人ではありません。` });
     }
-    if (!cell.solo && ctx.rules.avoid_setter && ctx.assignment.get(cell.key) === cell.setter) {
-      out.push({ code: 'SETTER_CLASH', level: 'HARD', grade: cell.grade, class_id: cell.class_id ?? null, class_name: cell.class_name ?? null, day: cell.day, slot: cell.slot, subject_name: cell.subject_name, teacher_id: cell.setter, msg: `出題者「${ctx.teacherById.get(cell.setter)?.name ?? cell.setter}」本人が自科目「${cell.subject_name}」${where(cell)} の監督に割当られています。` });
+    if (!cell.solo && ctx.rules.avoid_setter && tid === cell.setter) {
+      out.push({ code: 'SETTER_CLASH', level: 'HARD', grade: cell.grade, class_id: cell.class_id ?? null, class_name: cell.class_name ?? null, day: cell.day, slot: cell.slot, subject_name: cell.subject_name, teacher_id: cell.setter, msg: `出題者（作成者）「${ctx.teacherById.get(cell.setter)?.name ?? cell.setter}」本人が自科目「${cell.subject_name}」${where(cell)} の監督に割当られています。` });
     }
+    // 巡回者は自科目コマの監督を兼任できない（HARD）
+    if (ctx.rules.role_model && tid && cell.patrol && tid === cell.patrol) {
+      out.push({ code: 'PATROL_CLASH', level: 'HARD', grade: cell.grade, class_id: cell.class_id ?? null, class_name: cell.class_name ?? null, day: cell.day, slot: cell.slot, subject_name: cell.subject_name, teacher_id: cell.patrol, msg: `巡回者「${ctx.teacherById.get(cell.patrol)?.name ?? cell.patrol}」本人が自科目「${cell.subject_name}」${where(cell)} の監督に割当られています。` });
+    }
+    // 同日同限で作成者・巡回者を務める教員の監督兼任（別科目との衝突、HARD）
+    if (ctx.rules.role_model && tid && tid !== cell.setter && tid !== cell.patrol && ctx.roleBusy?.has(`${tid}|${cell.day}|${cell.slot}`)) {
+      out.push({ code: 'PROCTOR_ROLE_CLASH', level: 'HARD', grade: cell.grade, class_id: cell.class_id ?? null, class_name: cell.class_name ?? null, day: cell.day, slot: cell.slot, subject_name: cell.subject_name, teacher_id: tid, msg: `${ctx.teacherById.get(tid)?.name ?? tid} 教員は${cell.day}日目${cell.slot}限で作成者・巡回者を務めており、監督を兼任できません。` });
+    }
+  }
+
+  // 巡回者の同一コマ二重占有（HARD）と役割内訳の集計
+  for (const [key, units] of (ctx.patrolSlots ?? new Map()).entries()) {
+    if (units.size > 1) {
+      const [tid, dayStr, slotStr] = String(key).split('|');
+      out.push({ code: 'PATROL_MULTI_CLASH', level: 'HARD', teacher_id: tid, day: Number(dayStr), slot: Number(slotStr), msg: `巡回者「${ctx.teacherById.get(tid)?.name ?? tid}」が${dayStr}日目${slotStr}限で複数科目の巡回を務めています（1コマ1巡回）。` });
+    }
+  }
+  if (ctx.rules.role_model) {
+    const creators = ctx.cells.filter((c) => c.setter).length;
+    const patrols = ctx.cells.filter((c) => c.patrol).length;
+    out.push({ code: 'PROCTOR_ROLE_MODEL', level: 'INFO', msg: `役割内訳: 作成者 ${creators}コマ（1単位負荷）・巡回者 ${patrols}コマ（負荷0）・監督 ${ctx.assignment.size}コマ。` });
   }
 
   return out;
@@ -435,14 +512,24 @@ export function solveProctor(input) {
     days,
     slots,
     rules,
-    unitById: new Map((input.units || []).map((u) => [u.id, {
-      id: u.id,
-      subject_name: String(u.subject_name || '').trim(),
-      grade: Number(u.grade) || 0,
-      duration: Number(u.duration_slots) || 1,
-      setter_teacher_id: u.setter_teacher_id || null,
-      solo: !!u.solo_subject,
-    }])),
+    unitById: (() => {
+      const m = new Map();
+      for (const u of input.units || []) {
+        const v = {
+          id: u.id,
+          subject_name: String(u.subject_name || '').trim(),
+          grade: Number(u.grade) || 0,
+          duration: Number(u.duration_slots) || 1,
+          setter_teacher_id: u.setter_teacher_id || null,
+          patrol_teacher_id: u.patrol_teacher_id || null,
+          solo: !!u.solo_subject,
+        };
+        m.set(u.id, v);
+        // 計画行IDを持たないスロット（自動生成行・特別教室セル）は "grade|subject" キーで参照する
+        m.set(`${v.grade}|${v.subject_name}`, v);
+      }
+      return m;
+    })(),
     specialByRoom: new Map((input.room_config?.special_rooms || []).map((s) => [s.room_name, String(s.type).toUpperCase()])),
     roomCell: new Map(
       (input.room_cells || []).flatMap((c) => {
@@ -472,6 +559,8 @@ export function solveProctor(input) {
   ctx.cellByKey = new Map(ctx.cells.map((c) => [c.key, c]));
   ctx.pool = buildProctorPool(input, ctx);
   ctx.teacherById = new Map(ctx.pool.map((t) => [t.id, t]));
+  // 作成者・巡回者の占有コマと負荷（巡回者=0、作成者=1単位）を先に計算する
+  buildRoleSlots(input, ctx);
 
   // 1. 特別教室ローテーション（SP1/SP2/PREP1）を先に確定。ローテーション内は循環割当で負荷を均分する
   const specialCellsByType = new Map();
@@ -519,8 +608,8 @@ export function solveProctor(input) {
     }
   }
 
-  // 2. ソロ科目は出題者本人
-  if (rules.solo_subject_self) {
+  // 2. ソロ科目は出題者本人（役割モデル時は作成者が自コマを占有するため第三者監督へ委ねる）
+  if (rules.solo_subject_self && !rules.role_model) {
     for (const cell of ctx.cells) {
       if (!cell.solo || ctx.assignment.has(cell.key)) continue;
       const self = ctx.teacherById.get(cell.setter);
@@ -540,10 +629,15 @@ export function solveProctor(input) {
       applyAssign(ctx, cell, cands[0]);
     }
   }
-  localSwap(ctx);
-  localMove(ctx);
-  localSwap(ctx);
-  localMove(ctx);
+  // 大規模ボード（コマ数>120）では 2コマスワップの探索コストが急増するため移動改善のみ行う
+  if (ctx.cells.length > 120) {
+    localMove(ctx, 3);
+  } else {
+    localSwap(ctx);
+    localMove(ctx);
+    localSwap(ctx);
+    localMove(ctx);
+  }
 
   const assignments = ctx.cells.map((c) => {
     const tid = ctx.assignment.get(c.key) ?? null;
@@ -556,6 +650,10 @@ export function solveProctor(input) {
       subject_name: c.subject_name,
       day: c.day,
       slot: c.slot,
+      creator_teacher_id: c.setter ?? null,
+      creator_name: ctx.teacherById.get(c.setter)?.name ?? null,
+      patrol_teacher_id: c.patrol ?? null,
+      patrol_name: ctx.teacherById.get(c.patrol)?.name ?? null,
       kind: c.solo ? 'SOLO' : c.special_type ? 'SPECIAL' : 'REGULAR',
       proctor_teacher_id: tid,
       room_type: c.special_type,
@@ -577,13 +675,23 @@ export function solveProctor(input) {
       unassigned,
       rotationSpecial: ctx.cells.filter((c) => c.special_type && ctx.assignment.has(c.key)).length,
       soloSelf: ctx.cells.filter((c) => c.solo && ctx.assignment.get(c.key) === c.setter).length,
-      loads: ctx.pool.map((t) => ({
-        id: t.id,
-        name: t.name,
-        parttime: t.parttime,
-        kyomu: t.kyomu,
-        load: ctx.totalLoad.get(t.id) ?? 0,
-      })),
+      creators: ctx.cells.filter((c) => c.setter).length,
+      patrols: ctx.cells.filter((c) => c.patrol).length,
+      loads: ctx.pool.map((t) => {
+        const proctor = ctx.totalLoad.get(t.id) ?? 0;
+        const creator = ctx.creatorCount.get(t.id) ?? 0;
+        const patrol = ctx.patrolCount.get(t.id) ?? 0;
+        return {
+          id: t.id,
+          name: t.name,
+          parttime: t.parttime,
+          kyomu: t.kyomu,
+          proctor,
+          creator,
+          patrol,
+          load: ctx.effectiveLoad(t.id),
+        };
+      }),
     },
   };
 }
@@ -627,6 +735,7 @@ export function validateProctor(input, rows) {
       special_type: r.room_type ? String(r.room_type).toUpperCase() : null,
       solo: soloSet.has(`${Number(r.grade)}|${String(r.subject_name)}`),
       setter: r.setter_teacher_id || null,
+      patrol: r.patrol_teacher_id || null,
     };
     ctx.cells.push(cell);
     ctx.cellByKey.set(cell.key, cell);
@@ -640,6 +749,43 @@ export function validateProctor(input, rows) {
     ctx.daySlotsSet.get(dk).add(cell.slot);
     if (cell.special_type) ctx.specialLoad.set(tid, (ctx.specialLoad.get(tid) ?? 0) + 1);
   }
+
+  // 役割負荷（作成者=1単位、巡回者=負荷0）と占有コマ（rows の setter/patrol から算出）
+  const roleBusy = new Set();
+  const patrolSlots = new Map();
+  const creatorUnits = new Set();
+  for (const r of rows || []) {
+    const day = Number(r.day_number);
+    const slot = Number(r.slot_number);
+    const unitKey = `${Number(r.grade)}|${String(r.subject_name)}`;
+    const creator = r.setter_teacher_id ? String(r.setter_teacher_id) : null;
+    const patrol = r.patrol_teacher_id ? String(r.patrol_teacher_id) : null;
+    const duration = Math.min(Number(r.duration_slots) || 1, slots - slot + 1);
+    for (let s = slot; s < slot + duration; s++) {
+      if (creator) roleBusy.add(`${creator}|${day}|${s}`);
+      if (patrol) {
+        roleBusy.add(`${patrol}|${day}|${s}`);
+        const pk = `${patrol}|${day}|${s}`;
+        if (!patrolSlots.has(pk)) patrolSlots.set(pk, new Set());
+        patrolSlots.get(pk).add(unitKey);
+      }
+    }
+    if (creator) creatorUnits.add(`${creator}|${unitKey}|${day}`);
+  }
+  ctx.roleBusy = roleBusy;
+  ctx.patrolSlots = patrolSlots;
+  ctx.creatorCount = new Map();
+  ctx.patrolCount = new Map();
+  for (const key of creatorUnits) {
+    const tid = String(key).split('|')[0];
+    ctx.creatorCount.set(tid, (ctx.creatorCount.get(tid) ?? 0) + 1);
+  }
+  for (const [key, set] of patrolSlots.entries()) {
+    const tid = String(key).split('|')[0];
+    ctx.patrolCount.set(tid, (ctx.patrolCount.get(tid) ?? 0) + set.size);
+  }
+  ctx.effectiveLoad = (tid) =>
+    (ctx.totalLoad.get(tid) ?? 0) + (ctx.rules.count_creator ? (ctx.creatorCount.get(tid) ?? 0) : 0);
 
   const out = proctorDiagnostics(ctx, ctx.cells.map((c) => ({
     grade: c.grade,

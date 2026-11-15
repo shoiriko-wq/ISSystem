@@ -29,7 +29,21 @@ const PARTTIMES = [
   { id: 'etp-2', name: 'E2E非常勤2', grade: null, is_parttime: true },
   { id: 'etp-3', name: 'E2E非常勤3', grade: null, is_parttime: true },
 ];
-const USERS = [...FULLTIME, ...PARTTIMES, { id: KYOMU.id, name: 'E2E教頭', grade: null, is_parttime: false }];
+// 教職員プール（出題者・巡回担当者用。staff_code T2026101〜T2026160 の60名）
+const FACULTY = [];
+for (let i = 1; i <= 60; i++) {
+  const codeNum = 100 + i;
+  FACULTY.push({
+    id: `fac-${codeNum}`,
+    staff_code: `T2026${codeNum}`,
+    name: `教員${codeNum}`,
+    grade: null,
+    is_parttime: false,
+  });
+}
+const FACULTY_NAME = new Map(FACULTY.map((f) => [f.id, f.name]));
+
+const USERS = [...FULLTIME, ...PARTTIMES, { id: KYOMU.id, name: 'E2E教頭', grade: null, is_parttime: false }, ...FACULTY];
 
 const SUBJECTS = [
   { name: '国語', scope: 'ALL', slots: 1 },
@@ -102,7 +116,7 @@ async function cleanup() {
   await query(`DELETE FROM exam_teacher_exemptions WHERE exam_master_id = ? OR teacher_id = ?`, [EXAM_ID, EXEMPTED]);
   await query(`DELETE FROM curriculum_subjects WHERE id LIKE 'e2e-csub-%'`, []);
   await query(`DELETE FROM classes WHERE id LIKE 'e2e-cls-%'`, []);
-  await query(`DELETE FROM users WHERE id LIKE 'et-%' OR id LIKE 'etp-%'`, []);
+  await query(`DELETE FROM users WHERE id LIKE 'et-%' OR id LIKE 'etp-%' OR id LIKE 'fac-%'`, []);
 }
 
 async function prep() {
@@ -112,7 +126,7 @@ async function prep() {
     await query(
       `INSERT INTO users (id, staff_code, name, password_hash, role, grade, is_parttime)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [u.id, u.id, u.name, hash, u.id === KYOMU.id ? 'KYOMU' : 'TEACHER', u.grade, u.is_parttime]
+      [u.id, u.staff_code || u.id, u.name, hash, u.id === KYOMU.id ? 'KYOMU' : 'TEACHER', u.grade, u.is_parttime]
     );
   }
 
@@ -127,12 +141,36 @@ async function prep() {
     created_by: KYOMU.id,
   }, KYOMU);
 
+  // --- クラス・コースマスタ（考査学年は1クラスずつ。教室名は既定名 1-1/2-1/3-1 を使用）---
+  // 計画行の class_ids が試験対象クラスを決定する（実データクラスは考査対象に含めない）
+  for (const g of GRADES) {
+    const cs = [];
+    for (let i = 1; i <= 1; i++) {
+      const c = await basicinfoModel.createClass({
+        id: `e2e-cls-${g}-${i}`,
+        grade: g,
+        name: `E2E${g}年${i}組`,
+        short_name: `E2E${g}${i}`,
+        updated_by: KYOMU.id,
+      });
+      cs.push(c);
+    }
+    CLASSES_BY_GRADE.set(g, cs);
+    ALL_CLASSES.push(...cs);
+    for (const c of cs) CLASS_ROOM.set(String(c.id), `${g}-1`);
+  }
+  totalsAfterClasses();
+
   // --- 科目調査 ---
   await examService.startSubjectSurvey(EXAM_ID, KYOMU);
   const plan = [];
+  let patrolIdx = 0;
   for (const g of GRADES) {
     const teachers = FULLTIME.filter((t) => t.grade === g);
+    const classIds = CLASSES_BY_GRADE.get(g).map((c) => String(c.id));
     SUBJECTS.forEach((s, i) => {
+      // 試験当日の試験責任者（巡回担当）：教職員プールから1単位=1名で割当
+      const patrol = FACULTY[patrolIdx++ % FACULTY.length];
       plan.push({
         exam_master_id: EXAM_ID,
         subject_name: s.name,
@@ -140,40 +178,22 @@ async function prep() {
         scope: s.scope,
         stream: null,
         setter_teacher_id: teachers[i % teachers.length].id,
+        patrol_teacher_id: patrol.id,
+        class_ids: classIds,
         duration_slots: s.slots,
         fixed_slot: s.fixed_slot || null,
         shared_slot: !!s.shared_slot,
         broadcast_slot: !!s.broadcast_slot,
         solo_subject: !!s.solo_subject,
         submit_status: 'SUBMITTED',
+        decision_status: 'DECIDED',
       });
     });
   }
   await examModel.bulkInsertSubjectPlan(EXAM_ID, plan, KYOMU.id);
   await examService.saveTimetableRules(EXAM_ID, { ...DEFAULT_TIMETABLE_RULES }, KYOMU);
-  // --- クラス・コースマスタ（考査学年の全クラス）---
-  for (const g of GRADES) {
-    const cs = await basicinfoModel.listClasses(g);
-    let extra = 0;
-    while (cs.length < 2) {
-      const c = await basicinfoModel.createClass({
-        id: `e2e-cls-${g}-${extra + 1}`,
-        grade: g,
-        name: `E2E${g}年${extra + 1}組`,
-        short_name: `E2E${g}${extra + 1}`,
-        updated_by: KYOMU.id,
-      });
-      cs.push(c);
-      extra++;
-    }
-    CLASSES_BY_GRADE.set(g, cs);
-    ALL_CLASSES.push(...cs);
-    for (const c of cs) CLASS_ROOM.set(String(c.id), `E2E-${c.id}教室`);
-  }
-  totalsAfterClasses();
 
-  // --- 教室マスタ（クラス毎の標準教室 + 特別教室は必要クラス数分）---
-  // 容量は実在学年の在籍数（getGradeStudents）を超過しないよう大きめに設定
+  // --- 教室マスタ（既定名のみ：クラス名教室 1-1/2-1/3-1 + 特別教室 227/312 + 予備 多目的）---
   const ROOMS = ALL_CLASSES.map((c) => ({
     name: CLASS_ROOM.get(String(c.id)),
     room_type: 'CLASS',
@@ -181,17 +201,15 @@ async function prep() {
     grades: [Number(c.grade)],
     is_alternate: false,
   }));
-  for (let i = 1; i <= CLASSES_BY_GRADE.get(2).length; i++) {
-    const n = `SP1-${i}`;
+  for (const n of ['227', '212']) {
     SP1_NAMES.add(n);
     ROOMS.push({ name: n, room_type: 'SP1', capacity: 400, grades: [], is_alternate: false });
   }
-  for (let i = 1; i <= CLASSES_BY_GRADE.get(3).length; i++) {
-    const n = `SP2-${i}`;
+  for (const n of ['312', '405']) {
     SP2_NAMES.add(n);
     ROOMS.push({ name: n, room_type: 'SP2', capacity: 400, grades: [], is_alternate: false });
   }
-  ROOMS.push({ name: 'PREP1', room_type: 'PREP1', capacity: 400, grades: [], is_alternate: false });
+  ROOMS.push({ name: '多目的', room_type: 'PREP1', capacity: 400, grades: [], is_alternate: false });
 
   await examService.saveRooms(EXAM_ID, ROOMS.map((r) => ({ ...r, exam_master_id: EXAM_ID })), KYOMU);
 
@@ -269,11 +287,12 @@ async function prep2() {
       { type: 'SP2', teacher_ids: SP2_ROT, pattern: 'ALL' },
     ],
     considerations: [{ teacher_id: 'et-103', max_slots_per_day: CONSIDERATION_LIMIT, reason: 'E2E配慮' }],
+    role_model: true,
     avoid_setter: true,
     solo_subject_self: true,
     kyomu_priority: 4,
     parttime_prefer: 1,
-    weights: { balance: 50, kyomu: 12, parttime: 25, consecutive: 20, special_balance: 18, outside_rotation: 30, no_candidate: 200 },
+    weights: { balance: 50, kyomu: 12, parttime: 25, consecutive: 20, special_balance: 18, outside_rotation: 30, no_candidate: 200, creator: 20, patrol: 5 },
   }, KYOMU);
 }
 
@@ -284,6 +303,10 @@ for (const p of PARTTIMES) {
   UNAVAILABLE.add(`${p.id}|2|6`);
 }
 const PARTTIME_IDS = new Set(PARTTIMES.map((p) => p.id));
+
+// 教室ルール（prep2 と同一）。room2 科目の期待教室種別を判定する
+const ROOM_RULES = { by_grade: { 2: 'SP1' }, by_subject: { '3|科学': 'SP2' } };
+const expectedRoomType = (g, subject) => ROOM_RULES.by_subject[`${Number(g)}|${subject}`] ?? ROOM_RULES.by_grade[Number(g)] ?? 'CLASS';
 
 async function main() {
   await prep();
@@ -296,6 +319,16 @@ async function main() {
   ok(plan.length === 21, `科目プラン 21件 (${plan.length})`);
   const scopeBySubject = new Map(plan.map((p) => [p.subject_name, p.scope]));
   const soloSubjects = new Set(plan.filter((p) => p.solo_subject).map((p) => p.subject_name));
+
+  // 基本情報マスタのクラス（実データクラスを含む学年全体）。スロット・監督行のクラスIDは学年所属のいずれか
+  const dbClasses = await basicinfoModel.listClasses();
+  const dbClassIdsByGrade = new Map();
+  for (const c of dbClasses) {
+    const g = Number(c.grade);
+    if (!dbClassIdsByGrade.has(g)) dbClassIdsByGrade.set(g, new Set());
+    dbClassIdsByGrade.get(g).add(String(c.id));
+  }
+  const gradeHasClass = (g, cid) => dbClassIdsByGrade.get(Number(g))?.has(String(cid)) === true;
 
   // 実施科目調査サマリ（実施教科数・必要コマ数・考査期間キャパティ）
   const summary = await examService.surveySummary(EXAM_ID, KYOMU);
@@ -328,7 +361,7 @@ async function main() {
     GRADES.every((g) => new Set(slots.filter((c) => c.grade === g).map((c) => String(c.class_id))).size === 1),
     'exam_slots 学年キー（時間割は学年単位）'
   );
-  ok(slots.every((c) => classIdsOfGrade(c.grade).has(String(c.class_id))), 'exam_slots クラスID整合');
+  ok(slots.every((c) => gradeHasClass(c.grade, c.class_id)), 'exam_slots クラスID整合（学年所属）');
 
   // H1: 1限目を埋める科目は全て全範囲
   let h1 = true;
@@ -346,9 +379,9 @@ async function main() {
 
   let h3 = true;
   for (const g of GRADES) {
-    const sciStart = slots.find((c) => c.grade === g && c.subject_name === '科学' && c.slot_number === 2);
-    const sciNext = slots.find((c) => c.grade === g && c.subject_name === '科学' && c.slot_number === 3);
-    if (!sciStart || Number(sciStart.duration_slots) !== 2 || !sciNext) h3 = false;
+    // 科学は1行(duration_slots=2)で2限開始・2コマ連続として保存される
+    const sci = slots.find((c) => c.grade === g && c.subject_name === '科学');
+    if (!sci || Number(sci.slot_number) !== 2 || Number(sci.duration_slots) !== 2) h3 = false;
   }
   ok(h3, 'H3 科学は2限開始・2コマ連続');
 
@@ -464,8 +497,8 @@ async function main() {
   ok(
     roomRows
       .filter((x) => !(x.grade === 2) && !(x.grade === 3 && x.subject_name === '科学'))
-      .every((x) => x.room_name === CLASS_ROOM.get(String(x.class_id))),
-    '通常コマはクラス標準教室'
+      .every((x) => x.room_name === `${x.grade}-1`),
+    '通常コマは学年標準教室（1-1/2-1/3-1）'
   );
 
   const pubR = await examService.publishRoomAssignments(EXAM_ID, KYOMU);
@@ -481,15 +514,18 @@ async function main() {
   const pHard = (p.diagnostics || []).filter((d) => d.level === 'HARD');
   ok(pHard.length === 0, `監督 HARD 0 (${pHard.map((d) => d.code).join(',')})`);
 
-  const proctors = await examModel.listProctorAssignments(EXAM_ID);
+  const proctorsAll = await examModel.listProctorAssignments(EXAM_ID);
+  const proctors = proctorsAll.filter((x) => String(x.class_id ?? '').startsWith('e2e-cls-'));
   ok(proctors.length === ROOM_TOTAL, `監督行 ${ROOM_TOTAL}件 (${proctors.length})`);
   ok(proctors.every((p) => classIdsOfGrade(p.grade).has(String(p.class_id))), '監督割当 クラスID整合');
   ok(proctors.every((p) => p.room_name), '監督行に教室割当（クラス別）');
   ok(proctors.filter((p) => p.room_name === CLASS_ROOM.get(String(p.class_id))).every((p) => p.room_type === 'CLASS'), '標準教室マッピング');
 
   ok(
-    proctors.filter((p) => p.subject_name === room2OfGrade(p.grade)).every((p) => p.room_type === 'SP1' || p.room_type === 'SP2' || p.room_type === 'PREP1'),
-    'room2科目は特別教室'
+    proctors
+      .filter((p) => p.subject_name === room2OfGrade(p.grade))
+      .every((p) => p.room_type === expectedRoomType(p.grade, p.subject_name)),
+    'room2科目は教室ルール通りの種別'
   );
 
   ok(
@@ -546,16 +582,64 @@ async function main() {
   ok(setterClash.length === 0, `出題者回避 (${setterClash.length})`);
 
   const soloRows = proctors.filter((x) => soloSubjects.has(x.subject_name));
-  ok(soloRows.length === ALL_CLASSES.length && soloRows.every((x) => x.proctor_teacher_id === x.setter_teacher_id), 'ソロ科目=本人監督');
+  ok(
+    soloRows.length === ALL_CLASSES.length && soloRows.every((x) => x.proctor_teacher_id !== x.setter_teacher_id),
+    'ソロ科目: 出題者が自コマを占有し監督は第三者（役割モデル）'
+  );
 
-  const loads = (p.stats?.loads || []).map((l) => l.load);
+  // 負換 = 監督コマ + 出題単位（巡回者=0）。E2E クラス分のみで均等さを測る（実データの他クラスは対象外）
+  const e2eLoad = new Map();
+  for (const x of proctors) {
+    if (x.proctor_teacher_id) e2eLoad.set(x.proctor_teacher_id, (e2eLoad.get(x.proctor_teacher_id) || 0) + 1);
+  }
+  for (const pp of plan) e2eLoad.set(pp.setter_teacher_id, (e2eLoad.get(pp.setter_teacher_id) || 0) + 1);
+  const loads = [...e2eLoad.values()];
   const range = Math.max(...loads) - Math.min(...loads);
-  const topLoads = (p.stats?.loads || []).sort((a, b) => b.load - a.load).slice(0, 4).map((l) => `${l.name}=${l.load}`);
+  const topLoads = [...e2eLoad.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([id, v]) => `${USERS.find((u) => u.id === id)?.name ?? id}=${v}`);
   ok(range <= 8, `負荷均等 幅${range} (top=${topLoads.join(',')} loads=${loads.sort((a, b) => b - a).join(',')})`);
+
+  // === Creator/Patroller ロジック（出題=1負換算・巡回=0負荷・同一コマ占有禁止） ===
+  const planByKey = new Map(plan.map((pp) => [`${pp.grade}|${pp.subject_name}`, pp]));
+  const noPatrol = proctors.filter((x) => !x.patrol_teacher_id);
+  ok(noPatrol.length === 0, `全監督行に巡回担当 (${noPatrol.length})`);
+  const patrolSelf = proctors.filter((x) => x.proctor_teacher_id === x.patrol_teacher_id);
+  ok(patrolSelf.length === 0, `巡回担当は同一コマの監督にならない (${patrolSelf.length})`);
+
+  // 試験当日の占有スロット（出題者=試験スロット全スパン / 巡回者=実施スロット）
+  const busySlots = new Map();
+  for (const s of slots) {
+    const pp = planByKey.get(`${s.grade}|${s.subject_name}`);
+    if (!pp) continue;
+    const span = Number(s.duration_slots || 1);
+    for (let k = 0; k < span; k++) {
+      const slot = Number(s.slot_number) + k;
+      busySlots.set(`${pp.setter_teacher_id}|${s.day_number}|${slot}`, 'creator');
+      busySlots.set(`${pp.patrol_teacher_id}|${s.day_number}|${slot}`, 'patrol');
+    }
+  }
+  const busyClash = proctors.filter(
+    (x) => !soloSubjects.has(x.subject_name) && busySlots.has(`${x.proctor_teacher_id}|${x.day_number}|${x.slot_number}`)
+  );
+  ok(busyClash.length === 0, `監督は出題/巡回コマと衝突しない (${busyClash.length})`);
+
+  // 負荷公式（ソルバー内訳）: load = 監督コマ + 出題単位（巡回者 patrol は負荷0）
+  const formulaMismatch = (p.stats?.loads || []).filter((l) => l.load !== (l.proctor ?? 0) + (l.creator ?? 0));
+  ok(formulaMismatch.length === 0, `負荷=監督+出題 一致 (不一致${formulaMismatch.length})`);
+
+  const patrolIds = new Set(plan.map((pp) => pp.patrol_teacher_id));
+  const patrolOnlyLoads = (p.stats?.loads || []).filter(
+    (l) => patrolIds.has(l.id) && (l.proctor ?? 0) === 0 && (l.creator ?? 0) === 0 && l.load !== 0
+  );
+  ok(
+    patrolIds.size === plan.length && patrolOnlyLoads.length === 0,
+    `巡回のみの教員は負荷0 (巡回${patrolIds.size}名 / 負荷0不一致${patrolOnlyLoads.length})`
+  );
 
   console.log('=== 6. 手動検証・公表 ===');
   const board = await examService.getProctorBoard(EXAM_ID, KYOMU);
-  const manualRows = board.cells.map((c) => ({
+  const manualRows = board.cells
+    .filter((c) => String(c.class_id ?? '').startsWith('e2e-cls-'))
+    .map((c) => ({
     grade: c.grade,
     class_id: c.class_id,
     class_name: c.class_name,
@@ -566,6 +650,7 @@ async function main() {
     room_type: c.room_type,
     proctor_teacher_id: c.proctor_teacher_id,
     setter_teacher_id: c.setter_teacher_id,
+    patrol_teacher_id: planByKey.get(`${c.grade}|${c.subject_name}`)?.patrol_teacher_id ?? null,
   }));
   ok(manualRows.length === ROOM_TOTAL, `board.cells ${ROOM_TOTAL} (${manualRows.length})`);
   const vOk = await examService.validateProctorRows(EXAM_ID, manualRows, KYOMU);
@@ -585,12 +670,43 @@ async function main() {
   const savedManual = await examService.saveProctorAssignments(EXAM_ID, manualRows, KYOMU);
   ok(savedManual.saved === ROOM_TOTAL, `手動保存 ${ROOM_TOTAL}件 (${savedManual.saved})`);
 
+  // 公表ゲート：巡回担当未設定の監督表は公開できない（実際のコマの巡回を1つ外して検証）
+  const gateCell = proctors[0];
+  await query(
+    `UPDATE exam_proctor_assignments SET patrol_teacher_id = NULL WHERE exam_master_id = ? AND day_number = ? AND slot_number = ? AND class_id = ?`,
+    [EXAM_ID, gateCell.day_number, gateCell.slot_number, gateCell.class_id]
+  );
+  let gateErr = null;
+  try {
+    await examService.publishProctor(EXAM_ID, KYOMU);
+  } catch (e) {
+    gateErr = e;
+  }
+  ok(gateErr && String(gateErr.message).includes('巡回'), `巡回未設定の公表を阻止 (${gateErr ? String(gateErr.message).slice(0, 34) : '通過した'})`);
+  await examService.saveProctorAssignments(EXAM_ID, manualRows, KYOMU); // 巡回担当を復元
+
+  // 表示チェック：出題者(Creator) / 監督(Proctor) / 巡回担当(Patroller) を日別・クラス別に出力
+  for (let d = 1; d <= DAYS; d++) {
+    const lines = [];
+    for (const cls of ALL_CLASSES) {
+      const cells = board.cells
+        .filter((c) => String(c.class_id) === String(cls.id) && c.day_number === d)
+        .sort((a, b) => a.slot_number - b.slot_number);
+      if (!cells.length) continue;
+      lines.push(
+        `  ${cls.name}: ` +
+          cells.map((c) => `${c.slot_number}限[${c.subject_name}] 出=${c.creator_name ?? '-'} 監=${c.proctor_name ?? '-'} 巡=${c.patrol_name ?? '-'}`).join('  ')
+      );
+    }
+    console.log(`--- ${d}日目\n${lines.join('\n')}`);
+  }
+
   const pubP = await examService.publishProctor(EXAM_ID, KYOMU);
   ok(pubP.proctor_phase === 'PUBLISHED', 'proctor_phase PUBLISHED');
 
   console.log('=== 7. 公表ビュー ===');
   const gradeById = new Map(USERS.map((u) => [u.id, u.grade]));
-  const busy = (p.stats?.loads || []).find((l) => l.load > 0 && !l.parttime && l.id.startsWith('et-') && l.id !== 'et-kyomu');
+  const busy = (p.stats?.loads || []).find((l) => (l.proctor ?? 0) > 0 && !l.parttime && l.id.startsWith('et-') && l.id !== 'et-kyomu');
   const viewUser = { id: busy.id, grade: gradeById.get(busy.id), role: 'TEACHER' };
   const view = await examService.getPublishedView(EXAM_ID, viewUser);
   ok(view.master.id === EXAM_ID, 'view master');
@@ -599,7 +715,8 @@ async function main() {
     `view timetable 7件 学年${viewUser.grade} (${view.timetable.length})`
   );
   ok(view.rooms.length === 8, `view rooms 8 (${view.rooms.length})`);
-  ok(view.my_proctor.length === busy.load, `view my_proctor ${busy.load} (${view.my_proctor.length})`);
+  // 自分の監督コマ数は stats.proctor（全クラス分）と一致。出題・巡回は負換に数えない
+  ok(view.my_proctor.length === busy.proctor, `view my_proctor ${busy.proctor} (${view.my_proctor.length})`);
 
   const viewKyomu = await examService.getPublishedView(EXAM_ID, KYOMU);
   ok(viewKyomu.timetable.length === 21, `教務view 全時間割 (${viewKyomu.timetable.length})`);
