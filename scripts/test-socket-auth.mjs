@@ -28,6 +28,10 @@ const ALLOWED_TYPES = ['seating', 'exam', 'schedule', 'facility', 'approval', 'b
 // ★ Node 側の通信は CA を明示する（AGENTS.md 第12条）。素の fetch は自己署名チェーンを弾く。
 const CA = [fs.readFileSync(path.join(ROOT, 'certs', 'issystem-ca.crt'))];
 
+// TLS セッションキャッシュ無効化（Node24+プライベートCAの握手不良対策 — scripts/tls-compat.mjs）
+import { disableTlsSessionCache } from './tls-compat.mjs';
+disableTlsSessionCache();
+
 /** CA を渡す API 呼び出し（fetch と同じ形の res.status / res.json() を返す） */
 function caFetch(url, opts = {}) {
   const u = new URL(url);
@@ -93,6 +97,7 @@ function tryConnect({ token, origin }) {
       reconnection: false,
       timeout: 6000,
       ca: CA, // ★ 自己署名チェーンを通す（CA を明示。NODE_EXTRA_CA_CERTS は使わない）
+      agentOptions: { maxCachedSessions: 0 }, // TLS セッションキャッシュ無効化（tls-compat.mjs と同じ対策）
     });
     const settle = (payload) => {
       clearTimeout(timer);

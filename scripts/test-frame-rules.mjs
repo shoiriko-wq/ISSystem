@@ -176,9 +176,9 @@ const newsCards = await page.evaluate(() => {
   });
 });
 check('news share cards draw one line (title link + right date); long titles cut with … and full text stays in title',
-  newsCards.length === 3 && newsCards.every((c) => c.display === 'flex' && c.cardH <= 38 && c.linkH === 19
+  newsCards.length === 3 && newsCards.every((c) => c.display === 'flex' && c.cardH <= 42 && c.linkH === 24
     && c.nowrap === 'nowrap' && c.overflowX === 'hidden' && c.ellipsis === 'ellipsis'
-    && c.linkFont === '14px' && c.dateFont === '10px' && c.dateRightGap <= 12
+    && c.linkFont === '17.5px' && c.dateFont === '10px' && c.dateRightGap <= 12
     && !c.badge && !c.shareName && c.titleAttr === c.linkText)
   && newsCards[0].linkScrollW > newsCards[0].linkW,
   newsCards.map((c) => `cardH=${c.cardH} linkH=${c.linkH} link=${c.linkW}/${c.linkScrollW} ell=${c.ellipsis} gap=${c.dateRightGap}`).join(' | '));

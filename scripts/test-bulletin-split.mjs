@@ -58,6 +58,10 @@ const pressToday = async (pg) => {
 //   素の fetch は自己署名チェーンを SELF_SIGNED_CERT_IN_CHAIN で弾くため、
 //   node:https に certs/issystem-ca.crt を渡して叩く。NODE_EXTRA_CA_CERTS は使わない。
 const SECURE = BASE.startsWith('https:');
+// TLS セッションキャッシュ無効化（Node24+プライベートCAの握手不良対策 — scripts/tls-compat.mjs）
+import { disableTlsSessionCache } from './tls-compat.mjs';
+disableTlsSessionCache();
+
 const CA = SECURE ? [fs.readFileSync(path.join(ROOT, 'certs', 'issystem-ca.crt'))] : null;
 
 /** CA を渡す API 呼び出し（fetch と同じ形で status / text / json() を返す） */

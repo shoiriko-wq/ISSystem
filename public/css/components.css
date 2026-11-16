@@ -1152,7 +1152,8 @@
   white-space: nowrap;
 }
 
-.dash-news-unread-marker { flex: 0 0 auto; }
+/* 未読マーカは14px（17.5pxのリンク見出しより小さい＝第6条。root が 17.5px のため px で書く） */
+.dash-news-unread-marker { flex: 0 0 auto; font-size: 14px; line-height: 14px; }
 
 /* 「本日の連絡」のカードは button（施設予約 data-facility-open と同じ慣習）。中身 span は block 化 */
 button.dash-news-item {

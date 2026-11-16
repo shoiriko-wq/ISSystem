@@ -120,6 +120,10 @@ while ((m = segRe.exec(routes))) segments.add(m[2]);
 const smoke = read('scripts/api-smoke-test.js');
 segments.forEach((seg) => record(`API スモーク被覆 /api/${seg}`, new RegExp('/' + seg + '(?![A-Za-z0-9-])').test(smoke)));
 
+// TLS セッションキャッシュ無効化（Node24+プライベートCAの握手不良対策 — scripts/tls-compat.mjs）
+import { disableTlsSessionCache } from './tls-compat.mjs';
+disableTlsSessionCache();
+
 const ca = fs.readFileSync(path.join(ROOT, 'certs', 'issystem-ca.crt'));
 const health = await new Promise((resolve) => {
   const req = https.request({ host: '127.0.0.1', port: 3443, path: '/api/health', method: 'GET', ca: [ca], timeout: 4000 }, (res) => resolve(res.statusCode));

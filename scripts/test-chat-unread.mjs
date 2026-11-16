@@ -45,6 +45,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 //   素の fetch は自己署名チェーンを SELF_SIGNED_CERT_IN_CHAIN で弾くため、
 //   node:https に certs/issystem-ca.crt を渡して叩く。NODE_EXTRA_CA_CERTS は使わない。
 const SECURE = BASE.startsWith('https:');
+// TLS セッションキャッシュ無効化（Node24+プライベートCAの握手不良対策 — scripts/tls-compat.mjs）
+import { disableTlsSessionCache } from './tls-compat.mjs';
+disableTlsSessionCache();
+
 const CA = SECURE ? [fs.readFileSync(path.join(ROOT, 'certs', 'issystem-ca.crt'))] : null;
 
 /** CA を渡す API 呼び出し（fetch と同じ形の res.status / res.json() を返す） */
@@ -83,7 +87,7 @@ function caFetch(url, opts = {}) {
 }
 
 /** socket.io クライアント用: https のときは CA を添える */
-const ioOpts = (auth) => (SECURE ? { auth, ca: CA } : { auth });
+const ioOpts = (auth) => (SECURE ? { auth, ca: CA, agentOptions: { maxCachedSessions: 0 } } : { auth });
 
 const failures = [];
 const log = (name, val) => console.log(`${name} = ${JSON.stringify(val)}`);

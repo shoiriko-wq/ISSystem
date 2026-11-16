@@ -11,6 +11,8 @@
  *  7. HTTPS でも /ca ページが利用できる
  *  8. ブラウザは wss:// で接続し、アプリ内 API は https 相対で機能する
  *  9. 非HTTPポートでは plain ws 接続が確立しない
+ * 10. 通信環境（学校のネットワーク）: .env の HTTPS_PROXY / NODE_USE_ENV_PROXY=1 と
+ *     Node の --use-system-ca を print する。不足はコードの劣化ではなく人間の環境設定の警告として扱う
  *
  * 実行: npm run test:ui:https   （サーバー起動済み・CA信頼ストアは人間環境で一度だけ登録）
  *  options: UI_BASE=https://127.0.0.1:3443  INSECURE_BASE=http://127.0.0.1:<.env の PORT>
@@ -316,6 +318,32 @@ check('非HTTPポートでは plain ws/socket 接続が確立しない', plain.c
 check('ページに未捕获JSエラーがない', pageErrors.length === 0, { pageErrors: pageErrors.slice(0, 3) });
 
 await browser.close();
+
+// --- 10. 通信環境（学校のネットワークの環境変数プロキシと Node の OS CA 信頼） ---
+// 不足はコードの劣化ではなく人間の環境設定の問題として扱う（failures へ入れず警告として print する）。
+const readEnvKey = (key) => {
+  try {
+    const line = fs.readFileSync(path.join(ROOT, '.env'), 'utf8').split(/\r?\n/)
+      .find((l) => l.trim().startsWith(`${key}=`));
+    return line ? line.split('=').slice(1).join('=').trim() : null;
+  } catch {
+    return null;
+  }
+};
+const warnEnv = (name, ok, detail = null) => {
+  const d = detail === null ? '' : ` -> ${JSON.stringify(detail)}`;
+  console.log(`  ${ok ? 'PASS' : '警告(人間の環境設定)'} - ${name}${d}`);
+};
+const envProxy = readEnvKey('HTTPS_PROXY');
+const envUseProxy = readEnvKey('NODE_USE_ENV_PROXY');
+const sysCa = process.execArgv.some((a) => a.includes('use-system-ca'))
+  || (process.env.NODE_OPTIONS || '').includes('use-system-ca');
+warnEnv('.env の HTTPS_PROXY が学校の環境変数プロキシ（proxy2.hyogo-c.ed.jp）',
+  !!envProxy && envProxy.includes('proxy2.hyogo-c.ed.jp'), { HTTPS_PROXY: envProxy });
+warnEnv('.env の NODE_USE_ENV_PROXY=1（Node 12.4.2+ の内蔵 fetch が環境変数プロキシを使う）',
+  envUseProxy === '1', { NODE_USE_ENV_PROXY: envUseProxy });
+warnEnv('Node が --use-system-ca（OS 信頼ストア＝学校 CA の秘密CA）で起動している', sysCa,
+  { execArgv: process.execArgv, NODE_OPTIONS: process.env.NODE_OPTIONS || null });
 
 console.log('=== REPORT ===');
 console.log(

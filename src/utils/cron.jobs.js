@@ -77,6 +77,19 @@ export function initializeCronJobs(io = null) {
 
       console.log('[Cron News Refresher] 教育ニュースおよび天気予報のキャッシュ更新が完了しました。');
 
+      // ★ ピノックアップ教育ニュースのタイトル再取得（共有時にページが開けずドメイン名になった行だけ）
+      //   学校の環境は学校プロキシ＋node --use-system-ca が必須（titleFetchEnvStatus が環境の揃い方を出す）
+      const env = newsService.titleFetchEnvStatus();
+      if (!env.ready) {
+        console.warn('[Cron News Refresher] タイトル再取得をスキップ: プロキシ設定と --use-system-ca が揃っていない',
+          JSON.stringify(env));
+      } else {
+        const refill = await newsService.refreshSharedLinkTitles({ limit: 20 });
+        if (refill.checked > 0) {
+          console.log(`[Cron News Refresher] ドメイン名タイトルの再取得: 対象=${refill.checked} 更新=${refill.updated} 失敗=${refill.failed}`);
+        }
+      }
+
       // 接続中のクライアントへリアルタイムプッシュ通知
       if (io) {
         io.emit('weather:updated', {

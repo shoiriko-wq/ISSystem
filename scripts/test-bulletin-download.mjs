@@ -40,6 +40,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ★ Node 側の通信は CA を明示する（素の fetch は自己署名チェーンを弾く。NODE_EXTRA_CA_CERTS は使わない）
 const SECURE = BASE.startsWith('https:');
+// TLS セッションキャッシュ無効化（Node24+プライベートCAの握手不良対策 — scripts/tls-compat.mjs）
+import { disableTlsSessionCache } from './tls-compat.mjs';
+disableTlsSessionCache();
+
 const CA = SECURE ? [fs.readFileSync(path.join(ROOT, 'certs', 'issystem-ca.crt'))] : null;
 
 /** CA を渡す API 呼び出し（バイナリも扱う。status / headers / text / buffer を返す） */

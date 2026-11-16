@@ -27,6 +27,10 @@ const CHROME = process.env.CHROME_PATH || '/usr/bin/google-chrome';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Node 側の API 呼び出しは certs/issystem-ca.crt を ca に渡して https で叩く（NODE_EXTRA_CA_CERTS は npm script に埋めない）
+// TLS セッションキャッシュ無効化（Node24+プライベートCAの握手不良対策 — scripts/tls-compat.mjs）
+import { disableTlsSessionCache } from './tls-compat.mjs';
+disableTlsSessionCache();
+
 const CA = [readFileSync(new URL('../certs/issystem-ca.crt', import.meta.url), 'utf8')];
 const caFetch = (path, opts = {}) => new Promise((resolve, reject) => {
   const u = new URL(path, BASE);

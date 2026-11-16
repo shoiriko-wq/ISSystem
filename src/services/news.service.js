@@ -179,6 +179,21 @@ const SITE_NAME_SEPARATORS = /\s*[\u007c\uff5c\u2022\u30fb\uff73]\s*/;
 const TITLE_USER_AGENT = 'ISSystem/3.1 (ISSystem title fetch)';
 
 /**
+ * タイトル取得の通信環境をしみねる（学校の環境は学校プロキシが必須＝Node 既定の fetch はプロキシを越えない）
+ * .env の HTTPS_PROXY / HTTP_PROXY と NODE_USE_ENV_PROXY=1、起動フラグ --use-system-ca が揃って初めて
+ * 外部ページへ到達できる。揃っていないと全リクエストがタイムアウト・証明書検証失敗になり
+ * title_source が domain のままになる（cron が毎時再取得し、ログに理由を出す）。
+ * @returns {{proxy:string|null, envProxyOn:boolean, systemCa:boolean, ready:boolean}}
+ */
+function titleFetchEnvStatus() {
+  const proxy = process.env.HTTPS_PROXY || process.env.HTTP_PROXY
+    || process.env.https_proxy || process.env.http_proxy || null;
+  const envProxyOn = process.env.NODE_USE_ENV_PROXY === '1';
+  const systemCa = process.execArgv.some((a) => a.startsWith('--use-system-ca'));
+  return { proxy, envProxyOn, systemCa, ready: Boolean(proxy) && envProxyOn && systemCa };
+}
+
+/**
  * ヘッダー値が Latin-1 ByteString だけを載せられることを検証する（送信前のガード）
  * 日本語などの非Latin-1文字・127文字超の User-Agent は fetch が TypeError を投げるため、
  * 原因を名前付きエラーとしてここで出す（ログで読める）。
@@ -628,7 +643,49 @@ export const newsService = {
   },
 
   /**
-   * Cronジョブ用: キャッシュの強制定期更新
+   * Cronジョブ用: ドメイン名のままの共有リンクのページタイトルを再取得する
+   * 共有時にページが開けなかった行（title_source='domain'）だけを見て、
+   * <title> → <h1> → og:title が取れた行だけ title / title_source を更新する（URL・共有者・追加日は変えない）。
+   * @param {number} limit 1回に見る件数（既定 20）
+   * @returns {Promise<{checked:number,updated:number,failed:number}>}
+   */
+  async refreshSharedLinkTitles({ limit = 20 } = {}) {
+    const links = await newsLinkModel.listNewsLinksWithDomainTitle({ limit });
+    let checked = 0;
+    let updated = 0;
+    let failed = 0;
+
+    for (const link of links) {
+      checked += 1;
+      let pageTitle = null;
+      let fetchFail = null;
+      try {
+        const html = await fetchHtmlGuarded(link.url);
+        pageTitle = html ? extractPageTitle(html) : null;
+      } catch (e) {
+        fetchFail = e;
+      }
+
+      if (!pageTitle) {
+        failed += 1;
+        console.warn(`[News Title Refill] url=${link.url} タイトル取得失敗（ドメイン名維持）`,
+          fetchFail ? `${fetchFail.name}: ${fetchFail.message}` : 'ページにタイトルが見つからない');
+        continue;
+      }
+
+      await newsLinkModel.updateNewsLinkTitle({
+        id: link.id,
+        title: pageTitle.title,
+        titleSource: pageTitle.titleSource,
+      });
+      updated += 1;
+    }
+
+    return { checked, updated, failed };
+  },
+
+  /**
+   * キャッシュの強制定期更新
    */
   async refreshCache() {
     await this.getEducationNews(true);
@@ -676,5 +733,5 @@ export {
   isPrivateHost, normalizeLinkUrl, extractPageTitle,
   fitTitle, stripTags, pickTitleTag, pickH1Tag, pickOgTitleTag, dropSiteName, TITLE_SOURCES,
   TITLE_USER_AGENT, TITLE_MAX_CHARS, TITLE_MIN_CHARS, TITLE_FETCH_TIMEOUT_MS,
-  assertByteStringHeaders, fetchHtmlGuarded,
+  assertByteStringHeaders, fetchHtmlGuarded, titleFetchEnvStatus,
 };

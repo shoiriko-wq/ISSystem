@@ -92,6 +92,35 @@ export const newsLinkModel = {
   },
 
   /**
+   * ドメイン名のままの共有リンクを新しい順に並べる（cron のタイトル再取得用）
+   * title_source='domain' の行だけを対象にする（ページタイトルが取れた行は触らない）。
+   * @param {number} limit 1回の再取得で見る件数
+   * @returns {Promise<Array<object>>}
+   */
+  async listNewsLinksWithDomainTitle({ limit = 20 } = {}) {
+    await getDb();
+    const res = await query(
+      `SELECT * FROM news_links WHERE is_deleted = 0 AND title_source = 'domain' ORDER BY added_at ASC, id ASC LIMIT $1`,
+      [Math.max(1, Math.min(parseInt(limit, 10) || 20, 100))]
+    );
+    return res.rows.map(mapLink);
+  },
+
+  /**
+   * タイトルと出所だけを更新する（URL・共有者・追加日は変えない＝cron の再取得）
+   * @param {object} link { id, title, titleSource }
+   * @returns {Promise<object|null>} 更新後のレコード
+   */
+  async updateNewsLinkTitle({ id, title, titleSource }) {
+    await getDb();
+    const res = await query(
+      `UPDATE news_links SET title = $2, title_source = $3 WHERE id = $1 AND is_deleted = 0 RETURNING *`,
+      [id, title, titleSource]
+    );
+    return mapLink(res.rows[0]);
+  },
+
+  /**
    * 共有リンクを追加する（時刻は JST 壁時計で書く）
    * @param {object} link { url, title, domain, titleSource, addedBy, addedByName }
    * @returns {Promise<object>}

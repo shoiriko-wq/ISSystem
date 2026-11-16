@@ -11,6 +11,10 @@ import https from 'node:https';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = nodePath.resolve(nodePath.dirname(fileURLToPath(import.meta.url)), '..');
+// TLS セッションキャッシュ無効化（Node24+プライベートCAの握手不良対策 — scripts/tls-compat.mjs）
+import { disableTlsSessionCache } from './tls-compat.mjs';
+disableTlsSessionCache();
+
 const CA = [fs.readFileSync(nodePath.join(ROOT, 'certs', 'issystem-ca.crt'))];
 const BASE = process.env.API_BASE || 'https://127.0.0.1:3443/api';
 

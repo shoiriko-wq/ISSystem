@@ -14,6 +14,7 @@ import { seedInitialData } from '../scripts/seed-data.js';
 import { initializeSockets } from './sockets/socket.index.js';
 import { initializeCronJobs } from './utils/cron.jobs.js';
 import { loadTlsOptions, getCaInfo } from './services/ca.service.js';
+import { titleFetchEnvStatus } from './services/news.service.js';
 import { isSocketOriginAllowed } from './middlewares/socket.middleware.js';
 
 const SSL_PORT = config.ssl.httpsPort; // HTTPS / WSS（アプリ本体）
@@ -93,6 +94,14 @@ async function startServer() {
 
       // 6. 定期バックグラウンドタスク (Cron) の登録
       initializeCronJobs(io);
+
+      // 6b. ピノックアップ教育ニュースのタイトル取得環境（学校プロキシ＋OSの証明書）を起動時ログに出す
+      //     揃っていないと全fetchが失敗し title_source が domain のままになる（cron が毎時再取得する）
+      const titleEnv = titleFetchEnvStatus();
+      console.log(
+        `[News Title Fetch] プロキシ=${titleEnv.proxy ?? 'なし'} envProxy=${titleEnv.envProxyOn} systemCa=${titleEnv.systemCa} → ` +
+        (titleEnv.ready ? '外部ページへ到達可（<title>/<h1> を取る）' : 'タイトル取得不可（ドメイン名になる）')
+      );
 
       attachListenErrorHandler(secureServer, SSL_PORT, 'HTTPS/WSS');
       secureServer.listen(SSL_PORT, SSL_HOST, () => {

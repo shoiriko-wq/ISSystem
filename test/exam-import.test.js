@@ -35,9 +35,13 @@ const CLASS_CSV = [
   `1,${classNameA},CA,TRUE`,
 ].join('\n');
 
-const SUBJECT_CSV = [
+// 教科マスタ名は data/seed/subject_groups.csv（運用で作り替える実データ）に依存する。
+// 固定名をコードへ書かず、beforeAll で実在する教科名を1件読んで突合の正答に使う。
+let validSubjectGroup = '';
+
+const subjectCsv = () => [
   'name,subject_id,grade,sort_order,notes',
-  `${subjectNameA},コ,1,100,CSV科目`,
+  `${subjectNameA},${validSubjectGroup},1,100,CSV科目`,
   `${subjectNameB},ZZZ,1,101,CSV科目`,
 ].join('\n');
 
@@ -52,10 +56,10 @@ const DECISION_HEADERS = [
   'setter_teacher_id', 'patrol_teacher_id', 'duration_slots', 'duration_minutes', 'room_name', 'notes',
 ];
 
-const DECISION_CSV = [
+const decisionCsv = () => [
   DECISION_HEADERS.join(','),
-  `${decisionNameA},CS国,コ,1,OTHER,ALL,田中 先生,,1,60,${roomNameA},CSV決定`,
-  `${decisionNameB},CS国2,コ,2,OTHER,ALL,存在しない先生,,1,60,${roomNameA},CSV決定`,
+  `${decisionNameA},CS国,${validSubjectGroup},1,OTHER,ALL,田中 先生,,1,60,${roomNameA},CSV決定`,
+  `${decisionNameB},CS国2,${validSubjectGroup},2,OTHER,ALL,存在しない先生,,1,60,${roomNameA},CSV決定`,
 ].join('\n');
 
 let kyomuToken = '';
@@ -70,6 +74,10 @@ describe('考査 CSV 一括登録 API (/api/exam/import)', () => {
     kyomuToken = k.body.token;
     const t = await request(app).post('/api/auth/login').send(TEACHER);
     teacherToken = t.body.token;
+    // 教科マスタ（data/seed/subject_groups.csv 由来の実データ）から実在教科名を1件取る
+    const grp = await query('select name from subjects order by sort_order asc, name asc limit 1');
+    expect(grp.rows.length).toBeGreaterThan(0);
+    validSubjectGroup = String(grp.rows[0].name);
     const ex = await request(app)
       .post('/api/exam')
       .set('Authorization', bearer(kyomuToken))
@@ -193,7 +201,7 @@ describe('考査 CSV 一括登録 API (/api/exam/import)', () => {
     const subj = await request(app)
       .post('/api/exam/import/preview')
       .set('Authorization', bearer(kyomuToken))
-      .send({ section: 'subject', exam_master_id: examId, csvBase64: b64(SUBJECT_CSV) });
+      .send({ section: 'subject', exam_master_id: examId, csvBase64: b64(subjectCsv()) });
     expect(subj.statusCode).toBe(200);
     const s = dataOf(subj);
     expect(s.total_rows).toBe(2);
@@ -215,7 +223,7 @@ describe('考査 CSV 一括登録 API (/api/exam/import)', () => {
     const res = await request(app)
       .post('/api/exam/import/preview')
       .set('Authorization', bearer(kyomuToken))
-      .send({ section: 'decision', exam_master_id: examId, csvBase64: b64(DECISION_CSV) });
+      .send({ section: 'decision', exam_master_id: examId, csvBase64: b64(decisionCsv()) });
     expect(res.statusCode).toBe(200);
     const d = dataOf(res);
     expect(d.valid_rows).toBe(0);
@@ -226,7 +234,7 @@ describe('考査 CSV 一括登録 API (/api/exam/import)', () => {
     const missing = await request(app)
       .post('/api/exam/import/preview')
       .set('Authorization', bearer(kyomuToken))
-      .send({ section: 'decision', exam_master_id: 'no-such-exam', csvBase64: b64(DECISION_CSV) });
+      .send({ section: 'decision', exam_master_id: 'no-such-exam', csvBase64: b64(decisionCsv()) });
     expect(missing.statusCode).toBe(404);
     expect(missing.body.message).toContain('考査');
   });
@@ -295,12 +303,12 @@ describe('考査 CSV 一括登録 API (/api/exam/import)', () => {
     const subj = await request(app)
       .post('/api/exam/import/commit')
       .set('Authorization', bearer(kyomuToken))
-      .send({ section: 'subject', exam_master_id: examId, csvBase64: b64(SUBJECT_CSV), rows: [2] });
+      .send({ section: 'subject', exam_master_id: examId, csvBase64: b64(subjectCsv()), rows: [2] });
     expect(subj.statusCode).toBe(201);
     expect(dataOf(subj).registered_count).toBe(1);
 
     const subjDb = await query('select name, subject_id from curriculum_subjects where name = $1', [subjectNameA]);
-    expect(subjDb.rows[0].subject_id).toBe('コ');
+    expect(subjDb.rows[0].subject_id).toBe(validSubjectGroup);
 
     const room = await request(app)
       .post('/api/exam/import/commit')
@@ -316,7 +324,7 @@ describe('考査 CSV 一括登録 API (/api/exam/import)', () => {
     const dpv = await request(app)
       .post('/api/exam/import/preview')
       .set('Authorization', bearer(kyomuToken))
-      .send({ section: 'decision', exam_master_id: examId, csvBase64: b64(DECISION_CSV) });
+      .send({ section: 'decision', exam_master_id: examId, csvBase64: b64(decisionCsv()) });
     expect(dpv.statusCode).toBe(200);
     const d = dataOf(dpv);
     expect(d.valid_rows).toBe(1);
@@ -326,7 +334,7 @@ describe('考査 CSV 一括登録 API (/api/exam/import)', () => {
     const dec = await request(app)
       .post('/api/exam/import/commit')
       .set('Authorization', bearer(kyomuToken))
-      .send({ section: 'decision', exam_master_id: examId, csvBase64: b64(DECISION_CSV), rows: [2] });
+      .send({ section: 'decision', exam_master_id: examId, csvBase64: b64(decisionCsv()), rows: [2] });
     expect(dec.statusCode).toBe(201);
     expect(dataOf(dec).registered_count).toBe(1);
 
@@ -342,12 +350,12 @@ describe('考査 CSV 一括登録 API (/api/exam/import)', () => {
     const dpv2 = await request(app)
       .post('/api/exam/import/preview')
       .set('Authorization', bearer(kyomuToken))
-      .send({ section: 'decision', exam_master_id: examId, csvBase64: b64(DECISION_CSV) });
+      .send({ section: 'decision', exam_master_id: examId, csvBase64: b64(decisionCsv()) });
     expect(dataOf(dpv2).rows[0].action).toBe('update');
     const dec2 = await request(app)
       .post('/api/exam/import/commit')
       .set('Authorization', bearer(kyomuToken))
-      .send({ section: 'decision', exam_master_id: examId, csvBase64: b64(DECISION_CSV), rows: [2] });
+      .send({ section: 'decision', exam_master_id: examId, csvBase64: b64(decisionCsv()), rows: [2] });
     expect(dec2.statusCode).toBe(201);
     expect(dataOf(dec2).results[0].action).toBe('update');
     const decList = await request(app)
