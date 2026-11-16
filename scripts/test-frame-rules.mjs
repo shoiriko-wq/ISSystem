@@ -376,6 +376,34 @@ const approvalCursor = await page.evaluate(() => {
 });
 check('「承認依頼一覧へ」ボタンは指カーソルを維持する', approvalCursor === 'pointer', `cursor=${approvalCursor}`);
 
+// ---- R4c: ダッシュボード見出しは「アイコン→タイトル」（全セクション同一の作法） ----
+// 他タブ（掲示板・施設・メール・スケジュール・座席表・考査…）とダッシュボードの4セクションは
+// h3.font-bold.text-sm.text-main.flex.items-center.gap-2 の先頭に w-4 h-4 アイコンを置く。
+// 「年休等・出張」と「要対応タスク」は従来 justify-between でアイコンを右端へ置き、タイトルが先だった
+// （見出しが左揃えで揃わず、アイコン位置が他のセクションとずれていた）。
+const headingOrder = await page.evaluate(() => [...document.querySelectorAll('#view-dashboard h3')]
+  .map((h) => {
+    const cs = getComputedStyle(h);
+    const icon = h.querySelector('svg.lucide, i[data-lucide]');
+    const ir = icon ? icon.getBoundingClientRect() : null;
+    const hr = h.getBoundingClientRect();
+    return {
+      title: h.textContent.replace(/\s+/g, ' ').trim(),
+      iconFirst: !!icon && h.firstElementChild === icon,
+      iconW: ir ? parseFloat(ir.width) : -1,
+      iconH: ir ? parseFloat(ir.height) : -1,
+      iconInset: ir ? Math.round(ir.left - hr.left) : -1,
+      gap: parseFloat(cs.columnGap),
+      display: cs.display,
+      align: cs.alignItems,
+    };
+  }));
+check('ダッシュボード見出しはアイコンが先・タイトルが後（w-4=26.25px アイコン・gap 8.75px・見出しの左端にアイコン）',
+  headingOrder.length === 6 && headingOrder.every((h) => h.iconFirst && h.display === 'flex' && h.align === 'center' &&
+    Math.abs(h.iconW - 26.25) < 0.6 && Math.abs(h.iconH - 26.25) < 0.6 && Math.abs(h.gap - 8.75) < 0.6 && h.iconInset >= 0 &&
+    h.title.length > 0),
+  headingOrder.map((h) => `${h.title} iconFirst=${h.iconFirst} icon=${h.iconW}x${h.iconH} inset=${h.iconInset} gap=${h.gap}`).join(' | '));
+
 // ---- R4: ダッシュボード 4セクションの記事カードもトップ3記事カードと同じホバーアニメーション ----
 const dashArticleSelectors = ['#dash-pinned-bulletins', '#dash-news-summary', '#dash-today-facilities', '#dash-today-schedules'];
 const dashArticleHovers = [];

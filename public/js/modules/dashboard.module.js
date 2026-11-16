@@ -322,11 +322,13 @@ export function initDashboardModule() {
 
       <div class="card card--framed card--static p-4 flex flex-col">
 
-        <div class="flex items-center justify-between text-sm text-muted mb-2">
+        <!-- 見出しは他のセクションと同一の作法: h3 + w-4 アイコンが先、タイトルが後（gap-2）。
+            justify-between は使わない（アイコンとタイトルを左右へ引き離さない） -->
+        <div class="flex items-center mb-2">
 
-          <span class="font-bold text-main">年休等・出張</span>
-
-          <i data-lucide="calendar-x-2" class="w-4 h-4 text-danger"></i>
+          <h3 class="font-bold text-sm text-main flex items-center gap-2">
+            <i data-lucide="calendar-x-2" class="w-4 h-4 text-danger shrink-0"></i> 年休等・出張
+          </h3>
 
         </div>
 
@@ -362,11 +364,12 @@ export function initDashboardModule() {
 
       <div class="card card--framed card--static p-4 flex flex-col justify-between">
 
-        <div class="flex items-center justify-between text-xs text-muted mb-2">
+        <!-- 見出しは他のセクションと同一の作法: h3 + w-4 アイコンが先、タイトルが後（gap-2） -->
+        <div class="flex items-center mb-2">
 
-          <span class="font-bold text-main">要対応タスク</span>
-
-          <i data-lucide="check-square" class="w-4 h-4 text-warning"></i>
+          <h3 class="font-bold text-xs text-main flex items-center gap-2">
+            <i data-lucide="check-square" class="w-4 h-4 text-warning shrink-0"></i> 要対応タスク
+          </h3>
 
         </div>
 
