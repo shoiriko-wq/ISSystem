@@ -227,11 +227,16 @@ export async function seedInitialData(options = {}) {
       const keys = Object.keys(out);
       const cols = keys.join(', ');
       const placeholders = keys.map((_, k) => `$${k + 1}`).join(', ');
-      await runQuery(
-        `INSERT INTO ${spec.table} (${cols}) VALUES (${placeholders}) ON CONFLICT (id) DO NOTHING`,
+      const res = await runQuery(
+        `INSERT INTO ${spec.table} (${cols}) VALUES (${placeholders}) ON CONFLICT DO NOTHING RETURNING id`,
         keys.map((k) => out[k])
       );
-      inserted += 1;
+      const added = res?.rowCount ?? 0;
+      if (added === 0) {
+        console.warn(`[Seed CSV] ${spec.file} ${out.id} (${raw.name ?? ''}) は一意制約と衝突したためスキップします。`);
+        continue;
+      }
+      inserted += added;
     }
 
     results.push({ table: spec.table, file: spec.file, inserted });

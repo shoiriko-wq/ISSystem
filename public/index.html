@@ -771,7 +771,75 @@
             </form>
           </div>
 
-          <!-- 登録済み職員一覧 -->
+          <!-- v3.2.0追加5: 管理者 (ADMIN) によるユーザ情報編集フォーム。ADMIN が行の「情報編集」で開く。
+               教務部 (KYOMU) はこのフォームを開けない（担当教科ピッカーのみ現行維持）。-->
+          <div id="user-info-edit-card" class="bg-surface p-4 rounded-xl border border-main hidden">
+            <h4 class="font-bold text-main mb-2 flex items-center gap-1.5 text-sm">
+              <i data-lucide="user-cog" class="w-4 h-4 text-accent"></i> ユーザ情報編集（管理者 ADMIN のみ）
+            </h4>
+            <p class="text-[11px] text-muted mb-3">
+              <span id="uinfo-target-label" class="font-bold text-main">--</span>
+              <span class="font-mono text-main" id="uinfo-target-code"></span> を編集しています。
+              <span class="font-bold text-main">教職員番号 (ID) とパスワードは変更できません</span>
+              （座席・チャット・考査監督が教職員番号を FK で参照するため）。role と教務主任フラグは ADMIN のみ変更でき、
+              自分自身の ADMIN を外すことはできません。
+            </p>
+            <form id="user-info-edit-form" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-[11px] font-semibold text-soft mb-1">氏名（40文字以内）</label>
+                <input type="text" id="uinfo-name" maxlength="40" required class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" placeholder="例: 田中 先生">
+              </div>
+              <div>
+                <label class="block text-[11px] font-semibold text-soft mb-1">email（他の教職員と重複不可）</label>
+                <input type="email" id="uinfo-email" maxlength="120" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" placeholder="未設定">
+              </div>
+              <div>
+                <label class="block text-[11px] font-semibold text-soft mb-1">学年</label>
+                <select id="uinfo-grade" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main">
+                  <option value="NONE">指定なし (NONE)</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="">未設定</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-[11px] font-semibold text-soft mb-1">所属部局（40文字以内）</label>
+                <input type="text" id="uinfo-department" maxlength="40" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" placeholder="例: 生徒指導部">
+              </div>
+              <div>
+                <label class="block text-[11px] font-semibold text-soft mb-1">内線番号（数字と - ）</label>
+                <input type="text" id="uinfo-ext" maxlength="16" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main" placeholder="例: 102">
+              </div>
+              <div>
+                <label class="block text-[11px] font-semibold text-soft mb-1">ロール (role)</label>
+                <select id="uinfo-role" class="input-field w-full p-2 text-xs rounded bg-surface border border-main text-main">
+                  <option value="TEACHER">TEACHER（教員）</option>
+                  <option value="KYOMU">KYOMU（教務部）</option>
+                  <option value="ADMIN">ADMIN（システム管理者）</option>
+                </select>
+              </div>
+              <div class="flex items-center gap-4">
+                <label class="flex items-center gap-1.5 text-[11px] font-semibold text-soft">
+                  <input type="checkbox" id="uinfo-kyomu" class="accent-theme w-3.5 h-3.5"> 教務主任 (is_kyomu)
+                </label>
+                <label class="flex items-center gap-1.5 text-[11px] font-semibold text-soft">
+                  <input type="checkbox" id="uinfo-parttime" class="accent-theme w-3.5 h-3.5"> 非常勤 (is_parttime)
+                </label>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="block text-[11px] font-semibold text-soft mb-1">担当教科（複数選択可）</label>
+                <div id="uinfo-subjects" class="flex flex-wrap gap-1.5 bg-surface rounded-lg border border-main p-2 min-h-[2.5rem]"></div>
+              </div>
+              <div class="sm:col-span-2 flex justify-end gap-2 pt-1">
+                <button type="button" id="uinfo-cancel" class="btn-secondary py-2 px-4 text-xs rounded border border-main bg-surface text-main">中止する</button>
+                <button type="submit" id="uinfo-save" class="btn-primary py-2 px-4 text-xs font-bold rounded flex items-center gap-1">
+                  <i data-lucide="save" class="w-3.5 h-3.5"></i> 保存する
+                </button>
+              </div>
+            </form>
+          </div>
+
           <div>
             <h4 class="font-bold text-main mb-2 flex items-center gap-1.5 text-sm">
               <i data-lucide="list" class="w-4 h-4 text-accent"></i> 登録済み教職員一覧
@@ -782,6 +850,8 @@
                   <tr class="bg-surface border-b border-main text-soft">
                     <th class="p-3">氏名 / ID</th>
                     <th class="p-3">所属</th>
+                    <th class="p-3">種別</th>
+                    <th class="p-3">学年</th>
                     <th class="p-3">担当教科</th>
                     <th class="p-3">内線</th>
                     <th class="p-3 text-right">操作</th>
@@ -789,7 +859,7 @@
                 </thead>
                 <tbody id="users-manage-tbody" class="divide-y divide-divider">
                   <tr>
-                    <td colspan="5" class="text-center py-6 text-muted">読み込み中...</td>
+                    <td colspan="7" class="text-center py-6 text-muted">読み込み中...</td>
                   </tr>
                 </tbody>
               </table>

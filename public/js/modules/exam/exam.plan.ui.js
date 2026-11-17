@@ -14,6 +14,7 @@
 import { examStore, examApi, resolveActiveExamId, sectionCard, phaseBadge, isKyomuUser } from './exam.shared.js';
 import { examFormHtml, bindMasterSection } from './exam.master.ui.js';
 import { renderSurveySection, bindSurveySection } from './exam.subject.ui.js';
+import { importCardHtml, bindImportCard } from './exam-import.ui.js';
 import { escapeHTML, refreshLucideIcons, showToast } from '../../ui-helpers.js';
 
 const PLAN_PHASES = {
@@ -168,7 +169,7 @@ function periodRowHtml(m, editable, activeId, statusById) {
     : `<button data-plan-open="${escapeHTML(id)}" class="btn-secondary py-1 px-2 text-[10px]" ${dis}>この考査を開く</button>`;
   const dstr = (v) => String(v ?? '').slice(0, 10);
   return `<tr data-plan-row-id="${escapeHTML(id)}"${isActive ? ' class="bg-accent-soft"' : ''}>
-    <td class="border border-divider p-1.5 font-semibold text-main text-[11px]">${escapeHTML(String(m.title ?? ''))}</td>
+    <td class="border border-divider p-1.5 font-semibold text-main text-[11px]">${isActive ? `<span id="plan-title">${escapeHTML(String(m.title ?? ''))}</span>` : escapeHTML(String(m.title ?? ''))}</td>
     <td class="border border-divider p-1.5"><input data-pf="start_date" type="date" value="${escapeHTML(dstr(m.start_date))}" class="input-field py-1 px-1.5 text-[11px] w-28" ${dis} /></td>
     <td class="border border-divider p-1.5"><input data-pf="end_date" type="date" value="${escapeHTML(dstr(m.end_date))}" class="input-field py-1 px-1.5 text-[11px] w-28" ${dis} /></td>
     <td class="border border-divider p-1.5 text-center"><input data-pf="daily_slots" type="number" min="1" max="8" value="${escapeHTML(String(m.daily_slots ?? ''))}" class="input-field py-1 px-1.5 text-[11px] w-12" ${dis} /></td>
@@ -231,7 +232,9 @@ function periodTable(kyomu, board) {
           }</div>`
         : ''
     }`;
-  return sectionCard(
+  return (
+    '<div id="plan-card">' +
+    sectionCard(
     'calendar-check',
     '③ 考査期間の登録（考査名ごとの表）',
     '行が考査名です。各行で開始日・終了日・1日の時限数を入力します（標準試験時間の入力はありません。実施時間は ② の実施科目調査で科目ごとに設定します）。試験日数・キャパ（日数×時限数）は自動算出、年度は開始日の西暦から導出されます。計画フェーズ: ' + phaseBadgePlan(planPhase) + ' / 実施科目: ' + phaseBadge(subjectPhase),
@@ -254,8 +257,11 @@ function periodTable(kyomu, board) {
       </div>
       ${gradeView}
       ${actionRow}
+      ${importCardHtml(kyomu)}
     </div>`,
     `<button id="plan-refresh" class="btn-secondary py-1 px-2 text-[11px] flex items-center gap-1"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> 更新</button>`,
+    ) +
+    '</div>'
   );
 }
 
@@ -364,6 +370,12 @@ export function bindPlanTab(container, reload) {
   if (!panel) return;
   // 年間考査計画に統合された「考査の登録」セクションのイベントを連結する
   bindMasterSection(panel, reload);
+  // CSV 一括登録カード (教務部のみ。テンプレート・CSV選択・確定・取り消し)。
+  // reload で再描画されたら古い制御ごと捨てる（listener が積み上がらない）
+  if (container.__planImportCtl) container.__planImportCtl.abort();
+  const planImportCtl = new AbortController();
+  container.__planImportCtl = planImportCtl;
+  bindImportCard(panel, reload, planImportCtl.signal);
   if (panel.dataset.boundPlan) return;
   panel.dataset.boundPlan = 'plan';
 

@@ -78,6 +78,12 @@ router.get('/users', authenticateToken, safe(authController?.listUsers));
 router.post('/users', authenticateToken, requireKyomuRole, safe(authController?.createUser));
 router.delete('/users/:id', authenticateToken, requireAdminRole, safe(authController?.deleteUser));
 
+// v3.2.0追加5 ユーザ情報編集: 担当教科以外の全項目 (name / email / grade / department /
+// extension_number / is_parttime / subjects / role / is_kyomu) は ADMIN のみ。
+// 教務部 (KYOMU) は担当教科のみ (下の PUT /users/:id/subjects を維持)。
+// subjects ルートより下に置くが Express 5 の :id はスラッシュを跨がないため両立する。
+router.put('/users/:id', authenticateToken, requireAdminRole, safe(authController?.updateUserManagedInfo));
+
 // v3.1.15 CSV 一括登録 (教務部限定): preview は検証のみ、commit は承認行を 1 トランザクションで INSERT (§5)
 router.post('/users/import/preview', authenticateToken, requireKyomuRole, safe(userImportController?.preview));
 router.post('/users/import/commit', authenticateToken, requireKyomuRole, safe(userImportController?.commit));

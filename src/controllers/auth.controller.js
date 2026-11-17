@@ -6,6 +6,7 @@
 import authService from '../services/auth.service.js';
 import userModel from '../models/user.model.js';
 import subjectService from '../services/subject.service.js';
+import userInfoService from '../services/user-info.service.js';
 import jwt from 'jsonwebtoken';
 import config from '../../config/default.js';
 
@@ -424,6 +425,38 @@ export const authController = {
       }
 
       return res.status(200).json({ success: true, message: 'ユーザーを削除しました。' });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * 管理者 (ADMIN) によるユーザ情報更新 (v3.2.0追加5)
+   * PUT /api/users/:id
+   * 教職員番号とパスワードハッシュは編集対象外。担当教科のみの教務部編集は
+   * PUT /api/users/:id/subjects を使う（現行維持）。
+   */
+  async updateUserManagedInfo(req, res, next) {
+    try {
+      // ルートの requireAdminRole に加えコントローラ・service で ADMIN を再検証（第二・第三防衛線）
+      if (!req.user || String(req.user.role).toUpperCase() !== 'ADMIN') {
+        return res.status(403).json({ success: false, message: '教職員のユーザ情報を変更できるのはシステム管理者 (ADMIN) の権限が必要です。' });
+      }
+
+      const { id } = req.params;
+      const result = await userInfoService.updateByAdmin(req.user, id, req.body || {});
+
+      const io = req.app ? req.app.get('io') : null;
+      if (io) {
+        io.emit('user:updated', result.user);
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'ユーザ情報を更新しました。',
+        user: result.user,
+        changes: result.changes,
+      });
     } catch (error) {
       next(error);
     }

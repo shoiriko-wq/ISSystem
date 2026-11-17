@@ -6,7 +6,7 @@
  */
 import { examImportService } from '../services/exam-import.service.js';
 
-const SECTIONS = ['class', 'subject', 'room', 'decision'];
+const SECTIONS = ['class', 'group', 'subject', 'room', 'decision', 'plan'];
 
 function parseJsonBody(raw) {
   if (!raw) return null;
@@ -49,7 +49,7 @@ function validateParams(body) {
 }
 
 function emitSocketEvents(io, rows, section, user) {
-  const labels = { class: 'クラス・コース', subject: '科目', room: '教室', decision: '実施科目の決定' };
+  const labels = { class: 'クラス・コース', group: '教科', subject: '科目', room: '教室', decision: '実施科目の決定', plan: '考査期間' };
   io.emit('cache:invalidate', { section: 'exam', user_id: user.id, timestamp: Date.now() });
   io.emit('exam:updated', { exam_master_id: rows?.examId, section, updated_by: user.id, timestamp: Date.now() });
   io.emit('exam:changed', { exam_master_id: rows?.examId, section, updated_by: user.id, timestamp: Date.now() });
@@ -106,10 +106,15 @@ export const examImportController = {
       if (!SECTIONS.includes(section)) {
         return res.status(400).json({ success: false, message: 'section が不正' });
       }
-      const data = await examImportService.getTemplate(section);
+      const mode = String(req.query?.mode || 'template').trim();
+      const examId = String(req.query?.exam_master_id ?? '').trim();
+      if (mode === 'current' && section === 'decision' && !examId) {
+        return res.status(400).json({ success: false, message: '実施科目の決定の実データ出力には exam_master_id が必要です' });
+      }
+      const data = await examImportService.getTemplate(section, { mode, examId, user: req.user });
       return res.status(200).json({ success: true, data });
     } catch (e) {
-      return res.status(400).json({ success: false, message: e?.message || 'template 失敗' });
+      return res.status(e?.statusCode || 400).json({ success: false, message: e?.message || 'template 失敗' });
     }
   },
 

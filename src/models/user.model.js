@@ -116,10 +116,24 @@ export const userModel = {
    */
   async listAll() {
     try {
-      const res = await query(`SELECT id, staff_code, email, name, role, grade, department, extension_number, avatar_url, subjects, must_change_password FROM users ORDER BY name ASC`);
+      // is_kyomu / is_parttime も返す（職員一覧の種別表示と管理者編集の prefill に使う）
+      const res = await query(`SELECT id, staff_code, email, name, role, grade, department, extension_number, avatar_url, subjects, is_kyomu, is_parttime, must_change_password FROM users ORDER BY name ASC`);
       return res.rows.map(withSubjects);
     } catch (err) {
       return Array.from(mockUsers.values());
+    }
+  },
+
+  /**
+   * 指定 role のアカウント数 (ADMIN は最低1人残る検証に使う)
+   */
+  async countByRole(role) {
+    try {
+      const res = await query(`SELECT count(*) AS c FROM users WHERE upper(role) = upper($1)`, [role]);
+      return Number(res.rows[0]?.c) || 0;
+    } catch (err) {
+      console.warn('[UserModel PG Warning] countByRole failed:', err.message);
+      return Array.from(mockUsers.values()).filter((u) => String(u.role).toUpperCase() === String(role).toUpperCase()).length;
     }
   },
 
@@ -256,6 +270,54 @@ export const userModel = {
       return { ...user, name, email, department, extension_number, avatar_url, subjects };
     } catch (err) {
       console.warn('[UserModel PG Warning] updateProfile failed:', err.message);
+      return null;
+    }
+  },
+
+  /**
+   * 管理者 (ADMIN) によるユーザ情報更新 (v3.2.0追加5)
+   * patch は検証済みの表示項目だけ部分更新する。
+   * 教職員番号 (staff_code) と password_hash は対象外 (fk 連鎖とパスワードフローの関係で編集しない)。
+   * @param {string} userId 対象教職員id
+   * @param {Object} patch { name, email, grade, department, extension_number, is_parttime, subjects, role, is_kyomu }
+   */
+  async updateManagedInfo(userId, patch = {}) {
+    // 更新を許す列と型寄せ (キー名 = users の列名)
+    const EDITABLE = {
+      name: (v) => String(v ?? '').trim(),
+      email: (v) => String(v ?? '').trim() || null,
+      grade: (v) => String(v ?? '').trim() || null,
+      department: (v) => String(v ?? '').trim() || null,
+      extension_number: (v) => String(v ?? '').trim() || null,
+      is_parttime: (v) => (v === true || v === 1 || v === '1' || v === 'true' ? true : false),
+      role: (v) => String(v ?? '').trim().toUpperCase(),
+      is_kyomu: (v) => (v === true || v === 1 || v === '1' || v === 'true' ? 1 : 0),
+      subjects: (v) => JSON.stringify(parseSubjectList(v)),
+    };
+
+    const sets = [];
+    const params = [];
+    for (const key of Object.keys(EDITABLE)) {
+      if (patch[key] === undefined) continue;
+      sets.push(`${key} = $${params.length + 1}`);
+      params.push(EDITABLE[key](patch[key]));
+    }
+    if (sets.length === 0) return null; // 更新項目なし
+
+    params.push(nowIso(), userId);
+    const sql = `UPDATE users SET ${sets.join(', ')}, updated_at = $${params.length - 1} WHERE id = $${params.length} RETURNING id, staff_code, email, name, role, grade, department, extension_number, avatar_url, subjects, is_kyomu, is_parttime, must_change_password, updated_at`;
+    try {
+      const res = await query(sql, params);
+      const updated = res.rows[0];
+      if (!updated) return null;
+      for (const u of mockUsers.values()) {
+        if (String(u.id) === String(userId)) {
+          Object.assign(u, updated, { subjects: parseSubjectList(updated.subjects) });
+        }
+      }
+      return withSubjects(updated);
+    } catch (err) {
+      console.warn('[UserModel PG Warning] updateManagedInfo failed:', err.message);
       return null;
     }
   },

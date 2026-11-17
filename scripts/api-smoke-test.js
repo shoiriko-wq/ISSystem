@@ -371,6 +371,54 @@ const importCleanup = await req('DELETE', `/users/${importStaff}`, '', adminToke
 console.log('IMPORT_CLEANUP', importCleanup.status, importCleanup.status === 200 ? 'OK (ADMIN が削除)' : 'NG');
 
 
+// --- 管理者によるユーザ情報編集 (v3.2.0追加5 §5・§7): ADMIN のみ、KYOMU は担当教科のみ ---
+const infoStaff = `AP${String(Date.now()).slice(-6)}`;
+const infoCreate = await req('POST', '/users', JSON.stringify({ staff_code: infoStaff, name: 'API編集 テスト', password: 'Init2026!8', role: 'TEACHER' }), token);
+const infoCreateJson = JSON.parse(infoCreate.text || '{}');
+const infoId = infoCreateJson?.user?.id || infoCreateJson?.data?.id;
+console.log('USERINFO_CREATE', infoCreate.status, infoCreate.status === 201 ? 'OK (KYOMU が作成)' : 'NG');
+
+const infoKyomuPut = await req('PUT', `/users/${infoId}`, JSON.stringify({ name: '教務が編集', role: 'ADMIN' }), token);
+console.log('USERINFO_KYOMU_BLOCK', infoKyomuPut.status, infoKyomuPut.status === 403 ? 'OK (KYOMU は 403)' : 'NG');
+
+const infoSubjPut = await req('PUT', `/users/${infoId}/subjects`, JSON.stringify({ subjects: [] }), token);
+console.log('USERINFO_KYOMU_SUBJECTS', infoSubjPut.status, infoSubjPut.status === 200 ? 'OK (担当教科のみ 200)' : 'NG');
+
+const infoAdminPut = await req(
+  'PUT',
+  `/users/${infoId}`,
+  JSON.stringify({
+    name: 'API編集 改名',
+    email: `api.${infoStaff.toLowerCase()}@school.ed.jp`,
+    grade: '2',
+    department: '特色推進部',
+    extension_number: '118',
+    is_parttime: true,
+    role: 'KYOMU',
+    is_kyomu: true,
+    subjects: [],
+  }),
+  adminToken
+);
+const infoAdminJson = JSON.parse(infoAdminPut.text || '{}');
+const infoUser = infoAdminJson.user;
+console.log(
+  'USERINFO_ADMIN_EDIT',
+  infoAdminPut.status,
+  infoAdminPut.status === 200 && infoUser?.name === 'API編集 改名' && infoUser?.grade === '2' &&
+    infoUser?.is_parttime === true && infoUser?.role === 'KYOMU' && infoUser?.password_hash === undefined
+    ? 'OK (200 / 全項目編集・password_hash 非返却)'
+    : `NG (${JSON.stringify(infoUser ?? {}).slice(0, 160)})`
+);
+
+// 最終 ADMIN 保護: 自分自身の ADMIN を外そうとすると 400
+const selfDemoteRes = await req('PUT', '/users/sys-admin', JSON.stringify({ role: 'TEACHER' }), adminToken);
+console.log('USERINFO_SELF_DEM_BLOCK', selfDemoteRes.status, selfDemoteRes.status === 400 ? 'OK (400)' : 'NG');
+
+const infoCleanup = await req('DELETE', `/users/${infoId}`, '', adminToken);
+console.log('USERINFO_CLEANUP', infoCleanup.status, infoCleanup.status === 200 ? 'OK (ADMIN が削除)' : 'NG');
+
+
 // --- 全トップレベルAPI被覆確認（読取専用 GET。各セグメントがスモークで叩かれる） ---
 // 読取のみでデータを変えない。ステータスを表示し、スモークが全APIセグメントを網羅していることを
 // node scripts/verify-docs.mjs が src/routes/index.js と突き合わせて検証する。

@@ -17,6 +17,7 @@ import { basicinfoModel } from '../models/basicinfo.model.js';
 import { examModel } from '../models/exam.model.js';
 import { basicinfoService } from './basicinfo.service.js';
 import { examService } from './exam.service.js';
+import { subjectService } from './subject.service.js';
 
 /** 教務部権限の判定（basicinfo.service.js と同じ規則） */
 function isKyomuUser(user) {
@@ -31,9 +32,11 @@ const MAX_PREVIEW_ROWS = 5000;
 // セクション = UI の tab id と一致。kind は basicinfo のセクションロック名（decision は行単位書き込み）
 const SECTIONS = {
   class: { kind: 'class', label: 'クラス・コース', key: ['grade', 'name'] },
+  group: { kind: 'group', label: '教科', key: ['name'] },
   subject: { kind: 'subject', label: '科目', key: ['name'] },
   room: { kind: 'room', label: '教室', key: ['name'] },
   decision: { kind: null, label: '実施科目の決定', key: ['subject_name', 'grade'] },
+  plan: { kind: null, label: '考査期間', key: ['title'] },
 };
 
 // CSV ヘッダー（テンプレートと同じ必須列。列名は実テーブルの列名に合わせる）
@@ -41,6 +44,8 @@ const CSV_HEADERS = {
   class: ['grade', 'name', 'short_name', 'is_active'],
   subject: ['name', 'subject_id', 'grade', 'sort_order', 'notes'],
   room: ['name', 'seats', 'notes', 'is_active'],
+  group: ['name', 'color_key', 'sort_order'],
+  plan: ['title', 'start_date', 'end_date', 'daily_slots'],
   decision: [
     'subject_name',
     'subject_short',
@@ -59,11 +64,15 @@ const CSV_HEADERS = {
 
 const STREAMS = ['SCIENCE', 'ARTS', 'OTHER'];
 const SCOPES = ['ALL', 'GRADE', 'STREAM'];
+// 教科マスタの色キー（public/js/modules/subjects.module.js のパレットと data/seed/subject_groups.csv の旧色名の大文字小文字は無視）
+const COLOR_KEYS = ['amber', 'blue', 'rose', 'teal', 'orange', 'gray', 'green', 'slate', 'purple', 'accent', 'success', 'info', 'warning', 'danger'];
 
 const SAMPLE_ROW = {
   class: '1,1X,1X,TRUE',
+  group: '国語,amber,1',
   subject: '国語,国語,1,1,第一教科',
   room: 'A101,40,南校舎3階,TRUE',
+  plan: '1学期期末考査,2026-10-15,2026-10-17,3',
   decision: '国語,国,国語,1,OTHER,ALL,田中 太郎,,1,60,A101,',
 };
 
@@ -95,8 +104,44 @@ function parseIntIn(text, min, max, dflt = null) {
   return n;
 }
 
+/** 日付列を YYYY-MM-DD で検証（不正は null）。exam_masters.start_date/end_date は TEXT の YYYY-MM-DD */
+function parseYmd(text) {
+  const t = String(text || '').trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
+  const d = new Date(`${t}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return null;
+  return t;
+}
+
+/** 暦日日数（開始日〜終了日。不正日程は 0） */
+function dayCount(start, end) {
+  const s = new Date(`${String(start).slice(0, 10)}T00:00:00`);
+  const e = new Date(`${String(end).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime()) || e < s) return 0;
+  return Math.round((e - s) / 86400000) + 1;
+}
+
+/** CSVフィールドのエスケープ（RFC4180。カンマ・引用符・改行を含む値を quotes で守る） */
+function csvField(v) {
+  const s = String(v ?? '');
+  if (s === '') return '';
+  if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function csvLine(fields) {
+  return fields.map(csvField).join(',');
+}
+
 function csvNameOf(section) {
-  const map = { class: 'classes', subject: 'curriculum_subjects', room: 'basic_rooms', decision: 'exam_subject_decisions' };
+  const map = {
+    class: 'classes',
+    group: 'subject_groups',
+    subject: 'curriculum_subjects',
+    room: 'basic_rooms',
+    decision: 'exam_subject_decisions',
+    plan: 'exam_plan',
+  };
   return map[section] || section;
 }
 
@@ -152,6 +197,36 @@ function buildRows(csv, section) {
       rows.push(row);
       continue;
     }
+    if (section === 'group') {
+      const name = get(r, 'name');
+      const color = (get(r, 'color_key') || 'slate').toLowerCase();
+      const sort = parseIntIn(get(r, 'sort_order'), 0, 500, 0);
+      const row = {
+        name,
+        color_key: color,
+        sort_order: sort,
+        display: `教科 ${name}（色 ${color} / 並び ${sort}）`,
+      };
+      rows.push(row);
+      continue;
+    }
+    if (section === 'plan') {
+      const title = get(r, 'title');
+      const start = parseYmd(get(r, 'start_date'));
+      const end = parseYmd(get(r, 'end_date'));
+      const slots = parseIntIn(get(r, 'daily_slots'), 1, 8);
+      const days = start && end ? dayCount(start, end) : 0;
+      const period = start && end ? `${start}〜${end}（${days}日×${slots ?? 0}時限）` : '期間未登録';
+      const row = {
+        title,
+        start_date: start,
+        end_date: end,
+        daily_slots: slots,
+        display: `考査 ${title}（${period}）`,
+      };
+      rows.push(row);
+      continue;
+    }
     // decision
     const subjectName = get(r, 'subject_name');
     const grade = parseIntIn(get(r, 'grade'), 1, 6);
@@ -177,13 +252,15 @@ function buildRows(csv, section) {
 
 // ===== 参照データ（検証・名前→ID解決用） =====
 async function loadCtx(examId, section, user) {
-  const ctx = { classes: [], subjects: [], groups: [], rooms: [], staff: [], decisions: [], phases: null };
+  const ctx = { classes: [], subjects: [], groups: [], rooms: [], staff: [], decisions: [], masters: [], phases: null };
   if (section === 'class') ctx.classes = await basicinfoModel.listClasses();
   if (section === 'subject') {
     ctx.subjects = await basicinfoModel.listSubjects();
     ctx.groups = await basicinfoModel.listSubjectGroups();
   }
+  if (section === 'group') ctx.groups = await basicinfoModel.listSubjectGroups();
   if (section === 'room') ctx.rooms = await basicinfoModel.listRooms();
+  if (section === 'plan') ctx.masters = await examModel.listExamMasters();
   if (section === 'decision') {
     const board = await examService.listSubjectDecisions(examId, user);
     ctx.decisions = board.decisions || [];
@@ -205,6 +282,12 @@ function findExisting(section, row, ctx) {
   }
   if (section === 'room') {
     return ctx.rooms.find((r) => normalizeName(r.name) === normalizeName(row.name)) || null;
+  }
+  if (section === 'group') {
+    return ctx.groups.find((g) => normalizeName(g.name) === normalizeName(row.name)) || null;
+  }
+  if (section === 'plan') {
+    return ctx.masters.find((m) => normalizeName(m.title) === normalizeName(row.title)) || null;
   }
   return ctx.decisions.find((d) => normalizeName(d.subject_name) === normalizeName(row.subject_name) && Number(d.grade) === row.grade) || null;
 }
@@ -261,6 +344,23 @@ function validateRow(section, row, ctx, user) {
     if (row.seats < 10) warn.push('座席数が10未満');
     return { ok: errors.length === 0, errors, warn };
   }
+  if (section === 'group') {
+    if (row.name.length < 2) errors.push('name が不正（2文字以上）');
+    if (!COLOR_KEYS.includes(row.color_key)) errors.push(`color_key が不正（${COLOR_KEYS.join('/')}）`);
+    if (row.sort_order === null) errors.push('sort_order が不正（0〜500）');
+    return { ok: errors.length === 0, errors, warn };
+  }
+  if (section === 'plan') {
+    const existing = findExisting(section, row, ctx);
+    if (row.title.length < 2) errors.push('title が不正（2文字以上）');
+    const hasStart = row.start_date !== null;
+    const hasEnd = row.end_date !== null;
+    if (hasStart !== hasEnd) errors.push('開始日・終了日が揃わない');
+    if (hasStart && hasEnd && dayCount(row.start_date, row.end_date) <= 0) errors.push('日程が不正（開始日 ≦ 終了日）');
+    if (row.daily_slots === null) warn.push('時限数が未入力（既存の時限数を維持）');
+    if (!existing && (hasStart !== true || row.daily_slots === null)) errors.push('未登録の考査名は開始日・終了日・時限数が必須');
+    return { ok: errors.length === 0, errors, warn };
+  }
   // decision
   if (row.subject_name.length < 2) errors.push('subject_name が不正');
   if (row.grade === null) errors.push('grade が不正');
@@ -300,6 +400,48 @@ async function commitRow(section, row, ctx, user, examId) {
     const payload = { name: row.name, seats: row.seats, notes: row.notes, is_active: row.is_active };
     const saved = existing ? await basicinfoService.updateItem('room', existing.id, payload, user) : await basicinfoService.createItem('room', payload, user);
     return { action, id: saved?.id ? String(saved.id) : null, name: row.name };
+  }
+  if (section === 'group') {
+    if (existing) {
+      // 教科名はキーなので CSV で改名はしない（色・並び順だけ更新）
+      await subjectService.updateSubject(existing.id, { color_key: row.color_key, sort_order: row.sort_order }, user);
+      return { action: 'update', id: existing.id, name: row.name };
+    }
+    const created = await subjectService.createSubject(row.name, user, { color_key: row.color_key, sort_order: row.sort_order });
+    return { action: 'create', id: created.id, name: row.name };
+  }
+  if (section === 'plan') {
+    // 考査期間 = exam_masters の日程（plan_phase を REGISTERED へ進める）
+    if (existing) {
+      const saved = await examService.registerPlan(
+        existing.id,
+        {
+          start_date: row.start_date ?? existing.start_date,
+          end_date: row.end_date ?? existing.end_date,
+          daily_slots: row.daily_slots ?? existing.daily_slots,
+          default_duration: 50,
+        },
+        user
+      );
+      return { action: 'update', id: existing.id, name: row.title, summary: saved };
+    }
+    const created = await examService.createMaster(
+      {
+        title: row.title,
+        start_date: row.start_date,
+        end_date: row.end_date,
+        daily_slots: row.daily_slots,
+        days_count: dayCount(row.start_date, row.end_date),
+        default_duration: 50,
+      },
+      user
+    );
+    await examService.registerPlan(
+      created.id,
+      { start_date: row.start_date, end_date: row.end_date, daily_slots: row.daily_slots, default_duration: 50 },
+      user
+    );
+    return { action: 'create', id: created.id, name: row.title };
   }
   // decision — 名前をIDへ解決してから examService 経由で書く
   const payload = {
@@ -575,11 +717,117 @@ async function cleanupStagedPreviews() {
   return { removed: before - stagingPreviews.size };
 }
 
-async function getTemplate(section) {
+/** 登録済みデータを CSV ヘッダと同じ列順で書き出す行（実データ出力用。is_active 無効行も対象） */
+async function exportCurrentRows({ section, examId = null }, user) {
+  if (section === 'class') {
+    const classes = await basicinfoModel.listClasses();
+    const sorted = classes.slice().sort(
+      (a, b) =>
+        Number(a.grade) - Number(b.grade) ||
+        Number(a.class_num) - Number(b.class_num) ||
+        String(a.name).localeCompare(String(b.name))
+    );
+    return sorted.map((c) => [c.grade, c.name, c.short_name, c.is_active ? 'TRUE' : 'FALSE']);
+  }
+  if (section === 'group') {
+    const groups = await basicinfoModel.listSubjectGroups();
+    const sorted = groups.slice().sort(
+      (a, b) => Number(a.sort_order) - Number(b.sort_order) || String(a.name).localeCompare(String(b.name))
+    );
+    return sorted.map((g) => [g.name, g.color_key, g.sort_order]);
+  }
+  if (section === 'subject') {
+    const subjects = await basicinfoModel.listSubjects();
+    const groups = await basicinfoModel.listSubjectGroups();
+    const groupOrder = new Map(groups.map((g, i) => [String(g.id), i]));
+    const sorted = subjects.slice().sort(
+      (a, b) =>
+        (a.subject_id ? groupOrder.get(String(a.subject_id)) ?? 999 : 999) -
+          (b.subject_id ? groupOrder.get(String(b.subject_id)) ?? 999 : 999) || String(a.name).localeCompare(String(b.name))
+    );
+    return sorted.map((s) => [s.name, s.subject_group_name || '', s.grade, s.sort_order, s.notes || '']);
+  }
+  if (section === 'room') {
+    const rooms = await basicinfoModel.listRooms();
+    const sorted = rooms.slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    return sorted.map((r) => [r.name, r.seats, r.notes || '', r.is_active ? 'TRUE' : 'FALSE']);
+  }
+  if (section === 'plan') {
+    const masters = await examModel.listExamMasters();
+    return masters.map((m) => [m.title, m.start_date ?? '', m.end_date ?? '', m.daily_slots ?? '']);
+  }
+  // decision（対象考査の決定行のみ。教師名・教科名・教室名は解決して名前で書く）
+  const examIdStr = String(examId || '').trim();
+  if (!examIdStr) {
+    const err = new Error('実施科目の決定の実データ出力には exam_master_id が必要です。');
+    err.statusCode = 400;
+    throw err;
+  }
+  const master = await examModel.findExamMasterById(examIdStr);
+  if (!master) {
+    const err = new Error('考査マスタが見つかりません。');
+    err.statusCode = 404;
+    throw err;
+  }
+  const drows = await examModel.listSubjectDecisions(examIdStr);
+  const staff = await examModel.fetchStaffPool();
+  const subjects = await basicinfoModel.listSubjects();
+  const groups = await basicinfoModel.listSubjectGroups();
+  const rooms = await basicinfoModel.listRooms();
+  const staffById = new Map(staff.map((s) => [String(s.id), s.name]));
+  const groupById = new Map(groups.map((g) => [String(g.id), g.name]));
+  const roomById = new Map(rooms.map((r) => [String(r.id), r.name]));
+  const subjectById = new Map(subjects.map((s) => [String(s.id), s]));
+  return drows.map((d) => {
+    const sub = subjectById.get(String(d.subject_id)) || null;
+    return [
+      d.subject_name,
+      d.subject_short || sub?.short_name || '',
+      groupById.get(String(sub?.subject_id ?? d.subject_id)) ?? '',
+      d.grade,
+      d.stream,
+      d.scope,
+      staffById.get(String(d.setter_teacher_id)) ?? '',
+      staffById.get(String(d.patrol_teacher_id)) ?? '',
+      d.duration_slots ?? 1,
+      d.duration_minutes,
+      d.room_name ?? roomById.get(String(d.room_id)) ?? '',
+      d.notes || '',
+    ];
+  });
+}
+
+/** 登録済みデータの実データ出力（KYOMU/ADMIN 限定・読み取り専用。編集して CSV 一括登録へ貼ると update になる） */
+async function exportCurrentCsv({ section, examId = null }, user) {
+  if (!isKyomuUser(user)) {
+    const err = new Error('実データ出力は教務部 (KYOMU) の権限が必要です。');
+    err.statusCode = 403;
+    throw err;
+  }
   const headers = CSV_HEADERS[section];
+  const rows = await exportCurrentRows({ section, examId }, user);
+  const csvText = '\uFEFF' + [csvLine(headers), ...rows.map(csvLine)].join('\r\n') + '\r\n';
+  return {
+    section,
+    label: SECTIONS[section].label,
+    headers,
+    mode: 'current',
+    csvText,
+    fileName: `${csvNameOf(section)}-current.csv`,
+    row_count: rows.length,
+    required_columns: headers,
+  };
+}
+
+async function getTemplate(section, { mode = 'template', examId = null, user = null } = {}) {
+  const headers = CSV_HEADERS[section];
+  if (mode === 'current') {
+    return exportCurrentCsv({ section, examId }, user);
+  }
   return {
     section,
     headers,
+    mode: 'template',
     sample: SAMPLE_ROW[section],
     csvText: templateCsv(section),
     fileName: `${csvNameOf(section)}-import-template.csv`,

@@ -1,9 +1,11 @@
 /**
  * ISSystem 定期考査 基本情報 CSV 一括登録 UI (仕様書 §5・§7)
- * 基本情報タブ（クラス・科目・教室）と 実施科目の決定 のデータを CSV で一括登録する教務部カード。
- * - セクションを選ぶとテンプレート CSV (UTF-8 BOM) をダウンロードできる
+ * 基本情報タブ（クラス・コース・教科・科目・教室）と 実施科目の決定・考査期間 のデータを CSV で一括登録する教務部カード。
+ * - セクションとモード（新規のみ / 登録済み）を選ぶ
+ * - 新規のみ = 空テンプレート（ヘッダ+記入例 1 行）をダウンロード、登録済み = 現在の DB データ全件を出力して編集に使う
  * - CSV を選ぶと preview API へ送り、実データと突合して行の合否を表で示す（DB 書き込みなし）
- * - preview は basicinfo のセクション編集ロックを取得する（決定セクションは行単位書き込みなのでロックなし）
+ * - 登録済みモードの CSV はキー列が DB と一致するので全行「更新」になる（キー一致で update。改名・削除は CSV 対象外）
+ * - preview は basicinfo のセクション編集ロックを取得する（決定・考査期間は行単位書き込みなのでロックなし）
  * - 確定ボタンは検証済み全行を CSV 行順に登録する（行単位の書き込みなので先行行は残る＝部分作成あり）
  * 教務部 (KYOMU/ADMIN) のみ表示。exam.basic.ui.js の基本情報タブ末尾にカードを追加して使う。
  */
@@ -14,17 +16,26 @@ import { examApi, examStore, isKyomuUser, sectionCard } from './exam.shared.js';
 
 const SECTIONS = [
   { key: 'class', label: 'クラス・コース' },
+  { key: 'group', label: '教科' },
   { key: 'subject', label: '科目' },
   { key: 'room', label: '教室・座席数' },
   { key: 'decision', label: '実施科目の決定' },
+  { key: 'plan', label: '考査期間' },
 ];
 
 const CSV_NAMES = {
   class: 'classes',
+  group: 'subject_groups',
   subject: 'curriculum_subjects',
   room: 'basic_rooms',
   decision: 'exam_subject_decisions',
+  plan: 'exam_plan',
 };
+
+const MODES = [
+  { key: 'template', label: '新規のみ（空テンプレート）' },
+  { key: 'current', label: '登録済み（編集用データ）' },
+];
 
 /** 直近のプレビュー（section / preview_id / csvBase64 / 行の合否） */
 let current = null;
@@ -45,13 +56,16 @@ function countDataRows(text) {
   return Math.max(0, lines.length - 1);
 }
 
-/** テンプレート CSV をダウンロード（サーバー生成の UTF-8 BOM 付き） */
-async function downloadTemplate(sectionKey) {
-  const r = await examApi.get(`/exam/import/template/${sectionKey}`);
+/** テンプレート / 登録済みデータの CSV をダウンロード（サーバー生成の UTF-8 BOM 付き） */
+async function downloadTemplate(sectionKey, mode = 'template') {
+  const q = mode === 'current' ? `?mode=current&exam_master_id=${encodeURIComponent(examStore.examId || '')}` : '';
+  const r = await examApi.get(`/exam/import/template/${sectionKey}${q}`);
   const csvText = r?.csvText;
-  if (!csvText) throw new Error('テンプレートが取得できませんでした。');
+  if (!csvText) throw new Error('CSV が取得できませんでした。');
   const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8' });
-  saveBlobAsFile(blob, `${CSV_NAMES[sectionKey] || sectionKey}-import-template.csv`);
+  const name = r?.fileName || `${CSV_NAMES[sectionKey] || sectionKey}-${mode === 'current' ? 'current' : 'import-template'}.csv`;
+  saveBlobAsFile(blob, name);
+  return { mode, rowCount: Number(r?.row_count || 0) };
 }
 
 /** プレビュー表（行番号・種別・内容・合否） */
@@ -88,14 +102,16 @@ function previewTableHtml(rows) {
 export function importCardHtml(kyomu = isKyomuUser()) {
   if (!kyomu) return '';
   const options = SECTIONS.map((s) => `<option value="${s.key}">${s.label}</option>`).join('');
+  const modeOptions = MODES.map((m) => `<option value="${m.key}">${m.label}</option>`).join('');
   return sectionCard(
     'upload',
     'CSV 一括登録',
-    'テンプレートをダウンロードして記入し、CSV を選ぶと行の合否を表示します。検証済み行のみ登録されます（教務部のみ）。',
+    'セクションとモードを選び、CSV を選ぶと行の合否を表示します。検証済み行のみ登録されます（教務部のみ）。モード「登録済み」は現在のデータ全件を出力し、編集して CSV へ戻すと各行が更新になります（キー一致なので改名・削除は CSV 対象外）。',
     `
     <div class="ui-exam-import-inner" data-staged="0">
       <div class="flex flex-wrap items-center gap-2">
         <select class="ui-exam-import-section border border-slate-300 rounded px-2 py-1 text-[12px] bg-white">${options}</select>
+        <select class="ui-exam-import-mode border border-slate-300 rounded px-2 py-1 text-[12px] bg-white">${modeOptions}</select>
         <button class="ui-exam-import-template inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50">
           <i data-lucide="download" class="w-3.5 h-3.5"></i> テンプレート
         </button>
@@ -123,6 +139,7 @@ export function bindImportCard(container, reload, sig) {
   const inner = container.querySelector('.ui-exam-import-inner');
   if (!inner) return;
   const sel = inner.querySelector('.ui-exam-import-section');
+  const modeSel = inner.querySelector('.ui-exam-import-mode');
   const tmplBtn = inner.querySelector('.ui-exam-import-template');
   const fileInput = inner.querySelector('.ui-exam-import-file');
   const summary = inner.querySelector('.ui-exam-import-summary');
@@ -139,15 +156,22 @@ export function bindImportCard(container, reload, sig) {
   };
 
   sel.addEventListener('change', () => clear(), { signal: sig });
+  modeSel.addEventListener('change', () => clear(), { signal: sig });
 
   tmplBtn.addEventListener(
     'click',
     async () => {
+      const mode = modeSel.value;
       try {
-        await downloadTemplate(sel.value);
-        showToast('テンプレートをダウンロードしました。', 'success');
+        const out = await downloadTemplate(sel.value, mode);
+        showToast(
+          out.mode === 'current'
+            ? `登録済みデータ ${out.rowCount} 行をダウンロードしました（編集して CSV 一括登録へ戻すと各行が更新になります）。`
+            : 'テンプレートをダウンロードしました。',
+          'success'
+        );
       } catch (e) {
-        showToast(String(e?.message || 'テンプレート取得に失敗しました。'), 'error');
+        showToast(String(e?.message || 'CSV 取得に失敗しました。'), 'error');
       }
     },
     { signal: sig },
@@ -175,9 +199,13 @@ export function bindImportCard(container, reload, sig) {
           : res.locks?.length
             ? `（編集ロック: ${res.locks.map((l) => l.user_name || l.name).join('・')}）`
             : '';
+        const rowsOk = res.rows || [];
+        const createCount = rowsOk.filter((r) => r.ok && r.action === 'create').length;
+        const updateCount = rowsOk.filter((r) => r.ok && r.action === 'update').length;
         summary.innerHTML =
           `<span class="font-bold text-slate-700">CSV: ${escapeHTML(res.fileName)}・全 ${res.total_rows} 行</span>` +
           `<span class="ml-2 font-bold text-emerald-700">登録可能 ${res.valid_rows} 行</span>` +
+          `<span class="ml-2 font-bold text-blue-700">新規 ${createCount} / 更新 ${updateCount}</span>` +
           `<span class="ml-2 font-bold text-red-700">エラー ${res.invalid_rows} 行</span>` +
           `${lockNote ? `<span class="ml-2 text-slate-500">${escapeHTML(lockNote)}</span>` : ''}`;
         preview.innerHTML = previewTableHtml(res.rows || []);
@@ -206,13 +234,14 @@ export function bindImportCard(container, reload, sig) {
         showToast('登録可能な行がありません。', 'error');
         return;
       }
-      const label = { class: 'クラス', subject: '科目', room: '教室', decision: '実施科目' }[current.section] || 'データ';
+      const sec = current.section;
+      const label = { class: 'クラス', group: '教科', subject: '科目', room: '教室', decision: '実施科目', plan: '考査期間' }[sec] || 'データ';
       commitBtn.disabled = true;
       commitBtn.innerHTML = '<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> 登録中…';
       refreshLucideIcons(commitBtn);
       try {
         const res = await examApi.post('/exam/import/commit', {
-          section: current.section,
+          section: sec,
           exam_master_id: examStore.examId,
           csvBase64: current.csvBase64,
           rows,
@@ -220,8 +249,9 @@ export function bindImportCard(container, reload, sig) {
         clear();
         const registered = Number(res.registered_count || 0);
         const updated = (res.results || []).filter((r) => r.action === 'update').length;
+        const phaseNote = sec === 'plan' ? '（③ の試験期間を登録済へ更新）' : '';
         const msg = registered
-          ? `${registered} 行の${label}を登録しました${updated ? `（そのうち更新 ${updated} 行）` : ''}。`
+          ? `${registered} 行の${label}を登録しました${updated ? `（そのうち更新 ${updated} 行）` : ''}${phaseNote}。`
           : '検証済み行が登録されませんでした。';
         await reload();
         showToast(msg, registered ? 'success' : 'info');

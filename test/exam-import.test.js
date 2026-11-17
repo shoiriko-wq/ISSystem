@@ -97,20 +97,24 @@ describe('考査 CSV 一括登録 API (/api/exam/import)', () => {
     await closePool();
   });
 
-  test('テンプレートは 4 セクションの登録項目列のみ (UTF-8 BOM)', async () => {
+  test('テンプレートは 6 セクションの登録項目列のみ (UTF-8 BOM)', async () => {
     const headers = {
       class: ['grade', 'name', 'short_name', 'is_active'],
+      group: ['name', 'color_key', 'sort_order'],
       subject: ['name', 'subject_id', 'grade', 'sort_order', 'notes'],
       room: ['name', 'seats', 'notes', 'is_active'],
       decision: DECISION_HEADERS,
+      plan: ['title', 'start_date', 'end_date', 'daily_slots'],
     };
     const names = {
       class: 'classes-import-template.csv',
+      group: 'subject_groups-import-template.csv',
       subject: 'curriculum_subjects-import-template.csv',
       room: 'basic_rooms-import-template.csv',
       decision: 'exam_subject_decisions-import-template.csv',
+      plan: 'exam_plan-import-template.csv',
     };
-    for (const section of ['class', 'subject', 'room', 'decision']) {
+    for (const section of ['class', 'group', 'subject', 'room', 'decision', 'plan']) {
       const res = await request(app)
         .get(`/api/exam/import/template/${section}`)
         .set('Authorization', bearer(kyomuToken));
@@ -122,7 +126,7 @@ describe('考査 CSV 一括登録 API (/api/exam/import)', () => {
       expect(d.csvText.split('\r\n')[0]).toBe('\uFEFF' + headers[section].join(','));
     }
     const bad = await request(app)
-      .get('/api/exam/import/template/plan')
+      .get('/api/exam/import/template/bogus')
       .set('Authorization', bearer(kyomuToken));
     expect(bad.statusCode).toBe(400);
   });
@@ -132,7 +136,7 @@ describe('考査 CSV 一括登録 API (/api/exam/import)', () => {
     const badSection = await request(app)
       .post('/api/exam/import/preview')
       .set('Authorization', bearer(kyomuToken))
-      .send({ section: 'plan', exam_master_id: examId, csvBase64: csv });
+      .send({ section: 'bogus', exam_master_id: examId, csvBase64: csv });
     expect(badSection.statusCode).toBe(400);
     expect(badSection.body.message).toContain('section');
 
@@ -363,6 +367,193 @@ describe('考査 CSV 一括登録 API (/api/exam/import)', () => {
       .set('Authorization', bearer(kyomuToken));
     expect(decList.body.data.decisions.filter((x) => x.subject_name === decisionNameA).length).toBe(1);
   });
+
+  test('実データ出力（mode=current）は登録済みデータ全件を書き出し、決定は exam_master_id 必須', async () => {
+    const countOf = async (sql, params = []) => Number((await query(sql, params)).rows[0].c);
+    const headers = {
+      class: ['grade', 'name', 'short_name', 'is_active'],
+      group: ['name', 'color_key', 'sort_order'],
+      subject: ['name', 'subject_id', 'grade', 'sort_order', 'notes'],
+      room: ['name', 'seats', 'notes', 'is_active'],
+      plan: ['title', 'start_date', 'end_date', 'daily_slots'],
+    };
+    const names = {
+      class: 'classes-current.csv',
+      group: 'subject_groups-current.csv',
+      subject: 'curriculum_subjects-current.csv',
+      room: 'basic_rooms-current.csv',
+      plan: 'exam_plan-current.csv',
+    };
+    const expectCounts = {
+      class: await countOf('select count(*) c from classes'),
+      group: await countOf('select count(*) c from subjects'),
+      subject: await countOf('select count(*) c from curriculum_subjects'),
+      room: await countOf('select count(*) c from basic_rooms'),
+      plan: await countOf('select count(*) c from exam_masters where is_active = true'),
+    };
+    for (const section of ['class', 'group', 'subject', 'room', 'plan']) {
+      const res = await request(app)
+        .get(`/api/exam/import/template/${section}?mode=current`)
+        .set('Authorization', bearer(kyomuToken));
+      expect(res.statusCode).toBe(200);
+      const d = dataOf(res);
+      expect(d.mode).toBe('current');
+      expect(d.fileName).toBe(names[section]);
+      expect(d.row_count).toBe(expectCounts[section]);
+      expect(d.csvText.charCodeAt(0)).toBe(0xfeff);
+      expect(d.csvText.split('\r\n')[0]).toBe('\uFEFF' + headers[section].join(','));
+    }
+    const planText = dataOf(
+      await request(app).get('/api/exam/import/template/plan?mode=current').set('Authorization', bearer(kyomuToken))
+    ).csvText;
+    expect(planText).toContain(examTitle);
+
+    const noId = await request(app).get('/api/exam/import/template/decision?mode=current').set('Authorization', bearer(kyomuToken));
+    expect(noId.statusCode).toBe(400);
+    const decCount = await countOf('select count(*) c from exam_subject_decisions where exam_master_id = $1', [examId]);
+    expect(decCount).toBeGreaterThan(0);
+    const withId = await request(app)
+      .get(`/api/exam/import/template/decision?mode=current&exam_master_id=${examId}`)
+      .set('Authorization', bearer(kyomuToken));
+    expect(withId.statusCode).toBe(200);
+    expect(withId.body.data.row_count).toBe(decCount);
+    expect(withId.body.data.csvText).toContain(decisionNameA);
+
+    const decPv = await request(app)
+      .post('/api/exam/import/preview')
+      .set('Authorization', bearer(kyomuToken))
+      .send({ section: 'decision', exam_master_id: examId, csvBase64: b64(withId.body.data.csvText) });
+    expect(decPv.statusCode).toBe(200);
+    expect(dataOf(decPv).total_rows).toBe(decCount);
+    expect(dataOf(decPv).valid_rows).toBe(decCount);
+    expect(dataOf(decPv).rows.every((r) => r.action === 'update')).toBe(true);
+
+    const t403 = await request(app).get('/api/exam/import/template/class?mode=current').set('Authorization', bearer(teacherToken));
+    expect(t403.statusCode).toBe(403);
+    const anon = await request(app).get('/api/exam/import/template/class?mode=current');
+    expect(anon.statusCode).toBe(401);
+  });
+
+
+  test('教室の実データ CSV を編集して commit すると座席数が update される（実DB往復）', async () => {
+    const d = dataOf(
+      await request(app).get('/api/exam/import/template/room?mode=current').set('Authorization', bearer(kyomuToken))
+    );
+    const lines = d.csvText.split('\r\n').filter((l) => l.trim() !== '');
+    const idx = lines.findIndex((l) => l.startsWith(`${roomNameA},`));
+    expect(idx).toBeGreaterThan(0);
+    const parts = lines[idx].split(',');
+    expect(Number(parts[1])).toBe(40);
+    parts[1] = '35';
+    lines[idx] = parts.join(',');
+    const csvBase64 = b64(lines.join('\r\n'));
+    const pv = await request(app)
+      .post('/api/exam/import/preview')
+      .set('Authorization', bearer(kyomuToken))
+      .send({ section: 'room', exam_master_id: examId, csvBase64 });
+    expect(pv.statusCode).toBe(200);
+    const pd = dataOf(pv);
+    expect(pd.total_rows).toBe(lines.length - 1);
+    expect(pd.rows.every((r) => r.action === 'update')).toBe(true);
+    const cm = await request(app)
+      .post('/api/exam/import/commit')
+      .set('Authorization', bearer(kyomuToken))
+      .send({ section: 'room', exam_master_id: examId, csvBase64, rows: [idx + 1] });
+    expect(cm.statusCode).toBe(201);
+    expect(dataOf(cm).registered_count).toBe(1);
+    expect(dataOf(cm).results[0].action).toBe('update');
+    const db = await query('select seats from basic_rooms where name = $1', [roomNameA]);
+    expect(Number(db.rows[0].seats)).toBe(35);
+    await query('update basic_rooms set seats = 40 where name = $1', [roomNameA]);
+    await query("delete from editing_locks where resource_type = 'exam_basic'");
+  });
+
+
+  test('教科の実データ CSV は全行 update で、色変更と新規行 commit が教科マスタへ反映される', async () => {
+    const groupNew = `CSV教科${stamp}`;
+    const d = dataOf(
+      await request(app).get('/api/exam/import/template/group?mode=current').set('Authorization', bearer(kyomuToken))
+    );
+    const lines = d.csvText.split('\r\n').filter((l) => l.trim() !== '');
+    const idx = lines.findIndex((l) => l.startsWith(`${validSubjectGroup},`));
+    expect(idx).toBeGreaterThan(0);
+    const origColor = String(lines[idx].split(',')[1]);
+    const parts = lines[idx].split(',');
+    parts[1] = 'purple';
+    lines[idx] = parts.join(',');
+    lines.push(`${groupNew},slate,500`);
+    const csvBase64 = b64(lines.join('\r\n'));
+    const pv = await request(app)
+      .post('/api/exam/import/preview')
+      .set('Authorization', bearer(kyomuToken))
+      .send({ section: 'group', exam_master_id: examId, csvBase64 });
+    expect(pv.statusCode).toBe(200);
+    const pd = dataOf(pv);
+    expect(pd.total_rows).toBe(lines.length - 1);
+    expect(pd.valid_rows).toBe(lines.length - 1);
+    expect(pd.rows[idx - 1].action).toBe('update');
+    expect(pd.rows[lines.length - 2].action).toBe('create');
+    const cm = await request(app)
+      .post('/api/exam/import/commit')
+      .set('Authorization', bearer(kyomuToken))
+      .send({ section: 'group', exam_master_id: examId, csvBase64, rows: pd.rows.map((r) => r.row) });
+    expect(cm.statusCode).toBe(201);
+    expect(dataOf(cm).registered_count).toBe(lines.length - 1);
+    const dbColor = await query('select color_key from subjects where name = $1', [validSubjectGroup]);
+    expect(String(dbColor.rows[0].color_key).toLowerCase()).toBe('purple');
+    const dbNew = await query('select id, name from subjects where name = $1', [groupNew]);
+    expect(dbNew.rows.length).toBe(1);
+    await query('update subjects set color_key = $2 where name = $1', [validSubjectGroup, origColor]);
+    await query('delete from subjects where name = $1', [groupNew]);
+    await query("delete from editing_locks where resource_type = 'exam_basic'");
+  });
+
+
+  test('考査期間の実データ CSV commit は試験期間を REGISTERED 化し、新考査名は考査マスタを増やす', async () => {
+    const planNew = `CSVプラン考査${stamp}`;
+    const d = dataOf(
+      await request(app).get('/api/exam/import/template/plan?mode=current').set('Authorization', bearer(kyomuToken))
+    );
+    const lines = d.csvText.split('\r\n').filter((l) => l.trim() !== '');
+    const idx = lines.findIndex((l) => l.startsWith(`${examTitle},`));
+    expect(idx).toBeGreaterThan(0);
+    const parts = lines[idx].split(',');
+    parts[1] = '2026-11-20';
+    parts[2] = '2026-11-22';
+    parts[3] = '3';
+    lines[idx] = parts.join(',');
+    lines.push(`${planNew},2026-12-01,2026-12-03,2`);
+    const csvBase64 = b64(lines.join('\r\n'));
+    const pv = await request(app)
+      .post('/api/exam/import/preview')
+      .set('Authorization', bearer(kyomuToken))
+      .send({ section: 'plan', exam_master_id: examId, csvBase64 });
+    expect(pv.statusCode).toBe(200);
+    const pd = dataOf(pv);
+    expect(pd.total_rows).toBe(lines.length - 1);
+    expect(pd.rows[idx - 1].action).toBe('update');
+    expect(pd.rows[lines.length - 2].action).toBe('create');
+    // 共有DBの他考査は触らない（テスト考査と新考査の2行だけ commit）
+    const cm = await request(app)
+      .post('/api/exam/import/commit')
+      .set('Authorization', bearer(kyomuToken))
+      .send({ section: 'plan', exam_master_id: examId, csvBase64, rows: [idx + 1, lines.length] });
+    expect(cm.statusCode).toBe(201);
+    expect(dataOf(cm).registered_count).toBe(2);
+    expect(dataOf(cm).results.map((r) => r.action)).toEqual(['update', 'create']);
+    const db = await query('select start_date, end_date, days_count, daily_slots from exam_masters where id = $1', [examId]);
+    expect(String(db.rows[0].start_date).slice(0, 10)).toBe('2026-11-20');
+    expect(Number(db.rows[0].days_count)).toBe(3);
+    const phases = await query('select plan_phase from exam_phases where exam_master_id = $1', [examId]);
+    expect(phases.rows[0].plan_phase).toBe('REGISTERED');
+    const newMaster = await query('select id, title, days_count from exam_masters where title = $1', [planNew]);
+    expect(newMaster.rows.length).toBe(1);
+    expect(Number(newMaster.rows[0].days_count)).toBe(3);
+    const newId = String(newMaster.rows[0].id);
+    await query('delete from exam_phases where exam_master_id = $1', [newId]);
+    await query('delete from exam_masters where id = $1', [newId]);
+  });
+
 
   test('CSV 一括登録は教務部限定（TEACHER は 403 / 未ログインは 401）', async () => {
     const t = await request(app)

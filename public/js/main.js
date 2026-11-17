@@ -21,6 +21,7 @@ import { initAbsenceModule, loadAbsenceSummary } from './modules/absence.module.
 import { initExamModule, loadExamData } from './modules/exam/exam.module.js';
 import { initSubjectsModule, loadSubjects, renderSubjectPicker, renderSubjectPickerAsync, readSubjectPicker, subjectChipsHtml, openSubjectAdmin, isKyomuUser, setUserSubjects } from './modules/subjects.module.js';
 import { initUserImportModule, applyPasswordGate, applyUserImportCardVisibility } from './modules/user-import.module.js';
+import { initUserInfoModule, openUserEditForm, closeUserEditForm, isAdminUser, userKindCellHtml, userGradeCellHtml } from './modules/user-info.module.js';
 
 
 /**
@@ -990,17 +991,20 @@ function initEventsAndListeners() {
 async function loadUsersList() {
   const tbody = document.getElementById('users-manage-tbody');
   if (!tbody) return;
-  tbody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-muted">読み込み中...</td></tr>`;
+  // 一覧再描画時は開いていた情報編集フォームを閉じる（行の現在値とフォーム値のズレを防ぐ）
+  closeUserEditForm();
+  tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-muted">読み込み中...</td></tr>`;
   try {
     const data = await apiGet('/users');
     const users = data.users || [];
     // 担当教科表示マスタ（教科マスタの id コード → 正式名）を確保してから描画する（§5・§14）
     await loadSubjects();
     if (users.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-muted">登録されている教職員はいません。</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-muted">登録されている教職員はいません。</td></tr>`;
       return;
     }
     const kyomu = isKyomuUser();
+    const admin = isAdminUser();
     tbody.innerHTML = users.map(u => `
       <tr class="hover-surface transition-colors">
         <td class="p-3 font-bold text-main flex items-center gap-2">
@@ -1013,12 +1017,17 @@ async function loadUsersList() {
           </div>
         </td>
         <td class="p-3 text-soft">${escapeHTML(u.department || '未設定')}</td>
+        <td class="p-3">${userKindCellHtml(u)}</td>
+        <td class="p-3 text-xs">${userGradeCellHtml(u)}</td>
         <td class="p-3 subject-cell" data-user-id="${u.id}">
           <div class="subject-chips-area">${subjectChipsHtml(u.subjects || [])}</div>
           ${kyomu ? `<button class="subject-edit-btn btn-secondary py-1 px-2 text-[11px] rounded border border-main bg-surface text-main inline-flex items-center gap-1 mt-1" data-user-id="${u.id}"><i data-lucide="book-open" class="w-3 h-3"></i> 担当教科編集</button>` : ''}
         </td>
         <td class="p-3 text-muted font-mono">${escapeHTML(u.extension_number || '-')}</td>
         <td class="p-3 text-right whitespace-nowrap">
+          ${admin ? `<button class="btn-secondary py-1 px-2 text-[11px] rounded border border-main bg-surface text-main flex items-center gap-1 inline-flex user-info-edit-btn mr-2" data-user-id="${u.id}">
+            <i data-lucide="user-cog" class="w-3 h-3"></i> 情報編集
+          </button>` : ''}
           <button class="btn-secondary py-1 px-2 text-[11px] rounded border border-main bg-surface text-main flex items-center gap-1 inline-flex invite-code-btn mr-2" data-staff-code="${escapeHTML(u.staff_code)}" data-user-label="${escapeHTML(u.name || u.staff_code)}">
             <i data-lucide="key" class="w-3 h-3"></i> 再設定コード
           </button>
@@ -1066,6 +1075,17 @@ async function loadUsersList() {
         } catch (err) {
           showToast('招待コードの発行に失敗しました: ' + err.message, 'error');
         }
+        return;
+      }
+
+      // 管理者 (ADMIN) によるユーザ情報編集 (name / email / grade / department / 内線 / role /
+      // 教務主任・非常勤フラグ / 担当教科)。フォームはモーダル内の編集カードに現在値を prefill する。
+      const infoBtn = e.target.closest('.user-info-edit-btn');
+      if (infoBtn) {
+        const userId = infoBtn.getAttribute('data-user-id');
+        const targetUser = users.find((uu) => String(uu.id) === String(userId));
+        if (!targetUser) return;
+        openUserEditForm(targetUser);
         return;
       }
 
@@ -1124,7 +1144,7 @@ async function loadUsersList() {
       }
     };
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-danger">教職員一覧の取得に失敗しました。</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-danger">教職員一覧の取得に失敗しました。</td></tr>`;
   }
 }
 
@@ -1158,6 +1178,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   await initSubjectsModule();
   // v3.1.15 §5: CSV 一括登録モジュール (教務部のユーザー管理カード + 初期パスワード変更モーダル)
   initUserImportModule();
+  // v3.2.0追加5 §5・§14: 管理者 (ADMIN) によるユーザ情報編集フォーム。保存後は職員一覧を再取得する
+  initUserInfoModule();
+  document.addEventListener('users:list-refresh', () => loadUsersList());
   // 一括登録確定後は職員一覧を再読み込み / 初期パスワード変更完了後はタブ実データを再ロード / 強制ログアウトも処理
   document.addEventListener('users:imported', () => loadUsersList());
   document.addEventListener('password:changed', () => switchTab(state.currentTab || 'dashboard'));
