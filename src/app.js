@@ -12,7 +12,7 @@ import { fileURLToPath } from 'url';
 import routes from './routes/index.js';
 import caRoutes from './routes/ca.routes.js';
 import { errorHandler, notFoundHandler } from './middlewares/error.middleware.js';
-import { parseCorsOrigin } from './utils/origins.js';
+import { parseCorsOrigin, originMatches } from './utils/origins.js';
 import { createAccessLogStream } from './utils/access-log.js';
 import config from '../config/default.js';
 import jwt from 'jsonwebtoken';
@@ -34,7 +34,13 @@ app.use(
 // 2026/11/7 監査対策: wildcard ('*') を既定にせず、明示 Origin リストのみ許可する。
 app.use(
   cors({
-    origin: parseCorsOrigin(process.env.CORS_ORIGIN || process.env.CLIENT_ORIGIN, config.cors.allowedOrigins),
+    origin: (origin, callback) => {
+      // 2026/11/17: ブラウザは既定ポート 443 を Origin に書かない（https://<IP>:443 → https://<IP>）。
+      // 許可リスト側と要求側を normalizeOrigin で揃えて照合する（wildcard '*' は明示設定時のみ許可）。
+      const allowed = parseCorsOrigin(process.env.CORS_ORIGIN || process.env.CLIENT_ORIGIN, config.cors.allowedOrigins);
+      if (!origin) return callback(null, true);
+      return callback(null, originMatches(origin, allowed));
+    },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     credentials: true,

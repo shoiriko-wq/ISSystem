@@ -72,9 +72,32 @@ export function subjectsCacheList() {
   return subjectsCache;
 }
 
-/** 担当教科表示用チップ */
+/**
+ * 担当教科トークンを教科マスタの正式名（表示名）へ寄せる（§5・§14）。
+ * 照合は大小文字を区別しない: 正式名 → 教科マスタ id（ko03 等のコード）の順。
+ * マスタに無い語（表示だけのコード）はそのまま返す。
+ * @param {string} token 担当教科トークン（正式名・教科マスタ id）
+ * @param {Array} cache 教科マスタ（既定はモジュールキャッシュ）
+ */
+export function subjectLabelFor(token, cache = subjectsCache) {
+  const raw = String(token ?? '').trim();
+  if (!raw) return '';
+  const key = raw.toLowerCase();
+  const hit =
+    cache.find((s) => String(s.name ?? '').trim().toLowerCase() === key) ||
+    cache.find((s) => String(s.id ?? '').trim().toLowerCase() === key);
+  return hit ? String(hit.name).trim() : raw;
+}
+
+/** 担当教科トークン列を正式名列へ寄せる（重複除去） */
+export function subjectLabelsFor(tokens, cache = subjectsCache) {
+  const list = Array.isArray(tokens) ? tokens.map((t) => String(t ?? '').trim()).filter((t) => t !== '') : [];
+  return Array.from(new Set(list.map((t) => subjectLabelFor(t, cache))));
+}
+
+/** 担当教科表示用チップ（§5・§14: 教科マスタの id/短縮名コードは正式名で描く） */
 export function subjectChipsHtml(names, max = 4) {
-  const list = Array.isArray(names) ? names.filter(Boolean) : [];
+  const list = subjectLabelsFor(names);
   if (list.length === 0) return '<span class=\"text-[10px] text-muted\">担当教科なし</span>';
   const shown = list.slice(0, max);
   const chips = shown.map((n) => {
@@ -96,7 +119,8 @@ export function renderSubjectPicker(containerId, selected = [], checkboxName = '
   const holder = document.getElementById(containerId);
   if (!holder) return;
 
-  const selectedSet = new Set((selected || []).map((n) => String(n)));
+  // 選択値は正式名・教科マスタ id・短縮名のいずれでもチェックが付く（CSV 一括登録の id 表記 §5）
+  const selectedSet = new Set(subjectLabelsFor(selected));
 
   if (subjectsCache.length === 0) {
     holder.innerHTML = '<div class="text-[11px] text-muted">教科マスタが登録されていません。教務部が教科を追加してください。</div>';

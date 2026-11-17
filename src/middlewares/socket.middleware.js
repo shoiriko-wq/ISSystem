@@ -11,6 +11,7 @@
 
 import jwt from 'jsonwebtoken';
 import config from '../../config/default.js';
+import { normalizeOrigin } from '../utils/origins.js';
 
 /** 編集ロック対象として許されるリソース種別ホワイトリスト（lock:* ハンドラー用） */
 export const SOCKET_RESOURCE_TYPES = new Set([
@@ -28,20 +29,25 @@ export const SOCKET_RESOURCE_TYPES = new Set([
 export const SEATING_STATUSES = new Set(['PRESENT', 'CLASS', 'TRIP', 'LEAVE', 'IN', 'OUT']);
 
 /**
- * SSL_HOSTS から自サーバー Origin（https://host:port）集合を導出する
+ * SSL_HOSTS から自サーバー Origin 集合を導出する
+ * ブラウザは既定ポート https:443 を Origin ヘッダーに書かないため、SSL_PORT=443 のときは
+ * ポート省略形（https://<host>）も集合へ含める（2026/11/17 本番 Socket 400 の是正）。
+ * @param {string} [hosts] SSL_HOSTS（カンマ区切り）
+ * @param {string|number} [port] SSL_PORT
  * @returns {Set<string>}
  */
-function buildDefaultOrigins() {
-  const hosts = (process.env.SSL_HOSTS || 'localhost,127.0.0.1')
+export function buildDefaultOrigins(hosts = process.env.SSL_HOSTS || 'localhost,127.0.0.1', port = process.env.SSL_PORT || 3443) {
+  const set = new Set();
+  String(hosts)
     .split(',')
     .map((s) => s.trim())
-    .filter((h) => h && h !== '::1');
-  const port = process.env.SSL_PORT || 3443;
-  const set = new Set();
-  hosts.forEach((h) => set.add(`https://${h}:${port}`.toLowerCase()));
+    .filter((h) => h && h !== '::1')
+    .forEach((h) => {
+      set.add(normalizeOrigin(`https://${h}:${port}`));
+      set.add(normalizeOrigin(`https://${h}`));
+    });
   return set;
 }
-
 const DEFAULT_ORIGINS = buildDefaultOrigins();
 
 /**
@@ -55,13 +61,13 @@ export function isSocketOriginAllowed(origin) {
   // Origin 付き要求は必ず明示リストで照合する。
   if (!origin) return true;
 
-  const configured = (config.socket?.corsOrigins || []).map((s) => String(s).trim().toLowerCase());
+  const configured = (config.socket?.corsOrigins || []).map((s) => normalizeOrigin(s));
   if (configured.includes('*')) {
     console.warn('[Socket Auth] SOCKET_CORS_ORIGINS=* が設定されています（Origin 無制限）。本番運用では禁止。');
     return true;
   }
 
-  const normalized = String(origin).trim().toLowerCase();
+  const normalized = normalizeOrigin(origin);
   return configured.includes(normalized) || DEFAULT_ORIGINS.has(normalized);
 }
 

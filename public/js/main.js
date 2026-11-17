@@ -798,7 +798,8 @@ function initEventsAndListeners() {
     document.getElementById('profile-avatar-url').value = user.avatar_url || '';
 
     // 担当教科の複数選択UI (教務部は教科マスタ管理ボタンも表示)
-    renderSubjectPicker('profile-subjects', user.subjects || []);
+    // 教科マスタ読み込み込みで描画する（マスタ未読込みで描画すると担当教科が空で上書きされる）
+    renderSubjectPickerAsync('profile-subjects', user.subjects || []);
     // 2026/11/8 RBAC: ユーザー管理メニュー (一覧全件・追加・削除) は教務部以上のみ表示
     document.getElementById('menu-users-manage-btn')?.classList.toggle('hidden', !isKyomuUser());
     const subjectAdminBtn = document.getElementById('profile-subject-admin-btn');
@@ -843,7 +844,9 @@ function initEventsAndListeners() {
       const department = document.getElementById('profile-department').value.trim();
       const extension_number = document.getElementById('profile-extension').value.trim();
       const avatar_url = document.getElementById('profile-avatar-url').value.trim();
-      const subjects = readSubjectPicker('profile-subjects');
+      // ピッカーが未描画（教科マスタ読み込み前）のときは担当教科を変えない（空で上書きしない §5）
+      const pickerReady = Boolean(document.querySelector('#profile-subjects input[type="checkbox"]'));
+      const subjects = pickerReady ? readSubjectPicker('profile-subjects') : (state.currentUser.subjects || []);
 
       const res = await apiPut('/auth/profile', { name, email, department, extension_number, avatar_url, subjects });
       if (res && res.success) {
@@ -957,7 +960,8 @@ function initEventsAndListeners() {
   document.getElementById('menu-users-manage-btn')?.addEventListener('click', () => {
     userDropdownMenu?.classList.add('hidden');
     openModal('users-manage-modal');
-    renderSubjectPicker('new-user-subjects', []);
+    // 追加フォームの担当教科ピッカーは教科マスタ読み込み込みで描画する（§5・§14）
+    renderSubjectPickerAsync('new-user-subjects', []);
     loadUsersList();
   });
 
@@ -990,6 +994,8 @@ async function loadUsersList() {
   try {
     const data = await apiGet('/users');
     const users = data.users || [];
+    // 担当教科表示マスタ（教科マスタの id コード → 正式名）を確保してから描画する（§5・§14）
+    await loadSubjects();
     if (users.length === 0) {
       tbody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-muted">登録されている教職員はいません。</td></tr>`;
       return;
@@ -1024,25 +1030,30 @@ async function loadUsersList() {
     `).join('');
     refreshLucideIcons();
 
-    tbody.querySelectorAll('.delete-user-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const userId = btn.getAttribute('data-user-id');
-        if (confirm('本当にこの教職員アカウントを削除しますか？')) {
-          try {
-            await apiDelete(`/users/${userId}`);
-            showToast('教職員を削除しました', 'success');
-            loadUsersList();
-          } catch (err) {
-            showToast('削除に失敗しました: ' + err.message, 'error');
-          }
+    // 行内操作（削除・再設定コード・担当教科編集・保存・閉じる）は tbody への単一委譲で束縛する。
+    // 担当教科編集で生成される「保存」「閉じる」は一覧描画時点に存在しないため、個別束縛では
+    // クリック無反応になる。一覧を再描画するたびに listener を追加すると1クリックで保存が複数回走るため
+    // tbody.onclick へ代入（再描画で置き換わる）して単一束縛を保つ。
+    tbody.onclick = async (e) => {
+      const delBtn = e.target.closest('.delete-user-btn');
+      if (delBtn) {
+        const userId = delBtn.getAttribute('data-user-id');
+        if (!confirm('本当にこの教職員アカウントを削除しますか？')) return;
+        try {
+          await apiDelete(`/users/${userId}`);
+          showToast('教職員を削除しました', 'success');
+          loadUsersList();
+        } catch (err) {
+          showToast('削除に失敗しました: ' + err.message, 'error');
         }
-      });
-    });
-    // 職員ごとの「パスワード再設定用招待コード」発行 (新規登録用と同じ手続き)
-    tbody.querySelectorAll('.invite-code-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const staffCode = btn.getAttribute('data-staff-code');
-        const label = btn.getAttribute('data-user-label') || staffCode;
+        return;
+      }
+
+      // 職員ごとの「パスワード再設定用招待コード」発行 (新規登録用と同じ手続き)
+      const inviteBtn = e.target.closest('.invite-code-btn');
+      if (inviteBtn) {
+        const staffCode = inviteBtn.getAttribute('data-staff-code');
+        const label = inviteBtn.getAttribute('data-user-label') || staffCode;
         try {
           const res = await apiPost('/auth/generate-invitation', {});
           const code = res.code || res.invitation?.code;
@@ -1055,12 +1066,13 @@ async function loadUsersList() {
         } catch (err) {
           showToast('招待コードの発行に失敗しました: ' + err.message, 'error');
         }
-      });
-    });
-    // 教務部による担当教科の行内編集 (自分以外の変更は教務部のみ)
-    tbody.querySelectorAll('.subject-edit-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const userId = btn.getAttribute('data-user-id');
+        return;
+      }
+
+      // 教務部による担当教科の行内編集 (自分以外の変更は教務部のみ)
+      const editBtn = e.target.closest('.subject-edit-btn');
+      if (editBtn) {
+        const userId = editBtn.getAttribute('data-user-id');
         const targetUser = users.find((uu) => String(uu.id) === String(userId));
         const cell = tbody.querySelector(`.subject-cell[data-user-id="${userId}"]`);
         if (!cell || !targetUser) return;
@@ -1071,33 +1083,46 @@ async function loadUsersList() {
         cell.innerHTML = `
           <div id="${pickerId}" class="flex flex-wrap gap-1.5 bg-surface rounded-lg border border-main p-2"></div>
           <div class="flex items-center gap-1 mt-1.5">
-            <button class="subject-save-btn btn-primary py-1 px-2 text-[11px] rounded flex items-center gap-1" data-user-id="${userId}">
+            <button type="button" class="subject-save-btn btn-primary py-1 px-2 text-[11px] rounded flex items-center gap-1" data-user-id="${userId}">
               <i data-lucide="save" class="w-3 h-3"></i> 保存
             </button>
-            <button class="subject-cancel-btn btn-secondary py-1 px-2 text-[11px] rounded border border-main bg-surface text-main">閉じる</button>
+            <button type="button" class="subject-cancel-btn btn-secondary py-1 px-2 text-[11px] rounded border border-main bg-surface text-main">閉じる</button>
           </div>`;
-        renderSubjectPicker(pickerId, targetUser.subjects || []);
+        await renderSubjectPickerAsync(pickerId, targetUser.subjects || []);
         refreshLucideIcons();
-      });
-    });
+        return;
+      }
 
-    tbody.querySelectorAll('.subject-save-btn').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const userId = btn.getAttribute('data-user-id');
+      const saveBtn = e.target.closest('.subject-save-btn');
+      if (saveBtn) {
+        const userId = saveBtn.getAttribute('data-user-id');
         const picked = readSubjectPicker(`subject-edit-${userId}`);
+        saveBtn.disabled = true;
         try {
-            await setUserSubjects(userId, picked);
-            showToast('担当教科を保存しました', 'success');
-            loadUsersList();
+          await setUserSubjects(userId, picked);
+          showToast('担当教科を保存しました', 'success');
+          loadUsersList();
         } catch (err) {
           showToast('担当教科の保存に失敗しました: ' + err.message, 'error');
+        } finally {
+          saveBtn.disabled = false;
         }
-      });
-    });
+        return;
+      }
 
-    tbody.querySelectorAll('.subject-cancel-btn').forEach((btn) => {
-      btn.addEventListener('click', () => loadUsersList());
-    });
+      // 閉じる: 編集中の行だけ表示チップ（正式名）へ戻す。一覧全体の再取得はしない
+      const cancelBtn = e.target.closest('.subject-cancel-btn');
+      if (cancelBtn) {
+        const cell = cancelBtn.closest('.subject-cell');
+        const userId = cell?.getAttribute('data-user-id');
+        const targetUser = users.find((uu) => String(uu.id) === String(userId));
+        if (!cell || !targetUser) return;
+        cell.innerHTML = `
+          <div class="subject-chips-area">${subjectChipsHtml(targetUser.subjects || [])}</div>
+          ${kyomu ? `<button type="button" class="subject-edit-btn btn-secondary py-1 px-2 text-[11px] rounded border border-main bg-surface text-main inline-flex items-center gap-1 mt-1" data-user-id="${userId}"><i data-lucide="book-open" class="w-3 h-3"></i> 担当教科編集</button>` : ''}`;
+        refreshLucideIcons();
+      }
+    };
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-danger">教職員一覧の取得に失敗しました。</td></tr>`;
   }
